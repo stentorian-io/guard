@@ -10,7 +10,13 @@ description = "End-to-end smoke harness for Sentinel Phase 1 success criteria."
 [lib]
 path = "src/lib.rs"
 
+[dependencies]
+sentinel-core = { workspace = true }
+sentinel-daemon = { path = "../sentinel-daemon" }
+sentinel-ipc = { workspace = true }
+libc = { workspace = true }
+tempfile = { workspace = true }
+
 [dev-dependencies]
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
-tempfile = { workspace = true }

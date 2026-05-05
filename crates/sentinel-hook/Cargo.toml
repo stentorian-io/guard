@@ -9,7 +9,7 @@ authors.workspace = true
 description = "DYLD interpose hook dylib (libsentinel_hook.dylib) for outbound network enforcement."
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]   # rlib so integration tests can link
 
 [dependencies]
 libc = { workspace = true }
@@ -17,5 +17,15 @@ ctor = { workspace = true }
 memmap2 = { workspace = true }
 ciborium = { workspace = true }
 sentinel-core = { workspace = true }
+sha2 = "0.10"
 # CRITICAL: NO tokio, async-std, mio, crossbeam, serde_json, reqwest, tracing.
 # See .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md lines 127-129 (Hook crate exclusions).
+
+[dev-dependencies]
+tempfile = { workspace = true }
+sentinel-daemon = { path = "../sentinel-daemon" }
+criterion = { workspace = true }
+
+[[bench]]
+name = "hot_path"
+harness = false

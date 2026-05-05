@@ -45,7 +45,21 @@ impl std::fmt::Debug for LoadedSnapshot {
 }
 
 /// Phase 1 well-known state_dir for path validation. Must match plan 05.
+///
+/// ISS-07/ISS-12 remediation: honor SENTINEL_STATE_DIR env var override if set.
+/// This lets the e2e test harness use a short /tmp-based state dir (required to
+/// keep the Unix socket path under macOS's 104-byte SUN_LEN limit) while the
+/// dylib still validates the manifest path correctly. When SENTINEL_STATE_DIR is
+/// not set, fall back to HOME-derivation (the production default).
 fn well_known_state_dir() -> PathBuf {
+    // Check SENTINEL_STATE_DIR override first (using libc getenv to stay
+    // allocation-free on the ctor path).
+    let override_val = unsafe { getenv_libc(c"SENTINEL_STATE_DIR") };
+    if let Some(s) = override_val {
+        if !s.is_empty() {
+            return PathBuf::from(s);
+        }
+    }
     let home = std::env::var_os("HOME").unwrap_or_default();
     PathBuf::from(home).join("Library/Application Support/Sentinel")
 }

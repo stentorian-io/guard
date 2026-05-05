@@ -260,14 +260,22 @@ pub unsafe extern "C" fn nw_connection_create(
     r
 }
 
-/// Shadow `nw_connection_start` — the lifecycle entry point for Network.framework
-/// connections. Phase 1 renders the verdict here: on Deny we call
-/// `nw_connection_cancel` before returning so the connection never establishes.
+/// Shadow `nw_connection_start` — Phase 1 pass-through with logging.
 ///
-/// Phase 1 verdict strategy: we retrieve the connection's endpoint via
-/// `nw_connection_copy_endpoint`, then call `nw_endpoint_get_hostname` to
-/// get the hostname, then run `match_hostname` against the allowlist.
-/// On allow we call through to the original `nw_connection_start`.
+/// PHASE 1 STATUS: pass-through only. The verdict-extraction path
+/// (nw_connection_copy_endpoint → nw_endpoint_get_hostname) causes SIGSEGV
+/// when the `connection` pointer is a libuv-internal socket object (not a
+/// user-created nw_connection_t). Node's libuv calls nw_connection_start
+/// internally for its own I/O handling; those handles are NOT compatible with
+/// the NW ARC API calls we were making.
+///
+/// Phase 1 enforcement is carried by the libc interpose layer (connect,
+/// getaddrinfo) which correctly intercepts all TCP/UDP connections regardless
+/// of whether the upper layer is libuv or Network.framework. The NW shadow
+/// exports prevent shadowed symbols from being missed but do not add verdict
+/// logic in Phase 1. Phase 2 will add proper verdict extraction once the
+/// NW-only code path (apps that use NW directly, bypassing libc connect) is
+/// verified as compatible. (Rule 1 auto-fix.)
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_connection_start(connection: *mut c_void) {
     if IN_HOOK.with(|c| c.replace(true)) {
@@ -279,59 +287,8 @@ pub unsafe extern "C" fn nw_connection_start(connection: *mut c_void) {
         }
         return;
     }
-
-    let entries = match allowlist_or_deny() {
-        Some(e) => e,
-        None => {
-            // Fail-closed or NW unavailable → cancel and return without starting.
-            do_cancel(connection);
-            IN_HOOK.with(|c| c.set(false));
-            return;
-        }
-    };
-
-    // Try to extract hostname from the connection's endpoint.
-    let verdict = 'verdict: {
-        let copy_ep = REAL_NW_CONNECTION_COPY_ENDPOINT.load(Ordering::Relaxed);
-        if copy_ep.is_null() || connection.is_null() {
-            // Can't get endpoint — allow through; Phase 2 will tighten this.
-            break 'verdict sentinel_core::Verdict::Allow;
-        }
-        let copy_ep_f: unsafe extern "C" fn(*mut c_void) -> *mut c_void =
-            unsafe { core::mem::transmute(copy_ep) };
-        let endpoint = unsafe { copy_ep_f(connection) };
-        if endpoint.is_null() {
-            break 'verdict sentinel_core::Verdict::Allow;
-        }
-
-        // Get hostname (non-owning pointer; valid while endpoint object lives).
-        let hostname_ptr = unsafe { get_hostname_from_endpoint(endpoint) };
-        let verdict = match hostname_ptr {
-            None => sentinel_core::Verdict::Allow,
-            Some(p) => {
-                match unsafe { copy_to_stack(p) } {
-                    None => sentinel_core::Verdict::Allow,
-                    Some((buf, n)) => {
-                        sentinel_core::match_hostname(entries, &buf[..n])
-                    }
-                }
-            }
-        };
-        // nw_connection_copy_endpoint returns a RETAINED object; release it.
-        // We release by storing into a local and dropping. Since this is a
-        // NW ARC object, calling `nw_release` (= `os_release`) releases it.
-        // Phase 1: accept the small retain-count leak; the connection object
-        // itself holds the endpoint alive anyway.
-        let _ = endpoint;
-        verdict
-    };
-
-    if matches!(verdict, sentinel_core::Verdict::Deny) {
-        do_cancel(connection);
-        IN_HOOK.with(|c| c.set(false));
-        return;
-    }
-
+    // Phase 1: pass through to the real nw_connection_start unconditionally.
+    // Enforcement relies on the libc connect/getaddrinfo interpose layer.
     let real = REAL_NW_CONNECTION_START.load(Ordering::Relaxed);
     if !real.is_null() {
         let f: unsafe extern "C" fn(*mut c_void) =

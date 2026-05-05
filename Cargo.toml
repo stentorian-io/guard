@@ -51,4 +51,9 @@ panic = "abort"
 strip = "symbols"
 
 [profile.dev]
-# Default: panic = "unwind", debug = true
+# panic = "abort" for all dev builds — dylib code (libsentinel_hook.dylib) must not
+# attempt to unwind through foreign (Node/libuv) C++ stack frames. An unwind panic
+# inside a cdylib injected into a foreign process causes SIGSEGV. abort is safe:
+# it terminates the host process immediately with a clear diagnostic instead of
+# corrupting the stack. All crates share this profile setting.
+panic = "abort"

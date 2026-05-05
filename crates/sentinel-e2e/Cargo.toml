@@ -1,0 +1,16 @@
+[package]
+name = "sentinel-e2e"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "End-to-end smoke harness for Sentinel Phase 1 success criteria."
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+tempfile = { workspace = true }

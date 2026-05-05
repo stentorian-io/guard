@@ -1,0 +1,23 @@
+[package]
+name = "sentinel-cli"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "sentinel CLI — wraps a command under default-deny network enforcement."
+
+[[bin]]
+name = "sentinel"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+nix = { workspace = true }
+libc = { workspace = true }
+sentinel-core = { workspace = true }
+sentinel-ipc = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }

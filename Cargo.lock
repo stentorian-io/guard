@@ -999,7 +999,11 @@ name = "sentinel-e2e"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "libc",
  "predicates",
+ "sentinel-core",
+ "sentinel-daemon",
+ "sentinel-ipc",
  "tempfile",
 ]
 

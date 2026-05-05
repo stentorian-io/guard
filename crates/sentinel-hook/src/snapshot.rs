@@ -122,7 +122,14 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
     }
 
     // Open snapshot with O_NOFOLLOW; verify it is a regular file.
-    let snap_file = OpenOptions::new()
+    //
+    // BL-01 fix: use a SINGLE fd for both digest computation and mmap.
+    // Previously std::fs::read(&snapshot_path) re-opened by path, creating
+    // a TOCTOU window between the path-based open and the mmap. Now we open
+    // once, read all bytes via the same fd for digest, then Mmap::map using
+    // the SAME fd — the kernel guarantees both digest input and mapped bytes
+    // come from the same inode instance.
+    let mut snap_file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW)
         .open(&snapshot_path)
@@ -134,8 +141,10 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
         ));
     }
 
-    // Read bytes, verify digest.
-    let bytes = std::fs::read(&snapshot_path).map_err(LoadError::Io)?;
+    // Read bytes via the existing fd (NOT std::fs::read which re-opens by path).
+    // The file cursor is consumed; we seek back to the start before mmap.
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    snap_file.read_to_end(&mut bytes).map_err(LoadError::Io)?;
     let computed = format!("{:x}", Sha256::digest(&bytes));
     if computed != manifest_digest {
         return Err(LoadError::DigestMismatch {
@@ -152,9 +161,12 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
         other => LoadError::Codec(other.to_string()),
     })?;
 
-    // mmap is for the contract — Phase 1 actually uses the decoded Vec for matching,
-    // but we keep the mmap alive so future phases (Phase 2 zero-copy) inherit a
-    // working mmap path.
+    // mmap from the SAME fd. Mmap::map operates on the file descriptor
+    // independent of the file position (position was consumed by read_to_end
+    // but mmap works at the inode level, not the cursor).
+    //
+    // Phase 1: mmap kept alive so future phases (Phase 2 zero-copy) inherit a
+    // working mmap path. The decoded Vec is used for matching.
     let mmap = unsafe { Mmap::map(&snap_file).map_err(LoadError::Io)? };
 
     Ok(LoadedSnapshot {

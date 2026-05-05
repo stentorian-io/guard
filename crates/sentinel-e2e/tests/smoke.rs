@@ -7,8 +7,14 @@
 //! we only need to verify (a) the daemon received a RegisterRoot and (b) the
 //! wrapped command exited 0. The full dylib-injection verification is in
 //! deny.rs (Roadmap criterion #2) which uses Homebrew/nvm node.
+//!
+//! SC1 amendment (gap-closure plan 01-10): `smoke_dylib_loaded` proves that
+//! DYLD_INSERT_LIBRARIES actually loaded our dylib on the success path by
+//! using a NON-hardened Homebrew node binary (which does not strip DYLD_*
+//! on exec) and checking for a deterministic dylib ctor side-effect — a
+//! marker file written by the ctor when SENTINEL_TEST_MARKER is set.
 
-use sentinel_e2e::{resolve_cli, resolve_dylib, DaemonHarness};
+use sentinel_e2e::{cargo_workspace_root, resolve_cli, resolve_dylib, resolve_node, DaemonHarness};
 use std::process::Command;
 
 #[cfg_attr(not(target_os = "macos"), ignore)]
@@ -92,4 +98,121 @@ fn sentinel_run_propagates_child_exit_code() {
         "sentinel run should propagate child's non-zero exit; status={:?}",
         output.status
     );
+}
+
+/// SC1 amendment (gap-closure plan 01-10, BL-SC1):
+///
+/// Prove that `DYLD_INSERT_LIBRARIES` successfully loaded `libsentinel_hook.dylib`
+/// into a non-hardened Homebrew node binary.
+///
+/// Mechanism: the dylib constructor writes a marker file to the path given by
+/// `SENTINEL_TEST_MARKER` when that env var is set. The test:
+///   1. Picks a short tempdir path for the marker file.
+///   2. Wraps a trivial Node script (harness/smoke_node.js — just `process.exit(0)`)
+///      under `sentinel run` with `SENTINEL_TEST_MARKER` set.
+///   3. Asserts: child exits 0 AND marker file exists.
+///
+/// The existing `sentinel_run_echo_hello_registers_with_daemon_and_exits_zero`
+/// test uses hardened `/bin/echo` (which strips DYLD_INSERT_LIBRARIES on exec).
+/// That test proves the spawn/IPC/RegisterRoot path. THIS test uses non-hardened
+/// node to prove the dylib-load path — the complementary case.
+///
+/// Skip condition: SENTINEL_E2E_NODE not set and Homebrew node not found.
+#[cfg_attr(not(target_os = "macos"), ignore)]
+#[test]
+fn smoke_dylib_loaded() {
+    let cli = resolve_cli();
+    let dylib = resolve_dylib();
+
+    let node = match resolve_node() {
+        Ok(p) => p,
+        Err(why) => {
+            eprintln!("SKIP smoke_dylib_loaded: {why}");
+            return;
+        }
+    };
+
+    // Verify node is actually non-hardened by checking codesign -dv output.
+    // Non-hardened means "Hardened Runtime" flag is absent. If node is hardened
+    // (e.g. Apple-signed system Python), DYLD_INSERT_LIBRARIES would be stripped
+    // and the test would produce a false pass (child exits 0, but marker never
+    // written because dylib never loaded). We skip rather than produce a false pass.
+    let codesign_out = Command::new("codesign")
+        .args(["-dv", "--verbose=2"])
+        .arg(&node)
+        .output();
+    if let Ok(out) = &codesign_out {
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        if combined.contains("runtime") && !combined.contains("flags=0x0") {
+            // Has hardened runtime flag — DYLD_INSERT_LIBRARIES will be stripped.
+            eprintln!(
+                "SKIP smoke_dylib_loaded: node at {} has hardened runtime; \
+                 DYLD_INSERT_LIBRARIES would be stripped. Set SENTINEL_E2E_NODE \
+                 to a non-hardened node binary (e.g. Homebrew node).",
+                node.display()
+            );
+            return;
+        }
+    }
+
+    let harness = DaemonHarness::start().expect("start daemon");
+
+    // Marker file path: use a file INSIDE the harness state_dir (already a short
+    // /tmp-based path) so it's automatically cleaned up with the harness tempdir.
+    let marker_path = harness.state_dir.join("dylib-loaded.marker");
+
+    let script = cargo_workspace_root().join("crates/sentinel-e2e/harness/smoke_node.js");
+    assert!(
+        script.exists(),
+        "harness script missing at {}; run cargo build --workspace",
+        script.display()
+    );
+
+    let output = Command::new(&cli)
+        .arg("run")
+        .arg("--")
+        .arg(&node)
+        .arg(&script)
+        .env_clear()
+        .env("HOME", harness.home.path())
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("SENTINEL_HOOK_DYLIB", &dylib)
+        .env("SENTINEL_STATE_DIR", &harness.state_dir)
+        // SC1: dylib ctor writes this file when it runs.
+        .env("SENTINEL_TEST_MARKER", &marker_path)
+        .output()
+        .expect("run sentinel with node smoke_node.js");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "smoke_dylib_loaded: sentinel run node smoke_node.js must exit 0;\n\
+         stderr:\n{stderr}"
+    );
+
+    assert!(
+        marker_path.exists(),
+        "smoke_dylib_loaded: dylib ctor marker file was NOT written at {}.\n\
+         This means libsentinel_hook.dylib was NOT loaded by DYLD_INSERT_LIBRARIES.\n\
+         Likely causes: node binary is hardened (strips DYLD_*), or the dylib ctor \
+         panicked before writing the marker. Check SENTINEL_HOOK_DYLIB={} exists.\n\
+         sentinel stderr:\n{stderr}",
+        marker_path.display(),
+        dylib.display(),
+    );
+
+    // Read marker content as additional confirmation.
+    let marker_content = std::fs::read_to_string(&marker_path).unwrap_or_default();
+    assert_eq!(
+        marker_content, "dylib-loaded",
+        "smoke_dylib_loaded: marker file exists but content is unexpected: {:?}",
+        marker_content
+    );
+
+    drop(harness);
 }

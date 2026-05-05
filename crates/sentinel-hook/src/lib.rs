@@ -33,6 +33,16 @@ pub static ALLOWLIST: std::sync::OnceLock<Vec<sentinel_core::AllowlistEntry>> =
 /// sets FAIL_CLOSED and returns cleanly. Steps 3 and 4 are skipped via compile-time cfg.
 #[ctor::ctor(unsafe)]
 unsafe fn sentinel_hook_init() {
+    // 0. SC1 test marker — write a marker file when SENTINEL_TEST_MARKER is set.
+    //    This is the cheapest reliable dylib-load indicator for the smoke_dylib_loaded
+    //    e2e test: the test sets SENTINEL_TEST_MARKER to a tempdir path and asserts
+    //    the file exists after the child exits, proving the ctor ran (= dylib loaded).
+    //
+    //    The env var is intentionally named with a TEST prefix so it is obvious this
+    //    is a test-only hook. Production deployments never set SENTINEL_TEST_MARKER,
+    //    so this is a no-op in all real usage.
+    unsafe { write_test_marker_if_set() };
+
     // 1. Capture original libc symbol pointers via RTLD_NEXT.
     unsafe { interpose::capture_originals() };
 
@@ -88,4 +98,30 @@ unsafe fn sentinel_hook_init() {
         // NOTE: temporarily disabled to diagnose crash; will re-enable after root cause identified.
         // interpose::probe_self_test();
     }
+}
+
+/// Write a marker file to the path given by SENTINEL_TEST_MARKER if the env var is set.
+///
+/// This is a test-only hook. Production processes never set SENTINEL_TEST_MARKER.
+/// The file is written during the dylib constructor so its existence proves the ctor ran,
+/// which is the cheapest reliable evidence that DYLD_INSERT_LIBRARIES loaded our dylib.
+///
+/// # Safety
+/// Called from the dylib constructor (single-threaded, pre-main). libc::getenv is
+/// safe here because no concurrent setenv can occur before main() starts.
+unsafe fn write_test_marker_if_set() {
+    use std::ffi::CStr;
+    // Use libc::getenv to stay allocation-free until we know the env var is set.
+    // SAFETY: ctor runs pre-main, single-threaded; getenv pointer stable for duration.
+    let p = unsafe { libc::getenv(c"SENTINEL_TEST_MARKER".as_ptr()) };
+    if p.is_null() {
+        return;
+    }
+    let path_str = unsafe { CStr::from_ptr(p) }.to_string_lossy();
+    if path_str.is_empty() {
+        return;
+    }
+    // Write the marker file. A zero-byte file is sufficient.
+    // Use std::fs::write — allocation is fine here (not on the hot path).
+    let _ = std::fs::write(path_str.as_ref(), b"dylib-loaded");
 }

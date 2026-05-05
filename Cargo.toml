@@ -24,6 +24,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 nix = { version = "0.31.2", default-features = false, features = ["process", "socket", "user"] }
 clap = { version = "4.6.1", features = ["derive"] }
 memmap2 = "0.9.10"
+socket2 = { version = "0.5", features = ["all"] }
 thiserror = "2.0.18"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

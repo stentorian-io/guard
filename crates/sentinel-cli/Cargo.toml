@@ -12,12 +12,23 @@ description = "sentinel CLI — wraps a command under default-deny network enfor
 name = "sentinel"
 path = "src/main.rs"
 
+[lib]
+name = "sentinel_cli"
+path = "src/lib.rs"
+
 [dependencies]
 clap = { workspace = true }
 nix = { workspace = true }
 libc = { workspace = true }
+socket2 = { workspace = true }
 sentinel-core = { workspace = true }
 sentinel-ipc = { workspace = true }
+sentinel-daemon = { path = "../sentinel-daemon" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+assert_cmd = { workspace = true }
+predicates = { workspace = true }

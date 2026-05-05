@@ -1,4 +1,5 @@
-//! clap derive structs for the `sentinel` CLI. (RED stub — filled in GREEN)
+//! clap derive structs for the `sentinel` CLI.
+
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 
@@ -12,8 +13,12 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
     /// Wrap and execute a command under default-deny network enforcement.
+    ///
+    /// Use `--` to separate sentinel options from the wrapped command:
+    ///   sentinel run -- node -e 'require("net").connect(443, "host")'
     Run {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        /// The wrapped command and its arguments.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1.., required = true)]
         command: Vec<OsString>,
     },
 }

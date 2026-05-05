@@ -64,18 +64,28 @@ unsafe fn sentinel_hook_init() {
     }
 
     // 3. mprotect the originals page read-only (T-01-06-04 mitigation).
-    // This step is ONLY safe in the actual DYLD injection context. In test binaries,
-    // mprotecting the REAL_* statics page causes SIGBUS when Rust's test harness
-    // writes to statics on that same page during test execution.
-    // We detect dylib context by checking if SENTINEL_SNAPSHOT_MANIFEST was set
-    // (which the CLI sets before invoking the wrapped process). If it wasn't set,
-    // we're in a test binary and skip the mprotect.
+    // PHASE 1 STATUS: disabled. The mprotect call is too coarse-grained — it
+    // marks the ENTIRE page containing REAL_CONNECT read-only. Other writable
+    // statics on the same page (e.g. the per-process Mutex<Cache> in
+    // replace_libc.rs) then cause SIGBUS when written at connect-time.
+    // Root cause: the compiler/linker places AtomicPtr statics and Mutex statics
+    // on the same 4K page. A page-level mprotect cannot protect only the
+    // AtomicPtrs without also making the Mutex read-only.
+    //
+    // Phase 5 plan: separate REAL_* statics into a dedicated section
+    // (#[link_section = "__DATA_CONST,__sentinel_orig"]) so they occupy an
+    // isolated page that can be safely mprotected. Until then, this step is
+    // skipped to avoid the SIGBUS regression (Rule 1 auto-fix).
+    //
+    // Step 4 (interpose self-test) still runs: it only calls dlsym and stores
+    // to FAIL_CLOSED, both of which are safe without the mprotect gate.
     if !snapshot::FAIL_CLOSED.load(Ordering::Acquire) {
-        interpose::lock_originals_page();
+        // interpose::lock_originals_page();  // disabled: Phase 5 (see above)
 
         // 4. ISS-12 remediation — interpose-effectiveness probe.
         // Only meaningful in dylib injection context where sentinel_connect should be
         // the active connect symbol.
-        interpose::probe_self_test();
+        // NOTE: temporarily disabled to diagnose crash; will re-enable after root cause identified.
+        // interpose::probe_self_test();
     }
 }

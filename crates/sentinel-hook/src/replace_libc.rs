@@ -17,6 +17,48 @@ use sentinel_core::{match_hostname, AllowlistEntry, Verdict};
 // EAI_FAIL is -4 on macOS; we use libc constant.
 const DENY_EAI: c_int = libc::EAI_FAIL;
 
+// macOS syscall numbers for the five interposed symbols.
+// Using direct syscalls bypasses the __DATA,__interpose mechanism entirely,
+// which is essential: when our dylib is injected via DYLD_INSERT_LIBRARIES,
+// dyld patches ALL symbol lookups (including dlsym on the original image) to
+// return our replacement functions. The only escape from the interpose chain
+// is a raw syscall (the kernel entry point is never interposed).
+//
+// Verified from macOS 15.4 SDK /usr/include/sys/syscall.h:
+//   SYS_sendmsg=28, SYS_connect=98, SYS_sendto=133, SYS_connectx=447
+// These numbers are stable across macOS versions (BSD socket ABI).
+const SYS_CONNECT: libc::c_int = 98;
+const SYS_CONNECTX: libc::c_int = 447;
+const SYS_SENDTO: libc::c_int = 133;
+const SYS_SENDMSG: libc::c_int = 28;
+
+/// Call the real kernel connect(2) by bypassing the libc stub entirely.
+/// This avoids the infinite recursion caused by DYLD_INSERT_LIBRARIES
+/// patching all symbol lookups to return sentinel_connect instead of libSystem's connect.
+#[inline(always)]
+unsafe fn raw_connect(s: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
+    unsafe { libc::syscall(SYS_CONNECT, s, addr, addrlen) as c_int }
+}
+
+/// Call the real kernel sendto(2) via raw syscall.
+#[inline(always)]
+unsafe fn raw_sendto(
+    s: c_int,
+    buf: *const c_void,
+    len: size_t,
+    flags: c_int,
+    to: *const sockaddr,
+    tolen: socklen_t,
+) -> ssize_t {
+    unsafe { libc::syscall(SYS_SENDTO, s, buf, len, flags, to, tolen) as ssize_t }
+}
+
+/// Call the real kernel sendmsg(2) via raw syscall.
+#[inline(always)]
+unsafe fn raw_sendmsg(s: c_int, msg: *const msghdr, flags: c_int) -> ssize_t {
+    unsafe { libc::syscall(SYS_SENDMSG, s, msg, flags) as ssize_t }
+}
+
 // ISS-06 disposition: ENF-06 verification scope is documented as MATCHER-ONLY
 // in Phase 1. The `with_cache` helper takes a process-global Mutex on every
 // hot-path call (decide_for_sockaddr → cache.lookup), and `std::sync::Mutex`
@@ -93,34 +135,20 @@ pub unsafe extern "C" fn sentinel_connect(
     addr: *const sockaddr,
     addrlen: socklen_t,
 ) -> c_int {
+    // Reentrancy guard: if we're already inside a sentinel hook on this thread,
+    // fall through to the real syscall immediately without re-evaluating policy.
+    // This handles cases where the verdict logic itself calls connect internally.
     if IN_HOOK.with(|c| c.replace(true)) {
-        let real = REAL_CONNECT.load(Ordering::Relaxed);
-        let r = if real.is_null() {
-            -1
-        } else {
-            let f: unsafe extern "C" fn(c_int, *const sockaddr, socklen_t) -> c_int =
-                unsafe { core::mem::transmute(real) };
-            unsafe { f(s, addr, addrlen) }
-        };
-        return r;
+        return unsafe { raw_connect(s, addr, addrlen) };
     }
     let verdict = decide_for_sockaddr(addr, addrlen);
+    IN_HOOK.with(|c| c.set(false));
     if matches!(verdict, Verdict::Deny) {
-        IN_HOOK.with(|c| c.set(false));
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY connect");
         return -1;
     }
-    let real = REAL_CONNECT.load(Ordering::Relaxed);
-    let r = if real.is_null() {
-        -1
-    } else {
-        let f: unsafe extern "C" fn(c_int, *const sockaddr, socklen_t) -> c_int =
-            unsafe { core::mem::transmute(real) };
-        unsafe { f(s, addr, addrlen) }
-    };
-    IN_HOOK.with(|c| c.set(false));
-    r
+    unsafe { raw_connect(s, addr, addrlen) }
 }
 
 // ---- connectx (Darwin-specific) ----
@@ -160,21 +188,8 @@ unsafe extern "C" fn sentinel_connectx(
     connid: *mut c_int, // connid_t *
 ) -> c_int {
     if IN_HOOK.with(|c| c.replace(true)) {
-        let real = REAL_CONNECTX.load(Ordering::Relaxed);
-        let r = if real.is_null() {
-            -1
-        } else {
-            let f: unsafe extern "C" fn(
-                c_int,
-                *const c_void,
-                c_int,
-                u32,
-                *const c_void,
-                c_int,
-                *mut size_t,
-                *mut c_int,
-            ) -> c_int = unsafe { core::mem::transmute(real) };
-            unsafe { f(s, endpoints, associd, flags, iov, iovcnt, len, connid) }
+        let r = unsafe {
+            libc::syscall(SYS_CONNECTX, s, endpoints, associd, flags, iov, iovcnt, len, connid) as c_int
         };
         return r;
     }
@@ -186,30 +201,15 @@ unsafe extern "C" fn sentinel_connectx(
         decide_for_sockaddr(ep.sae_dstaddr, ep.sae_dstaddrlen)
     };
 
+    IN_HOOK.with(|c| c.set(false));
     if matches!(verdict, Verdict::Deny) {
-        IN_HOOK.with(|c| c.set(false));
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY connectx");
         return -1;
     }
-    let real = REAL_CONNECTX.load(Ordering::Relaxed);
-    let r = if real.is_null() {
-        -1
-    } else {
-        let f: unsafe extern "C" fn(
-            c_int,
-            *const c_void,
-            c_int,
-            u32,
-            *const c_void,
-            c_int,
-            *mut size_t,
-            *mut c_int,
-        ) -> c_int = unsafe { core::mem::transmute(real) };
-        unsafe { f(s, endpoints, associd, flags, iov, iovcnt, len, connid) }
-    };
-    IN_HOOK.with(|c| c.set(false));
-    r
+    unsafe {
+        libc::syscall(SYS_CONNECTX, s, endpoints, associd, flags, iov, iovcnt, len, connid) as c_int
+    }
 }
 
 // ---- getaddrinfo ----
@@ -324,45 +324,25 @@ unsafe extern "C" fn sentinel_sendto(
     tolen: socklen_t,
 ) -> ssize_t {
     if IN_HOOK.with(|c| c.replace(true)) {
-        let real = REAL_SENDTO.load(Ordering::Relaxed);
-        let r = if real.is_null() {
-            -1
-        } else {
-            let f: unsafe extern "C" fn(
-                c_int,
-                *const c_void,
-                size_t,
-                c_int,
-                *const sockaddr,
-                socklen_t,
-            ) -> ssize_t = unsafe { core::mem::transmute(real) };
-            unsafe { f(s, buf, len, flags, to, tolen) }
-        };
-        return r;
+        return unsafe { raw_sendto(s, buf, len, flags, to, tolen) };
     }
-    let verdict = decide_for_sockaddr(to, tolen);
+    // Phase 1 policy for sendto:
+    // - to null or tolen=0 → Allow (connected socket send; the destination
+    //   address was already permitted at connect() time). Denying connected
+    //   sends would break all established TCP data flows.
+    // - to set → run the allowlist check.
+    let verdict = if to.is_null() || tolen == 0 {
+        Verdict::Allow
+    } else {
+        decide_for_sockaddr(to, tolen)
+    };
+    IN_HOOK.with(|c| c.set(false));
     if matches!(verdict, Verdict::Deny) {
-        IN_HOOK.with(|c| c.set(false));
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY sendto");
         return -1;
     }
-    let real = REAL_SENDTO.load(Ordering::Relaxed);
-    let r = if real.is_null() {
-        -1
-    } else {
-        let f: unsafe extern "C" fn(
-            c_int,
-            *const c_void,
-            size_t,
-            c_int,
-            *const sockaddr,
-            socklen_t,
-        ) -> ssize_t = unsafe { core::mem::transmute(real) };
-        unsafe { f(s, buf, len, flags, to, tolen) }
-    };
-    IN_HOOK.with(|c| c.set(false));
-    r
+    unsafe { raw_sendto(s, buf, len, flags, to, tolen) }
 }
 
 // ---- sendmsg ----
@@ -374,43 +354,50 @@ unsafe extern "C" fn sentinel_sendmsg(
     flags: c_int,
 ) -> ssize_t {
     if IN_HOOK.with(|c| c.replace(true)) {
-        let real = REAL_SENDMSG.load(Ordering::Relaxed);
-        let r = if real.is_null() {
-            -1
-        } else {
-            let f: unsafe extern "C" fn(c_int, *const msghdr, c_int) -> ssize_t =
-                unsafe { core::mem::transmute(real) };
-            unsafe { f(s, msg, flags) }
-        };
-        return r;
+        return unsafe { raw_sendmsg(s, msg, flags) };
     }
+    // Phase 1 policy for sendmsg:
+    // - null msg → Deny (invalid call).
+    // - msg_name null or msg_namelen=0 → Allow (connected socket send; no
+    //   destination address means the kernel uses the connected address,
+    //   which was already permitted at connect() time). Blocking connected
+    //   sends would break all established TCP/Unix socket data flows.
+    // - msg_name set → run the same allowlist check as connect().
     let verdict = if msg.is_null() {
         Verdict::Deny
     } else {
         let m = unsafe { &*msg };
-        decide_for_sockaddr(m.msg_name as *const sockaddr, m.msg_namelen)
+        if m.msg_name.is_null() || m.msg_namelen == 0 {
+            Verdict::Allow
+        } else {
+            decide_for_sockaddr(m.msg_name as *const sockaddr, m.msg_namelen)
+        }
     };
+    IN_HOOK.with(|c| c.set(false));
     if matches!(verdict, Verdict::Deny) {
-        IN_HOOK.with(|c| c.set(false));
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY sendmsg");
         return -1;
     }
-    let real = REAL_SENDMSG.load(Ordering::Relaxed);
-    let r = if real.is_null() {
-        -1
-    } else {
-        let f: unsafe extern "C" fn(c_int, *const msghdr, c_int) -> ssize_t =
-            unsafe { core::mem::transmute(real) };
-        unsafe { f(s, msg, flags) }
-    };
-    IN_HOOK.with(|c| c.set(false));
-    r
+    unsafe { raw_sendmsg(s, msg, flags) }
 }
 
 // ---- shared decision path for connect/sendto/sendmsg ----
 
 fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
+    // Phase 1 policy: Unix domain sockets (AF_UNIX) are always allowed.
+    // They are local IPC — not network egress. Denying them breaks Node's
+    // internal libuv event loop (it uses a Unix socketpair for signaling),
+    // the daemon's own socket, and any other local IPC. (Rule 1 auto-fix.)
+    if !addr.is_null()
+        && addrlen as usize >= core::mem::size_of::<libc::sa_family_t>()
+    {
+        let family = unsafe { (*addr).sa_family };
+        if family as i32 == libc::AF_UNIX {
+            return Verdict::Allow;
+        }
+    }
+
     let entries = match entries_or_deny() {
         Some(e) => e,
         None => return Verdict::Deny,
@@ -552,8 +539,30 @@ unsafe extern "C" {
     ) -> c_int;
 }
 
-// Five interpose records: connect, connectx, getaddrinfo, sendto, sendmsg.
-// (getaddrinfo_async and getaddrinfo_async_call excluded — not in macOS 26 SDK.)
+// Phase 1 interpose records: connect, connectx, sendto, sendmsg.
+//
+// DEVIATION from plan (getaddrinfo removed, Rule 1 - Bug):
+// getaddrinfo is NOT interposed in Phase 1. Root cause: when libsentinel_hook.dylib
+// is injected via DYLD_INSERT_LIBRARIES, dyld patches ALL symbol table entries
+// globally — including those within libSystem itself. This means dlsym(libSystem,
+// "getaddrinfo") and RTLD_NEXT both return sentinel_getaddrinfo's address. There is
+// no way to call the real getaddrinfo from within the interposing dylib without a raw
+// syscall, and getaddrinfo is NOT a simple syscall (it goes through mDNSResponder
+// via XPC). Using IN_HOOK as a reentrancy guard in the allow path leads to
+// sentinel_getaddrinfo calling itself infinitely via REAL_GETADDRINFO.
+//
+// Phase 1 enforcement strategy without getaddrinfo interception:
+// - DENY path: discord.com and other non-allowlisted hosts are denied at connect(2)
+//   level, AFTER DNS resolution. The IP address returned by getaddrinfo is not in
+//   the D-18 allowlist (which only has 127.0.0.1, ::1, registry.npmjs.org etc.),
+//   so decide_for_ip_sockaddr() returns Deny. Node sees EHOSTUNREACH.
+// - ALLOW path: loopback (127.0.0.1, ::1) connects work because decide_for_ip_sockaddr
+//   matches the Ip() entries in the allowlist.
+// - Cache-based hostname matching (getaddrinfo → cache → connect) is NOT available in
+//   Phase 1 since getaddrinfo isn't intercepted. Phase 5 will add a safer getaddrinfo
+//   interception mechanism (e.g., using mach port messaging or a forked resolver).
+//
+// (getaddrinfo_async and getaddrinfo_async_call are also excluded — removed from macOS 26 SDK.)
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = "__DATA,__interpose")]
@@ -569,14 +578,6 @@ static SENTINEL_INTERPOSE_CONNECT: [SyncPtr; 2] = [
 static SENTINEL_INTERPOSE_CONNECTX: [SyncPtr; 2] = [
     SyncPtr(sentinel_connectx as *const c_void),
     SyncPtr(connectx as *const c_void),
-];
-
-#[unsafe(no_mangle)]
-#[unsafe(link_section = "__DATA,__interpose")]
-#[used]
-static SENTINEL_INTERPOSE_GETADDRINFO: [SyncPtr; 2] = [
-    SyncPtr(sentinel_getaddrinfo as *const c_void),
-    SyncPtr(libc::getaddrinfo as *const c_void),
 ];
 
 #[unsafe(no_mangle)]

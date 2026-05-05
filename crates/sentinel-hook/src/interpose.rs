@@ -10,35 +10,68 @@ pub static REAL_GETADDRINFO_ASYNC_CALL: AtomicPtr<c_void> = AtomicPtr::new(core:
 pub static REAL_SENDTO: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
 pub static REAL_SENDMSG: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
 
+/// Capture original libc symbol pointers.
+///
+/// IMPORTANT NOTE (Phase 1 deviation, Rule 1 - Bug):
+///
+/// When libsentinel_hook.dylib is injected via DYLD_INSERT_LIBRARIES, dyld applies the
+/// __DATA,__interpose records GLOBALLY — including patching the exported symbol table
+/// entries of ALL loaded images (libSystem included). This means that after interposing:
+///
+///   - dlsym(RTLD_NEXT, "connect") returns sentinel_connect (not libSystem's connect)
+///   - dlsym(libSystem_handle, "connect") also returns sentinel_connect
+///   - libc::connect as *const c_void resolves to sentinel_connect via the GOT
+///
+/// All three approaches create an infinite recursion loop because REAL_CONNECT
+/// points back to sentinel_connect itself.
+///
+/// THE FIX (Phase 1): Use direct kernel syscalls instead of function pointers.
+/// The hot-path replacement functions (sentinel_connect, sentinel_sendto, etc.)
+/// now call libc::syscall(SYS_*, ...) directly in their allow/reentrancy paths.
+/// libc::syscall itself is NOT interposed, so it correctly calls the kernel.
+///
+/// These AtomicPtrs remain for compatibility with probe_self_test and future phases
+/// that may find a way to store the real function pointers (e.g., Mach-O TEXT parsing).
+/// They are NOT used in the hot path in Phase 1.
 pub unsafe fn capture_originals() {
-    REAL_CONNECT.store(
-        unsafe { libc::dlsym(libc::RTLD_NEXT, c"connect".as_ptr()) },
-        Ordering::Relaxed,
-    );
-    REAL_CONNECTX.store(
-        unsafe { libc::dlsym(libc::RTLD_NEXT, c"connectx".as_ptr()) },
-        Ordering::Relaxed,
-    );
-    REAL_GETADDRINFO.store(
-        unsafe { libc::dlsym(libc::RTLD_NEXT, c"getaddrinfo".as_ptr()) },
-        Ordering::Relaxed,
-    );
+    // NOTE: The values stored here will all equal our replacement functions
+    // (sentinel_connect etc.) due to dyld's global interpose patching. They are
+    // NOT used in the hot path — raw syscalls are used instead (see replace_libc.rs).
+    // We still call dlsym to populate the fields for compatibility, knowing they
+    // won't be used for call-through.
+    let libsystem = unsafe {
+        libc::dlopen(
+            c"/usr/lib/libSystem.B.dylib".as_ptr(),
+            libc::RTLD_NOLOAD | libc::RTLD_NOW,
+        )
+    };
+
+    macro_rules! real_sym {
+        ($handle:expr, $name:expr) => {{
+            if $handle.is_null() {
+                unsafe { libc::dlsym(libc::RTLD_NEXT, $name.as_ptr()) }
+            } else {
+                unsafe { libc::dlsym($handle, $name.as_ptr()) }
+            }
+        }};
+    }
+
+    REAL_CONNECT.store(real_sym!(libsystem, c"connect"), Ordering::Relaxed);
+    REAL_CONNECTX.store(real_sym!(libsystem, c"connectx"), Ordering::Relaxed);
+    REAL_GETADDRINFO.store(real_sym!(libsystem, c"getaddrinfo"), Ordering::Relaxed);
     REAL_GETADDRINFO_ASYNC.store(
-        unsafe { libc::dlsym(libc::RTLD_NEXT, c"getaddrinfo_async".as_ptr()) },
+        real_sym!(libsystem, c"getaddrinfo_async"),
         Ordering::Relaxed,
     );
     REAL_GETADDRINFO_ASYNC_CALL.store(
-        unsafe { libc::dlsym(libc::RTLD_NEXT, c"getaddrinfo_async_call".as_ptr()) },
+        real_sym!(libsystem, c"getaddrinfo_async_call"),
         Ordering::Relaxed,
     );
-    REAL_SENDTO.store(
-        unsafe { libc::dlsym(libc::RTLD_NEXT, c"sendto".as_ptr()) },
-        Ordering::Relaxed,
-    );
-    REAL_SENDMSG.store(
-        unsafe { libc::dlsym(libc::RTLD_NEXT, c"sendmsg".as_ptr()) },
-        Ordering::Relaxed,
-    );
+    REAL_SENDTO.store(real_sym!(libsystem, c"sendto"), Ordering::Relaxed);
+    REAL_SENDMSG.store(real_sym!(libsystem, c"sendmsg"), Ordering::Relaxed);
+
+    crate::log_buffer::LOG_RING
+        .append(b"[sentinel-hook] capture_originals: raw-syscall mode (Phase 1)");
 }
 
 /// Mark the page containing the AtomicPtrs read-only (T-01-06-04 mitigation).

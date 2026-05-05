@@ -1,10 +1,10 @@
 //! Build the release dylib and verify __DATA,__interpose section size
-//! matches 7 records × 16 bytes = 112 bytes (0x70).
+//! matches 4 records × 16 bytes = 64 bytes (0x40).
 
 use std::process::Command;
 
 #[test]
-fn release_dylib_has_seven_interpose_records() {
+fn release_dylib_has_four_interpose_records() {
     let out = Command::new("cargo")
         .args(["build", "-p", "sentinel-hook", "--release"])
         .output()
@@ -45,14 +45,15 @@ fn release_dylib_has_seven_interpose_records() {
         }
     }
     let size = found_size.expect("expected __interpose section in otool output");
-    // 5 records: connect, connectx, getaddrinfo, sendto, sendmsg.
-    // getaddrinfo_async and getaddrinfo_async_call were removed: they are absent
-    // from the macOS 26 (Sequoia) SDK (linker error: Undefined symbols).
-    // [Rule 1 - Bug] deviation from the plan's expected 7 × 16 = 112 bytes.
+    // 4 records: connect, connectx, sendto, sendmsg.
+    // getaddrinfo was removed in plan 01-09: DYLD_INSERT_LIBRARIES patches every
+    // symbol-table path, so the real connect cannot be reached via dlsym(RTLD_NEXT)
+    // from inside our shadow. Connect-level IP allowlisting suffices for Phase 1;
+    // a safer getaddrinfo strategy is deferred to a later phase.
     assert_eq!(
         size,
-        5 * 16,
-        "expected 5 records × 16 bytes = 80; got {size} (otool full text head: {})",
+        4 * 16,
+        "expected 4 records × 16 bytes = 64; got {size} (otool full text head: {})",
         text.lines().take(40).collect::<Vec<_>>().join("\n")
     );
 }

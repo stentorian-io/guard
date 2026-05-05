@@ -4,20 +4,62 @@
 //! cache lookups against fixed-size storage; reentrancy-guard set/clear.
 
 use crate::cache::{Cache, MAX_HOSTNAME, MAX_SOCKADDR_BYTES};
-use crate::interpose::*;
 use crate::log_buffer::LOG_RING;
 use crate::reentrancy::IN_HOOK;
 use crate::snapshot::FAIL_CLOSED;
 use crate::ALLOWLIST;
 use core::ffi::{c_char, c_int, c_void};
 use core::sync::atomic::Ordering;
-use libc::{addrinfo, msghdr, size_t, ssize_t, sockaddr, socklen_t};
+use libc::{msghdr, size_t, ssize_t, sockaddr, socklen_t};
 use sentinel_core::{match_hostname, AllowlistEntry, Verdict};
 
-// EAI_FAIL is -4 on macOS; we use libc constant.
-const DENY_EAI: c_int = libc::EAI_FAIL;
+// BL-04 fix: RAII reentrancy guard.
+//
+// The previous pattern cleared IN_HOOK BEFORE dispatching the real syscall:
+//   set_guard(); decide(); CLEAR_GUARD(); if deny { return -1; } real_call();
+//
+// That left the dispatch window completely unguarded — if any code path
+// between the clear and the return re-entered a hook, IN_HOOK would be false
+// and the hook would re-evaluate policy rather than passing through.
+//
+// The correct pattern is: guard is held for the entire function scope and
+// drops AFTER the real dispatch. An RAII guard achieves this automatically:
+//   let _g = InHookGuard::enter()?;  // set on entry
+//   decide();
+//   real_call();
+//   // _g drops here, IN_HOOK cleared AFTER the real call returns
+//
+// InHookGuard::enter() returns None if already in a hook (pass-through path);
+// returns Some(guard) that holds IN_HOOK=true until Drop.
+struct InHookGuard {
+    _priv: (),
+}
 
-// macOS syscall numbers for the five interposed symbols.
+impl InHookGuard {
+    /// Try to enter the hook. Returns None if already in a hook on this
+    /// thread (reentrancy detected — caller must pass through immediately).
+    /// Returns Some(guard) when we successfully set IN_HOOK=true.
+    #[inline]
+    fn enter() -> Option<Self> {
+        // replace(true) returns the OLD value. If old was true, we are
+        // already in a hook → return None (caller takes the pass-through path).
+        // If old was false, we are now the outermost hook frame → return guard.
+        if IN_HOOK.with(|c| c.replace(true)) {
+            None
+        } else {
+            Some(Self { _priv: () })
+        }
+    }
+}
+
+impl Drop for InHookGuard {
+    #[inline]
+    fn drop(&mut self) {
+        IN_HOOK.with(|c| c.set(false));
+    }
+}
+
+// macOS syscall numbers for the four interposed symbols.
 // Using direct syscalls bypasses the __DATA,__interpose mechanism entirely,
 // which is essential: when our dylib is injected via DYLD_INSERT_LIBRARIES,
 // dyld patches ALL symbol lookups (including dlsym on the original image) to
@@ -84,30 +126,6 @@ fn entries_or_deny() -> Option<&'static [AllowlistEntry]> {
     ALLOWLIST.get().map(|v| v.as_slice())
 }
 
-/// Extract hostname C-string into a stack buffer. Returns None if hostname is
-/// null, oversized, or contains non-printable bytes.
-fn hostname_bytes(node: *const c_char) -> Option<([u8; MAX_HOSTNAME], usize)> {
-    if node.is_null() {
-        return None;
-    }
-    let mut buf = [0u8; MAX_HOSTNAME];
-    let mut n = 0usize;
-    unsafe {
-        loop {
-            if n >= MAX_HOSTNAME {
-                return None;
-            }
-            let b = *node.add(n) as u8;
-            if b == 0 {
-                break;
-            }
-            buf[n] = b;
-            n += 1;
-        }
-    }
-    Some((buf, n))
-}
-
 /// Sockaddr → opaque bytes for cache key. Includes full sockaddr length.
 fn sockaddr_bytes(
     addr: *const sockaddr,
@@ -135,20 +153,22 @@ pub unsafe extern "C" fn sentinel_connect(
     addr: *const sockaddr,
     addrlen: socklen_t,
 ) -> c_int {
-    // Reentrancy guard: if we're already inside a sentinel hook on this thread,
-    // fall through to the real syscall immediately without re-evaluating policy.
-    // This handles cases where the verdict logic itself calls connect internally.
-    if IN_HOOK.with(|c| c.replace(true)) {
-        return unsafe { raw_connect(s, addr, addrlen) };
-    }
+    // BL-04 fix: RAII guard — IN_HOOK is cleared when _guard drops, which
+    // happens AFTER raw_connect returns (or after the early-return on deny).
+    // The dispatch window is now correctly bracketed by the guard lifetime.
+    let _guard = match InHookGuard::enter() {
+        Some(g) => g,
+        None => return unsafe { raw_connect(s, addr, addrlen) },
+    };
     let verdict = decide_for_sockaddr(addr, addrlen);
-    IN_HOOK.with(|c| c.set(false));
     if matches!(verdict, Verdict::Deny) {
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY connect");
         return -1;
+        // _guard drops here: IN_HOOK cleared after deny path
     }
     unsafe { raw_connect(s, addr, addrlen) }
+    // _guard drops here: IN_HOOK cleared after real syscall returns
 }
 
 // ---- connectx (Darwin-specific) ----
@@ -187,12 +207,13 @@ unsafe extern "C" fn sentinel_connectx(
     len: *mut size_t,
     connid: *mut c_int, // connid_t *
 ) -> c_int {
-    if IN_HOOK.with(|c| c.replace(true)) {
-        let r = unsafe {
+    // BL-04 fix: RAII guard — IN_HOOK cleared after dispatch, not before.
+    let _guard = match InHookGuard::enter() {
+        Some(g) => g,
+        None => return unsafe {
             libc::syscall(SYS_CONNECTX, s, endpoints, associd, flags, iov, iovcnt, len, connid) as c_int
-        };
-        return r;
-    }
+        },
+    };
 
     let verdict = if endpoints.is_null() {
         Verdict::Deny
@@ -201,116 +222,42 @@ unsafe extern "C" fn sentinel_connectx(
         decide_for_sockaddr(ep.sae_dstaddr, ep.sae_dstaddrlen)
     };
 
-    IN_HOOK.with(|c| c.set(false));
     if matches!(verdict, Verdict::Deny) {
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY connectx");
         return -1;
+        // _guard drops here: IN_HOOK cleared after deny
     }
     unsafe {
         libc::syscall(SYS_CONNECTX, s, endpoints, associd, flags, iov, iovcnt, len, connid) as c_int
     }
+    // _guard drops here: IN_HOOK cleared after real syscall returns
 }
 
 // ---- getaddrinfo ----
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sentinel_getaddrinfo(
-    node: *const c_char,
-    service: *const c_char,
-    hints: *const addrinfo,
-    res: *mut *mut addrinfo,
-) -> c_int {
-    if IN_HOOK.with(|c| c.replace(true)) {
-        let real = REAL_GETADDRINFO.load(Ordering::Relaxed);
-        let r = if real.is_null() {
-            DENY_EAI
-        } else {
-            let f: unsafe extern "C" fn(
-                *const c_char,
-                *const c_char,
-                *const addrinfo,
-                *mut *mut addrinfo,
-            ) -> c_int = unsafe { core::mem::transmute(real) };
-            unsafe { f(node, service, hints, res) }
-        };
-        return r;
-    }
-    let entries = match entries_or_deny() {
-        Some(e) => e,
-        None => {
-            IN_HOOK.with(|c| c.set(false));
-            LOG_RING.append(b"[sentinel-hook] DENY getaddrinfo (fail-closed)");
-            return DENY_EAI;
-        }
-    };
-    let host_match = match hostname_bytes(node) {
-        Some((buf, n)) => match match_hostname(entries, &buf[..n]) {
-            Verdict::Allow => Some((buf, n)),
-            Verdict::Deny => {
-                IN_HOOK.with(|c| c.set(false));
-                LOG_RING.append(b"[sentinel-hook] DENY getaddrinfo");
-                return DENY_EAI;
-            }
-        },
-        None => None, // null hostname → numeric-only resolution; let it pass-through
-    };
-    // Allowed: call original.
-    let real = REAL_GETADDRINFO.load(Ordering::Relaxed);
-    let rc = if real.is_null() {
-        DENY_EAI
-    } else {
-        let f: unsafe extern "C" fn(
-            *const c_char,
-            *const c_char,
-            *const addrinfo,
-            *mut *mut addrinfo,
-        ) -> c_int = unsafe { core::mem::transmute(real) };
-        unsafe { f(node, service, hints, res) }
-    };
-    // On success, populate cache for each returned addrinfo so connect() later
-    // can recover the hostname.
-    if rc == 0 {
-        if let Some((host_buf, host_n)) = host_match {
-            unsafe {
-                let mut p = *res;
-                while !p.is_null() {
-                    let ai = &*p;
-                    if !ai.ai_addr.is_null() && ai.ai_addrlen as usize <= MAX_SOCKADDR_BYTES {
-                        let mut sb = [0u8; MAX_SOCKADDR_BYTES];
-                        core::ptr::copy_nonoverlapping(
-                            ai.ai_addr as *const u8,
-                            sb.as_mut_ptr(),
-                            ai.ai_addrlen as usize,
-                        );
-                        with_cache(|c| {
-                            c.insert(&sb[..ai.ai_addrlen as usize], &host_buf[..host_n])
-                        });
-                    }
-                    p = ai.ai_next;
-                }
-            }
-        }
-    }
-    IN_HOOK.with(|c| c.set(false));
-    rc
-}
-
-// ---- getaddrinfo_async / getaddrinfo_async_call ----
 //
-// NOTE: These symbols were planned per D-08 but are NOT present in macOS 26
-// (Sequoia) SDK. Both `getaddrinfo_async` and `getaddrinfo_async_call` were
-// deprecated in earlier macOS releases and have been removed from the dyld
-// shared cache on macOS 26. Attempting to reference them as interpose targets
-// causes an "Undefined symbols" linker error.
+// BL-05 fix: sentinel_getaddrinfo DELETED.
 //
-// [Rule 1 - Bug] Deviation from plan: reduced interpose set from 7 to 5 symbols.
-// getaddrinfo_async and getaddrinfo_async_call are excluded. The REAL_GETADDRINFO_ASYNC
-// and REAL_GETADDRINFO_ASYNC_CALL AtomicPtrs in interpose.rs remain (they get null
-// from dlsym at ctor time, which is handled gracefully). The interpose section will
-// be 5 × 16 = 80 bytes (0x50) instead of the planned 112 bytes (0x70).
-// Plan 07 can add nw_* Network.framework interception to cover the gap.
-// Tracked in SUMMARY deviations.
+// getaddrinfo was removed from the __DATA,__interpose table in plan 01-09
+// (see deviation comment below at the interpose records section) because
+// DYLD_INSERT_LIBRARIES patches ALL symbol-table entries globally — including
+// those within libSystem — so REAL_GETADDRINFO ended up pointing back to
+// sentinel_getaddrinfo, causing infinite recursion on the allow path.
+//
+// Despite being removed from the interpose table, sentinel_getaddrinfo
+// remained defined with #[unsafe(no_mangle)], making it a globally-visible
+// exported C symbol. This was a foot-gun: the symbol was dead (never called
+// via dyld interpose) but exported, misleading future contributors.
+//
+// Fix: delete the function entirely. The REAL_GETADDRINFO AtomicPtr in
+// interpose.rs is retained (it gets the real getaddrinfo from dlsym at init
+// time, which is harmless — it's just never consulted on the hot path).
+//
+// getaddrinfo_async and getaddrinfo_async_call are also excluded (removed
+// from macOS 26 SDK). Tracked in SUMMARY deviations.
+//
+// [Rule 1 - Bug] Original deviation from plan: reduced interpose set from 7
+// to 5 symbols. Plan 07 adds nw_* Network.framework interception.
 
 // ---- sendto ----
 
@@ -323,9 +270,11 @@ unsafe extern "C" fn sentinel_sendto(
     to: *const sockaddr,
     tolen: socklen_t,
 ) -> ssize_t {
-    if IN_HOOK.with(|c| c.replace(true)) {
-        return unsafe { raw_sendto(s, buf, len, flags, to, tolen) };
-    }
+    // BL-04 fix: RAII guard — IN_HOOK cleared after dispatch, not before.
+    let _guard = match InHookGuard::enter() {
+        Some(g) => g,
+        None => return unsafe { raw_sendto(s, buf, len, flags, to, tolen) },
+    };
     // Phase 1 policy for sendto:
     // - to null or tolen=0 → Allow (connected socket send; the destination
     //   address was already permitted at connect() time). Denying connected
@@ -336,13 +285,14 @@ unsafe extern "C" fn sentinel_sendto(
     } else {
         decide_for_sockaddr(to, tolen)
     };
-    IN_HOOK.with(|c| c.set(false));
     if matches!(verdict, Verdict::Deny) {
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY sendto");
         return -1;
+        // _guard drops here: IN_HOOK cleared after deny
     }
     unsafe { raw_sendto(s, buf, len, flags, to, tolen) }
+    // _guard drops here: IN_HOOK cleared after real syscall returns
 }
 
 // ---- sendmsg ----
@@ -353,9 +303,11 @@ unsafe extern "C" fn sentinel_sendmsg(
     msg: *const msghdr,
     flags: c_int,
 ) -> ssize_t {
-    if IN_HOOK.with(|c| c.replace(true)) {
-        return unsafe { raw_sendmsg(s, msg, flags) };
-    }
+    // BL-04 fix: RAII guard — IN_HOOK cleared after dispatch, not before.
+    let _guard = match InHookGuard::enter() {
+        Some(g) => g,
+        None => return unsafe { raw_sendmsg(s, msg, flags) },
+    };
     // Phase 1 policy for sendmsg:
     // - null msg → Deny (invalid call).
     // - msg_name null or msg_namelen=0 → Allow (connected socket send; no
@@ -373,13 +325,14 @@ unsafe extern "C" fn sentinel_sendmsg(
             decide_for_sockaddr(m.msg_name as *const sockaddr, m.msg_namelen)
         }
     };
-    IN_HOOK.with(|c| c.set(false));
     if matches!(verdict, Verdict::Deny) {
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY sendmsg");
         return -1;
+        // _guard drops here: IN_HOOK cleared after deny
     }
     unsafe { raw_sendmsg(s, msg, flags) }
+    // _guard drops here: IN_HOOK cleared after real syscall returns
 }
 
 // ---- shared decision path for connect/sendto/sendmsg ----

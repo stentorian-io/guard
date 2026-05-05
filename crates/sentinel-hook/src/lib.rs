@@ -13,6 +13,7 @@ pub mod interpose; // Filled in by task 2; symbol re-export only at this point
 pub mod log_buffer;
 pub mod reentrancy;
 pub mod replace_libc; // Filled in by task 2
+pub mod replace_nw; // Plan 07: Network.framework dlsym + shadow exports
 pub mod snapshot;
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -34,6 +35,11 @@ pub static ALLOWLIST: std::sync::OnceLock<Vec<sentinel_core::AllowlistEntry>> =
 unsafe fn sentinel_hook_init() {
     // 1. Capture original libc symbol pointers via RTLD_NEXT.
     unsafe { interpose::capture_originals() };
+
+    // 1.5. dlopen Network.framework and dlsym seven nw_* symbols into AtomicPtrs (D-09).
+    // Missing symbols are logged as coverage-gap lines; NW_AVAILABLE stays false if
+    // dlopen fails (D-20 libc-only fallback path).
+    replace_nw::init();
 
     // 2. Load snapshot (manifest + digest verify + mmap).
     match snapshot::load_from_env() {

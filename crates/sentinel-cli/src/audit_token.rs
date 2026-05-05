@@ -30,6 +30,14 @@ unsafe extern "C" {
         task_info_out: *mut u32, // pointer to AuditToken's val[8]
         task_info_count: *mut u32,
     ) -> KernReturnT;
+
+    /// Apple's mach_port_deallocate — releases a send-right back to the kernel.
+    ///
+    /// BL-02 fix: task_name_for_pid returns a Mach send-right that MUST be
+    /// deallocated on every return path. Failure to do so leaks a port reference
+    /// per call, and per-task port limits (default ~16,384 send-rights) eventually
+    /// cause task_name_for_pid to fail or the task to be terminated.
+    fn mach_port_deallocate(task: MachPortT, name: MachPortT) -> KernReturnT;
 }
 
 pub fn audit_token_for_pid(pid: libc::pid_t) -> std::io::Result<AuditToken> {
@@ -50,6 +58,13 @@ pub fn audit_token_for_pid(pid: libc::pid_t) -> std::io::Result<AuditToken> {
                 &mut count,
             )
         };
+        // BL-02 fix: always deallocate the Mach send-right returned by
+        // task_name_for_pid, regardless of whether task_info succeeded or
+        // failed. Without this, every successful call leaks one Mach port
+        // reference. Per-task port limits (~16,384 send-rights by default)
+        // will eventually cause task_name_for_pid to fail or the task to be
+        // terminated in a long-running process.
+        unsafe { mach_port_deallocate(mach_task_self(), task_port) };
         if kr2 == KERN_SUCCESS {
             return Ok(token);
         }

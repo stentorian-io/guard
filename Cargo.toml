@@ -1,0 +1,51 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/sentinel-cli",
+  "crates/sentinel-daemon",
+  "crates/sentinel-hook",
+  "crates/sentinel-core",
+  "crates/sentinel-ipc",
+  "crates/sentinel-e2e",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/sentinel-app/sentinel"
+authors = ["Sentinel contributors"]
+
+[workspace.dependencies]
+# Core (production runtime)
+libc = "0.2.186"
+ciborium = "0.2.2"
+serde = { version = "1.0.228", features = ["derive"] }
+nix = { version = "0.31.2", default-features = false, features = ["process", "socket", "user"] }
+clap = { version = "4.6.1", features = ["derive"] }
+memmap2 = "0.9.10"
+thiserror = "2.0.18"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+plist = "1.9.0"
+ctor = "1.0.1"
+
+# Internal crates
+sentinel-core = { path = "crates/sentinel-core" }
+sentinel-ipc  = { path = "crates/sentinel-ipc" }
+
+# Dev / test
+criterion = "0.8.2"
+tempfile  = "3"
+assert_cmd = "2"
+predicates = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+panic = "abort"
+strip = "symbols"
+
+[profile.dev]
+# Default: panic = "unwind", debug = true

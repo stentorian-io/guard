@@ -8,6 +8,10 @@ repository.workspace = true
 authors.workspace = true
 description = "sentineld — user-level LaunchAgent that publishes snapshot, accepts RegisterRoot."
 
+[lib]
+name = "sentinel_daemon"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sentineld"
 path = "src/main.rs"
@@ -23,3 +27,8 @@ ciborium = { workspace = true }
 nix = { workspace = true }
 libc = { workspace = true }
 thiserror = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -196,7 +196,36 @@ fn run_three_way_merge(
             .interact()
             .map_err(|e| CliError::Other(format!("dialoguer: {e}")))?;
         match choice {
-            0 => return Ok(proposed_text),
+            0 => {
+                // CR-04: Replace destroys hand-curated rules, deny rules, and
+                // comments authored by the user. Refuse on non-TTY (already
+                // guarded above but defensive — a future caller might bypass
+                // the outer TTY check) and ALWAYS write a timestamped backup
+                // of the prior file before returning the replacement text.
+                if !std::io::stdin().is_terminal() {
+                    return Err(CliError::Other(
+                        "non-TTY: refusing Replace; baseline aborted".into(),
+                    ));
+                }
+                if target.exists() {
+                    let backup = backup_path(target);
+                    match std::fs::copy(target, &backup) {
+                        Ok(_) => {
+                            eprintln!(
+                                "Wrote backup of prior policy to {} before Replace.",
+                                backup.display()
+                            );
+                        }
+                        Err(e) => {
+                            return Err(CliError::Other(format!(
+                                "Replace aborted — could not write backup at {}: {e}",
+                                backup.display()
+                            )));
+                        }
+                    }
+                }
+                return Ok(proposed_text);
+            }
             1 => return Ok(merged_text),
             2 => return Err(CliError::Other("aborted by user".into())),
             3 => {
@@ -207,6 +236,23 @@ fn run_three_way_merge(
             _ => unreachable!(),
         }
     }
+}
+
+/// CR-04: derive a timestamped backup path from the target. The timestamp uses
+/// chrono's UTC formatter (already a transitive dep through sentinel-daemon)
+/// for a sortable suffix.
+fn backup_path(target: &Path) -> PathBuf {
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let mut name = target
+        .file_name()
+        .map(|s| s.to_os_string())
+        .unwrap_or_else(|| std::ffi::OsString::from(".sentinel.toml"));
+    name.push(".bak.");
+    name.push(stamp);
+    target
+        .parent()
+        .map(|p| p.join(&name))
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 fn print_unified_diff(a: &str, b: &str, a_label: &str, b_label: &str) {

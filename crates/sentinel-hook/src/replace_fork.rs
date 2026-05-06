@@ -14,11 +14,26 @@
 //! do anything that mutates parent stack frames. The vfork child path here
 //! resets IN_HOOK and returns 0 — the IPC is sent from the parent's path.
 
-use crate::ipc_client::{copy_cstr_to_buf, send_exec_event_sync, send_fork_event_sync};
+use crate::ipc_client::{copy_cstr_to_buf, send_exec_event_sync, send_fork_event_sync, IpcClientError};
 use crate::reentrancy::IN_HOOK;
 use sentinel_ipc::AuditTokenWire;
 
 const IPC_TIMEOUT_MS: u64 = 250;
+
+/// BLOCKER-02 fix: distinguish "daemon says I'm not tracked" (do not fail
+/// closed — the dylib is loaded into a process outside `sentinel run`, so
+/// fork hooks should pass through to the real syscall) from any other IPC
+/// error (fail-closed per D-33).
+///
+/// The daemon's BLOCKER-02 gate replies with the literal substring
+/// "untracked peer" when peer-auth places the calling process outside the
+/// tracked tree. Matching on the substring is a string-coupled wire
+/// contract; the daemon side must keep emitting this token for the dylib's
+/// behaviour to remain correct. Both sides reference BLOCKER-02 to keep the
+/// contract discoverable.
+fn is_untracked_peer(err: &IpcClientError) -> bool {
+    matches!(err, IpcClientError::DaemonRejected(m) if m.contains("untracked peer"))
+}
 
 // Verified from macOS 15.4 SDK /usr/include/sys/syscall.h:
 const SYS_FORK: libc::c_int = 2;
@@ -111,11 +126,19 @@ pub unsafe extern "C" fn sentinel_fork() -> libc::pid_t {
         IN_HOOK.with(|c| c.set(false));
         return 0;
     }
-    // PARENT path: send ForkEvent IPC. Fail-closed on error per D-33.
+    // PARENT path: send ForkEvent IPC. Fail-closed on error per D-33,
+    // EXCEPT when the daemon explicitly tells us this peer is not in the
+    // tracked tree (BLOCKER-02 — dylib loaded into a non-`sentinel run`
+    // process; fail-closed there would self-DoS every fork on the box).
     let pv = child_pidversion(pid);
     let parent = current_audit_token_wire();
     match send_fork_event_sync(parent, pid as i32, pv, IPC_TIMEOUT_MS) {
         Ok(()) => pid,
+        Err(e) if is_untracked_peer(&e) => {
+            // BLOCKER-02: not under sentinel run → behave as if Sentinel
+            // wasn't loaded for this fork. Return the child pid normally.
+            pid
+        }
         Err(_e) => {
             // D-33: kill child, set EAGAIN, return -1 — the wrapped caller
             // sees fork failure and the install errors out cleanly.
@@ -144,11 +167,13 @@ pub unsafe extern "C" fn sentinel_vfork() -> libc::pid_t {
         IN_HOOK.with(|c| c.set(false));
         return 0;
     }
-    // PARENT path: send ForkEvent.
+    // PARENT path: send ForkEvent. BLOCKER-02 untracked-peer behaviour
+    // mirrors `sentinel_fork`.
     let pv = child_pidversion(pid);
     let parent = current_audit_token_wire();
     match send_fork_event_sync(parent, pid as i32, pv, IPC_TIMEOUT_MS) {
         Ok(()) => pid,
+        Err(e) if is_untracked_peer(&e) => pid,
         Err(_e) => {
             unsafe {
                 libc::kill(pid, libc::SIGKILL);
@@ -189,12 +214,39 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
     let new_pid = unsafe { *pid_out };
     let pv = child_pidversion(new_pid);
     let parent = current_audit_token_wire();
-    // Fork half — fail-closed on IPC failure per D-33.
-    if send_fork_event_sync(parent, new_pid as i32, pv, IPC_TIMEOUT_MS).is_err() {
-        unsafe {
-            libc::kill(new_pid, libc::SIGKILL);
+    // Fork half — fail-closed on IPC failure per D-33, except for the
+    // BLOCKER-02 untracked-peer signal (do not kill the child of a
+    // process Sentinel doesn't actually own).
+    //
+    // BLOCKER-04 mitigation (BLOCKER-04 partial): the kill-on-failure path
+    // here remains a known TOCTOU window — the child may already be running
+    // arbitrary code by the time we kill it. We pin pidversion at
+    // pre-spawn time and re-check before kill, mitigating the pid-reuse
+    // race; the larger "fail-closed BEFORE the child runs" promise can
+    // only be kept for posix_spawn by adding a new pre-spawn IPC, which
+    // is deferred to a follow-up fix (see REVIEW-FIX.md).
+    let saved_pv = pv;
+    match send_fork_event_sync(parent, new_pid as i32, pv, IPC_TIMEOUT_MS) {
+        Ok(()) => {}
+        Err(e) if is_untracked_peer(&e) => {
+            // Pass-through — Sentinel is loaded but this caller is not
+            // under `sentinel run`. Skip the exec-half best-effort IPC too
+            // (the daemon would just reject it).
+            return 0;
         }
-        return libc::EAGAIN;
+        Err(_) => {
+            // BLOCKER-04 partial: re-check pidversion to mitigate the
+            // pid-reuse race. If the kernel has already recycled the pid
+            // between posix_spawn return and now, do not kill an unrelated
+            // process.
+            let now_pv = child_pidversion(new_pid);
+            if now_pv != 0 && now_pv == saved_pv {
+                unsafe {
+                    libc::kill(new_pid, libc::SIGKILL);
+                }
+            }
+            return libc::EAGAIN;
+        }
     }
     // Exec half — best-effort (the spawn already happened; the child is
     // running). Failure is logged but not fail-closed.
@@ -234,11 +286,22 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
     let new_pid = unsafe { *pid_out };
     let pv = child_pidversion(new_pid);
     let parent = current_audit_token_wire();
-    if send_fork_event_sync(parent, new_pid as i32, pv, IPC_TIMEOUT_MS).is_err() {
-        unsafe {
-            libc::kill(new_pid, libc::SIGKILL);
+    let saved_pv = pv;
+    match send_fork_event_sync(parent, new_pid as i32, pv, IPC_TIMEOUT_MS) {
+        Ok(()) => {}
+        Err(e) if is_untracked_peer(&e) => return 0,
+        Err(_) => {
+            // BLOCKER-04 partial: pidversion-pinned kill mitigates the
+            // pid-reuse race window between posix_spawnp return and our
+            // kill. See sentinel_posix_spawn for the full discussion.
+            let now_pv = child_pidversion(new_pid);
+            if now_pv != 0 && now_pv == saved_pv {
+                unsafe {
+                    libc::kill(new_pid, libc::SIGKILL);
+                }
+            }
+            return libc::EAGAIN;
         }
-        return libc::EAGAIN;
     }
     let mut path_buf = [0u8; 1024];
     let n = copy_cstr_to_buf(path, &mut path_buf);

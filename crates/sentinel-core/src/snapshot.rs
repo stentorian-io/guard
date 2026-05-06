@@ -19,20 +19,16 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// Phase 1 minimal allowlist (D-18): loopback + registry.npmjs.org + test marker.
+    /// Phase 1 minimal allowlist — RETAINED for backward-compat test fixtures only.
+    /// Phase 2 production code uses `phase2_default()` (added in Task 2). Entries
+    /// are empty here because the V1 enum (Exact|Suffix|Ip variants) was replaced
+    /// by the V2 struct in Task 1; this default still produces SCHEMA_V1 so the
+    /// version-mismatch test path can exercise it.
     pub fn phase1_default() -> Self {
         Self {
             schema_version: SCHEMA_V1,
             generated_at_unix_ms: 0,
-            entries: vec![
-                AllowlistEntry::Ip("127.0.0.1".to_string()),
-                AllowlistEntry::Ip("::1".to_string()),
-                AllowlistEntry::Exact("localhost".to_string()),
-                AllowlistEntry::Exact("registry.npmjs.org".to_string()),
-                // Internal test marker — used by sentinel-e2e to validate the matcher
-                // path without depending on real registry availability.
-                AllowlistEntry::Exact("sentinel-test-marker.invalid".to_string()),
-            ],
+            entries: Vec::new(),
         }
     }
 

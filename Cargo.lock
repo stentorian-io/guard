@@ -1416,6 +1416,7 @@ dependencies = [
  "libc",
  "portable-pty",
  "predicates",
+ "rusqlite",
  "sentinel-core",
  "sentinel-daemon",
  "sentinel-ipc",

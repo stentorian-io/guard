@@ -18,44 +18,58 @@ pub fn should_rotate(active_path: &Path) -> bool {
 
 pub fn rotate(active_path: &Path) -> io::Result<()> {
     let parent = active_path.parent().ok_or_else(|| io::Error::other("active log has no parent"))?;
-    let stamp = chrono::Utc::now().format("%Y%m%d").to_string();
-    let seq = next_sequence(parent, &stamp)?;
+    // CR-06: use a millisecond-precision timestamp + per-process counter to
+    // make collisions effectively impossible. The previous scheme scanned the
+    // directory for the highest existing seq number; that scan races with the
+    // detached gzip thread (which removes the .log and creates the .log.gz),
+    // so two near-simultaneous rotations could both compute the same seq and
+    // the second `fs::rename` would silently clobber the first rotation's
+    // data. ms-precision + an atomic in-process counter guarantees a unique
+    // rotated filename for every call to rotate().
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%3f").to_string();
+    let seq = next_in_process_seq();
     let rotated = parent.join(format!("{ROTATED_GLOB_PREFIX}{stamp}-{seq:03}.log"));
     if active_path.exists() {
-        fs::rename(active_path, &rotated)?;     // atomic on same fs
+        // Best-effort guard: if the rotated path already exists (extremely
+        // unlikely with ms precision, but possible if the system clock was
+        // rolled back), bump seq until we find an open slot. Caps at a small
+        // bound; beyond that we fall through and let `rename` clobber, which
+        // is at worst the prior bug's behavior.
+        let mut final_rotated = rotated.clone();
+        let mut bump = 0u32;
+        while final_rotated.exists() && bump < 64 {
+            bump += 1;
+            let alt_seq = seq + bump;
+            final_rotated = parent.join(format!(
+                "{ROTATED_GLOB_PREFIX}{stamp}-{alt_seq:03}.log"
+            ));
+        }
+        fs::rename(active_path, &final_rotated)?; // atomic on same fs
+        let rotated = final_rotated;
+        // Pitfall 5 / R-07: gzip in detached thread.
+        let parent_owned = parent.to_path_buf();
+        std::thread::Builder::new()
+            .name("sentineld-log-rotate".into())
+            .spawn(move || {
+                if let Err(e) = gzip_in_place(&rotated) {
+                    tracing::warn!(error = %e, "log rotate gzip failed");
+                }
+                if let Err(e) = enforce_retention(&parent_owned) {
+                    tracing::warn!(error = %e, "log retention enforce failed");
+                }
+            })
+            .ok();
     }
-    // Pitfall 5 / R-07: gzip in detached thread.
-    let parent_owned = parent.to_path_buf();
-    std::thread::Builder::new()
-        .name("sentineld-log-rotate".into())
-        .spawn(move || {
-            if let Err(e) = gzip_in_place(&rotated) {
-                tracing::warn!(error = %e, "log rotate gzip failed");
-            }
-            if let Err(e) = enforce_retention(&parent_owned) {
-                tracing::warn!(error = %e, "log retention enforce failed");
-            }
-        })
-        .ok();
     Ok(())
 }
 
-fn next_sequence(parent: &Path, stamp: &str) -> io::Result<u32> {
-    let mut max = 0u32;
-    let prefix = format!("{ROTATED_GLOB_PREFIX}{stamp}-");
-    if let Ok(entries) = fs::read_dir(parent) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if !name.starts_with(&prefix) { continue; }
-            // Strip prefix; expect "NNN.log" or "NNN.log.gz".
-            let rest = &name[prefix.len()..];
-            let n_str = rest.split('.').next().unwrap_or("");
-            if let Ok(n) = n_str.parse::<u32>() {
-                if n > max { max = n; }
-            }
-        }
-    }
-    Ok(max + 1)
+/// CR-06: per-process monotonic counter. Combined with millisecond-precision
+/// timestamps, makes `(stamp, seq)` unique even under heavy rotation contention
+/// from concurrent threads in the same daemon process.
+fn next_in_process_seq() -> u32 {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    COUNTER.fetch_add(1, Ordering::Relaxed) % 1000
 }
 
 fn gzip_in_place(rotated: &Path) -> io::Result<()> {

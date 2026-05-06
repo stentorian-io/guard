@@ -1,10 +1,14 @@
 //! Thread-local in-hook guard (D-11).
 //!
 //! Every replacement function starts with:
-//!   if IN_HOOK.with(|c| c.replace(true)) {
-//!     // already inside a hook on this thread — pass through
-//!     return real(...);
-//!   }
+//!
+//! ```text
+//! if IN_HOOK.with(|c| c.replace(true)) {
+//!   // already inside a hook on this thread — pass through
+//!   return real(...);
+//! }
+//! ```
+//!
 //! and clears the flag on every exit path.
 //!
 //! # BL-04 fix (canonical reference) — RAII guard pattern
@@ -20,11 +24,13 @@
 //! The previous pattern cleared `IN_HOOK` BEFORE dispatching the real
 //! syscall:
 //!
-//!     set_guard();
-//!     decide();
-//!     CLEAR_GUARD();          // <-- bug: cleared too early
-//!     if deny { return -1; }
-//!     real_call();            // <-- guard already cleared
+//! ```text
+//! set_guard();
+//! decide();
+//! CLEAR_GUARD();          // <-- bug: cleared too early
+//! if deny { return -1; }
+//! real_call();            // <-- guard already cleared
+//! ```
 //!
 //! That left the dispatch window completely unguarded. If any code path
 //! between the clear and the return re-entered a hook (Network.framework
@@ -39,11 +45,13 @@
 //! The guard is held for the entire function scope and drops AFTER the
 //! real dispatch. An RAII `InHookGuard` achieves this automatically:
 //!
-//!     let _g = InHookGuard::enter()?; // sets IN_HOOK=true; None on
-//!                                     //   reentry → caller passes through
-//!     decide();
-//!     real_call();
-//!     // _g drops here — IN_HOOK cleared AFTER the real call returns
+//! ```text
+//! let _g = InHookGuard::enter()?; // sets IN_HOOK=true; None on
+//!                                 //   reentry → caller passes through
+//! decide();
+//! real_call();
+//! // _g drops here — IN_HOOK cleared AFTER the real call returns
+//! ```
 //!
 //! `InHookGuard::enter()` returns:
 //!   - `None` when already in a hook on this thread (caller MUST pass

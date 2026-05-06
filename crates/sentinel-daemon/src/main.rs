@@ -145,6 +145,7 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         recent_gaps,
         baseline_staging,
         last_snapshot_publish_failed: std::sync::atomic::AtomicBool::new(false),
+        deferred_resolve: std::sync::Arc::new(sentinel_daemon::ipc_server::DeferredResolveTable::new()),
     });
 
     // TODO(03-08): wire gap_detector → log_writer + recent_gaps when the gap fires.

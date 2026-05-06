@@ -241,6 +241,13 @@ impl ProcessTree {
         g.get(run_uuid).cloned()
     }
 
+    /// Return the number of active long-lived prompt channels.
+    /// Used by ipc_server.rs's R-05 cap gate (plan 03-12).
+    pub fn prompt_channels_len(&self) -> usize {
+        let g = self.prompt_channels.read().unwrap_or_else(|p| p.into_inner());
+        g.len()
+    }
+
     pub fn is_tracked(&self, audit_token: &AuditToken) -> bool {
         self.nodes
             .read()

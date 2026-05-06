@@ -16,7 +16,7 @@ use core::ffi::{c_char, CStr};
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     AuditTokenWire, DylibLoaded, DylibLoadedAck, ExecAck, ExecEvent, ForkAck, ForkEvent,
-    IPC_SCHEMA_V2,
+    IPC_SCHEMA_V2, Resolve, ResolveReply, SOCKADDR_WIRE_LEN,
 };
 use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
@@ -242,6 +242,44 @@ pub fn send_dylib_loaded_sync(
     match ack {
         DylibLoadedAck::Ok { .. } => Ok(()),
         DylibLoadedAck::Err { message, .. } => Err(IpcClientError::DaemonRejected(message)),
+    }
+}
+
+/// Synchronous Resolve round-trip (gap-closure 02-08, D-42 replacement).
+///
+/// Sends a `Resolve { host, port }` request (tag 0x06) to the daemon and
+/// returns the decoded list of resolved sockaddr wire buffers on success.
+///
+/// Returns:
+///   - `Ok(Vec<[u8; SOCKADDR_WIRE_LEN]>)` on `ResolveReply::Addresses`
+///   - `Err(IpcClientError::DaemonRejected(msg))` on `ResolveReply::Deny` or `ResolveReply::Err`
+///   - `Err(IpcClientError::NotConfigured)` if the daemon socket is not configured
+///   - `Err(IpcClientError::Timeout)` if the round-trip exceeds `timeout_ms`
+///
+/// Called on the libc connect cache-miss path — guarded by the caller to run
+/// at most MAX_RESOLVE_ATTEMPTS = 4 times per connect invocation.
+pub fn send_resolve_sync(
+    host: &str,
+    port: u16,
+    timeout_ms: u64,
+) -> Result<Vec<[u8; SOCKADDR_WIRE_LEN]>, IpcClientError> {
+    let req = Resolve {
+        schema_version: IPC_SCHEMA_V2,
+        host: host.to_string(),
+        port,
+    };
+    let reply: ResolveReply = send_tagged_and_recv_ack(TAG_RESOLVE, &req, timeout_ms)?;
+    match reply {
+        ResolveReply::Addresses { schema_version, addrs } => {
+            if schema_version != IPC_SCHEMA_V2 {
+                return Err(IpcClientError::Codec(format!(
+                    "ResolveReply schema_version {schema_version} != IPC_SCHEMA_V2"
+                )));
+            }
+            Ok(addrs)
+        }
+        ResolveReply::Deny { reason, .. } => Err(IpcClientError::DaemonRejected(reason)),
+        ResolveReply::Err { message, .. } => Err(IpcClientError::DaemonRejected(message)),
     }
 }
 

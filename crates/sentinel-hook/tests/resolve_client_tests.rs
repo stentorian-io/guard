@@ -9,8 +9,19 @@
 //! Test 4: Addresses-OK — stub returns ResolveReply::Addresses with one v4 sockaddr.
 //! Test 5: Deny — stub returns ResolveReply::Deny → DaemonRejected error.
 //! Test 6: Timeout — stub accepts connection but never replies.
+//!
+//! NOTE: These tests share a global daemon socket override (TEST_SOCKET_OVERRIDE).
+//! They MUST be serialized to avoid races. Each test acquires SOCKET_TEST_LOCK
+//! before mutating the override.
 
+/// Serialization lock for tests that mutate the daemon socket override.
+/// Tests in this binary run in parallel by default; this lock ensures
+/// only one test at a time holds the socket override.
+static SOCKET_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+use sentinel_core::allowlist::{AllowlistEntry, MatchType, RuleKind, RuleTier};
 use sentinel_hook::ipc_client::{_clear_daemon_socket_for_test, _set_daemon_socket_for_test, send_resolve_sync, IpcClientError};
+use sentinel_hook::_test_decide_for_sockaddr;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{ResolveReply, SOCKADDR_WIRE_LEN};
 use std::io::{Read, Write};
@@ -84,6 +95,7 @@ fn spawn_stub_no_reply() -> (TempDir, PathBuf) {
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
 fn send_resolve_sync_not_configured_when_socket_unset() {
+    let _lock = SOCKET_TEST_LOCK.lock().unwrap();
     // Ensure no test override is set.
     _clear_daemon_socket_for_test();
     let result = send_resolve_sync("registry.npmjs.org", 443, 100);
@@ -99,6 +111,7 @@ fn send_resolve_sync_not_configured_when_socket_unset() {
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
 fn send_resolve_sync_returns_addresses_on_ok_reply() {
+    let _lock = SOCKET_TEST_LOCK.lock().unwrap();
     let expected_addr = v4_sockaddr_1_2_3_4_443();
     let reply = ResolveReply::addresses(vec![expected_addr]);
     let (_dir, sock_path) = spawn_stub_resolver(reply);
@@ -126,6 +139,7 @@ fn send_resolve_sync_returns_addresses_on_ok_reply() {
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
 fn send_resolve_sync_returns_daemon_rejected_on_deny_reply() {
+    let _lock = SOCKET_TEST_LOCK.lock().unwrap();
     let reply = ResolveReply::deny("blocked");
     let (_dir, sock_path) = spawn_stub_resolver(reply);
     _set_daemon_socket_for_test(sock_path);
@@ -145,6 +159,7 @@ fn send_resolve_sync_returns_daemon_rejected_on_deny_reply() {
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
 fn send_resolve_sync_returns_timeout_when_stub_hangs() {
+    let _lock = SOCKET_TEST_LOCK.lock().unwrap();
     let (_dir, sock_path) = spawn_stub_no_reply();
     _set_daemon_socket_for_test(sock_path);
 
@@ -155,5 +170,70 @@ fn send_resolve_sync_returns_timeout_when_stub_hangs() {
         matches!(result, Err(IpcClientError::Timeout)),
         "expected Timeout when stub never replies; got: {:?}",
         result
+    );
+}
+
+// ---- Test 7: Wired end-to-end — decide_for_sockaddr uses Resolve-IPC on cache miss ----
+//
+// This test verifies the full chain:
+//   decide_for_sockaddr(1.2.3.4:443) [cache miss]
+//     → send_resolve_sync("example.com", 443, ...) via stub
+//     → stub replies Addresses([1.2.3.4:443])
+//     → cache populated with (sockaddr, "example.com")
+//     → evaluate_policy(host="example.com", ..., resolved_via_getaddrinfo=true)
+//     → Tier 1 CuratedAllow fires → Verdict::Allow
+//
+// Note: ALLOWLIST is a OnceLock set at most once per process. In a test binary,
+// the first test that calls _test_decide_for_sockaddr will set it. Subsequent
+// tests in the same process see the same ALLOWLIST. Run this test in isolation
+// or ensure all tests use compatible entries. Since this is the only test that
+// calls _test_decide_for_sockaddr, it has exclusive control over the OnceLock.
+
+#[cfg_attr(not(target_os = "macos"), ignore)]
+#[test]
+fn decide_for_sockaddr_allows_curated_host_via_resolve_ipc() {
+    let _lock = SOCKET_TEST_LOCK.lock().unwrap();
+    let expected_addr = v4_sockaddr_1_2_3_4_443();
+    let reply = ResolveReply::addresses(vec![expected_addr]);
+    let (_dir, sock_path) = spawn_stub_resolver(reply);
+    _set_daemon_socket_for_test(sock_path);
+
+    // AllowlistEntry for example.com at CuratedAllow tier, Exact match.
+    let entries = vec![AllowlistEntry {
+        kind: RuleKind::Allow,
+        tier: RuleTier::CuratedAllow,
+        match_type: MatchType::Exact,
+        pattern: "example.com".to_string(),
+        reason: "test entry for resolve-ipc gap-closure".to_string(),
+    }];
+
+    // Build a raw AF_INET sockaddr_in for 1.2.3.4:443.
+    // Darwin sockaddr_in layout:
+    //   u8  sin_len   = 16
+    //   u8  sin_family = AF_INET = 2
+    //   u16 sin_port  = 443 (big-endian)
+    //   u32 sin_addr  = 1.2.3.4
+    //   [u8; 8] sin_zero = zeroes
+    let mut sa = libc::sockaddr_in {
+        sin_len: 16,
+        sin_family: libc::AF_INET as u8,
+        sin_port: 443u16.to_be(),
+        sin_addr: libc::in_addr { s_addr: u32::from_be_bytes([1, 2, 3, 4]).to_be() },
+        sin_zero: [0i8; 8],
+    };
+    let addrlen = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+
+    let verdict = _test_decide_for_sockaddr(
+        entries,
+        &mut sa as *mut libc::sockaddr_in as *const libc::sockaddr,
+        addrlen,
+    );
+    _clear_daemon_socket_for_test();
+
+    assert_eq!(
+        verdict,
+        sentinel_core::Verdict::Allow,
+        "decide_for_sockaddr must return Allow for a curated-allowlisted host \
+         resolved via Resolve-IPC cache-miss path"
     );
 }

@@ -8,6 +8,8 @@ pub mod ipc_client;
 pub mod locate;
 pub mod logs;
 pub mod logs_follow;
+pub mod prompt_channel;
+pub mod prompt_render;
 pub mod shell_setup;
 pub mod spawn;
 pub mod status;

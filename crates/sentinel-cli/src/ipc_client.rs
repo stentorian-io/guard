@@ -27,6 +27,7 @@ use std::time::Duration;
 const TAG_PREPARE_SNAPSHOT: u8 = 0x02;
 const TAG_TRUST_POLICY: u8 = 0x07;
 const TAG_STATUS: u8 = 0x09;
+pub(crate) const TAG_PROMPT_CHANNEL_INIT: u8 = 0x0A;
 const TAG_INSERT_USER_RULE: u8 = 0x0B;
 const TAG_READ_INSTALL_ARTIFACTS: u8 = 0x0C;
 const TAG_BASELINE_COMMIT: u8 = 0x0D;
@@ -39,7 +40,7 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// a blocking `UnixStream` on success. ISS-08: the prior implementation used
 /// `UnixStream::connect` which has no documented timeout and could block
 /// indefinitely on certain Darwin states.
-fn connect_with_timeout(sock: &Path) -> Result<UnixStream, CliError> {
+pub(crate) fn connect_with_timeout(sock: &Path) -> Result<UnixStream, CliError> {
     let addr = SockAddr::unix(sock).map_err(|e| {
         CliError::DaemonUnreachable(format!("sockaddr({}): {e}", sock.display()))
     })?;

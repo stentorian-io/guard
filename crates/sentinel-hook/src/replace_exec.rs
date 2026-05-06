@@ -48,8 +48,18 @@ impl Drop for InHookGuard {
     }
 }
 
+/// BLOCKER-07 fix: see `replace_fork.rs::current_audit_token_wire` for the
+/// rationale. The wire-claimed token now carries `getpid()` in `val[5]` and
+/// `getppid()` in `val[6]` as advisory hints; the daemon's authoritative
+/// parent identity remains the kernel-sourced peer token (ENF-08).
 fn current_audit_token_wire() -> AuditTokenWire {
-    AuditTokenWire { val: [0; 8] }
+    // SAFETY: getpid()/getppid() are async-signal-safe and always succeed.
+    let pid = unsafe { libc::getpid() } as u32;
+    let ppid = unsafe { libc::getppid() } as u32;
+    let mut val = [0u32; 8];
+    val[5] = pid;
+    val[6] = ppid;
+    AuditTokenWire { val }
 }
 
 /// Send an ExecEvent IPC for `path`. Best-effort: errors are silently dropped

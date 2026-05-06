@@ -103,10 +103,27 @@ fn child_pidversion(child_pid: libc::pid_t) -> u32 {
 /// Best-effort current process audit token for use as `parent_audit_token`.
 /// The daemon trusts kernel peer-auth (LOCAL_PEERTOKEN) over wire-claimed
 /// values (ENF-08 invariant from Phase 1 plan 04, carried forward by plan
-/// 02-04 handlers). We send a zero token here and the daemon overrides on
-/// receive — log fidelity is preserved by the daemon's logged peer pid.
+/// 02-04 handlers).
+///
+/// BLOCKER-07 fix (Phase 2 review): we now populate `val[5] = getpid()` and
+/// `val[6] = getppid()` so the wire field carries USEFUL information for
+/// the daemon to consult as a fallback hint when the peer-auth pid alone
+/// does not place the peer in the tracked tree (e.g. a process re-execing
+/// without the dylib intercept, then re-loading the dylib via env
+/// inheritance — the daemon needs the parent pid to walk the tree).
+///
+/// The daemon's authoritative parent identity remains the kernel-sourced
+/// peer token; the wire-claimed values are advisory. If wire and kernel
+/// disagree on `val[5]` (the calling process's own pid), the daemon logs
+/// at warn level and trusts the kernel — see `ipc_server.rs` ENF-08.
 fn current_audit_token_wire() -> AuditTokenWire {
-    AuditTokenWire { val: [0; 8] }
+    // SAFETY: getpid()/getppid() are async-signal-safe and always succeed.
+    let pid = unsafe { libc::getpid() } as u32;
+    let ppid = unsafe { libc::getppid() } as u32;
+    let mut val = [0u32; 8];
+    val[5] = pid;
+    val[6] = ppid;
+    AuditTokenWire { val }
 }
 
 #[unsafe(no_mangle)]
@@ -269,8 +286,11 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
     // running). Failure is logged but not fail-closed.
     let mut path_buf = [0u8; 1024];
     let n = copy_cstr_to_buf(path, &mut path_buf);
+    // BLOCKER-07: forward the (pid, ppid) advisory hint via the wire
+    // audit-token field so the daemon can reconstruct tree linkage if
+    // peer-auth alone doesn't place us. See `current_audit_token_wire`.
     let _ = send_exec_event_sync(
-        AuditTokenWire { val: [0; 8] },
+        current_audit_token_wire(),
         &path_buf[..n],
         n,
         IPC_TIMEOUT_MS,
@@ -324,8 +344,11 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
     }
     let mut path_buf = [0u8; 1024];
     let n = copy_cstr_to_buf(path, &mut path_buf);
+    // BLOCKER-07: forward the (pid, ppid) advisory hint via the wire
+    // audit-token field so the daemon can reconstruct tree linkage if
+    // peer-auth alone doesn't place us. See `current_audit_token_wire`.
     let _ = send_exec_event_sync(
-        AuditTokenWire { val: [0; 8] },
+        current_audit_token_wire(),
         &path_buf[..n],
         n,
         IPC_TIMEOUT_MS,

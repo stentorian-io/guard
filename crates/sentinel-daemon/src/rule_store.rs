@@ -115,6 +115,40 @@ impl RuleStore {
         Ok(())
     }
 
+    /// Insert a user-approved rule (called by `sentinel approve` IPC handler in plan 03-11).
+    /// Validates kind/match_type at the boundary; reason must be non-empty (D-39).
+    /// Returns the new row id.
+    pub fn insert_user_rule(&self, kind: &str, match_type: &str, pattern: &str, reason: &str) -> SqlResult<i64> {
+        debug_assert!(matches!(kind, "allow" | "deny"));
+        debug_assert!(matches!(match_type, "exact" | "suffix" | "ip"));
+        debug_assert!(!reason.trim().is_empty(), "D-39: reason must be non-empty");
+        let conn = self.conn.lock().expect("rule store mutex");
+        let now = unix_ms_now();
+        conn.execute(
+            "INSERT INTO rules (kind, match_type, pattern, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![kind, match_type, pattern, reason, now],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// Count all rows in the rules table (user-approved rules added via `sentinel approve`).
+    /// Used by StatusReply handler in plan 03-08.
+    pub fn count_user_rules(&self) -> SqlResult<u64> {
+        // WARNING-08: fresh per-call read connection.
+        let conn = self.open_reader()?;
+        conn.query_row("SELECT COUNT(*) FROM rules", [], |r| r.get::<_, i64>(0))
+            .map(|n| n as u64)
+    }
+
+    /// Count all rows in the trusted_policy_files table.
+    /// Used by StatusReply handler in plan 03-08.
+    pub fn count_trusted(&self) -> SqlResult<u64> {
+        // WARNING-08: fresh per-call read connection.
+        let conn = self.open_reader()?;
+        conn.query_row("SELECT COUNT(*) FROM trusted_policy_files", [], |r| r.get::<_, i64>(0))
+            .map(|n| n as u64)
+    }
+
     /// Read all user rules; map each row to an AllowlistEntry with tier
     /// UserDeny / UserAllow. Used by plan 02-06's PrepareSnapshot handler.
     pub fn all_user_rules(&self) -> SqlResult<Vec<AllowlistEntry>> {

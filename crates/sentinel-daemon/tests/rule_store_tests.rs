@@ -127,3 +127,16 @@ fn all_user_rules_maps_kind_to_user_tier() {
     assert!(matches!(deny.match_type, MatchType::Suffix));
     assert_eq!(deny.pattern, ".prod.acme.com");
 }
+
+#[test]
+fn insert_user_rule_returns_rowid_and_appears_in_count() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("sentinel.db");
+    let store = RuleStore::open(&db).expect("open");
+    assert_eq!(store.count_user_rules().unwrap(), 0);
+    let id1 = store.insert_user_rule("allow", "exact", "h.example.com", "approved").expect("insert");
+    let id2 = store.insert_user_rule("allow", "suffix", ".example.com", "approved").expect("insert");
+    assert!(id1 > 0 && id2 > id1);
+    assert_eq!(store.count_user_rules().unwrap(), 2);
+    assert_eq!(store.count_trusted().unwrap(), 0);
+}

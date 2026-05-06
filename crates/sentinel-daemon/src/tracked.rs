@@ -9,7 +9,9 @@
 //! Migration: ipc_server.rs (Task 4) is updated to call `insert_root`
 //! instead of `insert`. The Phase 1 `TrackedRoots` type is removed.
 
+use crossbeam_channel::Sender;
 use sentinel_core::AuditToken;
+use sentinel_ipc::PromptRequest;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -28,6 +30,9 @@ pub struct ProcessNode {
     pub run_uuid: String,
     pub binary_path: String,
     pub coverage_gap: Option<CoverageGap>,
+    /// Phase 3 plan 03-04 (D-55): PM env subset captured from ExecEvent V3.
+    /// None until an ExecEvent V3 with non-empty pm_env arrives for this node.
+    pub pm_env_snapshot: Option<Vec<(String, String)>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,12 +56,25 @@ pub struct RunRecord {
     pub tracked_root: AuditToken,
     pub snapshot_path: PathBuf,
     pub manifest_path: PathBuf,
+    /// Phase 3 plan 03-04: true if the CLI that initiated this run is connected
+    /// to a TTY (affects interactive prompt display).
+    pub is_tty: bool,
+    /// Phase 3 plan 03-04: true if this run was started with --baseline-mode
+    /// (learn-mode: observe and record, but don't block).
+    pub baseline_mode: bool,
+    /// Phase 3 plan 03-04: path to the .sentinel.toml governing this run, if any.
+    pub project_toml_path: Option<String>,
 }
 
 #[derive(Default)]
 pub struct ProcessTree {
     nodes: RwLock<HashMap<AuditToken, ProcessNode>>,
     runs: RwLock<HashMap<String, RunRecord>>,
+    /// Phase 3 plan 03-04: long-lived prompt-channel senders keyed by run_uuid.
+    /// Sender<PromptRequest> does not implement Clone cleanly into RunRecord
+    /// (it would require RunRecord to become non-Clone), so it lives in a
+    /// parallel registry — per RESEARCH.md guidance.
+    prompt_channels: RwLock<HashMap<String, Sender<PromptRequest>>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -87,6 +105,7 @@ impl ProcessTree {
             run_uuid,
             binary_path,
             coverage_gap: None,
+            pm_env_snapshot: None,
         };
         g.insert(audit_token, node);
         true
@@ -114,6 +133,7 @@ impl ProcessTree {
             run_uuid: parent.run_uuid.clone(),
             binary_path: String::new(), // filled in on subsequent ExecEvent
             coverage_gap: None,
+            pm_env_snapshot: None,
         };
         g.insert(child_audit_token, child);
         Ok(())
@@ -149,6 +169,76 @@ impl ProcessTree {
         self.nodes
             .read()
             .unwrap_or_else(|p| p.into_inner()).get(audit_token).cloned()
+    }
+
+    // --- Phase 3 plan 03-04: pm_env snapshot ---
+
+    /// Store the filtered PM env snapshot on a ProcessNode identified by audit_token.
+    /// No-op if the audit_token is not in the tree (untracked peer race — safe to ignore).
+    pub fn set_pm_env_snapshot(&self, audit_token: &AuditToken, pm_env: Vec<(String, String)>) {
+        let mut g = self.nodes.write().unwrap_or_else(|p| p.into_inner());
+        if let Some(node) = g.get_mut(audit_token) {
+            node.pm_env_snapshot = Some(pm_env);
+        }
+    }
+
+    // --- Phase 3 plan 03-04: run field setters ---
+
+    /// Update is_tty on a RunRecord identified by run_uuid.
+    /// No-op if the run_uuid is not in the map.
+    pub fn set_run_is_tty(&self, run_uuid: &str, is_tty: bool) {
+        let mut g = self.runs.write().unwrap_or_else(|p| p.into_inner());
+        if let Some(rec) = g.get_mut(run_uuid) {
+            rec.is_tty = is_tty;
+        }
+    }
+
+    /// Update baseline_mode on a RunRecord identified by run_uuid.
+    /// No-op if the run_uuid is not in the map.
+    pub fn set_run_baseline_mode(&self, run_uuid: &str, baseline_mode: bool) {
+        let mut g = self.runs.write().unwrap_or_else(|p| p.into_inner());
+        if let Some(rec) = g.get_mut(run_uuid) {
+            rec.baseline_mode = baseline_mode;
+        }
+    }
+
+    /// Update project_toml_path on a RunRecord identified by run_uuid.
+    /// No-op if the run_uuid is not in the map.
+    pub fn set_run_project_toml_path(&self, run_uuid: &str, path: Option<String>) {
+        let mut g = self.runs.write().unwrap_or_else(|p| p.into_inner());
+        if let Some(rec) = g.get_mut(run_uuid) {
+            rec.project_toml_path = path;
+        }
+    }
+
+    /// Return all active RunRecords (used by StatusReply handler in plan 03-08).
+    pub fn list_runs(&self) -> Vec<RunRecord> {
+        let g = self.runs.read().unwrap_or_else(|p| p.into_inner());
+        g.values().cloned().collect()
+    }
+
+    // --- Phase 3 plan 03-04: prompt-channel registry ---
+
+    /// Register a long-lived prompt-channel Sender for the given run_uuid.
+    /// Called by the PromptChannelInit handler (plan 03-12).
+    pub fn set_prompt_channel(&self, run_uuid: &str, sender: Sender<PromptRequest>) {
+        let mut g = self.prompt_channels.write().unwrap_or_else(|p| p.into_inner());
+        g.insert(run_uuid.to_string(), sender);
+    }
+
+    /// Remove and return the prompt-channel Sender for the given run_uuid.
+    /// Called when the prompt channel connection closes or the run ends.
+    pub fn take_prompt_channel(&self, run_uuid: &str) -> Option<Sender<PromptRequest>> {
+        let mut g = self.prompt_channels.write().unwrap_or_else(|p| p.into_inner());
+        g.remove(run_uuid)
+    }
+
+    /// Clone and return the prompt-channel Sender for the given run_uuid.
+    /// Returns None if no channel is registered for this run.
+    /// Sender is cheap to clone (Arc internals).
+    pub fn get_prompt_channel(&self, run_uuid: &str) -> Option<Sender<PromptRequest>> {
+        let g = self.prompt_channels.read().unwrap_or_else(|p| p.into_inner());
+        g.get(run_uuid).cloned()
     }
 
     pub fn is_tracked(&self, audit_token: &AuditToken) -> bool {

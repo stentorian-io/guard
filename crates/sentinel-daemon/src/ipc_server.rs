@@ -496,6 +496,24 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
         return;
     }
     // The exec'ing process is the peer (peer_token); record_exec updates its binary_path.
+    //
+    // WARNING-10 (Phase 2 review): `from_utf8_lossy` silently replaces
+    // invalid UTF-8 bytes with U+FFFD. Filesystem paths can technically
+    // contain arbitrary bytes; a path with invalid UTF-8 will be mangled
+    // in storage and incorrect in subsequent forensic logs. Storing the
+    // raw `Vec<u8>` end-to-end is a wider refactor (touches `ProcessNode`,
+    // `record_exec`, `CoverageGap`, gap_detector tests) and is documented
+    // as deferred work in REVIEW-FIX.md. Until then, log at warn-level
+    // when invalid UTF-8 is detected so the forensic loss is visible
+    // rather than silent.
+    if std::str::from_utf8(&ev.target_path).is_err() {
+        warn!(
+            peer_pid = peer_token.val[5],
+            len = ev.target_path.len(),
+            "WARNING-10: ExecEvent target_path contains non-UTF-8 bytes; \
+             storing lossy form (forensic fidelity loss)"
+        );
+    }
     let target_path = String::from_utf8_lossy(&ev.target_path).into_owned();
     let _ = state
         .process_tree

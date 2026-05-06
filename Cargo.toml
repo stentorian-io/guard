@@ -20,6 +20,7 @@ authors = ["Sentinel contributors"]
 # Core (production runtime)
 libc = "0.2.186"
 ciborium = "0.2.2"
+crossbeam-channel = "0.5"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_bytes = "0.11"
 serde_yml = "0.0.12"

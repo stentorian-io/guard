@@ -20,6 +20,7 @@ path = "src/main.rs"
 sentinel-core = { workspace = true }
 sentinel-ipc = { workspace = true }
 clap = { workspace = true }
+crossbeam-channel = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 plist = { workspace = true }

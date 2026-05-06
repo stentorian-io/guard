@@ -81,23 +81,45 @@ impl Reply {
 // ============================================================================
 
 pub const IPC_SCHEMA_V2: u16 = 2;
+pub const IPC_SCHEMA_V3: u16 = 3;
 
 // --- PrepareSnapshot / SnapshotReply (D-29, D-30) --------------------------
 
 /// CLI → daemon: sent BEFORE posix_spawn. Daemon walks up cwd to .sentinel.toml,
 /// merges curated YAML + SQLite + project rules, writes per-run snapshot,
 /// returns the manifest path the CLI will set as SENTINEL_SNAPSHOT_MANIFEST.
+///
+/// V3 additions: `is_tty` (D-73) and `baseline_mode` (D-58). Both are
+/// `#[serde(default)]` so V2-encoded messages decode cleanly with false.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PrepareSnapshot {
-    pub schema_version: u16,
+    pub schema_version: u16,  // V2 or V3 — daemon accepts both (D-73, D-58)
     pub cwd: String,
+    #[serde(default)]
+    pub is_tty: bool,         // NEW V3 (D-73). Default false on V2 decode.
+    #[serde(default)]
+    pub baseline_mode: bool,  // NEW V3 (D-58). Default false on V2 decode.
 }
 
 impl PrepareSnapshot {
+    /// V2-compatible constructor — emits V2 schema_version; new fields default false.
+    /// Existing callers do NOT break.
     pub fn new(cwd: impl Into<String>) -> Self {
         Self {
             schema_version: IPC_SCHEMA_V2,
             cwd: cwd.into(),
+            is_tty: false,
+            baseline_mode: false,
+        }
+    }
+
+    /// V3 constructor — opt-in to the new TTY and baseline-mode fields.
+    pub fn new_v3(cwd: impl Into<String>, is_tty: bool, baseline_mode: bool) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V3,
+            cwd: cwd.into(),
+            is_tty,
+            baseline_mode,
         }
     }
 }
@@ -184,12 +206,18 @@ impl ForkAck {
 /// SECURITY (T-02-01-06): the wire allows arbitrary length but the daemon
 /// handler MUST reject `target_path.len() > 1024`. The dylib MUST cap copy
 /// at 1024 bytes before sending.
+///
+/// V3 addition: `pm_env` (D-55) carries package-manager environment variables
+/// captured at exec time (e.g. npm_package_name, npm_lifecycle_event).
+/// `#[serde(default)]` ensures V2-encoded messages decode with empty pm_env.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExecEvent {
     pub schema_version: u16,
     pub audit_token: AuditTokenWire,
     #[serde(with = "serde_bytes")]
     pub target_path: Vec<u8>,
+    #[serde(default)]
+    pub pm_env: Vec<(String, String)>, // NEW V3 (D-55). Cap MAX_PM_ENV_BYTES total wire bytes.
 }
 
 impl ExecEvent {
@@ -197,11 +225,30 @@ impl ExecEvent {
     /// receivers MUST reject longer payloads.
     pub const MAX_TARGET_PATH: usize = 1024;
 
+    /// Maximum total wire bytes for pm_env key+value pairs (T-03-02-04).
+    pub const MAX_PM_ENV_BYTES: usize = 4096;
+
+    /// V2-compatible constructor — emits V2 schema_version; pm_env defaults to empty.
     pub fn new(token: AuditTokenWire, target_path: Vec<u8>) -> Self {
         Self {
             schema_version: IPC_SCHEMA_V2,
             audit_token: token,
             target_path,
+            pm_env: Vec::new(),
+        }
+    }
+
+    /// V3 constructor — includes pm_env key-value pairs.
+    pub fn new_v3(
+        audit_token: AuditTokenWire,
+        target_path: Vec<u8>,
+        pm_env: Vec<(String, String)>,
+    ) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V3,
+            audit_token,
+            target_path,
+            pm_env,
         }
     }
 }

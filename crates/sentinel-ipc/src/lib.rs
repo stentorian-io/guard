@@ -36,4 +36,6 @@ pub use messages::{
     SnapshotReply,
     TrustPolicy,
     TrustPolicyReply,
+    // Phase 3
+    IPC_SCHEMA_V3,
 };

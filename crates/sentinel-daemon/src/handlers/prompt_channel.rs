@@ -117,13 +117,31 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
             sentinel_core::Verdict::Allow
         }
         PromptVerdict::AllowAlwaysProject => {
-            // Append to .sentinel.toml AND fire daemon-internal trust update inline.
-            // POL-02 fully delivered: the new rule takes effect for the parked Resolve
-            // because the rule_store / trust path is updated BEFORE we signal the oneshot.
+            // CR-08: side-effects can fail (disk full on persist, trust update
+            // on a poisoned rule store, no project_toml_path per CR-05). The
+            // user's connection should still go through — downgrade to a one-
+            // shot Allow with a distinct decision-row source_kind so the audit
+            // log makes the partial-failure path obvious post-hoc.
+            // CR-05: append_rule_and_update_trust now hard-fails when
+            // project_toml_path is None instead of writing to an arbitrary
+            // location, which trips this same downgrade path.
+            let mut source_kind = "prompt_allow_project";
             if let Some(rp) = resp.rule_pattern.as_ref() {
-                let _ = append_rule_and_update_trust(state, run_uuid, &rp.match_type, &rp.pattern);
+                if let Err(e) = append_rule_and_update_trust(
+                    state,
+                    run_uuid,
+                    &rp.match_type,
+                    &rp.pattern,
+                ) {
+                    tracing::warn!(
+                        error = %e,
+                        run_uuid = %run_uuid,
+                        "AllowAlwaysProject side-effects failed; downgrading to AllowOnce"
+                    );
+                    source_kind = "prompt_allow_once_after_persist_failure";
+                }
             }
-            emit_decision_row(state, run_uuid, &now, "Allow", "prompt_allow_project");
+            emit_decision_row(state, run_uuid, &now, "Allow", source_kind);
             sentinel_core::Verdict::Allow
         }
         PromptVerdict::Deny => {
@@ -220,18 +238,19 @@ fn append_rule_and_update_trust(
         Some(r) => r,
         None => return Err(std::io::Error::other("no run record")),
     };
+    // CR-05: refuse to auto-create policy files in arbitrary locations. When
+    // `project_toml_path` is None, the prior code derived a target from the
+    // snapshot path (state_dir/.sentinel.toml). Combined with auto-trust on
+    // creation, that let an AllowAlwaysProject verdict deposit policy outside
+    // any user project tree. Now we hard-fail; the caller (dispatch_response)
+    // logs the failure and downgrades the verdict to AllowOnce, which has no
+    // persistent side effects.
     let target_path = match run.project_toml_path.as_deref() {
         Some(p) => PathBuf::from(p),
         None => {
-            // No existing .sentinel.toml — create in the snapshot path's parent directory
-            // as a best-effort location (cwd not stored on RunRecord in this version).
-            let base = run
-                .snapshot_path
-                .parent()
-                .and_then(|p| p.parent()) // runs/ -> state_dir
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from("."));
-            base.join(".sentinel.toml")
+            return Err(std::io::Error::other(
+                "AllowAlwaysProject refused: no .sentinel.toml found for this run",
+            ));
         }
     };
     let existing =

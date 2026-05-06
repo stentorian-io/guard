@@ -60,6 +60,20 @@ pub fn handle_prepare_snapshot(
 ) -> SnapshotReply {
     let run_uuid = Uuid::new_v4().to_string();
 
+    // CR-05: validate the wire-claimed cwd before walking the filesystem from
+    // it. A same-uid local attacker could send `cwd = "/Users/victim/.ssh"`
+    // and have the daemon walk up looking for `.sentinel.toml`. Although the
+    // v1 trust boundary is same-uid only, refusing obviously-suspicious paths
+    // is cheap defense-in-depth.
+    let cwd = match validate_cwd(cwd) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!(error = %e, cwd = %cwd.display(), "PrepareSnapshot: rejecting suspicious cwd");
+            return SnapshotReply::err(format!("invalid cwd: {e}"));
+        }
+    };
+    let cwd = cwd.as_path();
+
     // 1. Walk-up + trust check + parse.
     let (project_entries, project_path, project_sha256) =
         match resolve_project_entries(cwd, rule_store) {
@@ -192,6 +206,44 @@ fn resolve_project_entries(
     }
     debug!(path = %path_str, count = out.len(), "loaded project rules");
     Ok((out, Some(path_str), Some(sha)))
+}
+
+/// CR-05: canonicalize the wire-claimed cwd and reject obviously-suspicious
+/// system paths. The path must (a) exist, (b) be a directory, (c) canonicalize
+/// successfully, and (d) not be inside a list of system directories the daemon
+/// should never walk for `.sentinel.toml`.
+fn validate_cwd(cwd: &Path) -> Result<std::path::PathBuf, String> {
+    let canonical = cwd
+        .canonicalize()
+        .map_err(|e| format!("canonicalize {}: {e}", cwd.display()))?;
+    if !canonical.is_dir() {
+        return Err(format!("not a directory: {}", canonical.display()));
+    }
+    // System path denylist — defense-in-depth, not the trust boundary itself.
+    // The daemon should never be walking these for project policy.
+    const FORBIDDEN_PREFIXES: &[&str] = &[
+        "/etc",
+        "/private/etc",
+        "/System",
+        "/usr/bin",
+        "/usr/sbin",
+        "/sbin",
+        "/bin",
+        "/var/db",
+        "/var/root",
+    ];
+    let canonical_str = canonical.to_string_lossy();
+    for prefix in FORBIDDEN_PREFIXES {
+        if canonical_str == *prefix
+            || canonical_str.starts_with(&format!("{prefix}/"))
+        {
+            return Err(format!(
+                "cwd in forbidden system path: {}",
+                canonical.display()
+            ));
+        }
+    }
+    Ok(canonical)
 }
 
 fn unix_ms_now() -> i64 {

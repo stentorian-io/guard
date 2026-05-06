@@ -472,3 +472,392 @@ impl EnvNotPropagatedGapAck {
         }
     }
 }
+
+// ============================================================
+// Phase 3 — Status IPC (tag 0x09)
+// ============================================================
+
+/// CLI → daemon: request daemon state and counters.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Status {
+    pub schema_version: u16, // V3
+}
+
+impl Status {
+    pub fn new() -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V3,
+        }
+    }
+}
+
+impl Default for Status {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Discriminant for daemon health state — used in StatusReply.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DaemonStateKind {
+    NotInstalled,
+    DaemonNotRunning,
+    Degraded,
+    StaleFeeds,   // reserved Phase 4 — Phase 3 never emits
+    Operational,
+}
+
+/// Summary of a tracked (wrapped) root invocation.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrackedRootInfo {
+    pub run_uuid: String,
+    pub audit_token: AuditTokenWire,
+    pub argv: Vec<String>, // root argv truncated to 256B per element
+    pub started_at_ms: u64,
+}
+
+/// Coverage gap event detected during a run.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GapInfo {
+    pub run_uuid: String,
+    pub gap_kind: String,                // "hardened-runtime" | "env-not-propagated"
+    pub binary_path: Option<String>,
+    pub detected_at_ms: u64,
+}
+
+/// Aggregate counters reported by daemon status.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StatusCounters {
+    pub rules_user: u64,
+    pub rules_trusted_toml: u64,
+    pub blocks_today: u64,
+    pub allows_today: u64,
+    pub gaps_today: u64,
+}
+
+/// Threat-feed freshness info (Phase 4 populated; Phase 3 emits empty vec).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FeedInfo {
+    pub name: String,
+    pub last_pulled_at_ms: Option<u64>,
+    pub fresh: bool,
+}
+
+/// Single install artifact recorded by `sentinel install`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstallArtifact {
+    pub artifact_kind: String, // "launchagent"|"marker_block"|"init_script"|"state_dir"|"log_dir"|"binary"
+    pub target_path: String,
+    pub installed_at_ms: u64,
+    pub content_hash: Option<String>,
+    pub sentinel_version: String,
+}
+
+/// Aggregated install metadata returned by ReadInstallArtifacts or StatusReply.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstallInfo {
+    pub version: String,          // sentinel-cli compile-time version
+    pub installed_at_ms: u64,
+    pub artifacts: Vec<InstallArtifact>,
+}
+
+/// Daemon → CLI: response to Status request.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StatusReply {
+    Ok {
+        schema_version: u16,
+        daemon_state: DaemonStateKind,
+        tracked_roots: Vec<TrackedRootInfo>,
+        recent_gaps: Vec<GapInfo>,
+        counters: StatusCounters,
+        feeds: Vec<FeedInfo>,                // empty in Phase 3 (Phase 4 reserved)
+        install_info: Option<InstallInfo>,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl StatusReply {
+    #[allow(clippy::too_many_arguments)]
+    pub fn ok(
+        daemon_state: DaemonStateKind,
+        tracked_roots: Vec<TrackedRootInfo>,
+        recent_gaps: Vec<GapInfo>,
+        counters: StatusCounters,
+        feeds: Vec<FeedInfo>,
+        install_info: Option<InstallInfo>,
+    ) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V3,
+            daemon_state,
+            tracked_roots,
+            recent_gaps,
+            counters,
+            feeds,
+            install_info,
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V3,
+            message: message.into(),
+        }
+    }
+}
+
+// ============================================================
+// Phase 3 — Prompt channel init (tag 0x0A; LONG-LIVED)
+// After init+ack, channel-internal frames are un-tagged length-prefixed CBOR.
+// ============================================================
+
+/// CLI → daemon: open a long-lived prompt channel tied to a run.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PromptChannelInit {
+    pub schema_version: u16, // V3
+    pub run_uuid: String,    // ties channel to RunRecord
+}
+
+/// Daemon → CLI: response to PromptChannelInit.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PromptChannelInitAck {
+    Ok { schema_version: u16 },
+    Err { schema_version: u16, message: String },
+}
+
+impl PromptChannelInitAck {
+    pub fn ok() -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V3,
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V3,
+            message: message.into(),
+        }
+    }
+}
+
+// ============================================================
+// Phase 3 — Prompt request/response/cancel (channel-internal; no tag byte)
+// ============================================================
+
+/// Package-manager context for a prompt — identifies which package triggered the connection.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PackageContext {
+    pub ecosystem: String,        // "npm"|"pip"|"cargo"|"bundle"|"gem"|"go"|"mix"|"hex"|"composer"
+    pub package: String,
+    pub version: String,
+    pub lifecycle: Option<String>, // "postinstall"|"install"|"build"|null
+    pub root_command: String,     // argv.join(' ') truncated to 256
+}
+
+/// Process context snapshot at the time of a connection attempt.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessCtx {
+    pub pid: u32,
+    pub pidversion: u32,
+    pub argv0: String,
+    pub cwd: String,
+}
+
+/// Suggested rule for the user to consider when approving/denying.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SuggestedRule {
+    pub match_type: String, // "exact"|"suffix"
+    pub pattern: String,
+    pub scope_hint: String, // "machine"|"project"
+}
+
+/// Daemon → CLI (prompt channel): request user decision on an outbound connection.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PromptRequest {
+    pub schema_version: u16,                // V3
+    pub prompt_id: String,                  // UUID v4
+    pub dest_host: String,
+    pub dest_port: u16,
+    pub dest_ip: Option<String>,
+    pub source_kind: String,                // Phase 2 D-27 enum string repr
+    pub source_locator: Option<String>,
+    pub package_context: Option<PackageContext>,
+    pub process: ProcessCtx,
+    pub intel: Option<()>,                  // Phase 4 reserved; always None in Phase 3
+    pub suggested_rules: Vec<SuggestedRule>,
+}
+
+/// User's verdict on a prompt request.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PromptVerdict {
+    AllowOnce,
+    AllowAlwaysMachine,
+    AllowAlwaysProject,
+    Deny,
+}
+
+/// Rule pattern for a user-approved or -denied connection pattern.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RulePattern {
+    pub match_type: String, // "exact"|"suffix"
+    pub pattern: String,
+}
+
+/// CLI → daemon (prompt channel): user's decision on a PromptRequest.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PromptResponse {
+    pub schema_version: u16,             // V3
+    pub prompt_id: String,
+    pub verdict: PromptVerdict,
+    pub rule_pattern: Option<RulePattern>,
+}
+
+/// CLI → daemon (prompt channel): cancel an outstanding prompt (e.g. timeout or Ctrl-C).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PromptCancel {
+    pub schema_version: u16, // V3
+    pub prompt_id: String,
+}
+
+// ============================================================
+// Phase 3 — InsertUserRule (tag 0x0B; sentinel approve)
+// ============================================================
+
+/// CLI → daemon: insert a user-authored rule into the SQLite rule store.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InsertUserRule {
+    pub schema_version: u16,  // V3
+    pub kind: String,          // "allow"|"deny"
+    pub match_type: String,    // "exact"|"suffix"|"ip"
+    pub pattern: String,
+    pub reason: String,        // non-empty (D-39)
+}
+
+/// Daemon → CLI: response to InsertUserRule.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum InsertUserRuleReply {
+    Ok { schema_version: u16, rule_id: i64 },
+    Err { schema_version: u16, message: String },
+}
+
+impl InsertUserRuleReply {
+    pub fn ok(rule_id: i64) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V3,
+            rule_id,
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V3,
+            message: message.into(),
+        }
+    }
+}
+
+// ============================================================
+// Phase 3 — ReadInstallArtifacts (tag 0x0C; sentinel uninstall)
+// ============================================================
+
+/// CLI → daemon: read the install artifacts manifest (for uninstall).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReadInstallArtifacts {
+    pub schema_version: u16, // V3
+}
+
+impl ReadInstallArtifacts {
+    pub fn new() -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V3,
+        }
+    }
+}
+
+impl Default for ReadInstallArtifacts {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Daemon → CLI: response to ReadInstallArtifacts.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ReadInstallArtifactsReply {
+    Ok {
+        schema_version: u16,
+        artifacts: Vec<InstallArtifact>,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl ReadInstallArtifactsReply {
+    pub fn ok(artifacts: Vec<InstallArtifact>) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V3,
+            artifacts,
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V3,
+            message: message.into(),
+        }
+    }
+}
+
+// ============================================================
+// Phase 3 — BaselineCommit (tag 0x0D; sentinel run --baseline exit)
+// ============================================================
+
+/// CLI → daemon: commit an accumulated baseline run into proposed rules.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BaselineCommit {
+    pub schema_version: u16, // V3
+    pub run_uuid: String,
+}
+
+/// A single rule proposed by the baseline commit process.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProposedRule {
+    pub match_type: String, // "exact"|"suffix"
+    pub pattern: String,
+    pub reason: String, // "baseline: recorded YYYY-MM-DD by sentinel run --baseline"
+}
+
+/// Daemon → CLI: response to BaselineCommit.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BaselineCommitReply {
+    Ok {
+        schema_version: u16,
+        proposed_rules: Vec<ProposedRule>,
+        existing_toml_path: Option<String>,
+        existing_toml_content: Option<String>,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl BaselineCommitReply {
+    pub fn ok(
+        proposed_rules: Vec<ProposedRule>,
+        existing_toml_path: Option<String>,
+        existing_toml_content: Option<String>,
+    ) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V3,
+            proposed_rules,
+            existing_toml_path,
+            existing_toml_content,
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V3,
+            message: message.into(),
+        }
+    }
+}

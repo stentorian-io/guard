@@ -125,34 +125,37 @@ pub(crate) fn build_proposed_only(proposed: &[ProposedRule]) -> Result<String, C
         .map_err(|e| CliError::Other(format!("policy_file_writer: {e}")))
 }
 
-/// Lightweight (match_type, pattern) extractor. Public for the unit test in
+/// Extract `(match_type, pattern)` keys from every `[[rules]]` entry in a
+/// `.sentinel.toml` body. Public for the unit test in
 /// tests/baseline_three_way_merge.rs.
+///
+/// WR-06: parses with `toml_edit::DocumentMut` so we honor real TOML
+/// structure — escape sequences in strings, multiline strings, mixed-case
+/// neighboring keys (`match_label`, `pattern_v2` no longer collide with
+/// `match`/`pattern`), and array-of-tables semantics. Returns an empty set on
+/// parse failure rather than guessing — callers compare against this set for
+/// dedup, so a misparsed key would manifest as an unwanted duplicate which is
+/// strictly worse than a missed dedup.
 pub fn extract_existing_rule_keys(content: &str) -> HashSet<(String, String)> {
     let mut keys = HashSet::new();
-    let mut current_match: Option<String> = None;
-    let mut current_pattern: Option<String> = None;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("[[rules]]") {
-            if let (Some(m), Some(p)) = (current_match.take(), current_pattern.take()) {
-                keys.insert((m, p));
-            }
+    let doc = match content.parse::<toml_edit::DocumentMut>() {
+        Ok(d) => d,
+        Err(_) => return keys,
+    };
+    let Some(rules_item) = doc.get("rules") else { return keys };
+    let Some(arr) = rules_item.as_array_of_tables() else { return keys };
+    for table in arr.iter() {
+        let m = table
+            .get("match")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let p = table
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        if let (Some(m), Some(p)) = (m, p) {
+            keys.insert((m, p));
         }
-        if let Some(rest) = trimmed.strip_prefix("match") {
-            if let Some(eq) = rest.find('=') {
-                let v = rest[eq + 1..].trim().trim_matches('"').to_string();
-                current_match = Some(v);
-            }
-        }
-        if let Some(rest) = trimmed.strip_prefix("pattern") {
-            if let Some(eq) = rest.find('=') {
-                let v = rest[eq + 1..].trim().trim_matches('"').to_string();
-                current_pattern = Some(v);
-            }
-        }
-    }
-    if let (Some(m), Some(p)) = (current_match, current_pattern) {
-        keys.insert((m, p));
     }
     keys
 }

@@ -7,3 +7,4 @@ pub mod ipc_server;
 pub mod peer_auth;
 pub mod tracked;
 pub mod dev_install;
+pub mod rule_store;

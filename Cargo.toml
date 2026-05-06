@@ -33,6 +33,8 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 plist = "1.9.0"
 ctor = "1.0.1"
+rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite_migration = "2.5"
 
 # Internal crates
 sentinel-core = { path = "crates/sentinel-core" }

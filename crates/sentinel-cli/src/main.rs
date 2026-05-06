@@ -99,9 +99,8 @@ fn real_main() -> Result<i32, CliError> {
         Cmd::ShellSetup => {
             shell_setup::run_shell_setup()
         }
-        Cmd::Status { .. } => {
-            eprintln!("sentinel status: pending plan 03-10");
-            Ok(0)
+        Cmd::Status { verbose, json } => {
+            sentinel_cli::status::run_status(&sock, &state, verbose, json)
         }
         Cmd::Logs { .. } => {
             eprintln!("sentinel logs: pending plan 03-10");

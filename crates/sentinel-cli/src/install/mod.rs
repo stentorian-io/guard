@@ -108,7 +108,17 @@ fn resolve_daemon_binary() -> Result<PathBuf, CliError> {
 }
 
 fn confirm_yn(prompt: &str) -> Result<bool, CliError> {
-    use std::io::{BufRead, Write};
+    // WR-04: reject non-TTY stdin so piped input (`yes |`, `< answers.txt`)
+    // can never silently agree to install. Callers that genuinely need to
+    // skip interactive confirmation should branch on their own
+    // is_terminal()/--yes flag and never call this helper from a non-TTY
+    // path.
+    use std::io::{BufRead, IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        return Err(CliError::Other(format!(
+            "{prompt} (TTY required for confirmation; re-run interactively)"
+        )));
+    }
     print!("{prompt} [y/N] ");
     std::io::stdout().flush().map_err(|e| CliError::Other(format!("stdout: {e}")))?;
     let mut line = String::new();

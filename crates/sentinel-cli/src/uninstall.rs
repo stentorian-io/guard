@@ -44,7 +44,16 @@ pub fn run_uninstall(sock: &Path, state_dir: &Path, force: bool) -> Result<i32, 
 }
 
 fn confirm(prompt: &str) -> Result<bool, CliError> {
-    use std::io::{BufRead, Write};
+    // WR-04: reject non-TTY stdin so piped input cannot silently agree to
+    // uninstall. The outer `run_uninstall` already guards on !force, but the
+    // helper is now defensive in case a future caller forgets the outer
+    // guard.
+    use std::io::{BufRead, IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        return Err(CliError::Other(format!(
+            "{prompt} (TTY required for confirmation; pass --force to skip)"
+        )));
+    }
     print!("{prompt} [y/N] ");
     std::io::stdout().flush().map_err(|e| CliError::Other(format!("stdout: {e}")))?;
     let mut line = String::new();

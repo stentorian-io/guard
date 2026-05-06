@@ -50,6 +50,14 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
         }
     };
     let reader_uuid = run_uuid.clone();
+    // CR-09: distinguish benign EOF from decode errors so we can log decode
+    // problems explicitly. In both cases we tear down promptly to keep the
+    // registry clean — a Resolve handler that parks on a stale channel would
+    // otherwise block until the channel is naturally torn down by an EPIPE
+    // on a write attempt, allowing a flurry of PromptRequests to queue up
+    // first.
+    let reader_state = Arc::clone(&state);
+    let reader_uuid_for_cleanup = reader_uuid.clone();
     let _ = std::thread::Builder::new()
         .name(format!(
             "sentineld-prompt-rdr-{}",
@@ -58,15 +66,41 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
         .spawn(move || {
             let mut s = reader_stream;
             loop {
-                let frame: ClientChannelFrame = match sentinel_ipc::frame::read_frame(&mut s) {
-                    Ok(f) => f,
-                    Err(_) => break,
-                };
-                if reader_tx.send(frame).is_err() {
-                    break;
+                let result: Result<ClientChannelFrame, _> =
+                    sentinel_ipc::frame::read_frame(&mut s);
+                match result {
+                    Ok(frame) => {
+                        if reader_tx.send(frame).is_err() {
+                            break;
+                        }
+                    }
+                    Err(sentinel_ipc::IpcError::Io(io)) if matches!(
+                        io.kind(),
+                        std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::BrokenPipe,
+                    ) => {
+                        tracing::debug!(run_uuid = %reader_uuid, "prompt_channel reader EOF");
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            run_uuid = %reader_uuid,
+                            "prompt_channel reader: decode error; tearing down"
+                        );
+                        break;
+                    }
                 }
             }
-            tracing::debug!(run_uuid = %reader_uuid, "prompt_channel reader exited");
+            // CR-09: eagerly drop the prompt-channel sender from the registry
+            // so the Resolve handler in ipc_server stops handing out parking
+            // slots tied to this run. Without this, a slate of new connect()s
+            // could queue PromptRequests onto a bounded channel whose
+            // consumer thread has already exited, until the bounded channel
+            // saturates and the Resolve handler falls through to deny.
+            reader_state
+                .process_tree
+                .take_prompt_channel(&reader_uuid_for_cleanup);
+            tracing::debug!(run_uuid = %reader_uuid_for_cleanup, "prompt_channel reader exited");
         });
 
     loop {

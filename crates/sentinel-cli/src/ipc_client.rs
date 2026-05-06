@@ -10,11 +10,19 @@
 use crate::CliError;
 use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
-use sentinel_ipc::{RegisterRoot, Reply};
+use sentinel_ipc::{
+    PrepareSnapshot, RegisterRoot, Reply, SnapshotReply, TrustPolicy, TrustPolicyReply,
+};
 use socket2::{Domain, SockAddr, Socket, Type};
+use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+// Tag bytes — must match plan 02-04's MessageTag values exactly. The dylib
+// uses the same values in `sentinel_hook::ipc_client`.
+const TAG_PREPARE_SNAPSHOT: u8 = 0x02;
+const TAG_TRUST_POLICY: u8 = 0x07;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
@@ -82,6 +90,79 @@ pub fn register_root_with_daemon(sock: &Path, token: AuditToken) -> Result<(), C
         Reply::Ack { .. } => Ok(()),
         Reply::Err { message, .. } => {
             Err(CliError::DaemonUnreachable(format!("daemon: {message}")))
+        }
+    }
+}
+
+/// Send a Phase 2 tagged frame: `[1-byte tag][4-byte BE length][CBOR body]`,
+/// then read the daemon's tag-echoed reply: `[1-byte tag][4-byte BE length][CBOR body]`.
+///
+/// Wire shape symmetry with:
+///   - daemon-side:  `crates/sentinel-daemon/src/ipc_server.rs::write_tagged`
+///   - dylib-side:   `crates/sentinel-hook/src/ipc_client.rs::send_tagged_and_recv_ack`
+fn send_tagged_request<Req, ReplyT>(
+    sock: &Path,
+    tag: u8,
+    req: &Req,
+) -> Result<ReplyT, CliError>
+where
+    Req: serde::Serialize,
+    ReplyT: serde::de::DeserializeOwned,
+{
+    let mut stream = connect_with_timeout(sock)?;
+    stream
+        .write_all(&[tag])
+        .map_err(|e| CliError::DaemonUnreachable(format!("tag write: {e}")))?;
+    write_frame(&mut stream, req)
+        .map_err(|e| CliError::DaemonUnreachable(format!("write frame: {e}")))?;
+    let mut tag_back = [0u8; 1];
+    stream
+        .read_exact(&mut tag_back)
+        .map_err(|e| CliError::DaemonUnreachable(format!("read tag echo: {e}")))?;
+    if tag_back[0] != tag {
+        return Err(CliError::DaemonUnreachable(format!(
+            "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
+            tag_back[0]
+        )));
+    }
+    let reply: ReplyT = read_frame(&mut stream)
+        .map_err(|e| CliError::DaemonUnreachable(format!("read reply: {e}")))?;
+    Ok(reply)
+}
+
+/// Phase 2 D-29: send `PrepareSnapshot { cwd }` BEFORE posix_spawn so the
+/// daemon walks `cwd` for `.sentinel.toml`, merges curated YAML + SQLite + the
+/// project policy, writes a per-run snapshot to `${state_dir}/runs/{uuid}.cbor`,
+/// and returns the manifest path. The CLI then sets that manifest path as
+/// `SENTINEL_SNAPSHOT_MANIFEST` in the wrapped child's envp so the dylib
+/// loads the per-run policy.
+pub fn prepare_snapshot(sock: &Path, cwd: &Path) -> Result<(PathBuf, String), CliError> {
+    let req = PrepareSnapshot::new(cwd.display().to_string());
+    let reply: SnapshotReply = send_tagged_request(sock, TAG_PREPARE_SNAPSHOT, &req)?;
+    match reply {
+        SnapshotReply::Ok {
+            manifest_path,
+            run_uuid,
+            ..
+        } => Ok((PathBuf::from(manifest_path), run_uuid)),
+        SnapshotReply::Err { message, .. } => {
+            Err(CliError::Other(format!("PrepareSnapshot: {message}")))
+        }
+    }
+}
+
+/// Phase 2 D-38: send `TrustPolicy { path, sha256 }` so the daemon inserts the
+/// (path, sha256) tuple into `trusted_policy_files`. The daemon performs a
+/// defense-in-depth re-hash of the file at handler time (T-02-06a-01) and
+/// rejects on mismatch — the CLI's claimed sha256 is treated as a diagnostic
+/// value, never trusted on its own.
+pub fn trust_policy_request(sock: &Path, path: &str, sha256: &str) -> Result<(), CliError> {
+    let req = TrustPolicy::new(path, sha256);
+    let reply: TrustPolicyReply = send_tagged_request(sock, TAG_TRUST_POLICY, &req)?;
+    match reply {
+        TrustPolicyReply::Ok { .. } => Ok(()),
+        TrustPolicyReply::Err { message, .. } => {
+            Err(CliError::Other(format!("TrustPolicy: {message}")))
         }
     }
 }

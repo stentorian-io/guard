@@ -27,7 +27,7 @@ fn trust_policy_requires_path_arg() {
 fn run_subcommand_still_parses() {
     // Sanity: adding TrustPolicy does not break the existing Run variant.
     let cli = Cli::try_parse_from(["sentinel", "run", "echo", "hello"]).expect("parse");
-    matches!(cli.cmd, Cmd::Run { .. });
+    assert!(matches!(cli.cmd, Cmd::Run { .. }));
 }
 
 /// Non-TTY (CI/scripts) calling `run_trust_policy` MUST fail with a diagnostic

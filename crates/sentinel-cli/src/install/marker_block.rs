@@ -83,8 +83,25 @@ pub fn install(rc_path: &Path) -> std::io::Result<PathBuf> {
 }
 
 /// Strip marker block (idempotent — no-op if absent).
+///
+/// WR-03: handle dangling-symlink and missing-file cases explicitly. The prior
+/// `unwrap_or_else(|_| rc_path.to_path_buf())` fallback returned a relative
+/// path on canonicalize failure, which then caused
+/// `tempfile::NamedTempFile::new_in(parent)` to create the temp file in the
+/// daemon's cwd; the subsequent `persist` could cross filesystems and fail
+/// with EXDEV, leaving stale state. We now treat a missing target as a benign
+/// no-op and propagate any other canonicalize error to the caller.
 pub fn strip(rc_path: &Path) -> std::io::Result<()> {
-    let target = std::fs::canonicalize(rc_path).unwrap_or_else(|_| rc_path.to_path_buf());
+    let target = match std::fs::canonicalize(rc_path) {
+        Ok(p) => p,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(std::io::Error::other(format!(
+                "canonicalize {}: {e}",
+                rc_path.display()
+            )));
+        }
+    };
     let original = match std::fs::read_to_string(&target) {
         Ok(s) => s,
         Err(_) => return Ok(()),    // file gone — already removed

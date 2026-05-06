@@ -43,24 +43,10 @@ fn evaluate_in_hook(
     verdict
 }
 
-// BL-04 fix: RAII reentrancy guard.
-//
-// The previous pattern cleared IN_HOOK BEFORE dispatching the real syscall:
-//   set_guard(); decide(); CLEAR_GUARD(); if deny { return -1; } real_call();
-//
-// That left the dispatch window completely unguarded — if any code path
-// between the clear and the return re-entered a hook, IN_HOOK would be false
-// and the hook would re-evaluate policy rather than passing through.
-//
-// The correct pattern is: guard is held for the entire function scope and
-// drops AFTER the real dispatch. An RAII guard achieves this automatically:
-//   let _g = InHookGuard::enter()?;  // set on entry
-//   decide();
-//   real_call();
-//   // _g drops here, IN_HOOK cleared AFTER the real call returns
-//
-// InHookGuard::enter() returns None if already in a hook (pass-through path);
-// returns Some(guard) that holds IN_HOOK=true until Drop.
+// BL-04 RAII reentrancy guard. See `reentrancy.rs` for the canonical
+// rationale (WARNING-02 fix moved the long explanation there). Each hook
+// file (`replace_fork.rs`, `replace_exec.rs`, etc.) carries a copy of the
+// same struct; if you change one, change them all.
 struct InHookGuard {
     _priv: (),
 }
@@ -71,9 +57,6 @@ impl InHookGuard {
     /// Returns Some(guard) when we successfully set IN_HOOK=true.
     #[inline]
     fn enter() -> Option<Self> {
-        // replace(true) returns the OLD value. If old was true, we are
-        // already in a hook → return None (caller takes the pass-through path).
-        // If old was false, we are now the outermost hook frame → return guard.
         if IN_HOOK.with(|c| c.replace(true)) {
             None
         } else {
@@ -183,9 +166,8 @@ pub unsafe extern "C" fn sentinel_connect(
     addr: *const sockaddr,
     addrlen: socklen_t,
 ) -> c_int {
-    // BL-04 fix: RAII guard — IN_HOOK is cleared when _guard drops, which
-    // happens AFTER raw_connect returns (or after the early-return on deny).
-    // The dispatch window is now correctly bracketed by the guard lifetime.
+    // BL-04: RAII guard — IN_HOOK cleared when _guard drops (see
+    // reentrancy.rs for the canonical rationale).
     let _guard = match InHookGuard::enter() {
         Some(g) => g,
         None => return unsafe { raw_connect(s, addr, addrlen) },
@@ -237,7 +219,7 @@ unsafe extern "C" fn sentinel_connectx(
     len: *mut size_t,
     connid: *mut c_int, // connid_t *
 ) -> c_int {
-    // BL-04 fix: RAII guard — IN_HOOK cleared after dispatch, not before.
+    // BL-04: RAII guard — see reentrancy.rs for the canonical rationale.
     let _guard = match InHookGuard::enter() {
         Some(g) => g,
         None => return unsafe {
@@ -300,7 +282,7 @@ unsafe extern "C" fn sentinel_sendto(
     to: *const sockaddr,
     tolen: socklen_t,
 ) -> ssize_t {
-    // BL-04 fix: RAII guard — IN_HOOK cleared after dispatch, not before.
+    // BL-04: RAII guard — see reentrancy.rs for the canonical rationale.
     let _guard = match InHookGuard::enter() {
         Some(g) => g,
         None => return unsafe { raw_sendto(s, buf, len, flags, to, tolen) },
@@ -333,7 +315,7 @@ unsafe extern "C" fn sentinel_sendmsg(
     msg: *const msghdr,
     flags: c_int,
 ) -> ssize_t {
-    // BL-04 fix: RAII guard — IN_HOOK cleared after dispatch, not before.
+    // BL-04: RAII guard — see reentrancy.rs for the canonical rationale.
     let _guard = match InHookGuard::enter() {
         Some(g) => g,
         None => return unsafe { raw_sendmsg(s, msg, flags) },

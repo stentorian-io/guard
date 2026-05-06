@@ -6,7 +6,7 @@ use std::ffi::OsString;
 fn run_with_simple_command() {
     let cli = Cli::try_parse_from(["sentinel", "run", "echo", "hello"]).expect("parse");
     match cli.cmd {
-        Cmd::Run { command } => {
+        Cmd::Run { command, .. } => {
             assert_eq!(command, vec![OsString::from("echo"), OsString::from("hello")]);
         }
         other => panic!("expected Run variant, got {other:?}"),
@@ -17,7 +17,7 @@ fn run_with_simple_command() {
 fn run_with_dash_dash_separator_and_hyphen_args() {
     let cli = Cli::try_parse_from(["sentinel", "run", "--", "node", "-e", "console.log(1)"]).expect("parse");
     match cli.cmd {
-        Cmd::Run { command } => {
+        Cmd::Run { command, .. } => {
             assert_eq!(command, vec![
                 OsString::from("node"),
                 OsString::from("-e"),

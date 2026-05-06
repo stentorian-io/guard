@@ -26,7 +26,7 @@ fn prepare_snapshot_writes_per_run_files_and_returns_ok() {
 
     // Use a cwd with no .sentinel.toml.
     let cwd = tmp.path().to_path_buf();
-    let reply = handle_prepare_snapshot(&cwd, &curated, &rs, &pt, &state_dir);
+    let reply = handle_prepare_snapshot(&cwd, &curated, &rs, &pt, &state_dir, false, false);
 
     match reply {
         sentinel_ipc::SnapshotReply::Ok {
@@ -76,7 +76,7 @@ fn prepare_snapshot_includes_curated_entries_sorted_by_tier() {
             reason: "npm registry".into(),
         },
     ];
-    let reply = handle_prepare_snapshot(tmp.path(), &curated, &rs, &pt, &state_dir);
+    let reply = handle_prepare_snapshot(tmp.path(), &curated, &rs, &pt, &state_dir, false, false);
     match reply {
         sentinel_ipc::SnapshotReply::Ok { run_uuid, .. } => {
             let snap_path =
@@ -119,7 +119,7 @@ fn prepare_snapshot_with_trusted_sentinel_toml_includes_project_rules() {
     rs.insert_trusted(&canonical.display().to_string(), &sha, "cli")
         .unwrap();
 
-    let reply = handle_prepare_snapshot(&proj, &curated, &rs, &pt, &state_dir);
+    let reply = handle_prepare_snapshot(&proj, &curated, &rs, &pt, &state_dir, false, false);
     match reply {
         sentinel_ipc::SnapshotReply::Ok { run_uuid, .. } => {
             let snap_path =

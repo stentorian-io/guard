@@ -66,11 +66,22 @@ fn trust_policy_request_round_trips_against_live_daemon() {
     std::fs::write(&toml_path, body).unwrap();
     let sha = format!("{:x}", sha2::Sha256::digest(body.as_bytes()));
 
+    // BLOCKER-03: daemon canonicalizes and rejects non-canonical wire input.
+    // macOS resolves `/var/folders/...` through a symlink to
+    // `/private/var/folders/...`. The CLI's real `run_trust_policy` path
+    // canonicalizes before sending; this lower-level `trust_policy_request`
+    // test must canonicalize explicitly.
+    let canonical = toml_path
+        .canonicalize()
+        .expect("canonicalize")
+        .display()
+        .to_string();
+
     let h = thread::spawn(move || {
         server.accept_one().expect("accept_one");
     });
 
-    let r = trust_policy_request(&sock, &toml_path.display().to_string(), &sha);
+    let r = trust_policy_request(&sock, &canonical, &sha);
     h.join().unwrap();
     r.expect("trust_policy_request Ok");
 }

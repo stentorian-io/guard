@@ -111,9 +111,18 @@ unsafe fn sentinel_hook_init() {
     //    even if DylibLoaded times out (T-02-05-06 mitigation).
     if !snapshot::FAIL_CLOSED.load(Ordering::Acquire) {
         const DYLIB_LOADED_TIMEOUT_MS: u64 = 100;
-        // Daemon overrides via kernel peer-auth (ENF-08); zero token is a
-        // wire-shape placeholder.
-        let token = sentinel_ipc::AuditTokenWire { val: [0; 8] };
+        // BLOCKER-07: include (pid, ppid) as an advisory hint in the wire
+        // audit-token so the daemon's BLOCKER-02 untracked-peer check can
+        // optionally use ppid to walk the tree and decide whether to ack.
+        // Daemon's authoritative parent identity remains kernel peer-auth
+        // (ENF-08); the wire fields are advisory.
+        // SAFETY: getpid()/getppid() are async-signal-safe and always succeed.
+        let pid = unsafe { libc::getpid() } as u32;
+        let ppid = unsafe { libc::getppid() } as u32;
+        let mut tok_val = [0u32; 8];
+        tok_val[5] = pid;
+        tok_val[6] = ppid;
+        let token = sentinel_ipc::AuditTokenWire { val: tok_val };
         match crate::ipc_client::send_dylib_loaded_sync(token, DYLIB_LOADED_TIMEOUT_MS) {
             Ok(()) => {
                 LOG_RING.append(b"[sentinel-hook] DylibLoaded sent");

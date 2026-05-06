@@ -107,6 +107,12 @@ pub fn handle_prepare_snapshot(
         tracked_root: sentinel_core::AuditToken { val: [0; 8] },
         snapshot_path: pub_.path.clone(),
         manifest_path: run_manifest_path(state_dir, &run_uuid),
+        // Phase 3 plan 03-04: new fields default to false/None for V2 callers.
+        // Plan 03-07 will extend PrepareSnapshot to carry V3 fields and call
+        // set_run_is_tty / set_run_baseline_mode / set_run_project_toml_path.
+        is_tty: false,
+        baseline_mode: false,
+        project_toml_path: None,
     });
 
     info!(

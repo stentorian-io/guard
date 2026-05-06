@@ -30,14 +30,17 @@ use crossbeam_channel::{bounded, TrySendError};
 use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
-    DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap, EnvNotPropagatedGapAck, ExecAck, ExecEvent,
-    ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3, IpcError, PrepareSnapshot, RegisterRoot,
-    Reply, Resolve, ResolveReply, SnapshotReply, TrustPolicy, TrustPolicyReply,
+    BaselineCommit, BaselineCommitReply, DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap,
+    EnvNotPropagatedGapAck, ExecAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3,
+    InsertUserRule, InsertUserRuleReply, IpcError, PrepareSnapshot, PromptChannelInitAck,
+    ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply, Resolve, ResolveReply,
+    SnapshotReply, Status, StatusReply, TrustPolicy, TrustPolicyReply,
 };
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::{debug, error, info, warn};
@@ -63,6 +66,10 @@ pub struct DaemonState {
     pub prompt_dedup: Arc<PromptDedup>,
     pub recent_gaps: Arc<RecentGapsRing>,
     pub baseline_staging: Arc<BaselineStaging>,
+    // Phase 3 plan 03-08 (WARNING #6 fix): snapshot-publication failure flag.
+    // Flipped to true on Err from publish_run; back to false on Ok.
+    // Feeds compute_daemon_state → StatusReply.daemon_state = Degraded on failure.
+    pub last_snapshot_publish_failed: AtomicBool,
 }
 
 impl DaemonState {
@@ -96,6 +103,7 @@ impl DaemonState {
             prompt_dedup,
             recent_gaps,
             baseline_staging,
+            last_snapshot_publish_failed: AtomicBool::new(false),
         }
     }
 

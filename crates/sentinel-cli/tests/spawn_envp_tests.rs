@@ -6,13 +6,21 @@
 
 use sentinel_cli::ipc_client::{probe_daemon_alive, register_root_with_daemon};
 use sentinel_core::AuditToken;
-use sentinel_daemon::ipc_server::IpcServer;
+use sentinel_daemon::gap_detector::GapDetector;
+use sentinel_daemon::ipc_server::{DaemonState, IpcServer};
 use sentinel_daemon::state_dir::{ensure_state_dir, socket_path};
-use sentinel_daemon::tracked::TrackedRoots;
+use sentinel_daemon::tracked::ProcessTree;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
+
+fn build_state() -> (Arc<ProcessTree>, Arc<DaemonState>) {
+    let tree = Arc::new(ProcessTree::new());
+    let det = Arc::new(GapDetector::new());
+    let state = Arc::new(DaemonState::new(tree.clone(), det));
+    (tree, state)
+}
 
 #[test]
 fn register_root_with_daemon_round_trips_ack() {
@@ -20,8 +28,8 @@ fn register_root_with_daemon_round_trips_ack() {
     ensure_state_dir(tmp.path()).unwrap();
     let sock = socket_path(tmp.path());
 
-    let tracked = Arc::new(TrackedRoots::new());
-    let server = IpcServer::bind(&sock, tracked.clone()).expect("bind");
+    let (tree, state) = build_state();
+    let server = IpcServer::bind(&sock, state).expect("bind");
 
     let h = thread::spawn(move || {
         server.accept_one().expect("accept_one");
@@ -34,8 +42,8 @@ fn register_root_with_daemon_round_trips_ack() {
     assert!(r.is_ok(), "register_root_with_daemon should return Ok: {r:?}");
 
     h.join().unwrap();
-    assert_eq!(tracked.len(), 1, "exactly one root recorded");
-    assert!(!tracked.contains(&dummy), "synthetic wire token must not be stored (T-01-04-03)");
+    assert_eq!(tree.nodes_len(), 1, "exactly one root recorded");
+    assert!(!tree.is_tracked(&dummy), "synthetic wire token must not be stored (T-01-04-03)");
 }
 
 #[test]
@@ -58,8 +66,8 @@ fn probe_daemon_alive_succeeds_against_live_socket() {
     ensure_state_dir(tmp.path()).unwrap();
     let sock = socket_path(tmp.path());
 
-    let tracked = Arc::new(TrackedRoots::new());
-    let server = IpcServer::bind(&sock, tracked.clone()).expect("bind");
+    let (tree, state) = build_state();
+    let server = IpcServer::bind(&sock, state).expect("bind");
 
     // The probe drops the stream immediately. The daemon's `accept_one` will
     // see the connect, then EOF on the first read_frame. Per plan 05 task 2's
@@ -73,7 +81,7 @@ fn probe_daemon_alive_succeeds_against_live_socket() {
 
     h.join().unwrap();
     // No state should have changed — tracked-roots remains empty.
-    assert_eq!(tracked.len(), 0, "probe-only must not record a tracked root");
+    assert_eq!(tree.nodes_len(), 0, "probe-only must not record a tracked root");
 }
 
 /// Connect-only probe against a missing socket returns DaemonUnreachable

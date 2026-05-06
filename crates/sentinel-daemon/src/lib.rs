@@ -4,6 +4,7 @@ pub mod gap_detector;
 pub mod state_dir;
 pub mod snapshot;
 pub mod manifest;
+pub mod ipc_dispatch;
 pub mod ipc_server;
 pub mod os_ffi;
 pub mod peer_auth;

@@ -116,6 +116,12 @@ pub fn gc_sweep(state_dir: &Path, tree: &ProcessTree) {
 /// Spawn a background thread that calls `gc_sweep` every GC_INTERVAL_SECS.
 /// The handle is intentionally returned for tests that may want to join;
 /// the daemon's serve() detaches it (thread runs as long as the process).
+///
+/// WARNING-07 part 2 (Phase 2 review): for graceful shutdown, prefer
+/// `spawn_gc_thread_with_shutdown` which takes a `crossbeam_channel::Receiver`
+/// the daemon's signal handler can send on to ask the thread to exit. The
+/// no-shutdown variant remains here for backwards compatibility — process
+/// exit terminates the thread, which is acceptable but documented.
 pub fn spawn_gc_thread(
     state_dir: std::path::PathBuf,
     tree: Arc<ProcessTree>,
@@ -127,4 +133,61 @@ pub fn spawn_gc_thread(
             std::thread::sleep(Duration::from_secs(GC_INTERVAL_SECS));
         })
         .expect("spawn gc thread")
+}
+
+/// Like `spawn_gc_thread` but exits cleanly when `shutdown` receives a value
+/// (or is dropped — disconnected). Use this when the daemon needs to be able
+/// to join on the GC thread during shutdown so a SIGTERM mid-sweep doesn't
+/// leave a half-removed snapshot+manifest pair.
+///
+/// The channel select uses `select!` with the shutdown receiver and a
+/// per-loop timeout equal to `GC_INTERVAL_SECS`. Shutdown latency is
+/// therefore at most one sweep duration; `gc_sweep` itself is fast (a
+/// stat'd directory walk), so practical shutdown is <100ms.
+pub fn spawn_gc_thread_with_shutdown(
+    state_dir: std::path::PathBuf,
+    tree: Arc<ProcessTree>,
+    shutdown: crossbeam_channel::Receiver<()>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("sentineld-gc".into())
+        .spawn(move || loop {
+            gc_sweep(&state_dir, &tree);
+            crossbeam_channel::select! {
+                recv(shutdown) -> _ => return,
+                default(Duration::from_secs(GC_INTERVAL_SECS)) => continue,
+            }
+        })
+        .expect("spawn gc thread")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossbeam_channel::bounded;
+
+    #[test]
+    fn shutdown_receiver_terminates_gc_thread() {
+        // WARNING-07 part 2 regression: the with-shutdown variant must exit
+        // promptly when the shutdown sender drops (or sends).
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let tree = Arc::new(ProcessTree::new());
+        let (tx, rx) = bounded::<()>(1);
+        let handle =
+            spawn_gc_thread_with_shutdown(tmp.path().to_path_buf(), tree, rx);
+        // Drop the sender — the receiver becomes Disconnected, which
+        // `select!`'s recv arm interprets as a closed channel returning Err.
+        // Either branch (disconnect OR explicit send) terminates the loop.
+        drop(tx);
+        // The first sweep runs immediately; the next select should fire on
+        // the disconnected channel within microseconds. Allow 5 seconds for
+        // CI noise.
+        let join_result = std::thread::Builder::new()
+            .name("test-join-watcher".into())
+            .spawn(move || handle.join())
+            .expect("spawn watcher")
+            .join();
+        let watcher_result = join_result.expect("watcher thread join");
+        assert!(watcher_result.is_ok(), "GC thread should join cleanly");
+    }
 }

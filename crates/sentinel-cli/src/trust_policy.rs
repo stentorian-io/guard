@@ -61,18 +61,15 @@ pub fn run_trust_policy(sock: &Path, toml_path: &Path) -> Result<(), CliError> {
 }
 
 fn display_rules(toml: &SentinelToml) {
-    println!(
-        "{:<8} {:<8} {:<50} {}",
-        "kind", "match", "pattern", "reason"
-    );
-    println!("{}", "-".repeat(100));
+    println!("{:<8} {:<8} {:<50} reason", "kind", "match", "pattern");
+    let separator = "-".repeat(100);
+    println!("{separator}");
     for r in &toml.rules {
+        let kind = format!("{:?}", r.kind).to_lowercase();
+        let mt = format!("{:?}", r.match_type).to_lowercase();
         println!(
-            "{:<8} {:<8} {:<50} {}",
-            format!("{:?}", r.kind).to_lowercase(),
-            format!("{:?}", r.match_type).to_lowercase(),
-            r.pattern,
-            r.reason,
+            "{kind:<8} {mt:<8} {:<50} {}",
+            r.pattern, r.reason,
         );
     }
 }

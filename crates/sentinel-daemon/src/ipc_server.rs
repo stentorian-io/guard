@@ -637,6 +637,25 @@ fn handle_legacy_register_root(
     let wire_pid = msg.audit_token.val[5];
     let kernel_pid = peer_token.val[5];
     let registration_token = if wire_pid != kernel_pid {
+        // WR-08: even though the v1 trust boundary is same-uid only, the
+        // delegation arm widens the attack surface — a same-uid process can
+        // register some OTHER user's pid as a tracked root, which grants no
+        // enforcement privilege but corrupts the gap-detector / process-tree
+        // coverage for that pid's children. Sanity-check that the wire pid
+        // exists in the OS process table AND has the same uid as the daemon
+        // (which itself runs as the user); refuse on mismatch.
+        if !verify_wire_pid_same_uid(wire_pid as libc::pid_t) {
+            warn!(
+                kernel_pid,
+                wire_pid,
+                "RegisterRoot: refusing cross-uid or non-existent wire pid (WR-08)"
+            );
+            let _ = write_legacy_err(
+                stream,
+                format!("WR-08: refusing wire pid {wire_pid}"),
+            );
+            return;
+        }
         // REGISTER-01: CLI is registering a child process's token.
         info!(
             kernel_pid,
@@ -663,6 +682,40 @@ fn handle_legacy_register_root(
     );
     if let Err(e) = write_frame(stream, &Reply::ack()) {
         error!(error = %e, "failed to send Ack");
+    }
+}
+
+/// WR-08: defense-in-depth for the REGISTER-01 delegation path. Returns true
+/// iff the wire pid (a) currently exists in the OS process table and (b) is
+/// owned by the same uid as the daemon. The daemon itself runs as the user
+/// (no privilege boundary), so `libc::getuid()` gives the trusted reference
+/// uid for comparison.
+///
+/// Rationale: a same-uid local attacker could send a RegisterRoot whose
+/// wire-claimed audit_token names some OTHER user's process. Tracking
+/// per se grants no network-enforcement privilege, but it does corrupt the
+/// gap-detector and process-tree coverage for that pid's descendants.
+fn verify_wire_pid_same_uid(wire_pid: libc::pid_t) -> bool {
+    // SAFETY: zeroed proc_bsdinfo is a valid initial state for libc; we only
+    // read the bytes proc_pidinfo writes back. The buffer is `info`'s memory
+    // and lives for the duration of the call.
+    unsafe {
+        let mut info: libc::proc_bsdinfo = std::mem::zeroed();
+        let info_size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        let n = libc::proc_pidinfo(
+            wire_pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            &mut info as *mut _ as *mut libc::c_void,
+            info_size,
+        );
+        if n != info_size {
+            // pid does not exist, or proc_pidinfo failed for another reason —
+            // refuse to register either way.
+            return false;
+        }
+        let cli_uid = libc::getuid();
+        info.pbi_uid == cli_uid
     }
 }
 

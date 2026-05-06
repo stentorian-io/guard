@@ -27,8 +27,8 @@ use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap, EnvNotPropagatedGapAck, ExecAck, ExecEvent,
-    ForkAck, ForkEvent, IPC_SCHEMA_V2, IpcError, PrepareSnapshot, RegisterRoot, Reply, Resolve,
-    ResolveReply, SnapshotReply, TrustPolicy, TrustPolicyReply,
+    ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3, IpcError, PrepareSnapshot, RegisterRoot,
+    Reply, Resolve, ResolveReply, SnapshotReply, TrustPolicy, TrustPolicyReply,
 };
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -489,12 +489,14 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
             return;
         }
     };
-    if ev.schema_version != IPC_SCHEMA_V2 {
+    // Phase 3 plan 03-04: accept V2 (pm_env defaults to empty via #[serde(default)])
+    // and V3 (carries pm_env). Reject anything else.
+    if !matches!(ev.schema_version, IPC_SCHEMA_V2 | IPC_SCHEMA_V3) {
         let _ = write_tagged(
             stream,
             MessageTag::ExecEvent,
             &ExecAck::err(format!(
-                "schema_version {} != IPC_SCHEMA_V2",
+                "schema_version {} not in [IPC_SCHEMA_V2, IPC_SCHEMA_V3]",
                 ev.schema_version
             )),
         );
@@ -551,6 +553,14 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     let _ = state
         .process_tree
         .record_exec(peer_token, target_path.clone());
+
+    // Phase 3 plan 03-04 (D-55): capture PM env subset onto ProcessNode for log enrichment.
+    // extract_pm_env applies the prefix allowlist + R-08 secret denylist + wire-size cap.
+    // V2 messages decode with pm_env=[] (via #[serde(default)]) → captured is empty → no-op.
+    let captured = crate::env_capture::extract_pm_env(&ev.pm_env);
+    if !captured.is_empty() {
+        state.process_tree.set_pm_env_snapshot(&peer_token, captured);
+    }
 
     // D-34 Phase A: csops pre-check on the calling process.
     let kernel_pid = peer_token.val[5] as libc::pid_t;

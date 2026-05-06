@@ -3,11 +3,28 @@
 //! Owned by the daemon. The dylib never reads SQLite directly — instead, the
 //! daemon merges SQLite rules into the per-run snapshot at PrepareSnapshot
 //! time (plan 02-06).
+//!
+//! WARNING-08 fix (Phase 2 review): the original implementation wrapped a
+//! single `Connection` in a process-global `Mutex`, serializing ALL
+//! rule-store reads (`is_trusted`, `all_user_rules`) and ALL writes
+//! (`insert_trusted`) through one lock. Under heavy fork load the daemon's
+//! 16 worker threads contended on this mutex, effectively reducing
+//! rule-store concurrency to 1 — which blocks `PrepareSnapshot`, which
+//! blocks `sentinel run` startup, which blocks the user's `npm install`.
+//!
+//! The fix opens a fresh `Connection` per read call. SQLite supports this
+//! natively (file-level locking + WAL mode handles concurrent readers
+//! cleanly). Writes still take a mutex on the long-lived connection so
+//! migrations and the singleton `INSERT OR REPLACE` path are serialized.
+//! In WAL mode this would also be true with separate connections, but the
+//! current schema does not yet enable WAL — keeping the write path on a
+//! shared mutex preserves the existing behaviour while removing the read
+//! contention.
 
-use rusqlite::{params, Connection, Result as SqlResult};
+use rusqlite::{params, Connection, OpenFlags, Result as SqlResult};
 use rusqlite_migration::{Migrations, M};
 use sentinel_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 #[derive(Debug, thiserror::Error)]
@@ -21,7 +38,11 @@ pub enum RuleStoreError {
 const SQL_001_INITIAL: &str = include_str!("../migrations/001_initial.sql");
 
 pub struct RuleStore {
+    /// Long-lived connection used for migrations + the write path
+    /// (`insert_trusted`). Reads open a fresh connection per call so they
+    /// do NOT contend on this mutex. See WARNING-08.
     conn: Mutex<Connection>,
+    db_path: PathBuf,
 }
 
 impl RuleStore {
@@ -45,11 +66,25 @@ impl RuleStore {
 
         Ok(Self {
             conn: Mutex::new(conn),
+            db_path: db_path.to_path_buf(),
         })
     }
 
+    /// Open a fresh read-only connection to the same DB file. Used by
+    /// read-path methods so they don't contend on the writer's mutex
+    /// (WARNING-08). On error, the caller surfaces the SQLite error to its
+    /// own caller; the long-lived writer connection is unaffected.
+    fn open_reader(&self) -> SqlResult<Connection> {
+        Connection::open_with_flags(
+            &self.db_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+    }
+
     pub fn is_trusted(&self, path: &str, sha256: &str) -> SqlResult<bool> {
-        let conn = self.conn.lock().expect("rule store mutex");
+        // WARNING-08: fresh per-call read connection — no contention with
+        // concurrent writers or other readers.
+        let conn = self.open_reader()?;
         let count: u32 = conn.query_row(
             "SELECT COUNT(*) FROM trusted_policy_files WHERE path = ?1 AND sha256 = ?2",
             params![path, sha256],
@@ -68,6 +103,8 @@ impl RuleStore {
             matches!(trusted_via, "cli" | "prompt"),
             "trusted_via must be 'cli' or 'prompt'; got {trusted_via}"
         );
+        // Writes still take the shared writer mutex so migrations and the
+        // singleton `INSERT OR REPLACE` are serialized.
         let conn = self.conn.lock().expect("rule store mutex");
         let now = unix_ms_now();
         conn.execute(
@@ -80,7 +117,8 @@ impl RuleStore {
     /// Read all user rules; map each row to an AllowlistEntry with tier
     /// UserDeny / UserAllow. Used by plan 02-06's PrepareSnapshot handler.
     pub fn all_user_rules(&self) -> SqlResult<Vec<AllowlistEntry>> {
-        let conn = self.conn.lock().expect("rule store mutex");
+        // WARNING-08: fresh per-call read connection.
+        let conn = self.open_reader()?;
         let mut stmt = conn.prepare(
             "SELECT kind, match_type, pattern, reason FROM rules ORDER BY id",
         )?;

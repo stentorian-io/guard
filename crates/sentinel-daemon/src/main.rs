@@ -90,7 +90,7 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     let process_tree = Arc::new(ProcessTree::new());
     let gap_detector = Arc::new(GapDetector::new());
     let state = Arc::new(DaemonState::new(
-        process_tree,
+        process_tree.clone(),
         gap_detector,
         rule_store,
         curated,
@@ -107,6 +107,16 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         socket = %socket_path(&state_dir).display(),
         "daemon ready"
     );
+
+    // Spawn the per-run snapshot GC sweeper (D-29 / plan 02-07).
+    // The handle is intentionally dropped — the GC thread runs as long as the
+    // daemon process; on daemon exit the OS reaps the thread.
+    let _gc_handle = sentinel_daemon::snapshot_gc::spawn_gc_thread(
+        state_dir.clone(),
+        process_tree,
+    );
+    info!(interval_secs = sentinel_daemon::snapshot_gc::GC_INTERVAL_SECS, "gc sweeper spawned");
+
     server.run_forever()
 }
 

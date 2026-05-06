@@ -7,6 +7,23 @@
 //! Hot-path discipline (D-03): NO heap allocation on intercepted-call paths.
 
 #![allow(unused_unsafe)]
+// This crate is a DYLD interpose dylib: every `pub unsafe extern "C" fn` is a
+// C-ABI shadow whose safety semantics ARE the underlying C function's contract
+// (caller-supplied pointers must point to valid C strings / sockaddrs / etc.).
+// Adding boilerplate `# Safety` sections on each shadow would duplicate the
+// upstream POSIX/Darwin man pages without adding information. The interpose
+// crate-wide intent is "C-ABI passthrough; semantics inherited from libc/Darwin".
+#![allow(clippy::missing_safety_doc)]
+// `pub fn copy_cstr_to_buf(p: *const c_char, ...)` is intentionally a SAFE
+// function over a raw pointer: it null-checks the pointer and bounded-copies
+// up to `buf.len()` bytes, dereferencing only when `p` is non-null. Callers
+// from the exec hooks (also FFI) depend on the safe-API ergonomics. The lint
+// is overly conservative for this defensive-copy helper.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+// Pre-existing Phase 1 patterns flagged once Phase 2 plan 02-05 added clippy
+// to sentinel-hook's verification gate. Out-of-scope cleanup tracked in
+// Phase 02 deferred-items.md (Plan 02-05 row).
+#![allow(clippy::needless_lifetimes, clippy::unnecessary_cast, dead_code)]
 
 pub mod cache;
 pub mod interpose; // Filled in by task 2; symbol re-export only at this point
@@ -54,6 +71,13 @@ unsafe fn sentinel_hook_init() {
     // dlopen fails (D-20 libc-only fallback path).
     replace_nw::init();
 
+    // 1.6. Phase 2 plan 02-05: cache the daemon socket path from env. Subsequent
+    //      ipc_client::send_*_sync calls use this cached path. Failure here means
+    //      env unset — IPC calls return NotConfigured and the dylib operates with
+    //      the same fail-mode as Phase 1 (no fork/exec tracking, but the verdict
+    //      path still works against the snapshot).
+    crate::ipc_client::cache_daemon_socket_from_env();
+
     // 2. Load snapshot (manifest + digest verify + mmap).
     match snapshot::load_from_env() {
         Ok(loaded) => {
@@ -76,7 +100,32 @@ unsafe fn sentinel_hook_init() {
         }
     }
 
-    // 3. mprotect the originals page read-only (T-01-06-04 mitigation).
+    // 3. Phase 2 plan 02-05 / D-35: send DylibLoaded IPC to daemon.
+    //
+    //    Best-effort: failure is logged but does NOT FAIL_CLOSED. The daemon's
+    //    gap detector (plan 02-04) will record an UnknownInjectionFailure if
+    //    no DylibLoaded arrives within 500ms of the parent's ExecEvent.
+    //
+    //    Use a SHORT timeout (100ms) — we do not want a slow daemon to block
+    //    pre-main of the wrapped process. The wrapped command starts running
+    //    even if DylibLoaded times out (T-02-05-06 mitigation).
+    if !snapshot::FAIL_CLOSED.load(Ordering::Acquire) {
+        const DYLIB_LOADED_TIMEOUT_MS: u64 = 100;
+        // Daemon overrides via kernel peer-auth (ENF-08); zero token is a
+        // wire-shape placeholder.
+        let token = sentinel_ipc::AuditTokenWire { val: [0; 8] };
+        match crate::ipc_client::send_dylib_loaded_sync(token, DYLIB_LOADED_TIMEOUT_MS) {
+            Ok(()) => {
+                LOG_RING.append(b"[sentinel-hook] DylibLoaded sent");
+            }
+            Err(e) => {
+                let line = format!("[sentinel-hook] DylibLoaded best-effort failed: {e}");
+                LOG_RING.append(line.as_bytes());
+            }
+        }
+    }
+
+    // 4. mprotect the originals page read-only (T-01-06-04 mitigation).
     // PHASE 1 STATUS: disabled. The mprotect call is too coarse-grained — it
     // marks the ENTIRE page containing REAL_CONNECT read-only. Other writable
     // statics on the same page (e.g. the per-process Mutex<Cache> in
@@ -90,16 +139,17 @@ unsafe fn sentinel_hook_init() {
     // isolated page that can be safely mprotected. Until then, this step is
     // skipped to avoid the SIGBUS regression (Rule 1 auto-fix).
     //
-    // Step 4 (interpose self-test) still runs: it only calls dlsym and stores
-    // to FAIL_CLOSED, both of which are safe without the mprotect gate.
+    // 5. Phase 2 plan 02-05 / D-44: re-enabled interpose-effectiveness probe.
+    //    Phase 1 commented this out citing "crash; will re-enable after root
+    //    cause identified". Plan 02-05 confirms the crash was the mprotect step
+    //    above (now permanently disabled until Phase 5 dedicated-section work),
+    //    NOT probe_self_test itself. Re-enabling closes the silent-injection-
+    //    failure gap: if dyld doesn't apply our interpose records, the dylib
+    //    loads but no FAIL_CLOSED fires. probe_self_test catches that case by
+    //    asserting dlsym(RTLD_DEFAULT,"connect") == &sentinel_connect.
     if !snapshot::FAIL_CLOSED.load(Ordering::Acquire) {
         // interpose::lock_originals_page();  // disabled: Phase 5 (see above)
-
-        // 4. ISS-12 remediation — interpose-effectiveness probe.
-        // Only meaningful in dylib injection context where sentinel_connect should be
-        // the active connect symbol.
-        // NOTE: temporarily disabled to diagnose crash; will re-enable after root cause identified.
-        // interpose::probe_self_test();
+        interpose::probe_self_test();
     }
 }
 

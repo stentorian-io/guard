@@ -9,8 +9,9 @@
 //! number for the < 100µs project constraint; this bench is a regression
 //! detector for the matcher component only.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use sentinel_core::{evaluate_rule, AllowlistEntry, MatchType, RuleKind, RuleTier, Verdict};
+use std::hint::black_box;
 
 fn entry(kind: RuleKind, mt: MatchType, pattern: &str) -> AllowlistEntry {
     AllowlistEntry {

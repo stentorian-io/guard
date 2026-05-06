@@ -63,6 +63,9 @@ fn gc_preserves_live_snapshots() {
         tracked_root: token,
         snapshot_path: snap_path.clone(),
         manifest_path: manifest_path.clone(),
+        is_tty: false,
+        baseline_mode: false,
+        project_toml_path: None,
     });
 
     gc_sweep(&state_dir, &tree);
@@ -94,6 +97,9 @@ fn gc_removes_dead_pid_snapshots() {
         tracked_root: token,
         snapshot_path: snap_path.clone(),
         manifest_path: manifest_path.clone(),
+        is_tty: false,
+        baseline_mode: false,
+        project_toml_path: None,
     });
 
     gc_sweep(&state_dir, &tree);
@@ -125,6 +131,9 @@ fn gc_skips_runrecord_with_zero_pid_placeholder() {
         tracked_root: token,
         snapshot_path: snap_path.clone(),
         manifest_path: manifest_path.clone(),
+        is_tty: false,
+        baseline_mode: false,
+        project_toml_path: None,
     });
 
     gc_sweep(&state_dir, &tree);

@@ -65,6 +65,64 @@ fn evaluate_cloud_metadata_denies_unconditionally() {
 }
 
 #[test]
+fn blocker_01_regression_libc_hot_path_contract() {
+    // BLOCKER-01 (Phase 2 review): the libc hot path
+    // (`replace_libc.rs::decide_for_sockaddr`) now delegates to
+    // `evaluate_policy`. This test pins the contract for the exact inputs the
+    // libc path passes:
+    //
+    //   1. Cache-hit / hostname-known: host=bytes, ip=Some(rendered),
+    //      resolved=true → tier-walk fires. Cloud-metadata host wins.
+    //   2. Cache-miss / connect-by-IP: host=b"", ip=Some(rendered),
+    //      resolved=false → raw-IP cache-miss-deny fires unless loopback or
+    //      cloud-metadata short-circuits first.
+    //
+    // The previous Phase 1 `match_hostname_compat` walker did NOT enforce
+    // these hard rules — a `.sentinel.toml` ProjectAllow for IMDS would have
+    // allowed AWS/Azure/GCP cloud-metadata exfil. Closing that gap is the
+    // single most important behaviour change of the Phase 2 review fix pass.
+
+    // Case 1: cache-hit on cloud-metadata host with a project allow override —
+    // the hard rule MUST win even though host+ip+entries+resolved matches a
+    // would-be allow.
+    let allow_imds = [entry(
+        RuleKind::Allow,
+        RuleTier::ProjectAllow,
+        MatchType::Ip,
+        "169.254.169.254",
+    )];
+    let (v1, src1) = evaluate_policy(
+        b"169.254.169.254",
+        Some(b"169.254.169.254"),
+        true,
+        &allow_imds,
+    );
+    assert_eq!(v1, Verdict::Deny, "cloud-metadata hard rule must win even with ProjectAllow override");
+    assert_eq!(src1, SourceKind::HardRule("cloud-metadata"));
+
+    // Case 2: cache-miss / numeric-IP connect with no prior getaddrinfo →
+    // raw-IP cache-miss-deny fires. The libc hot path passes host=b"" and
+    // resolved_via_getaddrinfo=false in this state.
+    let (v2, src2) = evaluate_policy(b"", Some(b"203.0.113.5"), false, &[]);
+    assert_eq!(v2, Verdict::Deny);
+    assert_eq!(src2, SourceKind::HardRule("raw-ip-cache-miss"));
+
+    // Case 3: cache-miss connect to IMDS by raw IP with NO entries — both
+    // raw-IP cache-miss-deny AND cloud-metadata hard rules apply; cloud
+    // metadata is checked first inside the evaluator (Tier 0b before 0c).
+    let (v3, src3) = evaluate_policy(b"", Some(b"169.254.169.254"), false, &[]);
+    assert_eq!(v3, Verdict::Deny);
+    assert_eq!(src3, SourceKind::HardRule("cloud-metadata"));
+
+    // Case 4: cache-miss connect to a loopback IP — loopback hard rule wins
+    // over cache-miss-deny (Tier 0a before 0c). The libc path's previous
+    // `node_connect_to_loopback_is_allowed` plan-02-07 fix must not regress.
+    let (v4, src4) = evaluate_policy(b"", Some(b"127.0.0.1"), false, &[]);
+    assert_eq!(v4, Verdict::Allow);
+    assert_eq!(src4, SourceKind::HardRule("loopback"));
+}
+
+#[test]
 fn evaluate_raw_ip_cache_miss_denies_allow_08() {
     // No prior getaddrinfo → deny.
     let (v, src) = evaluate_policy(b"", Some(b"203.0.113.5"), false, &[]);

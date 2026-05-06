@@ -103,6 +103,12 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
             tracing::debug!(run_uuid = %reader_uuid_for_cleanup, "prompt_channel reader exited");
         });
 
+    // WR-11: periodic dedup-window GC. The dispatch arms call forget() on
+    // every successful response/cancel, but a Resolve that times out without
+    // either path firing (e.g. process exit before the user answered) leaves
+    // a stale dedup entry behind. A 30-second tick reaps those reliably given
+    // the 5-second dedup window.
+    let gc_tick = crossbeam_channel::tick(std::time::Duration::from_secs(30));
     loop {
         select! {
             recv(rx) -> r => match r {
@@ -118,6 +124,9 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
                 Ok(ClientChannelFrame::Response(resp)) => dispatch_response(&state, &run_uuid, resp),
                 Ok(ClientChannelFrame::Cancel(c)) => dispatch_cancel(&state, &run_uuid, c),
                 Err(_) => break,
+            },
+            recv(gc_tick) -> _ => {
+                state.prompt_dedup.gc_expired();
             },
         }
     }
@@ -185,8 +194,15 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
     };
 
     // Signal the parked Resolve handler thread.
-    if let Some(sender) = state.deferred_resolve.take(&resp.prompt_id) {
-        let _ = sender.send(verdict_for_dylib);
+    // WR-11: use take_full so we know the (run_uuid, host, port) and can
+    // forget() the dedup entry. Otherwise PromptDedup entries pile up over
+    // the run's lifetime and a re-attempt to the same host within the 5s
+    // dedup window would reuse the dead prompt_id.
+    if let Some(entry) = state.deferred_resolve.take_full(&resp.prompt_id) {
+        let _ = entry.sender.send(verdict_for_dylib);
+        state
+            .prompt_dedup
+            .forget(&entry.run_uuid, &entry.host, entry.port);
     } else {
         tracing::warn!(
             prompt_id = %resp.prompt_id,
@@ -196,8 +212,12 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
 }
 
 fn dispatch_cancel(state: &DaemonState, run_uuid: &str, cancel: PromptCancel) {
-    if let Some(sender) = state.deferred_resolve.take(&cancel.prompt_id) {
-        let _ = sender.send(sentinel_core::Verdict::Deny);
+    // WR-11: same as dispatch_response — clear the dedup entry on cancel.
+    if let Some(entry) = state.deferred_resolve.take_full(&cancel.prompt_id) {
+        let _ = entry.sender.send(sentinel_core::Verdict::Deny);
+        state
+            .prompt_dedup
+            .forget(&entry.run_uuid, &entry.host, entry.port);
     }
     let row = LogRow::Gap(GapRecord {
         schema_version: JSONL_SCHEMA_VERSION,

@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use sentinel_cli::cli::{Cli, Cmd};
-use sentinel_cli::{audit_token, install, ipc_client, locate, shell_setup, spawn, trust_policy, uninstall, CliError};
+use sentinel_cli::{approve, audit_token, install, ipc_client, locate, shell_setup, spawn, trust_policy, uninstall, CliError};
 use sentinel_daemon::state_dir::{default_state_dir, socket_path};
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -103,9 +103,10 @@ fn real_main() -> Result<i32, CliError> {
             sentinel_cli::status::run_status(&sock, &state, verbose, json)
         }
         Cmd::Logs { follow } => sentinel_cli::logs::run_logs(follow),
-        Cmd::Approve { .. } => {
-            eprintln!("sentinel approve: pending plan 03-11");
-            Ok(0)
+        Cmd::Approve { pattern, suffix, project, from_log, yes } => {
+            approve::run_approve(&sock, approve::ApproveArgs {
+                pattern, suffix, project, from_log, yes,
+            })
         }
     }
 }

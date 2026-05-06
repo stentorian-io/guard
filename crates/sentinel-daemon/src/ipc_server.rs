@@ -299,6 +299,31 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
         );
         return;
     }
+    // BLOCKER-02 fix: verify the peer is in the tracked tree BEFORE recording
+    // a fork. Without this gate, a stray DYLD_INSERT_LIBRARIES injection into
+    // a process that is NOT under `sentinel run` would trigger ForkEvent IPC
+    // for every child the parent forks; the daemon would call `record_fork`
+    // (which fails with `ParentNotFound`), the dylib would receive
+    // `ForkAck::Err`, and `replace_fork.rs::sentinel_fork` would fail-closed
+    // (kill the child + EAGAIN). Net effect on a non-tracked parent: every
+    // fork it ever makes is killed — a self-DoS attack surface.
+    //
+    // Reply with the dedicated `untracked-peer` message so the dylib can
+    // distinguish "peer not in tree, ignore me, do not fail-closed" from a
+    // real daemon-side rejection. See replace_fork.rs for the matching
+    // client-side handling.
+    if !state.process_tree.is_tracked(&peer_token) {
+        debug!(
+            peer_pid = peer_token.val[5],
+            "ForkEvent from untracked peer; ignoring (peer is not under sentinel run)"
+        );
+        let _ = write_tagged(
+            stream,
+            MessageTag::ForkEvent,
+            &ForkAck::err("untracked peer; ignoring fork event"),
+        );
+        return;
+    }
     // ENF-08: trust peer-auth, not wire-claimed parent.
     let wire_parent_pid = ev.parent_audit_token.val[5];
     let kernel_pid = peer_token.val[5];
@@ -370,6 +395,22 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
         );
         return;
     }
+    // BLOCKER-02 fix: verify the peer is in the tracked tree BEFORE recording
+    // an exec or arming the gap detector. An untracked peer (DYLD-injected
+    // dylib in a process outside `sentinel run`) must not be able to mutate
+    // tree state or arm a coverage-gap timer.
+    if !state.process_tree.is_tracked(&peer_token) {
+        debug!(
+            peer_pid = peer_token.val[5],
+            "ExecEvent from untracked peer; ignoring (peer is not under sentinel run)"
+        );
+        let _ = write_tagged(
+            stream,
+            MessageTag::ExecEvent,
+            &ExecAck::err("untracked peer; ignoring exec event"),
+        );
+        return;
+    }
     // The exec'ing process is the peer (peer_token); record_exec updates its binary_path.
     let target_path = String::from_utf8_lossy(&ev.target_path).into_owned();
     let _ = state
@@ -415,6 +456,22 @@ fn handle_dylib_loaded(stream: &mut UnixStream, peer_token: AuditToken, state: &
                 "schema_version {} != IPC_SCHEMA_V2",
                 ev.schema_version
             )),
+        );
+        return;
+    }
+    // BLOCKER-02 fix: only cancel a gap-detector timer for a tracked peer.
+    // An untracked peer should not be able to silently cancel timers that
+    // were never armed for it (no-op anyway), but rejecting cleanly avoids
+    // the dylib re-trying.
+    if !state.process_tree.is_tracked(&peer_token) {
+        debug!(
+            peer_pid = peer_token.val[5],
+            "DylibLoaded from untracked peer; ignoring"
+        );
+        let _ = write_tagged(
+            stream,
+            MessageTag::DylibLoaded,
+            &DylibLoadedAck::err("untracked peer; ignoring dylib_loaded event"),
         );
         return;
     }

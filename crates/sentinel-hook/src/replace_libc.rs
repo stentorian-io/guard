@@ -11,32 +11,36 @@ use crate::ALLOWLIST;
 use core::ffi::{c_char, c_int, c_void};
 use core::sync::atomic::Ordering;
 use libc::{msghdr, size_t, ssize_t, sockaddr, socklen_t};
-use sentinel_core::{evaluate_rule, is_loopback_host, is_loopback_ip, AllowlistEntry, Verdict};
+use sentinel_core::{policy::evaluate_policy, AllowlistEntry, Verdict};
 
-/// Phase-1 compatibility shim: walk a flat `entries` slice and return the
-/// FIRST matching entry's verdict; Deny if no entry matches. Plan 02-02 will
-/// replace callers of this with the tier-walk `evaluate_policy` evaluator.
+/// BLOCKER-01 fix (Phase 2 review): the libc hot path now delegates to the
+/// V2 tier-walk evaluator (`sentinel_core::policy::evaluate_policy`) — the
+/// SAME chokepoint used by `replace_nw.rs::decide_for_nw_connection`.
+///
+/// This closes the BLOCKER-01 finding: the cloud-metadata hard rule (D-25b)
+/// for `169.254.169.254` / `fe80::a9fe:a9fe`, the raw-IP cache-miss hard rule
+/// (D-25c / ALLOW-08), AND the loopback hard rule (D-25a) are now ALL
+/// enforced on the libc connect/sendto/sendmsg/connectx path — even when a
+/// `.sentinel.toml` ProjectAllow entry tries to allow IMDS. The tier-walk
+/// also produces correct `SourceKind` attribution for the daemon's block-log
+/// (Phase 3 surfacing).
+///
+/// Inputs:
+///   - `host`: the cache-resolved hostname bytes, OR empty if connect-by-IP
+///   - `ip`: ASCII rendering of the destination IP, OR None
+///   - `resolved_via_getaddrinfo`: true if we found this destination in the
+///     dylib's per-process getaddrinfo cache (i.e. some prior code path
+///     resolved it through getaddrinfo). False if connect happened with a
+///     hardcoded numeric address with no prior resolution.
 #[inline]
-fn match_hostname_compat(entries: &[AllowlistEntry], host: &[u8]) -> Verdict {
-    for e in entries {
-        if let Some(v) = evaluate_rule(e, host) {
-            return v;
-        }
-    }
-    Verdict::Deny
-}
-
-/// D-25a hard rule: loopback is always allowed. The dylib's libc connect
-/// hot path (decide_for_ip_sockaddr) consults this BEFORE the snapshot
-/// allowlist — matching `sentinel_core::policy::evaluate_policy`'s tier
-/// ordering. Plan 02-07 closed the deferred bug where per-run snapshots
-/// (which do NOT include loopback entries — loopback is hard-rule code)
-/// caused `sentinel run` to deny localhost connects, breaking
-/// `node_connect_to_loopback_is_allowed` and any node script that talks
-/// to local services (the dev-loop case).
-#[inline]
-fn ip_or_host_is_loopback(slice: &[u8]) -> bool {
-    is_loopback_ip(slice) || is_loopback_host(slice)
+fn evaluate_in_hook(
+    host: &[u8],
+    ip: Option<&[u8]>,
+    resolved_via_getaddrinfo: bool,
+    entries: &[AllowlistEntry],
+) -> Verdict {
+    let (verdict, _src) = evaluate_policy(host, ip, resolved_via_getaddrinfo, entries);
+    verdict
 }
 
 // BL-04 fix: RAII reentrancy guard.
@@ -385,59 +389,42 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
         Some(v) => v,
         None => return Verdict::Deny,
     };
-    // Look up in cache for hostname.
+    // Look up the hostname in the per-process getaddrinfo cache. A cache hit
+    // means the sockaddr was previously resolved via getaddrinfo for THIS
+    // process — the tier-walk evaluator's `resolved_via_getaddrinfo` flag.
     let host = with_cache(|c| {
-        // Copy the hostname out of the cache to avoid holding the lock across match_hostname.
+        // Copy the hostname out of the cache to avoid holding the lock
+        // across the policy evaluation.
         c.lookup(&sa_buf[..sa_n]).map(|h| {
             let mut buf = [0u8; MAX_HOSTNAME];
             buf[..h.len()].copy_from_slice(h);
             (buf, h.len())
         })
     });
+
+    // BLOCKER-01 fix: rebuild the (host_bytes, ip_bytes, resolved) triple and
+    // delegate to `evaluate_policy`. The evaluator's hard rules cover
+    // loopback (D-25a), cloud-metadata (D-25b), and raw-IP cache-miss
+    // (D-25c / ALLOW-08) — the libc hot path now enforces them all, with
+    // correct precedence even when a project allow tries to override.
+    //
+    // Render the IP for evaluator use (small stack buffer; no heap alloc).
+    let mut ip_buf = [0u8; 64];
+    let ip_slice: Option<&[u8]> = unsafe { ip_to_str(addr, addrlen, &mut ip_buf) };
+
     match host {
         Some((buf, n)) => {
-            // D-25a hard rule: loopback hostname (e.g. "localhost") always allowed,
-            // regardless of snapshot contents.
-            if ip_or_host_is_loopback(&buf[..n]) {
-                return Verdict::Allow;
-            }
-            match_hostname_compat(entries, &buf[..n])
+            // Cache hit: getaddrinfo previously resolved this destination.
+            evaluate_in_hook(&buf[..n], ip_slice, true, entries)
         }
         None => {
-            // No prior getaddrinfo for this sockaddr → could be hardcoded-IP egress.
-            // D-17: deny by default within tracked subtrees.
-            // Phase 1: if the sockaddr is an IPv4/IPv6 address that ALSO appears as
-            // an Ip(_) entry in the allowlist (e.g. 127.0.0.1), allow it. Loopback
-            // hard-rule applied inside decide_for_ip_sockaddr too.
-            decide_for_ip_sockaddr(addr, addrlen, entries)
+            // Cache miss: connect-by-IP with no prior resolution. Pass an
+            // empty host so the evaluator tier-walks against the IP only;
+            // the cache-miss-deny hard rule fires at this point unless the
+            // destination is loopback (the loopback hard rule comes first
+            // inside `evaluate_policy`).
+            evaluate_in_hook(b"", ip_slice, false, entries)
         }
-    }
-}
-
-fn decide_for_ip_sockaddr(
-    addr: *const sockaddr,
-    addrlen: socklen_t,
-    entries: &[AllowlistEntry],
-) -> Verdict {
-    if addr.is_null() {
-        return Verdict::Deny;
-    }
-    let mut buf = [0u8; 64];
-    let s = unsafe { ip_to_str(addr, addrlen, &mut buf) };
-    if let Some(slice) = s {
-        // D-25a hard rule: loopback always allowed. Per-run snapshots from
-        // PrepareSnapshot don't include loopback entries (loopback lives in
-        // policy.rs as a hard rule, not in the curated YAML). Without this
-        // check, `sentinel run node …` would deny local connects, breaking
-        // any tool that talks to a local dev server or unix-emulated TCP.
-        // Plan 02-07 closed the deferred `node_connect_to_loopback_is_allowed`
-        // flake by adding this short-circuit.
-        if ip_or_host_is_loopback(slice) {
-            return Verdict::Allow;
-        }
-        match_hostname_compat(entries, slice)
-    } else {
-        Verdict::Deny
     }
 }
 

@@ -8,3 +8,4 @@ pub mod peer_auth;
 pub mod tracked;
 pub mod dev_install;
 pub mod rule_store;
+pub mod policy_file;

@@ -118,7 +118,7 @@ fn sha256_of_file_returns_64_char_hex() {
     assert_eq!(h.len(), 64);
     assert!(h
         .chars()
-        .all(|c| c.is_ascii_hexdigit() && (c.is_ascii_digit() || c.is_ascii_lowercase())));
+        .all(|c: char| c.is_ascii_hexdigit() && (c.is_ascii_digit() || c.is_ascii_lowercase())));
     // Known sha256("hello"):
     assert_eq!(
         h,

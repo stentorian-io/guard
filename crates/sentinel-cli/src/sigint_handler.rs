@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::Pid;
 use signal_hook::consts::SIGINT;
-use signal_hook::iterator::Signals;
+use signal_hook::iterator::{Handle, Signals};
 
 use crate::prompt_channel::{InflightPrompts, PromptChannel};
 use crate::CliError;
@@ -22,6 +22,11 @@ use crate::CliError;
 #[derive(Clone)]
 pub struct SigIntHandle {
     stop: Arc<AtomicBool>,
+    /// WR-01: signal-hook iterator handle. Calling `close()` unblocks
+    /// `signals.forever()` so the spawned thread exits cleanly when this
+    /// handle is dropped, instead of remaining parked until the next SIGINT
+    /// arrives in this or any subsequent CLI invocation.
+    handle: Handle,
 }
 
 pub type SharedChannel = Arc<Mutex<Option<PromptChannel>>>;
@@ -36,6 +41,9 @@ pub fn install(
 
     let mut signals = Signals::new([SIGINT])
         .map_err(|e| CliError::Other(format!("install SIGINT handler: {e}")))?;
+    // WR-01: capture the handle BEFORE moving `signals` into the spawned
+    // thread. Drop semantics call handle.close() to unblock forever().
+    let handle = signals.handle();
 
     let _ = std::thread::Builder::new()
         .name("sentinel-sigint".into())
@@ -50,7 +58,7 @@ pub fn install(
         })
         .map_err(|e| CliError::Other(format!("spawn sigint thread: {e}")))?;
 
-    Ok(SigIntHandle { stop })
+    Ok(SigIntHandle { stop, handle })
 }
 
 /// Synchronous core of the SIGINT handler. Extracted for unit testing.
@@ -72,5 +80,11 @@ pub fn handle_sigint(inflight: &InflightPrompts, channel: &SharedChannel, pgid: 
 impl Drop for SigIntHandle {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
+        // WR-01: unblock the parked `signals.forever()` iterator so the
+        // sigint thread exits cleanly. Without this the thread sits there
+        // until the next SIGINT in this process — which may never come, or
+        // may arrive in a subsequent CLI invocation producing spurious
+        // behavior.
+        self.handle.close();
     }
 }

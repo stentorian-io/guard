@@ -393,10 +393,37 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
         ],
     };
     let result = state.process_tree.record_fork(peer_token, child);
+    let recorded_ok = result.is_ok();
     let reply = match result {
         Ok(()) => ForkAck::ok(),
         Err(e) => ForkAck::err(format!("record_fork: {e}")),
     };
+    // WARNING-04 fix: after a successful fork, if the CHILD is hardened-
+    // runtime, arm a gap detector against the child's audit token. The
+    // existing exec-time arming (at handle_exec_event) only fires for the
+    // calling process (peer_token = the parent), which misses the
+    // posix_spawn case where the child is hardened: the parent is NOT
+    // hardened (it's the process that issued posix_spawn, ergo loaded the
+    // dylib), so the exec-time arming never sees a hardened bit.
+    //
+    // Arming on the child after fork closes the TREE-04 transitive
+    // coverage gap: if the hardened child fails to inject the dylib (DYLD
+    // env stripped), no DylibLoaded arrives within the gap window and the
+    // detector records `ConfirmedHardened`. The dylib's libc enforcement
+    // path is unaffected by this arming — it's purely a forensic / log
+    // signal so the user can see "this process slipped through".
+    if recorded_ok {
+        let child_pid = ev.child_pid as libc::pid_t;
+        if is_hardened_runtime(child_pid) {
+            let gap = CoverageGap::ConfirmedHardened {
+                binary_path: String::new(), // filled by ExecEvent if/when it arrives
+                detected_at_ms: unix_ms_now(),
+            };
+            state
+                .gap_detector
+                .arm(child, gap, state.process_tree.clone());
+        }
+    }
     if let Err(e) = write_tagged(stream, MessageTag::ForkEvent, &reply) {
         error!(error = %e, "failed to send ForkAck");
     }

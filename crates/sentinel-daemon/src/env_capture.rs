@@ -23,8 +23,15 @@ pub const PM_ENV_PREFIXES: &[&str] = &[
 ];
 
 /// Per RESEARCH.md "Open Questions for Planner Discretion §7" (R-08 mitigation).
-/// Exact-match (case-sensitive) denylist for keys whose VALUES are credentials,
+/// Case-INSENSITIVE exact-match denylist for keys whose VALUES are credentials,
 /// even though the KEYS happen to match a PM_ENV_PREFIXES entry.
+///
+/// CR-07: comparison is case-insensitive because npm normalizes config-key env
+/// vars case-insensitively (`npm` reads `NPM_CONFIG_AUTHTOKEN`,
+/// `npm_config_authtoken`, `NpM_cOnFiG_AuThToKeN` interchangeably) and bundler
+/// does the same for its env vars. A user with `NPM_CONFIG_AUTHTOKEN` set in
+/// their shell would otherwise leak their token into pm_env_snapshot and
+/// downstream JSONL log entries.
 pub const SECRET_DENYLIST: &[&str] = &[
     // npm authentication / publish credentials
     "npm_config_authToken",
@@ -43,6 +50,39 @@ pub const SECRET_DENYLIST: &[&str] = &[
     "COMPOSER_AUTH",
 ];
 
+/// CR-07: substring patterns that suggest a key holds credentials regardless
+/// of which package-manager prefix introduced it. Matches are case-insensitive
+/// and substring-anchored — e.g. any key containing "TOKEN", "_AUTH", "PASSWORD",
+/// "SECRET", or that ends in "_KEY" gets dropped. Tightly scoped to keep
+/// false positives low (e.g. CARGO_TARGET_DIR matches none of these).
+const SECRET_SUBSTRING_PATTERNS: &[&str] = &[
+    "TOKEN",
+    "PASSWORD",
+    "SECRET",
+    "PASSWD",
+    "APIKEY",
+    "API_KEY",
+];
+
+/// CR-07: returns true if `key` is on the case-insensitive denylist OR contains
+/// a credential-like substring pattern. Pulled out as a helper so the unit test
+/// can assert behavior without duplicating logic.
+fn is_secret_key(key: &str) -> bool {
+    if SECRET_DENYLIST.iter().any(|d| d.eq_ignore_ascii_case(key)) {
+        return true;
+    }
+    let upper = key.to_ascii_uppercase();
+    if SECRET_SUBSTRING_PATTERNS.iter().any(|p| upper.contains(p)) {
+        return true;
+    }
+    // Defensive auth-suffix patterns: keys ending with "_AUTH" or containing
+    // "__AUTH" (npm uses double-underscore for nested config keys).
+    if upper.ends_with("_AUTH") || upper.contains("__AUTH") {
+        return true;
+    }
+    false
+}
+
 const MAX_VALUE_BYTES: usize = 512;
 
 /// Filter `env` to PM-relevant keys, dropping secrets and respecting the wire cap.
@@ -58,8 +98,9 @@ pub fn extract_pm_env(env: &[(String, String)]) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     let mut total = 0usize;
     for (k, v) in env {
-        // R-08: explicit exact-match denylist takes precedence over prefix-allowlist.
-        if SECRET_DENYLIST.iter().any(|d| *d == k.as_str()) {
+        // R-08 / CR-07: case-insensitive denylist + substring pattern check
+        // takes precedence over prefix-allowlist.
+        if is_secret_key(k.as_str()) {
             continue;
         }
         // Prefix-allowlist gate.

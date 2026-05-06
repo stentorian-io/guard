@@ -3,11 +3,12 @@
 use clap::{Parser, Subcommand};
 use sentinel_core::Snapshot;
 use sentinel_daemon::dev_install;
-use sentinel_daemon::ipc_server::IpcServer;
+use sentinel_daemon::gap_detector::GapDetector;
+use sentinel_daemon::ipc_server::{DaemonState, IpcServer};
 use sentinel_daemon::manifest;
 use sentinel_daemon::snapshot::publish;
 use sentinel_daemon::state_dir::{default_state_dir, ensure_state_dir, ready_path, socket_path};
-use sentinel_daemon::tracked::TrackedRoots;
+use sentinel_daemon::tracked::ProcessTree;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
@@ -64,8 +65,10 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         "snapshot published"
     );
 
-    let tracked = Arc::new(TrackedRoots::new());
-    let server = IpcServer::bind(&socket_path(&state_dir), tracked.clone())?;
+    let process_tree = Arc::new(ProcessTree::new());
+    let gap_detector = Arc::new(GapDetector::new());
+    let state = Arc::new(DaemonState::new(process_tree, gap_detector));
+    let server = IpcServer::bind(&socket_path(&state_dir), state)?;
     let pid = unsafe { libc::getpid() };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

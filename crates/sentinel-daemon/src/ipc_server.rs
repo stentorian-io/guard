@@ -32,20 +32,87 @@ use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     BaselineCommit, BaselineCommitReply, DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap,
     EnvNotPropagatedGapAck, ExecAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3,
-    InsertUserRule, InsertUserRuleReply, IpcError, PrepareSnapshot, PromptChannelInitAck,
-    ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply, Resolve, ResolveReply,
-    SnapshotReply, Status, StatusReply, TrustPolicy, TrustPolicyReply,
+    InsertUserRule, InsertUserRuleReply, IpcError, PrepareSnapshot, PromptChannelInit,
+    PromptChannelInitAck, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply,
+    Resolve, ResolveReply, SnapshotReply, Status, StatusReply, TrustPolicy, TrustPolicyReply,
 };
+use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tracing::{debug, error, info, warn};
 
-pub const WORKER_THREADS: usize = 16;
+// ============================================================================
+// Phase 3 plan 03-12 — DeferredResolveTable (D-45 / BLOCKER #3)
+// ============================================================================
+
+/// An entry parked in the DeferredResolveTable waiting for a user prompt response.
+pub struct DeferredEntry {
+    pub run_uuid: String,
+    pub host: String,
+    pub port: u16,
+    pub sender: crossbeam_channel::Sender<sentinel_core::Verdict>,
+}
+
+/// Maps prompt_id → DeferredEntry. The Resolve handler inserts when parking;
+/// the prompt-channel handler takes when PromptResponse arrives.
+pub struct DeferredResolveTable {
+    pending: Mutex<HashMap<String, DeferredEntry>>,
+    counter: AtomicU64,
+}
+
+impl DeferredResolveTable {
+    pub fn new() -> Self {
+        Self {
+            pending: Mutex::new(HashMap::new()),
+            counter: AtomicU64::new(0),
+        }
+    }
+
+    /// Generate a fresh, unique prompt_id string ("p-00000042" style).
+    pub fn next_prompt_id(&self) -> String {
+        let n = self.counter.fetch_add(1, Ordering::Relaxed);
+        format!("p-{n:08}")
+    }
+
+    pub fn insert(&self, prompt_id: String, entry: DeferredEntry) {
+        let mut g = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+        g.insert(prompt_id, entry);
+    }
+
+    /// Remove the entry and return its Sender. Returns None if already taken.
+    pub fn take(
+        &self,
+        prompt_id: &str,
+    ) -> Option<crossbeam_channel::Sender<sentinel_core::Verdict>> {
+        let mut g = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+        g.remove(prompt_id).map(|e| e.sender)
+    }
+
+    /// Send Deny on every sender whose entry.run_uuid matches; remove those entries.
+    /// Called during prompt-channel teardown to prevent parked Resolve handler thread leaks.
+    pub fn drain_for_run(&self, run_uuid: &str) {
+        let mut g = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+        let to_remove: Vec<String> = g
+            .iter()
+            .filter(|(_, e)| e.run_uuid == run_uuid)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in to_remove {
+            if let Some(entry) = g.remove(&k) {
+                let _ = entry.sender.send(sentinel_core::Verdict::Deny);
+            }
+        }
+    }
+}
+
+// raised from 16 → 32 in Phase 3 plan 03-12 — D-45 deferred-resolve mechanism blocks worker
+// threads on user prompts (D-47 indefinite hold).
+pub const WORKER_THREADS: usize = 32;
 pub const ACCEPT_QUEUE_DEPTH: usize = 64;
 
 /// Shared daemon state passed to every worker handler.
@@ -70,6 +137,9 @@ pub struct DaemonState {
     // Flipped to true on Err from publish_run; back to false on Ok.
     // Feeds compute_daemon_state → StatusReply.daemon_state = Degraded on failure.
     pub last_snapshot_publish_failed: AtomicBool,
+    // Phase 3 plan 03-12 (D-45 / BLOCKER #3): deferred-resolve table for
+    // park-pending-prompt mechanism in the Resolve handler.
+    pub deferred_resolve: Arc<DeferredResolveTable>,
 }
 
 impl DaemonState {
@@ -104,6 +174,7 @@ impl DaemonState {
             recent_gaps,
             baseline_staging,
             last_snapshot_publish_failed: AtomicBool::new(false),
+            deferred_resolve: Arc::new(DeferredResolveTable::new()),
         }
     }
 
@@ -288,14 +359,11 @@ impl IpcServer {
             FrameKind::Tagged(MessageTag::BaselineCommit) => {
                 handle_baseline_commit_frame(&mut stream, state);
             }
-            // Phase 3 plan 03-12 owns PromptChannelInit — stub returns explicit error Ack
-            // so the CLI's PromptChannel::open fails cleanly (T-03-08-04).
+            // Phase 3 plan 03-12 — long-lived prompt channel handler (POL-02 / D-76).
             FrameKind::Tagged(MessageTag::PromptChannelInit) => {
-                let _ = write_tagged(
-                    &mut stream,
-                    MessageTag::PromptChannelInit,
-                    &PromptChannelInitAck::err("PromptChannelInit not yet wired (plan 03-12)"),
-                );
+                handle_prompt_channel_init_frame(stream, state);
+                // NB: return here — the stream is now owned by the prompt-channel thread.
+                return;
             }
         }
     }
@@ -417,6 +485,85 @@ fn handle_baseline_commit_frame(stream: &mut UnixStream, state: &Arc<DaemonState
     let reply = crate::handlers::baseline_commit::handle_baseline_commit(&req, state);
     if let Err(e) = write_tagged(stream, MessageTag::BaselineCommit, &reply) {
         error!(error = %e, "failed to send BaselineCommitReply");
+    }
+}
+
+// ============================================================================
+// Phase 3 plan 03-12 — PromptChannelInit frame handler (spawn-and-detach)
+// ============================================================================
+
+/// Handle a PromptChannelInit tagged frame.
+///
+/// Takes `stream` BY VALUE (moved out of the `handle` dispatch loop via `return`
+/// so the dispatch loop does NOT drop it).  The function:
+///   1. Reads the PromptChannelInit body.
+///   2. Validates schema_version + run_uuid + R-05 cap.
+///   3. Writes Ok/Err Ack.
+///   4. On Ok: spawns a dedicated "sentineld-prompt-{uuid8}" thread that calls
+///      `handlers::prompt_channel::run(stream, state, run_uuid)`.
+///      Pitfall 4: the dedicated thread is NOT on the worker pool.
+fn handle_prompt_channel_init_frame(mut stream: UnixStream, state: &Arc<DaemonState>) {
+    let init: PromptChannelInit = match read_tagged_body(&mut stream) {
+        Ok(m) => m,
+        Err(e) => {
+            let _ = write_tagged(
+                &mut stream,
+                MessageTag::PromptChannelInit,
+                &PromptChannelInitAck::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if init.schema_version != IPC_SCHEMA_V3 {
+        let _ = write_tagged(
+            &mut stream,
+            MessageTag::PromptChannelInit,
+            &PromptChannelInitAck::err(format!(
+                "schema_version {} != V3",
+                init.schema_version
+            )),
+        );
+        return;
+    }
+    if state.process_tree.get_run(&init.run_uuid).is_none() {
+        let _ = write_tagged(
+            &mut stream,
+            MessageTag::PromptChannelInit,
+            &PromptChannelInitAck::err(format!("unknown run_uuid {}", init.run_uuid)),
+        );
+        return;
+    }
+    // BLOCKER #4 — R-05 cap gate.
+    let current = state.process_tree.prompt_channels_len();
+    if current >= crate::handlers::prompt_channel::MAX_CONCURRENT_CHANNELS {
+        let _ = write_tagged(
+            &mut stream,
+            MessageTag::PromptChannelInit,
+            &PromptChannelInitAck::err(format!(
+                "max concurrent channels reached ({})",
+                crate::handlers::prompt_channel::MAX_CONCURRENT_CHANNELS
+            )),
+        );
+        return;
+    }
+    // OK ack.
+    if let Err(e) = write_tagged(&mut stream, MessageTag::PromptChannelInit, &PromptChannelInitAck::ok()) {
+        error!(error = %e, "failed to send PromptChannelInit Ok Ack");
+        return;
+    }
+    // Pitfall 4: spawn-and-detach — dedicated thread, NOT a worker pool slot.
+    let state_clone = state.clone();
+    let run_uuid = init.run_uuid.clone();
+    if let Err(e) = std::thread::Builder::new()
+        .name(format!(
+            "sentineld-prompt-{}",
+            &run_uuid[..8.min(run_uuid.len())]
+        ))
+        .spawn(move || {
+            crate::handlers::prompt_channel::run(stream, state_clone, run_uuid)
+        })
+    {
+        error!(error = %e, "failed to spawn prompt_channel thread");
     }
 }
 
@@ -909,8 +1056,8 @@ fn handle_trust_policy_frame(
 
 fn handle_resolve_frame(
     stream: &mut UnixStream,
-    _peer_token: AuditToken,
-    _state: &Arc<DaemonState>,
+    peer_token: AuditToken,
+    state: &Arc<DaemonState>,
 ) {
     let req: Resolve = match read_tagged_body(stream) {
         Ok(m) => m,
@@ -935,6 +1082,123 @@ fn handle_resolve_frame(
         );
         return;
     }
+
+    // Phase 3 plan 03-12 / D-45: park-pending-prompt path.
+    // On cache-miss in TTY-mode tracked subtree with an open prompt channel,
+    // ask the user instead of immediately returning default-deny.
+    //
+    // The resolve handler is deliberately NOT a policy-checking handler
+    // (it performs DNS resolution). However for TTY runs we need to intercept
+    // here to route the prompt before the dylib makes the actual connect() —
+    // the dylib calls Resolve and then connect(); if the user denies, the
+    // connect() falls through to default-deny anyway.
+    //
+    // NOTE: We only park when the run has a prompt channel open. The actual
+    // policy evaluation happens at connect() time. This park is specifically
+    // for the case where the dylib calls Resolve to get an IP, then will call
+    // connect() to that IP — without the prompt, the dylib would proceed to
+    // connect() which default-denies. Parking here lets us get user approval
+    // BEFORE the connect() so the dylib's connect() is allowed.
+    let park_eligible = {
+        let node = state.process_tree.get_node(&peer_token);
+        let run_opt = node
+            .as_ref()
+            .and_then(|n| state.process_tree.get_run(&n.run_uuid));
+        match run_opt {
+            Some(run)
+                if run.is_tty
+                    && !run.baseline_mode
+                    && state
+                        .process_tree
+                        .get_prompt_channel(&run.run_uuid)
+                        .is_some() =>
+            {
+                Some(run.run_uuid.clone())
+            }
+            _ => None,
+        }
+    };
+
+    if let Some(run_uuid) = park_eligible {
+        let prompt_id = state.deferred_resolve.next_prompt_id();
+        let outcome = state
+            .prompt_dedup
+            .coalesce(&run_uuid, &req.host, req.port, &prompt_id);
+        let effective_id = match outcome {
+            crate::prompt::CoalesceOutcome::Fresh => prompt_id.clone(),
+            crate::prompt::CoalesceOutcome::Existing(other_id) => other_id,
+        };
+        let (tx, rx) = crossbeam_channel::bounded::<sentinel_core::Verdict>(1);
+        state.deferred_resolve.insert(
+            effective_id.clone(),
+            DeferredEntry {
+                run_uuid: run_uuid.clone(),
+                host: req.host.clone(),
+                port: req.port,
+                sender: tx,
+            },
+        );
+        // Build PromptRequest.
+        let suggested = crate::prompt::generate_suggested_rules(&req.host);
+        let process_ctx = sentinel_ipc::ProcessCtx {
+            pid: peer_token.val[5],
+            pidversion: peer_token.val[7],
+            argv0: state
+                .process_tree
+                .get_node(&peer_token)
+                .map(|n| n.binary_path.clone())
+                .unwrap_or_default(),
+            cwd: String::new(),
+        };
+        let request = sentinel_ipc::PromptRequest {
+            schema_version: IPC_SCHEMA_V3,
+            prompt_id: effective_id.clone(),
+            dest_host: req.host.clone(),
+            dest_port: req.port,
+            dest_ip: None,
+            source_kind: "resolve".to_string(),
+            source_locator: None,
+            package_context: None,
+            process: process_ctx,
+            intel: None,
+            suggested_rules: suggested,
+        };
+        if let Some(channel) = state.process_tree.get_prompt_channel(&run_uuid) {
+            if channel.try_send(request).is_err() {
+                // Channel saturated — fall back to deny; clean up deferred entry.
+                let _ = state.deferred_resolve.take(&effective_id);
+                let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
+                if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
+                    error!(error = %e, "failed to send ResolveReply (channel-saturated fallback)");
+                }
+                return;
+            }
+            // D-47: block indefinitely on user response. Ctrl-C is the abort path.
+            let verdict = rx.recv().unwrap_or(sentinel_core::Verdict::Deny);
+            match verdict {
+                sentinel_core::Verdict::Allow => {
+                    // Resolve the hostname — user approved the connection.
+                    let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
+                    if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
+                        error!(error = %e, "failed to send ResolveReply (prompt allow)");
+                    }
+                }
+                sentinel_core::Verdict::Deny => {
+                    // Deny: return an empty addresses reply so the dylib sees no IPs.
+                    let _ = write_tagged(
+                        stream,
+                        MessageTag::Resolve,
+                        &ResolveReply::err(format!("connection to {} denied by user", req.host)),
+                    );
+                }
+            }
+            return;
+        }
+        // Channel was taken between the eligibility check and the send — fall through.
+        let _ = state.deferred_resolve.take(&effective_id);
+    }
+
+    // Default path: perform DNS resolution and return.
     let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
     if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
         error!(error = %e, "failed to send ResolveReply");

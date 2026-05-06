@@ -9,6 +9,7 @@
 pub mod baseline_commit;
 pub mod insert_user_rule;
 pub mod prepare_snapshot;
+pub mod prompt_channel;
 pub mod read_install_artifacts;
 pub mod resolve;
 pub mod status;

@@ -11,7 +11,7 @@ use crate::ALLOWLIST;
 use core::ffi::{c_char, c_int, c_void};
 use core::sync::atomic::Ordering;
 use libc::{msghdr, size_t, ssize_t, sockaddr, socklen_t};
-use sentinel_core::{evaluate_rule, AllowlistEntry, Verdict};
+use sentinel_core::{evaluate_rule, is_loopback_host, is_loopback_ip, AllowlistEntry, Verdict};
 
 /// Phase-1 compatibility shim: walk a flat `entries` slice and return the
 /// FIRST matching entry's verdict; Deny if no entry matches. Plan 02-02 will
@@ -24,6 +24,19 @@ fn match_hostname_compat(entries: &[AllowlistEntry], host: &[u8]) -> Verdict {
         }
     }
     Verdict::Deny
+}
+
+/// D-25a hard rule: loopback is always allowed. The dylib's libc connect
+/// hot path (decide_for_ip_sockaddr) consults this BEFORE the snapshot
+/// allowlist — matching `sentinel_core::policy::evaluate_policy`'s tier
+/// ordering. Plan 02-07 closed the deferred bug where per-run snapshots
+/// (which do NOT include loopback entries — loopback is hard-rule code)
+/// caused `sentinel run` to deny localhost connects, breaking
+/// `node_connect_to_loopback_is_allowed` and any node script that talks
+/// to local services (the dev-loop case).
+#[inline]
+fn ip_or_host_is_loopback(slice: &[u8]) -> bool {
+    is_loopback_ip(slice) || is_loopback_host(slice)
 }
 
 // BL-04 fix: RAII reentrancy guard.
@@ -382,12 +395,20 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
         })
     });
     match host {
-        Some((buf, n)) => match_hostname_compat(entries, &buf[..n]),
+        Some((buf, n)) => {
+            // D-25a hard rule: loopback hostname (e.g. "localhost") always allowed,
+            // regardless of snapshot contents.
+            if ip_or_host_is_loopback(&buf[..n]) {
+                return Verdict::Allow;
+            }
+            match_hostname_compat(entries, &buf[..n])
+        }
         None => {
             // No prior getaddrinfo for this sockaddr → could be hardcoded-IP egress.
             // D-17: deny by default within tracked subtrees.
             // Phase 1: if the sockaddr is an IPv4/IPv6 address that ALSO appears as
-            // an Ip(_) entry in the allowlist (e.g. 127.0.0.1), allow it.
+            // an Ip(_) entry in the allowlist (e.g. 127.0.0.1), allow it. Loopback
+            // hard-rule applied inside decide_for_ip_sockaddr too.
             decide_for_ip_sockaddr(addr, addrlen, entries)
         }
     }
@@ -404,6 +425,16 @@ fn decide_for_ip_sockaddr(
     let mut buf = [0u8; 64];
     let s = unsafe { ip_to_str(addr, addrlen, &mut buf) };
     if let Some(slice) = s {
+        // D-25a hard rule: loopback always allowed. Per-run snapshots from
+        // PrepareSnapshot don't include loopback entries (loopback lives in
+        // policy.rs as a hard rule, not in the curated YAML). Without this
+        // check, `sentinel run node …` would deny local connects, breaking
+        // any tool that talks to a local dev server or unix-emulated TCP.
+        // Plan 02-07 closed the deferred `node_connect_to_loopback_is_allowed`
+        // flake by adding this short-circuit.
+        if ip_or_host_is_loopback(slice) {
+            return Verdict::Allow;
+        }
         match_hostname_compat(entries, slice)
     } else {
         Verdict::Deny

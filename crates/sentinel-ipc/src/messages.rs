@@ -30,7 +30,7 @@ impl From<AuditTokenWire> for sentinel_core::AuditToken {
 /// process makes any outbound calls.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RegisterRoot {
-    pub schema_version: u16,        // FIRST field — must equal IPC_SCHEMA_V1
+    pub schema_version: u16, // FIRST field — must equal IPC_SCHEMA_V1
     pub audit_token: AuditTokenWire,
 }
 
@@ -52,16 +52,320 @@ pub enum Reply {
 
 impl Reply {
     pub fn ack() -> Self {
-        Reply::Ack { schema_version: IPC_SCHEMA_V1 }
+        Reply::Ack {
+            schema_version: IPC_SCHEMA_V1,
+        }
     }
 
     pub fn err(m: impl Into<String>) -> Self {
-        Reply::Err { schema_version: IPC_SCHEMA_V1, message: m.into() }
+        Reply::Err {
+            schema_version: IPC_SCHEMA_V1,
+            message: m.into(),
+        }
     }
 
     pub fn schema(&self) -> u16 {
         match self {
             Reply::Ack { schema_version } | Reply::Err { schema_version, .. } => *schema_version,
+        }
+    }
+}
+
+// ============================================================================
+// Phase 2 message types (D-30 / D-35 / D-38 / D-42).
+//
+// Existing `RegisterRoot` + `Reply` are FROZEN at IPC_SCHEMA_V1=1 and unchanged.
+// Every new message has `schema_version: u16` as its FIRST field (or first
+// field of every enum variant). Recipients verify the field equals
+// `IPC_SCHEMA_V2` and reject otherwise.
+// ============================================================================
+
+pub const IPC_SCHEMA_V2: u16 = 2;
+
+// --- PrepareSnapshot / SnapshotReply (D-29, D-30) --------------------------
+
+/// CLI → daemon: sent BEFORE posix_spawn. Daemon walks up cwd to .sentinel.toml,
+/// merges curated YAML + SQLite + project rules, writes per-run snapshot,
+/// returns the manifest path the CLI will set as SENTINEL_SNAPSHOT_MANIFEST.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PrepareSnapshot {
+    pub schema_version: u16,
+    pub cwd: String,
+}
+
+impl PrepareSnapshot {
+    pub fn new(cwd: impl Into<String>) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V2,
+            cwd: cwd.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SnapshotReply {
+    Ok {
+        schema_version: u16,
+        manifest_path: String,
+        run_uuid: String,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl SnapshotReply {
+    pub fn ok(manifest_path: impl Into<String>, run_uuid: impl Into<String>) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V2,
+            manifest_path: manifest_path.into(),
+            run_uuid: run_uuid.into(),
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V2,
+            message: message.into(),
+        }
+    }
+}
+
+// --- ForkEvent / ForkAck (D-31, D-32) --------------------------------------
+
+/// Dylib → daemon: a fork(2) / vfork(2) / posix_spawn completed in a tracked
+/// process. Sent SYNCHRONOUSLY (D-31): the dylib blocks until ForkAck.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForkEvent {
+    pub schema_version: u16,
+    pub parent_audit_token: AuditTokenWire,
+    pub child_pid: i32,
+    pub child_pidversion: u32,
+}
+
+impl ForkEvent {
+    pub fn new(parent: AuditTokenWire, child_pid: i32, child_pidversion: u32) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V2,
+            parent_audit_token: parent,
+            child_pid,
+            child_pidversion,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ForkAck {
+    Ok { schema_version: u16 },
+    Err { schema_version: u16, message: String },
+}
+
+impl ForkAck {
+    pub fn ok() -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V2,
+        }
+    }
+    pub fn err(m: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V2,
+            message: m.into(),
+        }
+    }
+}
+
+// --- ExecEvent / ExecAck (D-31, D-32) --------------------------------------
+
+/// Dylib → daemon: an execve / posix_spawn / exec* call is being made.
+/// `target_path` is the binary the calling process is about to load. The
+/// daemon uses this in D-34 Phase A: csops(CS_OPS_STATUS) on the calling
+/// process's pid to decide if exec into target will strip DYLD env vars.
+///
+/// SECURITY (T-02-01-06): the wire allows arbitrary length but the daemon
+/// handler MUST reject `target_path.len() > 1024`. The dylib MUST cap copy
+/// at 1024 bytes before sending.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExecEvent {
+    pub schema_version: u16,
+    pub audit_token: AuditTokenWire,
+    #[serde(with = "serde_bytes")]
+    pub target_path: Vec<u8>,
+}
+
+impl ExecEvent {
+    /// Maximum acceptable target_path length (T-02-01-06). Senders MUST cap;
+    /// receivers MUST reject longer payloads.
+    pub const MAX_TARGET_PATH: usize = 1024;
+
+    pub fn new(token: AuditTokenWire, target_path: Vec<u8>) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V2,
+            audit_token: token,
+            target_path,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ExecAck {
+    Ok { schema_version: u16 },
+    Err { schema_version: u16, message: String },
+}
+
+impl ExecAck {
+    pub fn ok() -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V2,
+        }
+    }
+    pub fn err(m: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V2,
+            message: m.into(),
+        }
+    }
+}
+
+// --- DylibLoaded / DylibLoadedAck (D-35) -----------------------------------
+
+/// Dylib → daemon: dylib ctor reached the end successfully. Confirms injection
+/// for D-34's two-phase gap detection (closes the post-exec timeout window).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DylibLoaded {
+    pub schema_version: u16,
+    pub audit_token: AuditTokenWire,
+}
+
+impl DylibLoaded {
+    pub fn new(token: AuditTokenWire) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V2,
+            audit_token: token,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DylibLoadedAck {
+    Ok { schema_version: u16 },
+    Err { schema_version: u16, message: String },
+}
+
+impl DylibLoadedAck {
+    pub fn ok() -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V2,
+        }
+    }
+    pub fn err(m: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V2,
+            message: m.into(),
+        }
+    }
+}
+
+// --- Resolve / ResolveReply (D-42 — getaddrinfo daemon-proxy) --------------
+
+/// Dylib → daemon: resolve `host:port` via the daemon's un-interposed libc.
+/// D-42: replaces the dropped Phase 1 getaddrinfo interpose. Result cached in
+/// the dylib's per-process getaddrinfo-cache.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Resolve {
+    pub schema_version: u16,
+    pub host: String,
+    pub port: u16,
+}
+
+impl Resolve {
+    pub fn new(host: impl Into<String>, port: u16) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V2,
+            host: host.into(),
+            port,
+        }
+    }
+}
+
+/// 28 bytes = sizeof(sockaddr_in6) on Darwin — fits both AF_INET and AF_INET6
+/// addresses with room for the family/length prefix.
+pub const SOCKADDR_WIRE_LEN: usize = 28;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ResolveReply {
+    Addresses {
+        schema_version: u16,
+        addrs: Vec<[u8; SOCKADDR_WIRE_LEN]>,
+    },
+    Deny {
+        schema_version: u16,
+        reason: String,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl ResolveReply {
+    pub fn addresses(addrs: Vec<[u8; SOCKADDR_WIRE_LEN]>) -> Self {
+        Self::Addresses {
+            schema_version: IPC_SCHEMA_V2,
+            addrs,
+        }
+    }
+    pub fn deny(reason: impl Into<String>) -> Self {
+        Self::Deny {
+            schema_version: IPC_SCHEMA_V2,
+            reason: reason.into(),
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V2,
+            message: message.into(),
+        }
+    }
+}
+
+// --- TrustPolicy / TrustPolicyReply (D-38) ---------------------------------
+
+/// CLI → daemon: trust the (path, sha256) tuple — inserts into
+/// `trusted_policy_files` SQLite table. Subsequent `sentinel run` invocations
+/// from working directories below `path` will honor that .sentinel.toml.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrustPolicy {
+    pub schema_version: u16,
+    pub path: String,   // canonicalized absolute path
+    pub sha256: String, // 64-char lowercase hex
+}
+
+impl TrustPolicy {
+    pub fn new(path: impl Into<String>, sha256: impl Into<String>) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V2,
+            path: path.into(),
+            sha256: sha256.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TrustPolicyReply {
+    Ok { schema_version: u16 },
+    Err { schema_version: u16, message: String },
+}
+
+impl TrustPolicyReply {
+    pub fn ok() -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V2,
+        }
+    }
+    pub fn err(m: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V2,
+            message: m.into(),
         }
     }
 }

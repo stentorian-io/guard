@@ -35,6 +35,10 @@ pub fn ready_path(state_dir: &Path) -> PathBuf {
     state_dir.join("daemon.ready")
 }
 
+pub fn db_path(state_dir: &Path) -> PathBuf {
+    state_dir.join("sentinel.db")
+}
+
 /// Create state_dir with mode 0700 if missing. Idempotent.
 pub fn ensure_state_dir(state_dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;

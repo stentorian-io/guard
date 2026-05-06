@@ -48,6 +48,27 @@ pub static FAIL_CLOSED: &AtomicBool = &snapshot::FAIL_CLOSED;
 pub static ALLOWLIST: std::sync::OnceLock<Vec<sentinel_core::AllowlistEntry>> =
     std::sync::OnceLock::new();
 
+/// Test-only helper: call `replace_libc::decide_for_sockaddr` with a temporary ALLOWLIST
+/// override so integration tests can verify the full Resolve-IPC → cache → evaluate_policy
+/// chain without running the ctor or needing a real snapshot.
+///
+/// `_` prefix signals test-seam convention (not for production use).
+/// Exposed as pub because integration tests in `tests/` cannot see crate-private items.
+pub fn _test_decide_for_sockaddr(
+    entries: Vec<sentinel_core::AllowlistEntry>,
+    addr: *const libc::sockaddr,
+    addrlen: libc::socklen_t,
+) -> sentinel_core::Verdict {
+    // Temporarily override the ALLOWLIST so decide_for_sockaddr sees `entries`.
+    // If ALLOWLIST is already set (from a prior test), we skip the set (OnceLock can only be set once).
+    // Tests should avoid relying on a pre-set ALLOWLIST from the ctor.
+    let _ = ALLOWLIST.set(entries);
+    // Ensure FAIL_CLOSED is false so entries_or_deny() returns Some.
+    snapshot::FAIL_CLOSED.store(false, core::sync::atomic::Ordering::Release);
+    // SAFETY: caller provides a valid sockaddr pointer with matching addrlen.
+    unsafe { crate::replace_libc::_decide_for_sockaddr_pub(addr, addrlen) }
+}
+
 /// Constructor — runs when the library is loaded (both as dylib and in test rlib linkage).
 /// In non-dylib contexts (tests), SENTINEL_SNAPSHOT_MANIFEST is not set, so step 2
 /// sets FAIL_CLOSED and returns cleanly. Steps 3 and 4 are skipped via compile-time cfg.

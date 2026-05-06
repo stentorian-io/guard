@@ -4,14 +4,31 @@
 //! cache lookups against fixed-size storage; reentrancy-guard set/clear.
 
 use crate::cache::{Cache, MAX_HOSTNAME, MAX_SOCKADDR_BYTES};
+use crate::ipc_client::{daemon_socket_path, send_resolve_sync};
 use crate::log_buffer::LOG_RING;
 use crate::reentrancy::IN_HOOK;
 use crate::snapshot::FAIL_CLOSED;
 use crate::ALLOWLIST;
 use core::ffi::{c_char, c_int, c_void};
 use core::sync::atomic::Ordering;
-use libc::{msghdr, size_t, ssize_t, sockaddr, socklen_t};
-use sentinel_core::{policy::evaluate_policy, AllowlistEntry, Verdict};
+use libc::{msghdr, size_t, ssize_t, sockaddr, socklen_t, AF_INET, AF_INET6};
+use sentinel_core::{
+    allowlist::{MatchType, RuleKind, RuleTier},
+    policy::{evaluate_policy, is_cloud_metadata_ip, is_loopback_ip},
+    AllowlistEntry, Verdict,
+};
+use sentinel_ipc::SOCKADDR_WIRE_LEN;
+
+/// Maximum number of Resolve-IPC round-trips per connect() invocation.
+/// Bounds worst-case latency at MAX_RESOLVE_ATTEMPTS * RESOLVE_TIMEOUT_MS = 400ms.
+/// gap-closure 02-08: bounds Resolve-IPC slow-loris DoS budget (T-02-08-02).
+const MAX_RESOLVE_ATTEMPTS: usize = 4;
+
+/// Per-Resolve-IPC timeout in milliseconds. One-time cost per (host, port) pair;
+/// subsequent connects to the same sockaddr are cache-hit-only (sub-100µs).
+/// This deviates from the CLAUDE.md <100µs per-intercepted-call budget for
+/// the cache-miss warm-up path — documented in plan 02-08's threat model (T-02-08-02).
+const RESOLVE_TIMEOUT_MS: u64 = 100;
 
 /// BLOCKER-01 fix (Phase 2 review): the libc hot path now delegates to the
 /// V2 tier-walk evaluator (`sentinel_core::policy::evaluate_policy`) — the
@@ -349,6 +366,15 @@ unsafe extern "C" fn sentinel_sendmsg(
 
 // ---- shared decision path for connect/sendto/sendmsg ----
 
+/// Public re-export for test-seam use from lib.rs's _test_decide_for_sockaddr.
+/// `_` prefix signals test-seam convention.
+///
+/// # Safety
+/// Same as `decide_for_sockaddr` — `addr` must be null or point to a valid sockaddr.
+pub unsafe fn _decide_for_sockaddr_pub(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
+    decide_for_sockaddr(addr, addrlen)
+}
+
 fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
     // Phase 1 policy: Unix domain sockets (AF_UNIX) are always allowed.
     // They are local IPC — not network egress. Denying them breaks Node's
@@ -394,9 +420,93 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
     let mut ip_buf = [0u8; 64];
     let ip_slice: Option<&[u8]> = unsafe { ip_to_str(addr, addrlen, &mut ip_buf) };
 
+    // -- Resolve-IPC fallback (gap-closure 02-08) --
+    //
+    // On cache miss, before falling through to the raw-IP cache-miss-deny path,
+    // attempt to reverse-lookup the destination IP against the per-run snapshot's
+    // Exact CuratedAllow / ProjectAllow hostname entries via the daemon's Resolve
+    // handler (tag 0x06). If a match is found, populate the cache and re-issue
+    // evaluate_policy with the resolved hostname.
+    //
+    // Guards (ALL must be true to enter the fallback):
+    //   (a) host is None (cache miss)
+    //   (b) destination family is AF_INET or AF_INET6
+    //   (c) destination is NOT loopback (Tier 0a fires before cache in evaluate_policy;
+    //       Resolve-IPC is redundant and wasteful for loopback)
+    //   (d) destination is NOT cloud-metadata (same reason)
+    //   (e) daemon socket IS configured (daemon_socket_path().is_some())
+    let host = if host.is_none() && daemon_socket_path().is_some() {
+        // Determine the address family from the raw sockaddr bytes.
+        let af = if sa_n >= 2 { sa_buf[1] as i32 } else { 0 };
+        let is_inet = af == AF_INET || af == AF_INET6;
+
+        let not_loopback = ip_slice.map_or(true, |ip| !is_loopback_ip(ip));
+        let not_imds = ip_slice.map_or(true, |ip| !is_cloud_metadata_ip(ip));
+
+        if is_inet && not_loopback && not_imds {
+            // Extract port from bytes [2..4] of the sockaddr wire buffer (BE u16).
+            let port = if sa_n >= 4 {
+                u16::from_be_bytes([sa_buf[2], sa_buf[3]])
+            } else {
+                0
+            };
+
+            // Walk Exact CuratedAllow / ProjectAllow entries, capped at MAX_RESOLVE_ATTEMPTS.
+            let mut host_from_resolve: Option<(/* buf */ [u8; MAX_HOSTNAME], /* len */ usize)> = None;
+            let mut attempts = 0usize;
+            'resolve_walk: for entry in entries
+                .iter()
+                .filter(|e| {
+                    e.kind == RuleKind::Allow
+                        && (e.tier == RuleTier::CuratedAllow || e.tier == RuleTier::ProjectAllow)
+                        && e.match_type == MatchType::Exact
+                })
+            {
+                if attempts >= MAX_RESOLVE_ATTEMPTS {
+                    break;
+                }
+                attempts += 1;
+
+                match send_resolve_sync(&entry.pattern, port, RESOLVE_TIMEOUT_MS) {
+                    Ok(addrs) => {
+                        // Compare each returned sockaddr wire buffer against sa_buf[..sa_n].
+                        // The daemon's sockaddr_to_wire uses sa_len as byte[0], so the
+                        // match key is the first sa_n bytes of each wire buffer.
+                        for wire_addr in &addrs {
+                            // The wire addr is always SOCKADDR_WIRE_LEN bytes; compare
+                            // up to sa_n bytes (the caller's addrlen).
+                            let cmp_len = sa_n.min(SOCKADDR_WIRE_LEN);
+                            if &wire_addr[..cmp_len] == &sa_buf[..cmp_len] {
+                                // Match found: populate the cache so future connects
+                                // to the same sockaddr are cache-hit-only.
+                                with_cache(|c| c.insert(&sa_buf[..sa_n], entry.pattern.as_bytes()));
+                                let mut hbuf = [0u8; MAX_HOSTNAME];
+                                let hlen = entry.pattern.len().min(MAX_HOSTNAME);
+                                hbuf[..hlen].copy_from_slice(&entry.pattern.as_bytes()[..hlen]);
+                                host_from_resolve = Some((hbuf, hlen));
+                                break 'resolve_walk;
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Resolve failed for this entry — skip and try the next.
+                        // Do NOT fail-closed on a per-entry error; the next entry might match.
+                        continue;
+                    }
+                }
+            }
+            host_from_resolve
+        } else {
+            None
+        }
+    } else {
+        host
+    };
+
     match host {
         Some((buf, n)) => {
-            // Cache hit: getaddrinfo previously resolved this destination.
+            // Cache hit (or Resolve-IPC populated): getaddrinfo previously resolved this
+            // destination OR we just populated via send_resolve_sync.
             evaluate_in_hook(&buf[..n], ip_slice, true, entries)
         }
         None => {

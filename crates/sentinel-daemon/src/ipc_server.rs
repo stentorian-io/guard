@@ -93,6 +93,15 @@ impl DeferredResolveTable {
         g.remove(prompt_id).map(|e| e.sender)
     }
 
+    /// WR-11: take_full removes the entry and returns the entire DeferredEntry,
+    /// so callers can use the (run_uuid, host, port) tuple to also clear the
+    /// PromptDedup map for the same connection. dispatch_response / dispatch_cancel
+    /// use this so dedup entries don't pile up over a long run's lifetime.
+    pub fn take_full(&self, prompt_id: &str) -> Option<DeferredEntry> {
+        let mut g = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+        g.remove(prompt_id)
+    }
+
     /// Send Deny on every sender whose entry.run_uuid matches; remove those entries.
     /// Called during prompt-channel teardown to prevent parked Resolve handler thread leaks.
     pub fn drain_for_run(&self, run_uuid: &str) {

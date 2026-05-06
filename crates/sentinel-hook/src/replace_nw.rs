@@ -34,8 +34,16 @@ use crate::log_buffer::LOG_RING;
 use crate::reentrancy::IN_HOOK;
 use crate::snapshot::FAIL_CLOSED;
 use crate::ALLOWLIST;
-use core::ffi::{c_char, c_void};
+use core::ffi::{c_char, c_void, CStr};
 use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+
+// Objective-C runtime — used by `is_nw_object` to gate calls to NW APIs on
+// pointers that may or may not be NW objects (libuv passes opaque non-NW
+// pointers through `nw_connection_start`; see Phase 1 plan 07's "Phase 2
+// will add proper verdict extraction" note).
+unsafe extern "C" {
+    fn object_getClassName(obj: *mut c_void) -> *const c_char;
+}
 
 // ---- Per-symbol AtomicPtrs for captured originals ----
 
@@ -222,6 +230,124 @@ fn do_cancel(connection: *mut c_void) {
     }
 }
 
+// ---- D-41 closure: safe object-type detection ------------------------------
+//
+// Phase 1 plan 01-07 left `nw_connection_start` as a pass-through because
+// calling `nw_connection_copy_endpoint` on a libuv-internal opaque pointer
+// crashes the wrapped process (libuv's nw_connection_t-shaped pointer is NOT
+// an actual NW object — node's I/O subsystem reuses NW symbols for its own
+// handles). T-02-06b-03 mitigation: gate every NW API call on a class-name
+// check via the Objective-C runtime.
+//
+// `object_getClassName` is the documented runtime API for retrieving the class
+// name of an Objective-C instance. NW.framework objects all have class names
+// starting with `OS_nw_` (e.g. `OS_nw_connection`, `OS_nw_endpoint_host`,
+// `OS_nw_resolver`). A libuv handle does NOT — it's a plain C struct with no
+// Objective-C class metadata.
+//
+// IMPORTANT — failure modes of object_getClassName on truly bogus pointers:
+//   - On valid Objective-C objects: returns the class name C-string.
+//   - On non-objc pointers that happen to live in mapped memory: usually
+//     returns NULL or a benign pointer that won't decode as `OS_nw_`-prefixed.
+//   - On freed/unmapped memory: may segfault. We accept that small risk
+//     because libuv's pointers ARE in mapped memory (they're live handles).
+//
+// The check is therefore: "if the pointer's class name starts with `OS_nw_`,
+// it's safe to call NW APIs on it; otherwise pass through unchanged".
+
+/// Returns true if `ptr` points to an Objective-C object whose class name
+/// starts with `OS_nw_`. Used to gate calls to `nw_endpoint_get_hostname` and
+/// related NW APIs in the verdict path. Phase 1 saw crashes when libuv passed
+/// opaque non-NW pointers through `nw_connection_start`; this gate replaces
+/// the pass-through with a safe class-name check (D-41).
+#[inline]
+pub fn is_nw_object(ptr: *mut c_void) -> bool {
+    if ptr.is_null() {
+        return false;
+    }
+    // SAFETY: object_getClassName is documented to be safe on any pointer the
+    // caller is willing to dereference (which libuv handles ARE — they live
+    // for the duration of nw_connection_start's call). The runtime treats a
+    // truly bogus pointer as undefined behavior; on Apple Silicon macOS 26
+    // with the typical objc4 dispatch path, non-objc pointers usually return
+    // NULL because the isa-pointer dereference yields zero or invalid data.
+    let cls = unsafe { object_getClassName(ptr) };
+    if cls.is_null() {
+        return false;
+    }
+    // SAFETY: object_getClassName returns either NULL or a NUL-terminated
+    // C-string owned by the runtime, valid for the lifetime of the class.
+    let bytes = unsafe { CStr::from_ptr(cls) }.to_bytes();
+    bytes.starts_with(b"OS_nw_")
+}
+
+/// Render the verdict for an NW connection: extract its endpoint, get the
+/// hostname, run `evaluate_policy` against the loaded ALLOWLIST. Returns
+/// `true` if the verdict is Deny. Returns `false` (pass-through / fail-open)
+/// on any failure to extract the hostname, on FAIL_CLOSED state, or on
+/// missing NW symbols — the libc connect-level enforcement still catches
+/// the connection in those degraded paths.
+fn decide_for_nw_connection(connection: *mut c_void) -> bool {
+    use sentinel_core::Verdict;
+    if FAIL_CLOSED.load(Ordering::Acquire) {
+        // Don't try to allocate / decode in FAIL_CLOSED mode; libc connect
+        // returns EHOSTUNREACH for everything anyway.
+        return false;
+    }
+    let host_bytes = match extract_endpoint_hostname(connection) {
+        Some(h) => h,
+        None => return false,
+    };
+    let entries = ALLOWLIST.get().map(|v| v.as_slice()).unwrap_or(&[]);
+    let (verdict, _src) = sentinel_core::policy::evaluate_policy(&host_bytes, None, true, entries);
+    matches!(verdict, Verdict::Deny)
+}
+
+/// Extract the hostname from an NW connection's endpoint. Returns `None` on
+/// any failure path; the caller treats `None` as pass-through (fail-open) to
+/// preserve Phase 1 no-crash semantics on partial NW symbol availability.
+///
+/// Implementation: `nw_connection_copy_endpoint` → `nw_endpoint_get_hostname`
+/// (cached at ctor time; D-20 logs gaps). Both calls are gated by
+/// `is_nw_object` on the caller side (`nw_connection_start` shadow), so we
+/// can call NW APIs without the libuv-pointer crash risk.
+///
+/// NOTE on the Phase 2-vs-Phase 3 split: this function returns `None` if
+/// either `nw_connection_copy_endpoint` or `nw_endpoint_get_hostname` is
+/// absent on the running OS (D-20 gap). On macOS 26.x both ARE present per
+/// `replace_nw::init`, so the typical path yields a real hostname. The
+/// libc connect path remains the dominant attack-surface enforcement and is
+/// not affected by this NW-only path's failure modes.
+fn extract_endpoint_hostname(connection: *mut c_void) -> Option<Vec<u8>> {
+    if connection.is_null() {
+        return None;
+    }
+    let copy_endpoint = REAL_NW_CONNECTION_COPY_ENDPOINT.load(Ordering::Relaxed);
+    if copy_endpoint.is_null() {
+        return None;
+    }
+    // SAFETY: caller guarantees `connection` is_nw_object; copy_endpoint was
+    // dlsym'd at ctor time. The returned endpoint is an ARC-managed
+    // nw_endpoint_t — borrowing it for the duration of the get-hostname call
+    // is safe since we don't hold it past return.
+    let endpoint: *mut c_void = unsafe {
+        let f: unsafe extern "C" fn(*mut c_void) -> *mut c_void =
+            core::mem::transmute(copy_endpoint);
+        f(connection)
+    };
+    if endpoint.is_null() {
+        return None;
+    }
+    // The endpoint must itself be an OS_nw_* object — defense in depth in
+    // case copy_endpoint returned an unexpected pointer.
+    if !is_nw_object(endpoint) {
+        return None;
+    }
+    let p_host = unsafe { get_hostname_from_endpoint(endpoint) }?;
+    let (buf, n) = unsafe { copy_to_stack(p_host) }?;
+    Some(buf[..n].to_vec())
+}
+
 // ---- Shadow exports ----
 //
 // `nw_connection_t` and `nw_endpoint_t` are opaque ARC-managed pointer types.
@@ -260,24 +386,27 @@ pub unsafe extern "C" fn nw_connection_create(
     r
 }
 
-/// Shadow `nw_connection_start` — Phase 1 pass-through with logging.
+/// Shadow `nw_connection_start` — Phase 2 verdict path with safe is_nw_object
+/// gate (D-41 closure).
 ///
-/// PHASE 1 STATUS: pass-through only. The verdict-extraction path
-/// (nw_connection_copy_endpoint → nw_endpoint_get_hostname) causes SIGSEGV
-/// when the `connection` pointer is a libuv-internal socket object (not a
-/// user-created nw_connection_t). Node's libuv calls nw_connection_start
-/// internally for its own I/O handling; those handles are NOT compatible with
-/// the NW ARC API calls we were making.
+/// Phase 1 left this as a pass-through after observing SIGSEGV on libuv's
+/// internal opaque pointers (node's I/O subsystem reuses `nw_connection_start`
+/// for non-NW handles). Phase 2 D-41 closure: gate every NW API call on
+/// `is_nw_object` so non-NW pointers fall through to the real symbol
+/// unchanged (preserving Phase 1's no-crash semantics) while real NW
+/// connections render through `evaluate_policy`.
 ///
-/// Phase 1 enforcement is carried by the libc interpose layer (connect,
-/// getaddrinfo) which correctly intercepts all TCP/UDP connections regardless
-/// of whether the upper layer is libuv or Network.framework. The NW shadow
-/// exports prevent shadowed symbols from being missed but do not add verdict
-/// logic in Phase 1. Phase 2 will add proper verdict extraction once the
-/// NW-only code path (apps that use NW directly, bypassing libc connect) is
-/// verified as compatible. (Rule 1 auto-fix.)
+/// On Deny, calls `do_cancel(connection)` and RETURNS without invoking the
+/// real `nw_connection_start` (T-02-06b-04: cancel-before-start ordering
+/// prevents the connection from being established).
+///
+/// On Allow / no-match / extraction failure, falls through to the real
+/// `nw_connection_start`. The libc connect/getaddrinfo path remains the
+/// dominant supply-chain enforcement layer and is unaffected.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_connection_start(connection: *mut c_void) {
+    // Reentrancy guard — preserved unchanged from Phase 1 (pass-through on
+    // re-entry, no IPC, no allocation).
     if IN_HOOK.with(|c| c.replace(true)) {
         let real = REAL_NW_CONNECTION_START.load(Ordering::Relaxed);
         if !real.is_null() {
@@ -287,8 +416,33 @@ pub unsafe extern "C" fn nw_connection_start(connection: *mut c_void) {
         }
         return;
     }
-    // Phase 1: pass through to the real nw_connection_start unconditionally.
-    // Enforcement relies on the libc connect/getaddrinfo interpose layer.
+
+    // D-41: safe object-type detection BEFORE calling NW APIs. If `connection`
+    // is not an OS_nw_* Objective-C object (libuv opaque pointer or similar),
+    // pass through unchanged. Preserves Phase 1's no-crash behavior on
+    // non-NW callers.
+    if !is_nw_object(connection) {
+        let real = REAL_NW_CONNECTION_START.load(Ordering::Relaxed);
+        if !real.is_null() {
+            let f: unsafe extern "C" fn(*mut c_void) =
+                unsafe { core::mem::transmute(real) };
+            unsafe { f(connection) };
+        }
+        IN_HOOK.with(|c| c.set(false));
+        return;
+    }
+
+    // Confirmed NW object — render verdict.
+    let verdict_is_deny = decide_for_nw_connection(connection);
+    if verdict_is_deny {
+        // T-02-06b-04: cancel BEFORE calling the real nw_connection_start so
+        // the connection never reaches the network.
+        do_cancel(connection);
+        IN_HOOK.with(|c| c.set(false));
+        return;
+    }
+
+    // Allow / no-match / extraction failure — pass through to the real symbol.
     let real = REAL_NW_CONNECTION_START.load(Ordering::Relaxed);
     if !real.is_null() {
         let f: unsafe extern "C" fn(*mut c_void) =
@@ -373,12 +527,6 @@ pub unsafe extern "C" fn nw_connection_copy_endpoint(connection: *mut c_void) ->
     r
 }
 
-// Suppress dead-code warnings for helpers that Phase 2 will activate.
-#[allow(dead_code)]
-#[inline(never)]
-fn _phase2_helpers_marker() {
-    unsafe {
-        let _ = get_hostname_from_endpoint(core::ptr::null_mut());
-        let _ = copy_to_stack(core::ptr::null());
-    }
-}
+// `get_hostname_from_endpoint`, `copy_to_stack`, `do_cancel`, and
+// `allowlist_or_deny` are all reachable from the Phase 2 verdict path —
+// `decide_for_nw_connection` and `extract_endpoint_hostname` invoke them.

@@ -31,6 +31,7 @@ pub(crate) const TAG_FORK_EVENT: u8 = 0x03;
 pub(crate) const TAG_EXEC_EVENT: u8 = 0x04;
 pub(crate) const TAG_DYLIB_LOADED: u8 = 0x05;
 pub(crate) const TAG_RESOLVE: u8 = 0x06;
+pub(crate) const TAG_ENV_NOT_PROPAGATED: u8 = 0x08;
 
 static DAEMON_SOCKET_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
@@ -280,6 +281,38 @@ pub fn send_resolve_sync(
         }
         ResolveReply::Deny { reason, .. } => Err(IpcClientError::DaemonRejected(reason)),
         ResolveReply::Err { message, .. } => Err(IpcClientError::DaemonRejected(message)),
+    }
+}
+
+/// Best-effort round trip for EnvNotPropagatedGap (TREE-06 — gap-closure 02-09).
+///
+/// Like `send_dylib_loaded_sync` (D-35), this does NOT fail-closed — the
+/// calling posix_spawn shadow continues regardless of the result. TREE-06 is
+/// an informational gap detector, not enforcement.
+///
+/// Returns `Ok(())` on `EnvNotPropagatedGapAck::Ok`, `Err(DaemonRejected)` on
+/// `Err`, and `Err(Timeout)` / `Err(NotConfigured)` on IPC failures.
+pub fn send_env_not_propagated_gap_sync(
+    parent: AuditTokenWire,
+    child_binary_path: &[u8],
+    detected_at_ms: u64,
+    timeout_ms: u64,
+) -> Result<(), IpcClientError> {
+    let capped_len = child_binary_path
+        .len()
+        .min(sentinel_ipc::EnvNotPropagatedGap::MAX_TARGET_PATH);
+    let ev = sentinel_ipc::EnvNotPropagatedGap::new(
+        parent,
+        child_binary_path[..capped_len].to_vec(),
+        detected_at_ms,
+    );
+    let ack: sentinel_ipc::EnvNotPropagatedGapAck =
+        send_tagged_and_recv_ack(TAG_ENV_NOT_PROPAGATED, &ev, timeout_ms)?;
+    match ack {
+        sentinel_ipc::EnvNotPropagatedGapAck::Ok { .. } => Ok(()),
+        sentinel_ipc::EnvNotPropagatedGapAck::Err { message, .. } => {
+            Err(IpcClientError::DaemonRejected(message))
+        }
     }
 }
 

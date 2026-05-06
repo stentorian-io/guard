@@ -42,3 +42,7 @@ tempfile = { workspace = true }
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 sha2 = { workspace = true }
+ciborium = { workspace = true }
+similar = { workspace = true }
+sentinel-core = { workspace = true }
+sentinel-ipc = { workspace = true }

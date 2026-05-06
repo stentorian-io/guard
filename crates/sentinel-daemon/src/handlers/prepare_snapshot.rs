@@ -9,6 +9,12 @@
 //!   6. Writes runs/{uuid}.cbor + runs/{uuid}.manifest atomically
 //!   7. Inserts RunRecord into ProcessTree (plan 02-07 GC will use it on tracked-root exit)
 //!   8. Returns SnapshotReply::Ok { manifest_path, run_uuid }
+//!
+//! Phase 3 plan 03-07 (IPC_SCHEMA_V3): handler now accepts V3 payloads carrying
+//! `is_tty` (D-73) and `baseline_mode` (D-58). The dispatcher in ipc_server.rs
+//! relaxes the schema check to `matches!(v, IPC_SCHEMA_V2 | IPC_SCHEMA_V3)` and
+//! passes those fields through as arguments. V2 callers receive false/false defaults
+//! via #[serde(default)] on the wire fields.
 
 use crate::policy_file::{find_sentinel_toml, parse_file, sha256_of_file};
 use crate::rule_store::RuleStore;
@@ -39,12 +45,18 @@ pub enum PrepareError {
 type ProjectResolution = (Vec<AllowlistEntry>, Option<String>, Option<String>);
 
 /// Inputs are passed by reference; outputs are the SnapshotReply to write back.
+///
+/// Phase 3 plan 03-07: `is_tty` and `baseline_mode` are V3 fields; they default
+/// to false on V2 callers. Propagated via `set_run_is_tty` / `set_run_baseline_mode`
+/// after RunRecord insertion.
 pub fn handle_prepare_snapshot(
     cwd: &Path,
     curated: &[AllowlistEntry],
     rule_store: &RuleStore,
     process_tree: &Arc<ProcessTree>,
     state_dir: &Path,
+    is_tty: bool,
+    baseline_mode: bool,
 ) -> SnapshotReply {
     let run_uuid = Uuid::new_v4().to_string();
 
@@ -102,22 +114,32 @@ pub fn handle_prepare_snapshot(
     // 6. Insert RunRecord. The tracked_root is unknown at this point (the
     //    CLI hasn't sent RegisterRoot yet). We record the run with a zero
     //    audit_token; plan 02-04's RegisterRoot handler updates it later.
+    //
+    //    Phase 3 plan 03-07: is_tty and baseline_mode are set at insertion.
+    //    project_toml_path is set from the walk-up result.
     process_tree.insert_run(RunRecord {
         run_uuid: run_uuid.clone(),
         tracked_root: sentinel_core::AuditToken { val: [0; 8] },
         snapshot_path: pub_.path.clone(),
         manifest_path: run_manifest_path(state_dir, &run_uuid),
-        // Phase 3 plan 03-04: new fields default to false/None for V2 callers.
-        // Plan 03-07 will extend PrepareSnapshot to carry V3 fields and call
-        // set_run_is_tty / set_run_baseline_mode / set_run_project_toml_path.
-        is_tty: false,
-        baseline_mode: false,
-        project_toml_path: None,
+        is_tty,
+        baseline_mode,
+        project_toml_path: project_path.clone(),
     });
+
+    // Phase 3 plan 03-07: also apply via setters so any downstream code that
+    // calls set_run_is_tty / set_run_baseline_mode (e.g. from a V3 ipc_server
+    // frame that decodes AFTER insert_run) will see up-to-date values. For the
+    // standard V2/V3 path the values are already correct from insert_run above;
+    // these setters are a no-op in that case but document the IPC_SCHEMA_V3 intent.
+    process_tree.set_run_is_tty(&run_uuid, is_tty);
+    process_tree.set_run_baseline_mode(&run_uuid, baseline_mode);
 
     info!(
         run_uuid = %run_uuid,
         project_toml = ?project_path,
+        is_tty,
+        baseline_mode,
         snapshot = %pub_.path.display(),
         "PrepareSnapshot OK"
     );

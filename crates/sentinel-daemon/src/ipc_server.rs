@@ -694,12 +694,14 @@ fn handle_prepare_snapshot_frame(
             return;
         }
     };
-    if req.schema_version != IPC_SCHEMA_V2 {
+    // Phase 3 plan 03-07: accept V2 OR V3. V3 carries is_tty + baseline_mode
+    // (#[serde(default)] on those fields → false on V2 decode, so no branch needed).
+    if !matches!(req.schema_version, IPC_SCHEMA_V2 | IPC_SCHEMA_V3) {
         let _ = write_tagged(
             stream,
             MessageTag::PrepareSnapshot,
             &SnapshotReply::err(format!(
-                "schema_version {} != IPC_SCHEMA_V2",
+                "schema_version {} not in [IPC_SCHEMA_V2, IPC_SCHEMA_V3]",
                 req.schema_version
             )),
         );
@@ -712,6 +714,8 @@ fn handle_prepare_snapshot_frame(
         &state.rule_store,
         &state.process_tree,
         &state.state_dir,
+        req.is_tty,
+        req.baseline_mode,
     );
     if let Err(e) = write_tagged(stream, MessageTag::PrepareSnapshot, &reply) {
         error!(error = %e, "failed to send SnapshotReply");

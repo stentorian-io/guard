@@ -57,8 +57,48 @@ pub fn is_loopback_ip(ip: &[u8]) -> bool {
 
 /// Cloud-metadata host test. AWS/Azure/GCP all use 169.254.169.254 (IPv4)
 /// or fe80::a9fe:a9fe (IPv6 link-local) — D-25b.
+///
+/// WARNING-05 fix (Phase 2 review): the previous implementation byte-compared
+/// against `b"fe80::a9fe:a9fe"` only. The IPv6 link-local form has many
+/// equivalent textual representations:
+///   - `fe80::a9fe:a9fe`            (canonical lowercase, double-colon)
+///   - `FE80::A9FE:A9FE`            (uppercase)
+///   - `fe80:0:0:0:0:0:a9fe:a9fe`   (no double-colon compression)
+///   - `fe80::a9fe:a9fe%en0`        (with link-scope ID)
+///
+/// `inet_ntop` on Darwin can return any of these depending on the address's
+/// origin and flags. To make the hard rule fire regardless of textual form,
+/// parse the input as an `Ipv6Addr` (rejecting any zone-id suffix first) and
+/// compare the resulting 16-byte address to the IMDS magic constant.
 pub fn is_cloud_metadata_host(host: &[u8]) -> bool {
-    host == b"169.254.169.254" || host == b"fe80::a9fe:a9fe"
+    // IPv4 fast path: byte-compare. The IPv4 textual form has a single
+    // canonical representation per `inet_ntop` Darwin behaviour.
+    if host == b"169.254.169.254" {
+        return true;
+    }
+    // Reject empty / non-ASCII before parsing.
+    if host.is_empty() {
+        return false;
+    }
+    // IPv6 path: strip optional zone-id (`%foo`), parse as Ipv6Addr, compare
+    // to the canonical link-local IMDS address fe80::a9fe:a9fe.
+    let s = match core::str::from_utf8(host) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let s = match s.split_once('%') {
+        Some((addr, _zone)) => addr,
+        None => s,
+    };
+    // Lowercase ASCII normalization for hex digits is implicit in
+    // `Ipv6Addr::from_str` (case-insensitive). Avoid heap alloc — parse
+    // directly. Most callers pass canonical lowercase already.
+    if let Ok(addr) = s.parse::<core::net::Ipv6Addr>() {
+        const IMDS_V6: core::net::Ipv6Addr =
+            core::net::Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0xa9fe, 0xa9fe);
+        return addr == IMDS_V6;
+    }
+    false
 }
 
 pub fn is_cloud_metadata_ip(ip: &[u8]) -> bool {

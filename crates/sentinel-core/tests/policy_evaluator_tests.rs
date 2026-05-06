@@ -34,6 +34,42 @@ fn hard_rule_cloud_metadata_predicates() {
     assert!(is_cloud_metadata_ip(b"169.254.169.254"));
 }
 
+#[test]
+fn warning_05_regression_cloud_metadata_ipv6_normalization() {
+    // WARNING-05: IPv6 link-local IMDS has many textual representations.
+    // The hard rule MUST fire on all of them.
+    //
+    //   1. canonical lowercase                    fe80::a9fe:a9fe
+    //   2. uppercase hex                          FE80::A9FE:A9FE
+    //   3. mixed case                             fe80::A9FE:A9FE
+    //   4. no double-colon compression            fe80:0:0:0:0:0:a9fe:a9fe
+    //   5. zone-id suffix                         fe80::a9fe:a9fe%en0
+    //   6. uppercase + zone-id                    FE80::A9FE:A9FE%en0
+    let cases: &[&[u8]] = &[
+        b"fe80::a9fe:a9fe",
+        b"FE80::A9FE:A9FE",
+        b"fe80::A9FE:A9FE",
+        b"fe80:0:0:0:0:0:a9fe:a9fe",
+        b"fe80::a9fe:a9fe%en0",
+        b"FE80::A9FE:A9FE%en0",
+    ];
+    for input in cases {
+        assert!(
+            is_cloud_metadata_host(input),
+            "WARNING-05: cloud-metadata host check must accept {:?}",
+            std::str::from_utf8(input).unwrap_or("<bad utf-8>")
+        );
+    }
+    // Negative controls: link-local but NOT the IMDS magic.
+    assert!(!is_cloud_metadata_host(b"fe80::a9fe:a9ff"));
+    assert!(!is_cloud_metadata_host(b"fe80::1"));
+    assert!(!is_cloud_metadata_host(b"::1"));
+    // Junk inputs.
+    assert!(!is_cloud_metadata_host(b""));
+    assert!(!is_cloud_metadata_host(b"not-an-address"));
+    assert!(!is_cloud_metadata_host(b"%en0"));
+}
+
 // --- Hard rules in evaluate_policy --------------------------------------
 
 #[test]

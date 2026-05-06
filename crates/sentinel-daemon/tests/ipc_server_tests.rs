@@ -11,18 +11,28 @@
 use sentinel_core::AuditToken;
 use sentinel_daemon::gap_detector::GapDetector;
 use sentinel_daemon::ipc_server::{DaemonState, IpcServer};
-use sentinel_daemon::state_dir::{ensure_state_dir, socket_path};
+use sentinel_daemon::rule_store::RuleStore;
+use sentinel_daemon::state_dir::{db_path, ensure_state_dir, socket_path};
 use sentinel_daemon::tracked::ProcessTree;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{RegisterRoot, Reply};
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 
-fn build_state() -> (Arc<ProcessTree>, Arc<DaemonState>) {
+fn build_state(state_dir: &Path) -> (Arc<ProcessTree>, Arc<DaemonState>) {
     let tree = Arc::new(ProcessTree::new());
     let det = Arc::new(GapDetector::new());
-    let state = Arc::new(DaemonState::new(tree.clone(), det));
+    let rs = Arc::new(RuleStore::open(&db_path(state_dir)).expect("open rule store"));
+    let curated = Arc::new(Vec::new());
+    let state = Arc::new(DaemonState::new(
+        tree.clone(),
+        det,
+        rs,
+        curated,
+        state_dir.to_path_buf(),
+    ));
     (tree, state)
 }
 
@@ -32,7 +42,7 @@ fn register_root_round_trip_records_kernel_sourced_token() {
     ensure_state_dir(tmp.path()).unwrap();
     let sock = socket_path(tmp.path());
 
-    let (tree, state) = build_state();
+    let (tree, state) = build_state(tmp.path());
     let server = IpcServer::bind(&sock, state).expect("bind");
 
     // Server handles one accept on a worker thread.
@@ -72,7 +82,7 @@ fn idempotent_register_root_for_same_token() {
     ensure_state_dir(tmp.path()).unwrap();
     let sock = socket_path(tmp.path());
 
-    let (tree, state) = build_state();
+    let (tree, state) = build_state(tmp.path());
     let server = IpcServer::bind(&sock, state).expect("bind");
 
     // Two consecutive accepts; same client process → same kernel audit token.
@@ -106,7 +116,7 @@ fn connect_close_no_frame_is_benign() {
     ensure_state_dir(tmp.path()).unwrap();
     let sock = socket_path(tmp.path());
 
-    let (tree, state) = build_state();
+    let (tree, state) = build_state(tmp.path());
     let server = IpcServer::bind(&sock, state).expect("bind");
 
     // Server: one accept; the handler must return Ok cleanly even though the

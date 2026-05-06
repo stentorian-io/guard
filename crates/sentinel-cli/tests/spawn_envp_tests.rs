@@ -8,17 +8,26 @@ use sentinel_cli::ipc_client::{probe_daemon_alive, register_root_with_daemon};
 use sentinel_core::AuditToken;
 use sentinel_daemon::gap_detector::GapDetector;
 use sentinel_daemon::ipc_server::{DaemonState, IpcServer};
-use sentinel_daemon::state_dir::{ensure_state_dir, socket_path};
+use sentinel_daemon::rule_store::RuleStore;
+use sentinel_daemon::state_dir::{db_path, ensure_state_dir, socket_path};
 use sentinel_daemon::tracked::ProcessTree;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 
-fn build_state() -> (Arc<ProcessTree>, Arc<DaemonState>) {
+fn build_state(state_dir: &Path) -> (Arc<ProcessTree>, Arc<DaemonState>) {
     let tree = Arc::new(ProcessTree::new());
     let det = Arc::new(GapDetector::new());
-    let state = Arc::new(DaemonState::new(tree.clone(), det));
+    let rs = Arc::new(RuleStore::open(&db_path(state_dir)).expect("open rule store"));
+    let curated = Arc::new(Vec::new());
+    let state = Arc::new(DaemonState::new(
+        tree.clone(),
+        det,
+        rs,
+        curated,
+        state_dir.to_path_buf(),
+    ));
     (tree, state)
 }
 
@@ -28,7 +37,7 @@ fn register_root_with_daemon_round_trips_ack() {
     ensure_state_dir(tmp.path()).unwrap();
     let sock = socket_path(tmp.path());
 
-    let (tree, state) = build_state();
+    let (tree, state) = build_state(tmp.path());
     let server = IpcServer::bind(&sock, state).expect("bind");
 
     let h = thread::spawn(move || {
@@ -66,7 +75,7 @@ fn probe_daemon_alive_succeeds_against_live_socket() {
     ensure_state_dir(tmp.path()).unwrap();
     let sock = socket_path(tmp.path());
 
-    let (tree, state) = build_state();
+    let (tree, state) = build_state(tmp.path());
     let server = IpcServer::bind(&sock, state).expect("bind");
 
     // The probe drops the stream immediately. The daemon's `accept_one` will

@@ -22,6 +22,7 @@ libc = "0.2.186"
 ciborium = "0.2.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_bytes = "0.11"
+serde_yml = "0.0.12"
 nix = { version = "0.31.2", default-features = false, features = ["process", "socket", "user"] }
 clap = { version = "4.6.1", features = ["derive"] }
 memmap2 = "0.9.10"

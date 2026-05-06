@@ -50,3 +50,38 @@ pub fn ensure_state_dir(state_dir: &Path) -> std::io::Result<()> {
         .mode(0o700)
         .create(state_dir)
 }
+
+// --- Per-run snapshot path helpers (Phase 2 D-29) ----------------------------
+
+pub fn runs_dir(state_dir: &Path) -> PathBuf {
+    state_dir.join("runs")
+}
+
+pub fn run_snapshot_path(state_dir: &Path, run_uuid: &str) -> PathBuf {
+    runs_dir(state_dir).join(format!("{run_uuid}.cbor"))
+}
+
+pub fn run_snapshot_tmp_path(state_dir: &Path, run_uuid: &str) -> PathBuf {
+    runs_dir(state_dir).join(format!(".{run_uuid}.cbor.tmp"))
+}
+
+pub fn run_manifest_path(state_dir: &Path, run_uuid: &str) -> PathBuf {
+    runs_dir(state_dir).join(format!("{run_uuid}.manifest"))
+}
+
+pub fn run_manifest_tmp_path(state_dir: &Path, run_uuid: &str) -> PathBuf {
+    runs_dir(state_dir).join(format!(".{run_uuid}.manifest.tmp"))
+}
+
+/// Create runs/ subdirectory with mode 0700 if missing. Idempotent.
+pub fn ensure_runs_dir(state_dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    let dir = runs_dir(state_dir);
+    if dir.exists() {
+        return Ok(());
+    }
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+}

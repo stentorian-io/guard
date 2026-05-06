@@ -34,6 +34,7 @@ serde = { workspace = true }
 serde_yml = { workspace = true }
 rusqlite = { workspace = true }
 rusqlite_migration = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

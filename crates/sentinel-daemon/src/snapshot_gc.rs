@@ -76,10 +76,28 @@ pub fn gc_sweep(state_dir: &Path, tree: &ProcessTree) {
                     // happened but RegisterRoot hasn't yet). Skip — too early to GC.
                     false
                 } else {
-                    // kill(pid, 0) returns 0 if alive, -1 with errno=ESRCH if dead.
-                    // Other errnos (EPERM) treat as alive (conservative — don't GC).
-                    let alive = unsafe { libc::kill(pid, 0) } == 0
-                        || unsafe { *libc::__error() } == libc::EPERM;
+                    // BLOCKER-06 fix: only `errno == ESRCH` definitively means
+                    // the process is dead. The previous code treated any
+                    // errno other than EPERM as "dead", which mis-classified
+                    // EINVAL / EFAULT / future macOS errno expansions and
+                    // could GC a snapshot whose tracked_root is still
+                    // running. A wrongly-GC'd snapshot leaves the dylib
+                    // running against a phantom mmap (or, after re-publish,
+                    // the wrong CBOR contents) — exactly the failure mode
+                    // the comment claimed the code was preventing.
+                    //
+                    // kill(pid, 0) results:
+                    //   0          → alive (signal could be delivered)
+                    //   -1 ESRCH   → dead (no such process)
+                    //   -1 EPERM   → alive but not signal-able (alive)
+                    //   -1 OTHER   → uncertain → conservative: alive
+                    let r = unsafe { libc::kill(pid, 0) };
+                    let alive = if r == 0 {
+                        true
+                    } else {
+                        let err = unsafe { *libc::__error() };
+                        err != libc::ESRCH
+                    };
                     !alive
                 }
             }

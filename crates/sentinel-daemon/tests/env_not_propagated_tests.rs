@@ -2,18 +2,24 @@
 //!
 //! Tests the daemon-side handler for tag 0x08 (EnvNotPropagatedGap IPC).
 //!
-//! Design note on peer-auth in tests:
+//! Design note on peer-auth and gap recording (REGISTER-01 + peer_token design):
 //!   The daemon's is_tracked check uses the KERNEL-sourced peer token
-//!   (from LOCAL_PEERCRED / audit_token). The ProcessTree is keyed by
-//!   AuditToken, so for a test to pass the is_tracked gate, the test
-//!   process's kernel token must be in the tree.
+//!   (from LOCAL_PEERTOKEN). The ProcessTree is keyed by AuditToken.
 //!
-//!   We register the kernel token via RegisterRoot (Phase 1 wire) which
-//!   causes the daemon to call insert_root(kernel_peer_token, ...).
-//!   We separately pre-insert a distinct "parent" node so set_coverage_gap
-//!   has something to update.
+//!   For a test to pass the is_tracked gate, the test process's kernel token
+//!   must be in the tree. We register it via RegisterRoot with wire_pid =
+//!   getpid() (self-registration path), which causes the daemon to call
+//!   insert_root(kernel_peer_token, ...).
 //!
-//! Test 1: round-trip — daemon records gap on a pre-inserted parent node.
+//!   After the REGISTER-01 + peer_token design change, the gap is recorded
+//!   on the PEER's node (peer_token = the process that calls posix_spawn).
+//!   The wire's parent_audit_token is advisory only.
+//!
+//!   To locate the gap in the tree after the test, we use `tree.nodes_len()`
+//!   and `tree.get_node_by_pid` (via a scan helper) — the kernel peer token
+//!   has val[5] == getpid(), so we can find it by pid.
+//!
+//! Test 1: round-trip — daemon records gap on the peer's own tree node.
 //! Test 2: untracked peer → daemon replies Err with "untracked peer" message.
 //! Test 3: two consecutive gaps → second overwrites first (last-writer-wins).
 //! Test 4: ipc_dispatch MessageTag::EnvNotPropagatedGap byte value = 0x08.
@@ -62,16 +68,26 @@ fn send_env_gap_and_recv_ack(
 }
 
 /// Register this test process as a tracked root via RegisterRoot (uses real peer-auth).
-/// The daemon's handler will record the kernel-sourced peer token into the tree.
+///
+/// REGISTER-01 self-registration path: wire_pid == kernel_pid.
+/// When wire_pid == kernel_pid, the daemon registers the kernel-sourced peer
+/// token (the test process's own full 8-field token).
 fn register_self_as_tracked(sock: &std::path::Path) {
-    let dummy = AuditToken { val: [0u32; 8] };
-    let msg = RegisterRoot::new(dummy);
+    let self_pid = unsafe { libc::getpid() } as u32;
+    let self_token = AuditToken { val: [0, 0, 0, 0, 0, self_pid, 0, 0] };
+    let msg = RegisterRoot::new(self_token);
     let mut stream = UnixStream::connect(sock).expect("connect RegisterRoot");
     write_frame(&mut stream, &msg).expect("write RegisterRoot");
     let _: Reply = read_frame(&mut stream).expect("read Reply");
 }
 
-// ---- Test 1: round-trip records CoverageGap::EnvNotPropagated on parent ----
+/// Find the CoverageGap on any node whose audit_token.val[5] matches `pid`.
+/// Uses ProcessTree::find_node_by_pid which scans all nodes by pid field.
+fn find_gap_by_pid(tree: &ProcessTree, pid: u32) -> Option<CoverageGap> {
+    tree.find_node_by_pid(pid).and_then(|n| n.coverage_gap)
+}
+
+// ---- Test 1: round-trip records CoverageGap::EnvNotPropagated on the peer's node ----
 
 #[test]
 fn env_not_propagated_gap_round_trip_records_gap_on_parent() {
@@ -80,19 +96,6 @@ fn env_not_propagated_gap_round_trip_records_gap_on_parent() {
     let sock = socket_path(tmp.path());
 
     let (tree, state) = build_state(tmp.path());
-
-    // Pre-insert a distinct "parent" node the gap will be recorded on.
-    // We use our_pid+1 so the key is different from the kernel peer token.
-    let our_pid = unsafe { libc::getpid() } as u32;
-    let wire_parent = AuditTokenWire {
-        val: [0, 0, 0, 0, 0, our_pid.wrapping_add(1), 0, 0],
-    };
-    let parent_key: AuditToken = wire_parent.into();
-    tree.insert_root(
-        parent_key,
-        "run-test1".to_string(),
-        "/usr/bin/example".to_string(),
-    );
 
     let server = IpcServer::bind(&sock, state.clone()).expect("bind");
     // Accept two connections: RegisterRoot then EnvNotPropagatedGap.
@@ -104,8 +107,13 @@ fn env_not_propagated_gap_round_trip_records_gap_on_parent() {
     // Register self so kernel peer token is in the tree (satisfies is_tracked check).
     register_self_as_tracked(&sock);
 
-    // Send the gap pointing at the parent node.
-    let gap = EnvNotPropagatedGap::new(wire_parent, b"/usr/bin/child".to_vec(), 123456789);
+    // Send the gap. The parent_audit_token is advisory; the daemon records
+    // the gap on peer_token (the connecting process's kernel token).
+    let self_pid = unsafe { libc::getpid() } as u32;
+    let advisory_parent = AuditTokenWire {
+        val: [0, 0, 0, 0, 0, self_pid, 0, 0],
+    };
+    let gap = EnvNotPropagatedGap::new(advisory_parent, b"/usr/bin/child".to_vec(), 123456789);
     let mut stream = UnixStream::connect(&sock).expect("connect gap");
     let ack = send_env_gap_and_recv_ack(&mut stream, &gap);
     drop(stream);
@@ -118,9 +126,10 @@ fn env_not_propagated_gap_round_trip_records_gap_on_parent() {
         ack
     );
 
-    // (b) The ProcessTree must have recorded the gap on parent_key.
-    let node = tree.get_node(&parent_key).expect("parent node must exist");
-    match node.coverage_gap {
+    // (b) The ProcessTree must have recorded the gap on the peer's node.
+    //     The peer's kernel token has val[5] == self_pid. We scan to find it.
+    let gap_found = find_gap_by_pid(&tree, self_pid);
+    match gap_found {
         Some(CoverageGap::EnvNotPropagated {
             ref binary_path,
             detected_at_ms,
@@ -129,7 +138,7 @@ fn env_not_propagated_gap_round_trip_records_gap_on_parent() {
             assert_eq!(detected_at_ms, 123456789, "detected_at_ms must match");
         }
         other => panic!(
-            "expected CoverageGap::EnvNotPropagated, got: {:?}",
+            "expected CoverageGap::EnvNotPropagated on peer node, got: {:?}",
             other
         ),
     }
@@ -190,13 +199,6 @@ fn env_not_propagated_gap_second_overwrites_first() {
 
     let (tree, state) = build_state(tmp.path());
 
-    let our_pid = unsafe { libc::getpid() } as u32;
-    let wire_parent = AuditTokenWire {
-        val: [0, 0, 0, 0, 0, our_pid.wrapping_add(1000), 0, 0],
-    };
-    let parent_key: AuditToken = wire_parent.into();
-    tree.insert_root(parent_key, "run-test3".to_string(), "/usr/bin/npm".to_string());
-
     // Server accepts 3 connections: RegisterRoot + 2 gaps.
     let server = IpcServer::bind(&sock, state.clone()).expect("bind");
     let h = thread::spawn(move || {
@@ -207,9 +209,14 @@ fn env_not_propagated_gap_second_overwrites_first() {
 
     register_self_as_tracked(&sock);
 
+    let self_pid = unsafe { libc::getpid() } as u32;
+    let advisory_parent = AuditTokenWire {
+        val: [0, 0, 0, 0, 0, self_pid, 0, 0],
+    };
+
     // First gap.
     {
-        let gap1 = EnvNotPropagatedGap::new(wire_parent, b"/first/child".to_vec(), 1000);
+        let gap1 = EnvNotPropagatedGap::new(advisory_parent, b"/first/child".to_vec(), 1000);
         let mut stream = UnixStream::connect(&sock).expect("connect gap1");
         let ack = send_env_gap_and_recv_ack(&mut stream, &gap1);
         assert!(
@@ -221,7 +228,7 @@ fn env_not_propagated_gap_second_overwrites_first() {
 
     // Second gap — different binary_path and timestamp.
     {
-        let gap2 = EnvNotPropagatedGap::new(wire_parent, b"/second/child".to_vec(), 2000);
+        let gap2 = EnvNotPropagatedGap::new(advisory_parent, b"/second/child".to_vec(), 2000);
         let mut stream = UnixStream::connect(&sock).expect("connect gap2");
         let ack = send_env_gap_and_recv_ack(&mut stream, &gap2);
         assert!(
@@ -233,9 +240,9 @@ fn env_not_propagated_gap_second_overwrites_first() {
 
     h.join().unwrap();
 
-    // The node must have the SECOND gap (overwrite / last-writer-wins).
-    let node = tree.get_node(&parent_key).expect("parent node");
-    match node.coverage_gap {
+    // The peer's node must have the SECOND gap (overwrite / last-writer-wins).
+    let gap_found = find_gap_by_pid(&tree, self_pid);
+    match gap_found {
         Some(CoverageGap::EnvNotPropagated {
             ref binary_path,
             detected_at_ms,

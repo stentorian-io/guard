@@ -171,6 +171,14 @@ impl ProcessTree {
             .unwrap_or_else(|p| p.into_inner()).len()
     }
 
+    /// Return the first node whose audit_token has val[5] == pid.
+    /// Used by unit tests that need to find a node by pid without knowing
+    /// the full 8-field kernel audit token.
+    pub fn find_node_by_pid(&self, pid: u32) -> Option<ProcessNode> {
+        let g = self.nodes.read().unwrap_or_else(|p| p.into_inner());
+        g.values().find(|n| n.audit_token.val[5] == pid).cloned()
+    }
+
     // --- run records ---
 
     pub fn insert_run(&self, run: RunRecord) {

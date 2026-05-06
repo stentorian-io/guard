@@ -44,15 +44,32 @@ fn register_root_with_daemon_round_trips_ack() {
         server.accept_one().expect("accept_one");
     });
 
-    // Use a dummy synthetic token; the daemon should record the kernel-sourced
-    // token (this test process's own) per T-01-04-03.
-    let dummy = AuditToken::synthetic([0; 8]);
-    let r = register_root_with_daemon(&sock, dummy);
+    // REGISTER-01 self-registration path: wire_pid == kernel_pid.
+    // When the connecting process sends its own pid in the wire token, the
+    // daemon stores the kernel-sourced peer token (not the wire-claimed synthetic).
+    // Use self_pid to trigger the self-registration path.
+    let self_pid = unsafe { libc::getpid() } as u32;
+    let self_token = AuditToken::synthetic([0, 0, 0, 0, 0, self_pid, 0, 0]);
+    let r = register_root_with_daemon(&sock, self_token);
     assert!(r.is_ok(), "register_root_with_daemon should return Ok: {r:?}");
 
     h.join().unwrap();
     assert_eq!(tree.nodes_len(), 1, "exactly one root recorded");
-    assert!(!tree.is_tracked(&dummy), "synthetic wire token must not be stored (T-01-04-03)");
+
+    // Self-registration path: daemon stores the kernel peer token (with real
+    // pidversion), NOT the synthetic wire token (which has val[7]=0).
+    // The synthetic token with zero pidversion is NOT in the tree (kernel token
+    // has non-zero pidversion from LOCAL_PEERTOKEN).
+    assert!(
+        !tree.is_tracked(&self_token),
+        "synthetic wire token (zero pidversion) must not match kernel token (non-zero pidversion)"
+    );
+    // The tree has exactly one node with our pid (the kernel-sourced token).
+    let node = tree.find_node_by_pid(self_pid).expect("node with self_pid must exist");
+    assert_eq!(
+        node.audit_token.val[5], self_pid,
+        "stored node must have val[5] == self_pid"
+    );
 }
 
 #[test]

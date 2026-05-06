@@ -8,6 +8,12 @@ use sentinel_ipc::PackageContext;
 pub const JSONL_SCHEMA_VERSION: u16 = 1;
 pub const MAX_ARGV_BYTES: usize = 1024;
 
+/// WR-12: cap on the number of argv elements logged per row. A malicious or
+/// buggy package manager could spawn `tool arg1 arg2 ... argN` with N=100k,
+/// producing JSONL rows that won't fit anywhere downstream. 256 is well
+/// above any legitimate tool invocation (npm install + flags is < 50 args).
+pub const MAX_ARGV_ELEMENTS: usize = 256;
+
 #[derive(Serialize)]
 #[serde(tag = "event")]
 pub enum LogRow {
@@ -59,7 +65,22 @@ pub struct RootCtxLog {
 }
 
 /// Per-element argv truncation per LOG schema (R-08 belt-and-braces, plus log-volume bound).
-pub fn truncate_argv(argv: Vec<String>) -> Vec<String> {
+///
+/// WR-12: also cap the total ELEMENT COUNT at MAX_ARGV_ELEMENTS. The previous
+/// implementation only bounded each element's length, leaving the vector itself
+/// unbounded — a buggy or hostile package manager spawning a tool with 100k
+/// args would produce log rows that won't fit in the 64 KiB IPC frame limit
+/// downstream. Append a synthetic placeholder telling the analyst how many
+/// elements were dropped.
+pub fn truncate_argv(mut argv: Vec<String>) -> Vec<String> {
+    let original_len = argv.len();
+    if original_len > MAX_ARGV_ELEMENTS {
+        argv.truncate(MAX_ARGV_ELEMENTS - 1);
+        argv.push(format!(
+            "..(truncated, {} more args)",
+            original_len - (MAX_ARGV_ELEMENTS - 1)
+        ));
+    }
     argv.into_iter().map(|s| truncate_str(s, MAX_ARGV_BYTES)).collect()
 }
 

@@ -11,7 +11,10 @@ use crate::CliError;
 use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
-    PrepareSnapshot, RegisterRoot, Reply, SnapshotReply, TrustPolicy, TrustPolicyReply,
+    BaselineCommit, BaselineCommitReply, InsertUserRule, InsertUserRuleReply,
+    PrepareSnapshot, ReadInstallArtifacts, ReadInstallArtifactsReply,
+    RegisterRoot, Reply, SnapshotReply, TrustPolicy, TrustPolicyReply,
+    InstallArtifact,
 };
 use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
@@ -23,6 +26,10 @@ use std::time::Duration;
 // uses the same values in `sentinel_hook::ipc_client`.
 const TAG_PREPARE_SNAPSHOT: u8 = 0x02;
 const TAG_TRUST_POLICY: u8 = 0x07;
+const TAG_STATUS: u8 = 0x09;
+const TAG_INSERT_USER_RULE: u8 = 0x0B;
+const TAG_READ_INSTALL_ARTIFACTS: u8 = 0x0C;
+const TAG_BASELINE_COMMIT: u8 = 0x0D;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
@@ -149,6 +156,57 @@ pub fn prepare_snapshot(sock: &Path, cwd: &Path) -> Result<(PathBuf, String), Cl
             Err(CliError::Other(format!("PrepareSnapshot: {message}")))
         }
     }
+}
+
+/// Phase 3 tag 0x09: request daemon status.
+pub fn status_request(sock: &Path) -> Result<sentinel_ipc::StatusReply, CliError> {
+    let req = sentinel_ipc::Status::new();
+    send_tagged_request(sock, TAG_STATUS, &req)
+}
+
+/// Phase 3 tag 0x0B: insert a user rule into the daemon's rule store.
+pub fn insert_user_rule_request(
+    sock: &Path,
+    kind: &str,
+    match_type: &str,
+    pattern: &str,
+    reason: &str,
+) -> Result<i64, CliError> {
+    let req = InsertUserRule {
+        schema_version: sentinel_ipc::IPC_SCHEMA_V3,
+        kind: kind.into(),
+        match_type: match_type.into(),
+        pattern: pattern.into(),
+        reason: reason.into(),
+    };
+    let reply: InsertUserRuleReply = send_tagged_request(sock, TAG_INSERT_USER_RULE, &req)?;
+    match reply {
+        InsertUserRuleReply::Ok { rule_id, .. } => Ok(rule_id),
+        InsertUserRuleReply::Err { message, .. } => {
+            Err(CliError::Other(format!("InsertUserRule: {message}")))
+        }
+    }
+}
+
+/// Phase 3 tag 0x0C: read install artifacts from the daemon (D-62 preferred path).
+pub fn read_install_artifacts_request(sock: &Path) -> Result<Vec<InstallArtifact>, CliError> {
+    let req = ReadInstallArtifacts::new();
+    let reply: ReadInstallArtifactsReply = send_tagged_request(sock, TAG_READ_INSTALL_ARTIFACTS, &req)?;
+    match reply {
+        ReadInstallArtifactsReply::Ok { artifacts, .. } => Ok(artifacts),
+        ReadInstallArtifactsReply::Err { message, .. } => {
+            Err(CliError::Other(format!("ReadInstallArtifacts: {message}")))
+        }
+    }
+}
+
+/// Phase 3 tag 0x0D: commit a baseline run into proposed rules.
+pub fn baseline_commit_request(sock: &Path, run_uuid: &str) -> Result<BaselineCommitReply, CliError> {
+    let req = BaselineCommit {
+        schema_version: sentinel_ipc::IPC_SCHEMA_V3,
+        run_uuid: run_uuid.into(),
+    };
+    send_tagged_request(sock, TAG_BASELINE_COMMIT, &req)
 }
 
 /// Phase 2 D-38: send `TrustPolicy { path, sha256 }` so the daemon inserts the

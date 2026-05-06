@@ -21,6 +21,9 @@ pub enum Cmd {
         /// The wrapped command and its arguments.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1.., required = true)]
         command: Vec<OsString>,
+        /// Record allow-and-log to per-project .sentinel.toml; show diff+confirm on exit (POL-04).
+        #[arg(long)]
+        baseline: bool,
     },
 
     /// Trust a project-local `.sentinel.toml` so its rules apply to subsequent

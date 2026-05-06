@@ -5,11 +5,22 @@
 //! Phase 1 `RegisterRoot` is FROZEN at `[length-prefixed CBOR body]` (no tag byte).
 //!
 //! Distinguishing the two: the legacy frame's length prefix is a 4-byte big-endian
-//! integer per `sentinel-ipc/src/frame.rs`. For any reasonable RegisterRoot CBOR
-//! body (≤ ~100 bytes), the first byte of the length prefix is 0x00. The Phase 2
-//! tag values are 0x01..=0x07 — non-overlapping with the legacy length prefix's
-//! high byte. The dispatcher peeks the first byte before deciding which path to
-//! take.
+//! integer per `sentinel-ipc/src/frame.rs`. The frame size is bounded by
+//! `MAX_FRAME_BYTES = 64 * 1024 = 0x10000`, so a valid legacy length-prefix high
+//! byte is ALWAYS 0x00. Any other high byte is either a Phase 2 tag
+//! (0x02..=0x07) or a protocol violation.
+//!
+//! WARNING-06 fix (Phase 2 review): the previous comment claimed any byte in
+//! 0x00..=0x01 ∪ 0x08..=0xff was "legacy length-prefix high byte" — but a
+//! valid legacy frame has only 0x00 in the high byte (0x01 already implies
+//! a 16+ MiB body, far above MAX_FRAME_BYTES). The dispatcher now treats:
+//!   - 0x02..=0x07            → tagged Phase 2 message
+//!   - 0x00                   → legacy RegisterRoot (Phase 1)
+//!   - everything else        → protocol violation (rejected immediately)
+//!
+//! This catches scribble traffic and stops downstream code from spending
+//! cycles reading 3 more bytes for an obviously-invalid length prefix
+//! before failing.
 
 use std::io::Read;
 use std::os::unix::net::UnixStream;
@@ -58,7 +69,8 @@ pub enum DispatchError {
 #[derive(Debug)]
 pub enum FrameKind {
     /// Phase 1 legacy: caller should treat the already-peeked byte as the
-    /// FIRST byte of a 4-byte length prefix and read the rest of the frame
+    /// FIRST byte of a 4-byte length prefix (always 0x00 in valid legacy
+    /// frames per MAX_FRAME_BYTES = 64 KiB) and read the rest of the frame
     /// as length-prefixed CBOR (RegisterRoot).
     LegacyUntagged { first_length_byte: u8 },
     /// Phase 2: caller should read a length-prefixed CBOR body of this type.
@@ -67,22 +79,29 @@ pub enum FrameKind {
 
 /// Peek the first byte to decide framing kind. Reads exactly 1 byte from the
 /// stream — caller must continue with the appropriate read path.
+///
+/// WARNING-06: only 0x00 (legacy length-prefix high byte) and 0x02..=0x07
+/// (Phase 2 tags) are valid first bytes. Anything else is a protocol
+/// violation (invalid length prefix or unknown tag). Rejecting at this
+/// stage prevents the legacy handler from spending three more
+/// `read_exact(1)` syscalls on garbage frames before failing.
 pub fn classify_frame(stream: &mut UnixStream) -> Result<FrameKind, DispatchError> {
     let mut first = [0u8; 1];
     stream.read_exact(&mut first)?;
-    if let Some(tag) = MessageTag::from_byte(first[0]) {
+    let b = first[0];
+    if let Some(tag) = MessageTag::from_byte(b) {
         return Ok(FrameKind::Tagged(tag));
     }
-    // Phase 1 legacy length-prefixed frame's high byte. Anything outside
-    // 0x02..=0x07 is treated as legacy. (0x00 is by far the most common
-    // because Phase 1 RegisterRoot bodies are tens of bytes; 0x02..=0x07
-    // are captured as tags above. So this branch is reached only for 0x00
-    // or 0x01 or 0x08..=0xff, which are valid length-prefix high bytes.
-    // 0x01 in the high byte would mean a body ≥ 16 MiB which exceeds
-    // MAX_FRAME_BYTES anyway and is rejected downstream.)
-    Ok(FrameKind::LegacyUntagged {
-        first_length_byte: first[0],
-    })
+    if b == 0x00 {
+        // Phase 1 legacy length-prefixed frame's high byte (always 0x00 for
+        // any frame ≤ MAX_FRAME_BYTES = 64 KiB).
+        return Ok(FrameKind::LegacyUntagged {
+            first_length_byte: b,
+        });
+    }
+    // Anything else: not a valid Phase 2 tag and not a valid legacy
+    // length-prefix high byte. Reject as a protocol violation.
+    Err(DispatchError::UnknownTag(b))
 }
 
 #[cfg(test)]

@@ -26,9 +26,9 @@ use crossbeam_channel::{bounded, TrySendError};
 use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
-    DylibLoaded, DylibLoadedAck, ExecAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IpcError,
-    PrepareSnapshot, RegisterRoot, Reply, Resolve, ResolveReply, SnapshotReply, TrustPolicy,
-    TrustPolicyReply,
+    DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap, EnvNotPropagatedGapAck, ExecAck, ExecEvent,
+    ForkAck, ForkEvent, IPC_SCHEMA_V2, IpcError, PrepareSnapshot, RegisterRoot, Reply, Resolve,
+    ResolveReply, SnapshotReply, TrustPolicy, TrustPolicyReply,
 };
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -227,6 +227,9 @@ impl IpcServer {
             }
             FrameKind::Tagged(MessageTag::Resolve) => {
                 handle_resolve_frame(&mut stream, peer_token, state);
+            }
+            FrameKind::Tagged(MessageTag::EnvNotPropagatedGap) => {
+                handle_env_not_propagated_frame(&mut stream, peer_token, state);
             }
         }
     }
@@ -705,5 +708,76 @@ fn handle_resolve_frame(
     let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
     if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
         error!(error = %e, "failed to send ResolveReply");
+    }
+}
+
+fn handle_env_not_propagated_frame(
+    stream: &mut UnixStream,
+    peer_token: AuditToken,
+    state: &Arc<DaemonState>,
+) {
+    let req: EnvNotPropagatedGap = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "EnvNotPropagatedGap decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::EnvNotPropagatedGap,
+                &EnvNotPropagatedGapAck::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V2 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::EnvNotPropagatedGap,
+            &EnvNotPropagatedGapAck::err(format!(
+                "schema_version {} != IPC_SCHEMA_V2",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    // BLOCKER-02 mirror: untracked peer → diagnostic reply, no gap recorded.
+    if !state.process_tree.is_tracked(&peer_token) {
+        let _ = write_tagged(
+            stream,
+            MessageTag::EnvNotPropagatedGap,
+            &EnvNotPropagatedGapAck::err("untracked peer; ignoring env-not-propagated gap"),
+        );
+        return;
+    }
+    let parent: AuditToken = req.parent_audit_token.into();
+    let binary_path = String::from_utf8_lossy(&req.child_binary_path).into_owned();
+    let gap = CoverageGap::EnvNotPropagated {
+        binary_path: binary_path.clone(),
+        detected_at_ms: req.detected_at_ms,
+    };
+    match state.process_tree.set_coverage_gap(parent, gap) {
+        Ok(()) => {
+            // The literal substrings `TREE-06` and `env-not-propagated`
+            // are the e2e test's grep targets in env_not_propagated.rs
+            // (Task 3). Both must remain in this message verbatim.
+            warn!(
+                target: "sentinel.tree06",
+                parent_pid = parent.val[5],
+                binary_path = %binary_path,
+                detected_at_ms = req.detected_at_ms,
+                "TREE-06 env-not-propagated gap recorded"
+            );
+        }
+        Err(e) => {
+            // Parent not in tree (e.g. fork-event arrived but the
+            // peer-auth token differs from the wire-claimed parent).
+            warn!(error = ?e, "EnvNotPropagatedGap: set_coverage_gap failed");
+        }
+    }
+    if let Err(e) = write_tagged(
+        stream,
+        MessageTag::EnvNotPropagatedGap,
+        &EnvNotPropagatedGapAck::ok(),
+    ) {
+        error!(error = %e, "failed to send EnvNotPropagatedGapAck");
     }
 }

@@ -19,6 +19,8 @@ pub use messages::{
     // Phase 2
     DylibLoaded,
     DylibLoadedAck,
+    EnvNotPropagatedGap,
+    EnvNotPropagatedGapAck,
     ExecAck,
     ExecEvent,
     ForkAck,

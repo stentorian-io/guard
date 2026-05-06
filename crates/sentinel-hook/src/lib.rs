@@ -13,6 +13,8 @@ pub mod interpose; // Filled in by task 2; symbol re-export only at this point
 pub mod ipc_client; // Phase 2 plan 02-05: blocking IPC for ForkEvent / ExecEvent / DylibLoaded
 pub mod log_buffer;
 pub mod reentrancy;
+pub mod replace_exec; // Phase 2 plan 02-05: exec-family shadows
+pub mod replace_fork; // Phase 2 plan 02-05: fork/vfork/posix_spawn shadows
 pub mod replace_libc; // Filled in by task 2
 pub mod replace_nw; // Plan 07: Network.framework dlsym + shadow exports
 pub mod snapshot;

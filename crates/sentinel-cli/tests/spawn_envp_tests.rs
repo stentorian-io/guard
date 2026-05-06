@@ -115,12 +115,14 @@ fn probe_daemon_alive_fails_when_socket_missing() {
 fn spawn_wrapped_against_echo_returns_valid_pid() {
     let dylib = tempfile::NamedTempFile::new().unwrap(); // dummy dylib path
     let mfst = tempfile::NamedTempFile::new().unwrap(); // dummy manifest path
+    let sock = std::path::PathBuf::from("/tmp/sentinel-test-bogus.sock");
     let prog = Path::new("/bin/echo");
     let pid = sentinel_cli::spawn::spawn_wrapped(
         prog,
         &[OsStr::new("hello")],
         dylib.path(),
         mfst.path(),
+        &sock,
     )
     .expect("spawn_wrapped");
     assert!(pid > 0);
@@ -138,6 +140,7 @@ fn spawn_wrapped_against_echo_returns_valid_pid() {
 fn audit_token_for_pid_succeeds_against_spawned_child() {
     let dylib = tempfile::NamedTempFile::new().unwrap();
     let mfst = tempfile::NamedTempFile::new().unwrap();
+    let sock = std::path::PathBuf::from("/tmp/sentinel-test-bogus.sock");
     // Use /bin/sleep at a negligible duration. The child sleeps 200ms then exits.
     let prog = Path::new("/bin/sleep");
     let pid = sentinel_cli::spawn::spawn_wrapped(
@@ -145,6 +148,7 @@ fn audit_token_for_pid_succeeds_against_spawned_child() {
         &[OsStr::new("0.2")],
         dylib.path(),
         mfst.path(),
+        &sock,
     )
     .expect("spawn_wrapped sleep");
     assert!(pid > 0);

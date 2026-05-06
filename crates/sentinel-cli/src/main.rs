@@ -2,8 +2,8 @@
 
 use clap::Parser;
 use sentinel_cli::cli::{Cli, Cmd};
-use sentinel_cli::{audit_token, ipc_client, locate, spawn, CliError};
-use sentinel_daemon::state_dir::{default_state_dir, manifest_path, socket_path};
+use sentinel_cli::{audit_token, ipc_client, locate, spawn, trust_policy, CliError};
+use sentinel_daemon::state_dir::{default_state_dir, socket_path};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 
@@ -25,6 +25,11 @@ fn main() {
 
 fn real_main() -> Result<i32, CliError> {
     let cli = Cli::parse();
+    let state = std::env::var_os("SENTINEL_STATE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_state_dir);
+    let sock = socket_path(&state);
+
     match cli.cmd {
         Cmd::Run { command } => {
             if command.is_empty() {
@@ -35,34 +40,32 @@ fn real_main() -> Result<i32, CliError> {
             let args: Vec<&OsStr> = command[1..].iter().map(|s| s.as_os_str()).collect();
             let dylib =
                 locate::find_dylib().map_err(|e| CliError::DylibNotFound(e.to_string()))?;
-            let state = std::env::var_os("SENTINEL_STATE_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(default_state_dir);
-            let mfst = manifest_path(&state);
-            if !mfst.exists() {
-                return Err(CliError::DaemonUnreachable(format!(
-                    "manifest not found at {} — run `sentineld dev-install` first",
-                    mfst.display()
-                )));
-            }
-            let sock = socket_path(&state);
 
             // ISS-08 remediation — DAEMON-FIRST SEQUENCING:
-            // Probe the daemon BEFORE spawning the wrapped child. T-01-08-06
-            // promises "exits with code 70 BEFORE having spawned the child if
-            // daemon unreachable" — that promise is only kept if the connect
-            // attempt happens before posix_spawnp. The probe is connect-only:
-            // success of `connect_timeout` against the daemon's bound socket
-            // is sufficient liveness evidence (a non-running daemon yields
-            // ECONNREFUSED or ENOENT). No frame is sent; the stream is closed
-            // immediately. The daemon's accept-side handler (plan 05) treats
-            // the resulting EOF on read_frame as a benign liveness probe.
+            // Probe the daemon BEFORE asking it to do anything. T-01-08-06
+            // promises the CLI exits 70 BEFORE having spawned the child if
+            // the daemon is unreachable.
             ipc_client::probe_daemon_alive(&sock)?;
 
-            // Daemon is alive — spawn the wrapped child.
-            let pid = spawn::spawn_wrapped(&program, &args, &dylib, &mfst)?;
+            // Phase 2 D-29: PrepareSnapshot — ask the daemon to walk cwd for
+            // .sentinel.toml, merge curated + project + user rules, and write
+            // a per-run snapshot. The returned manifest path is what the
+            // dylib will read at ctor time via SENTINEL_SNAPSHOT_MANIFEST.
+            //
+            // This replaces Phase 1's daemon-startup snapshot: each `sentinel
+            // run` invocation now gets a fresh per-run snapshot tailored to
+            // its working directory.
+            let cwd =
+                std::env::current_dir().map_err(|e| CliError::Other(format!("getcwd: {e}")))?;
+            let (manifest_path, _run_uuid) = ipc_client::prepare_snapshot(&sock, &cwd)?;
 
-            // Derive audit token, register with daemon.
+            // Daemon is alive and per-run snapshot is published — spawn the
+            // wrapped child with both SENTINEL_SNAPSHOT_MANIFEST (per-run) and
+            // SENTINEL_DAEMON_SOCKET (so the dylib's IPC client can talk back
+            // for fork/exec/dylib_loaded events).
+            let pid = spawn::spawn_wrapped(&program, &args, &dylib, &manifest_path, &sock)?;
+
+            // Derive audit token, register with daemon (Phase 1 unchanged).
             let token = audit_token::audit_token_for_pid(pid)
                 .map_err(|e| CliError::DaemonUnreachable(format!("audit_token: {e}")))?;
             ipc_client::register_root_with_daemon(&sock, token)?;
@@ -79,6 +82,13 @@ fn real_main() -> Result<i32, CliError> {
                 128 + libc::WTERMSIG(status)
             };
             Ok(exit_code)
+        }
+        Cmd::TrustPolicy { path } => {
+            // Probe the daemon first so the user gets a clean DaemonUnreachable
+            // error instead of a hang on the tagged frame's connect.
+            ipc_client::probe_daemon_alive(&sock)?;
+            trust_policy::run_trust_policy(&sock, &path)?;
+            Ok(0)
         }
     }
 }

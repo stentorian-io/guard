@@ -1080,6 +1080,8 @@ dependencies = [
  "sentinel-core",
  "sentinel-daemon",
  "sentinel-ipc",
+ "serde",
+ "sha2",
  "socket2",
  "tempfile",
  "thiserror",

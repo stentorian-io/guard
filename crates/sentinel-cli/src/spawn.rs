@@ -1,8 +1,12 @@
-//! posix_spawnp wrapper that injects DYLD_INSERT_LIBRARIES and
-//! SENTINEL_SNAPSHOT_MANIFEST into the child's envp.
+//! posix_spawnp wrapper that injects DYLD_INSERT_LIBRARIES,
+//! SENTINEL_SNAPSHOT_MANIFEST, and SENTINEL_DAEMON_SOCKET into the child's envp.
 //!
 //! Pattern: .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md
 //! lines 671-739 (Example 1).
+//!
+//! Phase 2 plan 02-06b: SENTINEL_DAEMON_SOCKET added so the dylib's
+//! `cache_daemon_socket_from_env` (plan 02-05) finds the daemon socket and
+//! can send ForkEvent / ExecEvent / DylibLoaded events.
 
 use std::ffi::{CString, OsStr};
 use std::os::unix::ffi::OsStrExt;
@@ -10,19 +14,24 @@ use std::path::Path;
 
 const ENV_DYLD: &str = "DYLD_INSERT_LIBRARIES";
 const ENV_MANIFEST: &str = "SENTINEL_SNAPSHOT_MANIFEST";
+const ENV_DAEMON_SOCKET: &str = "SENTINEL_DAEMON_SOCKET";
 
 pub fn spawn_wrapped(
     program: &Path,
     args: &[&OsStr],
     dylib_path: &Path,
     manifest_path: &Path,
+    socket_path: &Path,
 ) -> std::io::Result<libc::pid_t> {
-    // Build envp: inherit current environment minus the two we manage.
+    // Build envp: inherit current environment minus the three we manage.
     let mut env: Vec<CString> = std::env::vars_os()
         .filter_map(|(k, v)| {
             let k_bytes = k.as_bytes();
             // Strip our managed vars — we'll re-add them with proper values below.
-            if k_bytes == ENV_DYLD.as_bytes() || k_bytes == ENV_MANIFEST.as_bytes() {
+            if k_bytes == ENV_DYLD.as_bytes()
+                || k_bytes == ENV_MANIFEST.as_bytes()
+                || k_bytes == ENV_DAEMON_SOCKET.as_bytes()
+            {
                 return None;
             }
             let mut s = k_bytes.to_vec();
@@ -59,6 +68,20 @@ pub fn spawn_wrapped(
             .map_err(|e| std::io::Error::other(format!("MANIFEST env contains NUL: {e}")))?,
     );
 
+    // SENTINEL_DAEMON_SOCKET: absolute path the dylib uses to talk back to the
+    // daemon (plan 02-05's ipc_client::cache_daemon_socket_from_env reads this
+    // at ctor time). Without it the dylib's send_*_sync calls return
+    // NotConfigured and the fork/exec/dylib_loaded events never reach the
+    // daemon — Phase 2 IPC is a no-op.
+    let mut entry3 = ENV_DAEMON_SOCKET.as_bytes().to_vec();
+    entry3.push(b'=');
+    entry3.extend_from_slice(socket_path.as_os_str().as_bytes());
+    env.push(
+        CString::new(entry3).map_err(|e| {
+            std::io::Error::other(format!("DAEMON_SOCKET env contains NUL: {e}"))
+        })?,
+    );
+
     // Build argv[0] = program name.
     let prog_c = CString::new(program.as_os_str().as_bytes())
         .map_err(|e| std::io::Error::other(format!("program path contains NUL: {e}")))?;
@@ -87,8 +110,8 @@ pub fn spawn_wrapped(
             prog_c.as_ptr(),
             std::ptr::null(), // file_actions: none
             std::ptr::null(), // attrp: none (default attrs)
-            argv_ptrs.as_ptr() as *const *mut libc::c_char,
-            envp_ptrs.as_ptr() as *const *mut libc::c_char,
+            argv_ptrs.as_ptr(),
+            envp_ptrs.as_ptr(),
         )
     };
     if rc != 0 {

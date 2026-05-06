@@ -9,6 +9,7 @@ fn run_with_simple_command() {
         Cmd::Run { command } => {
             assert_eq!(command, vec![OsString::from("echo"), OsString::from("hello")]);
         }
+        other => panic!("expected Run variant, got {other:?}"),
     }
 }
 
@@ -23,6 +24,7 @@ fn run_with_dash_dash_separator_and_hyphen_args() {
                 OsString::from("console.log(1)"),
             ]);
         }
+        other => panic!("expected Run variant, got {other:?}"),
     }
 }
 

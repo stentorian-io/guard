@@ -9,8 +9,9 @@ use sentinel_cli::ipc_client::{prepare_snapshot, trust_policy_request};
 use sentinel_daemon::gap_detector::GapDetector;
 use sentinel_daemon::ipc_server::{DaemonState, IpcServer};
 use sentinel_daemon::rule_store::RuleStore;
-use sentinel_daemon::state_dir::{db_path, ensure_state_dir, ensure_runs_dir, socket_path};
+use sentinel_daemon::state_dir::{db_path, ensure_runs_dir, ensure_state_dir, socket_path};
 use sentinel_daemon::tracked::ProcessTree;
+use sha2::Digest;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
@@ -73,6 +74,3 @@ fn trust_policy_request_round_trips_against_live_daemon() {
     h.join().unwrap();
     r.expect("trust_policy_request Ok");
 }
-
-// `sha2::Sha256::digest` import for the test above (kept local to the test mod).
-use sha2::{Digest, Sha256};

@@ -95,16 +95,18 @@ impl IpcServer {
     /// Run forever — bounded thread pool consumes from a bounded channel.
     /// Takes self by value because the listener and channel senders move into
     /// long-lived workers.
+    ///
+    /// WARNING-03 fix (Phase 2 review): each worker is wrapped in a panic
+    /// catcher so a single panicked handler does NOT silently shrink the
+    /// worker pool. On panic, the worker is respawned with a fresh `state`
+    /// clone and the same channel receiver. Without this, a poisoned RwLock
+    /// inside `process_tree.write().expect(...)` could panic one worker per
+    /// pid; the daemon would silently degrade to N-K concurrency with no
+    /// log evidence of the loss.
     pub fn run_forever(self) -> std::io::Result<()> {
         let (tx, rx) = bounded::<UnixStream>(ACCEPT_QUEUE_DEPTH);
-        for _ in 0..WORKER_THREADS {
-            let rx = rx.clone();
-            let state = self.state.clone();
-            std::thread::spawn(move || {
-                while let Ok(stream) = rx.recv() {
-                    Self::handle(stream, &state);
-                }
-            });
+        for worker_id in 0..WORKER_THREADS {
+            spawn_worker(worker_id, rx.clone(), self.state.clone());
         }
         loop {
             let (stream, _) = self.listener.accept()?;
@@ -126,6 +128,47 @@ impl IpcServer {
         }
     }
 
+}
+
+/// WARNING-03: spawn a worker that catches panics and respawns itself.
+/// Lives outside the `IpcServer` impl so the recursive respawn cleanly
+/// captures a fresh `Arc<DaemonState>` clone and the same `Receiver`.
+fn spawn_worker(
+    worker_id: usize,
+    rx: crossbeam_channel::Receiver<UnixStream>,
+    state: Arc<DaemonState>,
+) {
+    let _ = std::thread::Builder::new()
+        .name(format!("sentineld-worker-{worker_id}"))
+        .spawn(move || {
+            // catch_unwind around the inner loop. AssertUnwindSafe is
+            // acceptable here: `IpcServer::handle` is structured so any
+            // partial mutation it leaves behind in `DaemonState` is
+            // self-recoverable (nodes/runs maps tolerate stale entries
+            // until GC sweep). The Arc references themselves are unwind-
+            // safe by construction.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                while let Ok(stream) = rx.recv() {
+                    IpcServer::handle(stream, &state);
+                }
+            }));
+            if let Err(panic_payload) = result {
+                let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                    (*s).to_string()
+                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "non-string panic payload".to_string()
+                };
+                error!(worker_id, panic = %msg, "ipc worker panicked — respawning");
+                spawn_worker(worker_id, rx, state);
+            }
+            // Normal exit (rx Disconnected) is silent: the daemon is shutting
+            // down and the listener will return Err next accept iteration.
+        });
+}
+
+impl IpcServer {
     fn handle(mut stream: UnixStream, state: &Arc<DaemonState>) {
         let peer_id = match authenticate(&stream) {
             Ok(id) => id,

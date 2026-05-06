@@ -70,7 +70,9 @@ impl ProcessTree {
 
     /// Insert a tracked-root node. Idempotent: returns false if already present.
     pub fn insert_root(&self, audit_token: AuditToken, run_uuid: String, binary_path: String) -> bool {
-        let mut g = self.nodes.write().expect("process_tree nodes write");
+        // WARNING-03: tolerate poison so a worker panic in one handler does
+        // not poison the daemon-wide process tree forever.
+        let mut g = self.nodes.write().unwrap_or_else(|p| p.into_inner());
         if g.contains_key(&audit_token) {
             return false;
         }
@@ -91,7 +93,9 @@ impl ProcessTree {
         parent_audit_token: AuditToken,
         child_audit_token: AuditToken,
     ) -> Result<(), TreeError> {
-        let mut g = self.nodes.write().expect("process_tree nodes write");
+        // WARNING-03: tolerate poison so a worker panic in one handler does
+        // not poison the daemon-wide process tree forever.
+        let mut g = self.nodes.write().unwrap_or_else(|p| p.into_inner());
         let parent = g
             .get(&parent_audit_token)
             .ok_or(TreeError::ParentNotFound)?
@@ -116,7 +120,9 @@ impl ProcessTree {
         audit_token: AuditToken,
         binary_path: String,
     ) -> Result<(), TreeError> {
-        let mut g = self.nodes.write().expect("process_tree nodes write");
+        // WARNING-03: tolerate poison so a worker panic in one handler does
+        // not poison the daemon-wide process tree forever.
+        let mut g = self.nodes.write().unwrap_or_else(|p| p.into_inner());
         let node = g.get_mut(&audit_token).ok_or(TreeError::NodeNotFound)?;
         node.binary_path = binary_path;
         Ok(())
@@ -127,14 +133,18 @@ impl ProcessTree {
         audit_token: AuditToken,
         gap: CoverageGap,
     ) -> Result<(), TreeError> {
-        let mut g = self.nodes.write().expect("process_tree nodes write");
+        // WARNING-03: tolerate poison so a worker panic in one handler does
+        // not poison the daemon-wide process tree forever.
+        let mut g = self.nodes.write().unwrap_or_else(|p| p.into_inner());
         let node = g.get_mut(&audit_token).ok_or(TreeError::NodeNotFound)?;
         node.coverage_gap = Some(gap);
         Ok(())
     }
 
     pub fn get_node(&self, audit_token: &AuditToken) -> Option<ProcessNode> {
-        self.nodes.read().expect("process_tree nodes read").get(audit_token).cloned()
+        self.nodes
+            .read()
+            .unwrap_or_else(|p| p.into_inner()).get(audit_token).cloned()
     }
 
     pub fn is_tracked(&self, audit_token: &AuditToken) -> bool {
@@ -152,25 +162,34 @@ impl ProcessTree {
     }
 
     pub fn nodes_len(&self) -> usize {
-        self.nodes.read().expect("process_tree nodes read").len()
+        self.nodes
+            .read()
+            .unwrap_or_else(|p| p.into_inner()).len()
     }
 
     // --- run records ---
 
     pub fn insert_run(&self, run: RunRecord) {
-        let mut g = self.runs.write().expect("process_tree runs write");
+        let mut g = self.runs.write().unwrap_or_else(|p| p.into_inner());
         g.insert(run.run_uuid.clone(), run);
     }
 
     pub fn remove_run(&self, run_uuid: &str) -> Option<RunRecord> {
-        self.runs.write().expect("process_tree runs write").remove(run_uuid)
+        self.runs
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(run_uuid)
     }
 
     pub fn get_run(&self, run_uuid: &str) -> Option<RunRecord> {
-        self.runs.read().expect("process_tree runs read").get(run_uuid).cloned()
+        self.runs
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(run_uuid)
+            .cloned()
     }
 
     pub fn runs_len(&self) -> usize {
-        self.runs.read().expect("process_tree runs read").len()
+        self.runs.read().unwrap_or_else(|p| p.into_inner()).len()
     }
 }

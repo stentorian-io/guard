@@ -116,17 +116,24 @@ fn register_root_delegation_stores_wire_claimed_child_token() {
         server.accept_one().expect("accept_one");
     });
 
-    // Send RegisterRoot with a wire pid that differs from getpid() (simulating
-    // the CLI registering a child process). Use a large synthetic pid value that
-    // cannot be our pid (our pid fits in 16 bits on test runners; 0x7fff_0001
-    // is well above). All other fields zero except val[5].
-    let child_pid_synthetic = 0x7fff_0001u32;
+    // Send RegisterRoot with a wire pid that differs from the connecting
+    // peer's kernel pid (simulating the CLI registering a child process).
+    // WR-08: the daemon now sanity-checks that the wire pid (a) exists and
+    // (b) has the same uid as the daemon. Spawn a real child process so the
+    // pid passes the existence check, then register that pid. The child runs
+    // `sleep 30` which is more than enough time for the test to send the
+    // RegisterRoot and read the Ack.
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn sleep child");
+    let child_pid_real = child.id();
     let our_pid = unsafe { libc::getpid() } as u32;
     assert_ne!(
-        child_pid_synthetic, our_pid,
-        "test assumption: synthetic child pid must differ from our pid"
+        child_pid_real, our_pid,
+        "test assumption: child pid must differ from our pid"
     );
-    let child_wire = AuditToken::synthetic([0, 0, 0, 0, 0, child_pid_synthetic, 0, 0x42]);
+    let child_wire = AuditToken::synthetic([0, 0, 0, 0, 0, child_pid_real, 0, 0x42]);
     let mut stream = UnixStream::connect(&sock).expect("connect");
     write_frame(&mut stream, &RegisterRoot::new(child_wire)).expect("write RegisterRoot");
     let reply: Reply = read_frame(&mut stream).expect("read Reply");
@@ -146,6 +153,10 @@ fn register_root_delegation_stores_wire_claimed_child_token() {
     // Our own kernel token (with getpid()) must NOT be stored.
     // We can't get the exact kernel token here, but we can verify the delegation
     // token was stored by asserting is_tracked(child_wire) is true (done above).
+
+    // Clean up the child process we spawned.
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[test]
@@ -163,10 +174,15 @@ fn idempotent_register_root_for_same_token() {
         server.accept_one().unwrap();
     });
 
+    // WR-08: avoid the REGISTER-01 delegation path (which would now sanity-
+    // check the wire pid against the OS process table) by sending a wire
+    // token whose val[5] matches the test's own kernel pid. The handler then
+    // takes the same-pid arm and uses peer_token directly.
+    let our_pid = unsafe { libc::getpid() } as u32;
     for _ in 0..2 {
         let mut stream = UnixStream::connect(&sock).unwrap();
-        let dummy = AuditToken::synthetic([0; 8]);
-        write_frame(&mut stream, &RegisterRoot::new(dummy)).unwrap();
+        let self_wire = AuditToken::synthetic([0, 0, 0, 0, 0, our_pid, 0, 0]);
+        write_frame(&mut stream, &RegisterRoot::new(self_wire)).unwrap();
         let _: Reply = read_frame(&mut stream).unwrap();
     }
     h.join().unwrap();

@@ -219,6 +219,7 @@ pub fn send_exec_event_sync(
         schema_version: IPC_SCHEMA_V2,
         audit_token,
         target_path: target_path[..len].to_vec(),
+        pm_env: Vec::new(), // V2 caller — pm_env capture added in plan 03-04
     };
     let ack: ExecAck = send_tagged_and_recv_ack(TAG_EXEC_EVENT, &ev, timeout_ms)?;
     match ack {

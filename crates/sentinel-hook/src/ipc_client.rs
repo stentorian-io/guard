@@ -20,7 +20,6 @@ use sentinel_ipc::{
 };
 use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
-use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -137,9 +136,10 @@ pub(crate) fn connect_with_timeout(sock: &Path, total_ms: u64) -> Result<UnixStr
     let rw_dur = Duration::from_millis((total_ms * 2) / 5);
     socket.set_read_timeout(Some(rw_dur)).ok();
     socket.set_write_timeout(Some(rw_dur)).ok();
-    let fd = socket.into_raw_fd();
-    // SAFETY: we own the fd; from_raw_fd takes ownership.
-    Ok(unsafe { UnixStream::from_raw_fd(fd) })
+    // WR-02: use the safe From<Socket> for UnixStream conversion (socket2 0.5+
+    // on Unix). Eliminates the unsafe raw-fd dance and its future-edit
+    // hazard.
+    Ok(socket.into())
 }
 
 fn map_io_to_timeout(e: std::io::Error) -> IpcClientError {

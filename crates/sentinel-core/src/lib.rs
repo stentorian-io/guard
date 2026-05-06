@@ -5,6 +5,7 @@ pub mod error;
 pub mod identity;
 pub mod policy;
 pub mod policy_file;
+pub mod policy_file_writer;
 pub mod snapshot;
 
 pub use allowlist::{AllowlistEntry, MatchType, RuleKind, RuleTier, Verdict, evaluate_rule};
@@ -15,4 +16,5 @@ pub use policy::{
     is_loopback_ip,
 };
 pub use policy_file::{PolicyFileError, PolicyRule, SentinelToml};
+pub use policy_file_writer::{WriteError, append_rule, append_rules};
 pub use snapshot::{SCHEMA_V1, SCHEMA_V2, Snapshot};

@@ -1,0 +1,148 @@
+//! Tier-ordered policy evaluator (RESEARCH.md §5).
+//!
+//! Hot-path discipline (D-03): no heap allocation. The evaluator iterates a
+//! pre-sorted `&[AllowlistEntry]` and does only byte-comparison + the three
+//! hard-rule checks. Returns a `(Verdict, SourceKind)` tuple by value; both
+//! types are `Copy`, so no heap touch.
+
+use crate::allowlist::{AllowlistEntry, RuleKind, RuleTier, Verdict};
+
+/// Source attribution. Stored by the daemon's block-log for Phase 3 surfacing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceKind {
+    /// Hard rule encoded in this file. The &'static str names the rule —
+    /// "loopback" | "cloud-metadata" | "raw-ip-cache-miss".
+    HardRule(&'static str),
+    BuiltinDeny,
+    CuratedAllow,
+    ProjectDeny,
+    UserDeny,
+    FeedDeny,
+    ProjectAllow,
+    UserAllow,
+    DefaultDeny,
+}
+
+impl SourceKind {
+    fn from_tier(tier: RuleTier) -> Self {
+        match tier {
+            RuleTier::BuiltinDeny => SourceKind::BuiltinDeny,
+            RuleTier::CuratedAllow => SourceKind::CuratedAllow,
+            RuleTier::ProjectDeny => SourceKind::ProjectDeny,
+            RuleTier::UserDeny => SourceKind::UserDeny,
+            RuleTier::FeedDeny => SourceKind::FeedDeny,
+            RuleTier::ProjectAllow => SourceKind::ProjectAllow,
+            RuleTier::UserAllow => SourceKind::UserAllow,
+        }
+    }
+}
+
+// ============================================================================
+// Hard rules (D-25) — encoded in code, non-overridable by any entry source.
+// ============================================================================
+
+/// Hostname-based loopback test. Matches `localhost` and `localhost6`.
+pub fn is_loopback_host(host: &[u8]) -> bool {
+    host == b"localhost" || host == b"localhost6"
+}
+
+/// IP-string loopback test. Matches IPv4 127.0.0.0/8 (textually) and IPv6 ::1.
+pub fn is_loopback_ip(ip: &[u8]) -> bool {
+    if ip == b"::1" {
+        return true;
+    }
+    // 127.x.y.z — accept any 127. prefix
+    ip.starts_with(b"127.")
+}
+
+/// Cloud-metadata host test. AWS/Azure/GCP all use 169.254.169.254 (IPv4)
+/// or fe80::a9fe:a9fe (IPv6 link-local) — D-25b.
+pub fn is_cloud_metadata_host(host: &[u8]) -> bool {
+    host == b"169.254.169.254" || host == b"fe80::a9fe:a9fe"
+}
+
+pub fn is_cloud_metadata_ip(ip: &[u8]) -> bool {
+    is_cloud_metadata_host(ip)
+}
+
+// ============================================================================
+// Tier-ordered evaluator.
+// ============================================================================
+
+/// Evaluate a connection attempt against the snapshot's pre-sorted entries.
+///
+/// Inputs:
+///   - `host`: bytes of the SNI / hostname (may be empty if connect-by-IP only)
+///   - `ip`:   Some(ascii bytes) of the destination IP if known
+///   - `resolved_via_getaddrinfo`: true if the dylib's per-process getaddrinfo
+///     cache shows that the IP was resolved earlier in this process
+///   - `entries`: pre-sorted by RuleTier (the daemon sorts at snapshot-write
+///     time; the dylib mmaps already-sorted bytes)
+///
+/// The function iterates `entries` linearly and returns at the first match.
+/// Because entries are sorted by tier, the first match is the highest-priority
+/// match — implementing RESEARCH.md §5's seven-tier precedence stack.
+pub fn evaluate_policy(
+    host: &[u8],
+    ip: Option<&[u8]>,
+    resolved_via_getaddrinfo: bool,
+    entries: &[AllowlistEntry],
+) -> (Verdict, SourceKind) {
+    // --- Tier 0a: loopback always-allow (D-25a) ---
+    if !host.is_empty() && is_loopback_host(host) {
+        return (Verdict::Allow, SourceKind::HardRule("loopback"));
+    }
+    if let Some(ip_bytes) = ip {
+        if is_loopback_ip(ip_bytes) {
+            return (Verdict::Allow, SourceKind::HardRule("loopback"));
+        }
+    }
+
+    // --- Tier 0b: cloud metadata always-deny (D-25b) ---
+    if !host.is_empty() && is_cloud_metadata_host(host) {
+        return (Verdict::Deny, SourceKind::HardRule("cloud-metadata"));
+    }
+    if let Some(ip_bytes) = ip {
+        if is_cloud_metadata_ip(ip_bytes) {
+            return (Verdict::Deny, SourceKind::HardRule("cloud-metadata"));
+        }
+    }
+
+    // --- Tier 0c: raw-IP cache-miss-deny (D-25c / ALLOW-08) ---
+    // If we have an IP but no prior getaddrinfo for it, deny — the connect
+    // happened with a hardcoded numeric address inside a tracked subtree.
+    if ip.is_some() && !resolved_via_getaddrinfo {
+        return (Verdict::Deny, SourceKind::HardRule("raw-ip-cache-miss"));
+    }
+
+    // --- Tiers 1..6: walk entries in tier order ---
+    // Caller MUST supply pre-sorted entries (daemon's snapshot-write step does
+    // this). On the dylib hot path we do not re-sort — that would allocate.
+    for entry in entries {
+        // Match against host first (most common case for hostname-based rules).
+        // If host is empty or doesn't match, try matching against the IP string
+        // for entries with match_type == Ip.
+        if !host.is_empty() && entry.matches(host) {
+            return verdict_for(entry);
+        }
+        if let Some(ip_bytes) = ip {
+            if matches!(entry.match_type, crate::allowlist::MatchType::Ip)
+                && entry.matches(ip_bytes)
+            {
+                return verdict_for(entry);
+            }
+        }
+    }
+
+    // --- Default deny ---
+    (Verdict::Deny, SourceKind::DefaultDeny)
+}
+
+#[inline]
+fn verdict_for(entry: &AllowlistEntry) -> (Verdict, SourceKind) {
+    let v = match entry.kind {
+        RuleKind::Allow => Verdict::Allow,
+        RuleKind::Deny => Verdict::Deny,
+    };
+    (v, SourceKind::from_tier(entry.tier))
+}

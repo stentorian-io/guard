@@ -199,6 +199,23 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
             return unsafe { libc::posix_spawn(pid_out, path, file_actions, attrp, argv, envp) };
         }
     };
+    // BLOCKER-05 assumption (Phase 2 review): we hold IN_HOOK=true across
+    // the libc::posix_spawn call. Apple's posix_spawn(2) implementation
+    // atomically fork+execs without invoking user-visible interpose records
+    // during the in-flight window — the child's image is replaced before
+    // any user code runs. Therefore the parent's `IN_HOOK=true` thread-local
+    // cannot leak into a nested hook in the child. If Apple ever changes
+    // this assumption (verified on macOS 14.x and 15.x as of 2025), this
+    // hook becomes a reentrancy hazard. Reach for `posix_spawn_file_actions`
+    // (a pre-spawn IPC) or interpose via Endpoint Security at that point.
+    //
+    // The fork hook (`sentinel_fork`) and vfork hook (`sentinel_vfork`)
+    // explicitly reset IN_HOOK in the child path because raw_fork()/raw_vfork()
+    // share the parent's thread-local cell across the fork. posix_spawn does
+    // NOT need that reset here because the libc atomic forks-and-execs in a
+    // single call — the child's exec discards inherited mappings before any
+    // hook can fire.
+    //
     // Call the real posix_spawn via libc — IN_HOOK is set, so any nested hook
     // calls take the pass-through path.
     let rc = unsafe { libc::posix_spawn(pid_out, path, file_actions, attrp, argv, envp) };
@@ -276,6 +293,8 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
             return unsafe { libc::posix_spawnp(pid_out, path, file_actions, attrp, argv, envp) };
         }
     };
+    // BLOCKER-05: see `sentinel_posix_spawn` for the IN_HOOK-thread-local
+    // reentrancy assumption — same logic applies to posix_spawnp.
     let rc = unsafe { libc::posix_spawnp(pid_out, path, file_actions, attrp, argv, envp) };
     if rc != 0 {
         return rc;

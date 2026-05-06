@@ -1,61 +1,70 @@
-//! Fixed-capacity SPSC log ring for use from hot-path code (D-03 — no alloc).
+//! Concurrent-writer-safe log ring (BL-03 / D-43 fix).
 //!
-//! Phase 1 keeps it simple: a static byte buffer + atomic write index. The
-//! constructor and a future flush thread read the buffer; replacement fns
-//! append. Lossy: if the buffer fills, new writes overwrite from index 0.
+//! Phase 1's SpscRing was a single-producer-single-consumer approximation
+//! that accepted writes from multiple threads (replace_libc.rs hot paths) —
+//! racy by design. Phase 2 replaces it with `crossbeam_queue::ArrayQueue<Box<[u8]>>`,
+//! a lock-free MPMC queue with proven correctness.
 //!
-//! For Phase 1 this is dev-only (we read it via `dump()` in tests). Phase 3
-//! wires the flush thread to write structured records to ~/Library/Logs/Sentinel.
+//! The append API takes `&[u8]` (unchanged from Phase 1) and copies into an
+//! owned `Box<[u8]>` — this allocates, which would normally violate D-03's
+//! no-alloc-on-the-hot-path rule, BUT the log ring is NOT on the verdict hot
+//! path (the hot path is connect/sendto, which decides allow/deny without
+//! touching LOG_RING). Fork/exec hooks DO call append, and they are not on
+//! the <100µs budget — they pay an IPC round trip. A small-byte malloc is
+//! fine in that context.
+//!
+//! On overflow: `force_push` evicts the oldest entry. The log is lossy by
+//! design — we prefer recent records over a hung writer.
 
-use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use crossbeam_queue::ArrayQueue;
+use std::sync::OnceLock;
 
-const RING_BYTES: usize = 64 * 1024;
+const CAPACITY: usize = 1024;
 
-pub struct SpscRing {
-    // UnsafeCell so we can write through a shared reference from the static.
-    buf: UnsafeCell<[u8; RING_BYTES]>,
-    write_idx: AtomicUsize,
+static LOG_RING_INNER: OnceLock<ArrayQueue<Box<[u8]>>> = OnceLock::new();
+
+fn ring() -> &'static ArrayQueue<Box<[u8]>> {
+    LOG_RING_INNER.get_or_init(|| ArrayQueue::new(CAPACITY))
 }
 
-// SAFETY: SpscRing is accessed from multiple threads only via atomic
-// write_idx (monotonic) + UnsafeCell buf (SPSC approximation). For Phase 1
-// this is acceptable; Phase 3 replaces with a proper per-thread ring.
-unsafe impl Sync for SpscRing {}
+/// Process-global log ring. Phase 1 callers wrote `LOG_RING.append(...)`.
+/// The static is a unit struct delegating to the OnceLock-backed inner queue;
+/// this preserves the call-site syntax exactly while routing all writes
+/// through the lock-free MPMC ArrayQueue.
+pub struct LogRing;
 
-pub static LOG_RING: SpscRing = SpscRing {
-    buf: UnsafeCell::new([0; RING_BYTES]),
-    write_idx: AtomicUsize::new(0),
-};
+pub static LOG_RING: LogRing = LogRing;
 
-impl SpscRing {
-    /// Append `msg` followed by a newline. Lossy on overflow.
+impl LogRing {
+    /// Capacity of the ring (entries, not bytes). Lossy on overflow.
+    pub const CAPACITY: usize = CAPACITY;
+
+    /// Append a log line. Allocates a `Box<[u8]>` from `msg` plus a trailing
+    /// newline. Lossy on overflow (oldest evicted via `force_push`). Safe
+    /// under concurrent writers (lock-free MPMC).
     pub fn append(&self, msg: &[u8]) {
-        // Reserve a slot; lossy wrap on overflow.
-        let len = msg.len() + 1;
-        let start = self.write_idx.fetch_add(len, Ordering::Relaxed) % RING_BYTES;
-        // SAFETY: UnsafeCell permits interior mutability; SPSC approximation.
-        let p = self.buf.get() as *mut u8;
-        unsafe {
-            for (i, b) in msg.iter().enumerate() {
-                *p.add((start + i) % RING_BYTES) = *b;
-            }
-            *p.add((start + msg.len()) % RING_BYTES) = b'\n';
+        let mut v = Vec::with_capacity(msg.len() + 1);
+        v.extend_from_slice(msg);
+        v.push(b'\n');
+        let _ = ring().force_push(v.into_boxed_slice());
+    }
+
+    /// Drain the queue into `out`. Concatenates each entry's bytes; entries
+    /// already include trailing newlines.
+    pub fn dump(&self, out: &mut Vec<u8>) {
+        while let Some(entry) = ring().pop() {
+            out.extend_from_slice(&entry);
         }
     }
 
-    /// Read the (approximate) current ring contents up to `len` bytes from index 0.
-    /// Useful for tests; not for production hot-path use.
-    pub fn dump(&self, out: &mut [u8]) -> usize {
-        let n = out
-            .len()
-            .min(self.write_idx.load(Ordering::Relaxed))
-            .min(RING_BYTES);
-        // SAFETY: reading from UnsafeCell buf; SPSC approximation.
-        let p = self.buf.get() as *const u8;
-        unsafe {
-            core::ptr::copy_nonoverlapping(p, out.as_mut_ptr(), n);
-        }
-        n
+    /// Number of entries currently buffered. Useful for tests.
+    pub fn len(&self) -> usize {
+        ring().len()
+    }
+
+    /// True if the buffer is empty. Pairs with `len()` to satisfy
+    /// clippy::len_without_is_empty.
+    pub fn is_empty(&self) -> bool {
+        ring().is_empty()
     }
 }

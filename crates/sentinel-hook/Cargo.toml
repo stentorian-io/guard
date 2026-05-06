@@ -16,10 +16,15 @@ libc = { workspace = true }
 ctor = { workspace = true }
 memmap2 = { workspace = true }
 ciborium = { workspace = true }
+crossbeam-queue = { workspace = true }
 sentinel-core = { workspace = true }
+sentinel-ipc = { workspace = true }
+socket2 = { workspace = true }
 sha2 = "0.10"
-# CRITICAL: NO tokio, async-std, mio, crossbeam, serde_json, reqwest, tracing.
-# See .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md lines 127-129 (Hook crate exclusions).
+# Phase 2 plan 02-05 lifts the original "no crossbeam" exclusion: crossbeam-queue
+# (lock-free MPMC) is the BL-03 / D-43 fix for the racy SpscRing log buffer. The
+# remaining exclusions (tokio, async-std, mio, serde_json, reqwest, tracing) still
+# stand — see .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md.
 
 [dev-dependencies]
 tempfile = { workspace = true }

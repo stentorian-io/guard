@@ -1,6 +1,7 @@
 //! sentineld library — exposes the daemon internals to integration tests.
 pub mod baseline_staging;
 pub mod curated;
+pub mod daemon_state;
 pub mod log_writer;
 pub mod prompt;
 pub mod env_capture;
@@ -19,3 +20,10 @@ pub mod tracked;
 pub mod dev_install;
 pub mod rule_store;
 pub mod policy_file;
+
+// Convenience re-exports for integration tests (plan 03-12).
+pub use ipc_server::DaemonState;
+/// Re-export Verdict under `sentinel_daemon::policy::Verdict` for test ergonomics.
+pub mod policy {
+    pub use sentinel_core::Verdict;
+}

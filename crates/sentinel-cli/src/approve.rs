@@ -187,6 +187,18 @@ pub struct BlockEntry {
     pub source_kind: String,
 }
 
+/// WR-05: cap the unique-host count we accumulate when filtering block
+/// destinations. Without a cap, a hostile package making thousands of unique
+/// hostnames per run could OOM the CLI. 10000 is comfortably above any
+/// legitimate single-run cardinality (typical npm install has < 200 unique
+/// hosts).
+const MAX_UNIQUE_BLOCK_HOSTS: usize = 10_000;
+/// WR-05: cap the per-host hostname length we accept. The daemon's log writer
+/// doesn't bound dest_host length on the way in, so a malicious package could
+/// emit log entries with multi-KiB hostnames. We discard entries whose host
+/// exceeds this length rather than silently storing them.
+const MAX_HOST_LENGTH: usize = 256;
+
 pub fn filter_block_destinations(log_path: &Path, run_uuid: &str)
     -> Result<Vec<BlockEntry>, CliError>
 {
@@ -211,8 +223,19 @@ pub fn filter_block_destinations(log_path: &Path, run_uuid: &str)
         let port = v.get("dest_port").and_then(|p| p.as_u64()).unwrap_or(0) as u16;
         let source_kind = v.get("source_kind").and_then(|s| s.as_str()).unwrap_or("").to_string();
         if host.is_empty() { continue; }
+        // WR-05: bound dest_host length defensively. The daemon's log writer
+        // doesn't truncate on the way in, so a hostile package could emit
+        // entries with multi-KiB hosts.
+        if host.len() > MAX_HOST_LENGTH { continue; }
         if seen.insert((host.to_string(), port)) {
             out.push(BlockEntry { host: host.to_string(), port, source_kind });
+            // WR-05: cap unique hosts to keep memory bounded.
+            if out.len() >= MAX_UNIQUE_BLOCK_HOSTS {
+                return Err(CliError::Other(format!(
+                    "log contains > {MAX_UNIQUE_BLOCK_HOSTS} unique blocked hosts for run {run_uuid}; \
+                     refusing to load — re-run after rotating the log"
+                )));
+            }
         }
     }
     Ok(out)

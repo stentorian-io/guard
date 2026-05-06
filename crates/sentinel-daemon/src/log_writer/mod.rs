@@ -100,6 +100,12 @@ impl LogWriter {
 
     /// Try to enqueue a row. Drops on a full queue (defense against unbounded growth).
     pub fn send(&self, row: LogRow) {
+        // WR-05: bound dest_host length on the way in. A hostile package
+        // calling connect() with an attacker-controlled multi-KiB hostname
+        // would otherwise produce log lines of arbitrary size (the active log
+        // is bounded by 16 MiB rotation but downstream consumers like
+        // `sentinel approve --from-log` accumulate entries in memory).
+        let row = clamp_row(row);
         match self.tx.try_send(row) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
@@ -126,4 +132,38 @@ fn open_active(path: &std::path::Path) -> io::Result<File> {
         .append(true)
         .mode(0o600)
         .open(path)
+}
+
+/// WR-05: maximum length for a `dest_host` field in a log row. RFC1035 caps DNS
+/// names at 255 octets; we round up to 256 as the on-disk cap. Anything longer
+/// is attacker-controlled garbage and gets truncated.
+const MAX_DEST_HOST_LEN: usize = 256;
+
+/// WR-05: truncate any oversized fields in a LogRow before enqueuing. Keeps
+/// individual JSONL entries bounded so a hostile package emitting multi-KiB
+/// hostnames cannot blow up downstream consumers (e.g. `sentinel approve
+/// --from-log`).
+fn clamp_row(row: LogRow) -> LogRow {
+    match row {
+        LogRow::Block(mut d) => {
+            clamp_decision(&mut d);
+            LogRow::Block(d)
+        }
+        LogRow::Allow(mut d) => {
+            clamp_decision(&mut d);
+            LogRow::Allow(d)
+        }
+        // Gap rows have no dest_host field.
+        other => other,
+    }
+}
+
+fn clamp_decision(d: &mut Decision) {
+    if d.dest_host.len() > MAX_DEST_HOST_LEN {
+        let mut end = MAX_DEST_HOST_LEN;
+        while end > 0 && !d.dest_host.is_char_boundary(end) {
+            end -= 1;
+        }
+        d.dest_host.truncate(end);
+    }
 }

@@ -231,6 +231,17 @@ impl IpcServer {
             FrameKind::Tagged(MessageTag::EnvNotPropagatedGap) => {
                 handle_env_not_propagated_frame(&mut stream, peer_token, state);
             }
+            // Phase 3 tags — handlers wired in plan 03-08.
+            // Gracefully reject with error reply so the connection closes cleanly
+            // rather than panicking on an unmatched variant.
+            FrameKind::Tagged(MessageTag::Status)
+            | FrameKind::Tagged(MessageTag::PromptChannelInit)
+            | FrameKind::Tagged(MessageTag::InsertUserRule)
+            | FrameKind::Tagged(MessageTag::ReadInstallArtifacts)
+            | FrameKind::Tagged(MessageTag::BaselineCommit) => {
+                // TODO(03-08): wire Phase 3 handlers here
+                let _ = write_legacy_err(&mut stream, "handler not yet wired (plan 03-08)");
+            }
         }
     }
 }

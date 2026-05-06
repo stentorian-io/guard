@@ -108,6 +108,30 @@ entries:
     }
 }
 
+/// WARNING-11 (Phase 2 review): single-TLD suffixes like `.com` (4 bytes)
+/// are catastrophically over-broad — `.com` matches every `.com` host on
+/// the internet. The previous `MIN_SUFFIX_LEN = 4` accepted these. The
+/// fix raised the limit to 6 so all the canonical mistakes are rejected.
+#[test]
+fn parse_yaml_rejects_top_level_tld_suffix() {
+    for bad_tld in [".com", ".org", ".net", ".dev", ".app", ".io"] {
+        let yaml = format!(
+            "entries:\n  - kind: deny\n    match: suffix\n    pattern: {}\n    reason: too broad\n",
+            bad_tld
+        );
+        let res = parse_yaml(&yaml);
+        assert!(
+            matches!(res, Err(CuratedError::InvalidPattern { .. })),
+            "WARNING-11: pattern {} must be rejected as too short; got {:?}",
+            bad_tld,
+            res
+        );
+    }
+    // Sanity check: legitimate suffixes >= 6 bytes still pass.
+    let ok_yaml = "entries:\n  - kind: allow\n    match: suffix\n    pattern: .co.uk\n    reason: legit ccTLD\n";
+    assert!(parse_yaml(ok_yaml).is_ok(), ".co.uk (6 bytes) must be accepted");
+}
+
 #[test]
 fn parse_yaml_rejects_suffix_without_leading_dot() {
     let bad = r#"
@@ -154,8 +178,10 @@ fn parse_yaml_rejects_malformed() {
 }
 
 #[test]
-fn min_suffix_len_const_is_4() {
-    assert_eq!(MIN_SUFFIX_LEN, 4);
+fn min_suffix_len_const_is_6() {
+    // WARNING-11: raised from 4 to 6 to reject single-TLD suffixes like
+    // ".com" / ".org" / ".net" / ".dev" / ".app" / ".io".
+    assert_eq!(MIN_SUFFIX_LEN, 6);
 }
 
 // Suppress dev-dep usage warning for MatchType (used implicitly via load_curated entries).

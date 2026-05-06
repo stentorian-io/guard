@@ -16,10 +16,14 @@ pub const CURATED_YAML_PATH: &str = "crates/sentinel-core/data/allowlist.yaml";
 /// `crates/sentinel-daemon/src/curated.rs` to the in-tree YAML.
 const CURATED_YAML: &str = include_str!("../../sentinel-core/data/allowlist.yaml");
 
-/// Minimum length for a suffix pattern (e.g. `.x.y` = 4 bytes is the smallest
-/// reasonable form). Anything shorter is over-broad (e.g. `.com` was the
-/// classic mistake) — reject at load time so the YAML PR review never accepts.
-pub const MIN_SUFFIX_LEN: usize = 4;
+/// Minimum length for a suffix pattern. WARNING-11 fix (Phase 2 review):
+/// raised from 4 → 6 so single-TLD suffixes like `.com`, `.org`, `.net`,
+/// `.dev`, `.app` (all 4 bytes) are rejected at load time. Real curated
+/// patterns like `.co.uk` (6), `.bar.io` (7), `.npmjs.org` (10) all pass.
+/// The previous 4-byte limit accidentally allowed `.com` to slip through,
+/// which would match every `.com` host on the internet — exactly the
+/// catastrophic over-broadening the constant exists to prevent.
+pub const MIN_SUFFIX_LEN: usize = 6;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CuratedError {

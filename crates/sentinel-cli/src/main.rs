@@ -102,10 +102,7 @@ fn real_main() -> Result<i32, CliError> {
         Cmd::Status { verbose, json } => {
             sentinel_cli::status::run_status(&sock, &state, verbose, json)
         }
-        Cmd::Logs { .. } => {
-            eprintln!("sentinel logs: pending plan 03-10");
-            Ok(0)
-        }
+        Cmd::Logs { follow } => sentinel_cli::logs::run_logs(follow),
         Cmd::Approve { .. } => {
             eprintln!("sentinel approve: pending plan 03-11");
             Ok(0)

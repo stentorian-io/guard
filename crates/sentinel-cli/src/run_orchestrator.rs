@@ -44,16 +44,20 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, baseline_mode:
     let (mut child, pgid) =
         crate::spawn::spawn_wrapped_with_pgid(&command, sock, &manifest_path, &run_uuid)?;
 
-    // BLOCKER #1: register SIGINT handler now that pgid is known and channel is open.
-    let _sigint_handle = if let Some(ref inflight) = inflight_handle {
-        Some(crate::sigint_handler::install(
-            inflight.clone(),
-            Arc::clone(&shared_channel),
-            pgid,
-        )?)
-    } else {
-        None
-    };
+    // BLOCKER #1 / CR-01: ALWAYS install the SIGINT handler so Ctrl-C reliably
+    // propagates to the wrapped child's process group, even when the prompt
+    // channel is unavailable (non-TTY, baseline mode, R-05 cap, schema skew,
+    // transient daemon error). When `inflight_handle` is None we install with
+    // an empty in-flight registry; `handle_sigint` tolerates an absent channel
+    // and a zero-length set, falling through to the load-bearing `killpg`.
+    let inflight_for_sigint = inflight_handle
+        .clone()
+        .unwrap_or_default();
+    let _sigint_handle = crate::sigint_handler::install(
+        inflight_for_sigint,
+        Arc::clone(&shared_channel),
+        pgid,
+    )?;
 
     // Render-loop thread (only when interactive AND not baseline-recording).
     let stop_flag = Arc::new(AtomicBool::new(false));

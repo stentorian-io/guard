@@ -2,11 +2,15 @@
 
 use clap::{Parser, Subcommand};
 use sentinel_core::Snapshot;
+use sentinel_daemon::baseline_staging::BaselineStaging;
 use sentinel_daemon::curated::load_curated;
 use sentinel_daemon::dev_install;
 use sentinel_daemon::gap_detector::GapDetector;
+use sentinel_daemon::install_artifacts::InstallArtifactStore;
 use sentinel_daemon::ipc_server::{DaemonState, IpcServer};
+use sentinel_daemon::log_writer::LogWriter;
 use sentinel_daemon::manifest;
+use sentinel_daemon::prompt::{PromptDedup, RecentGapsRing};
 use sentinel_daemon::rule_store::RuleStore;
 use sentinel_daemon::snapshot::publish;
 use sentinel_daemon::state_dir::{
@@ -92,15 +96,59 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         "daemon-startup snapshot published"
     );
 
+    // Phase 3: log directory + writer (D-50).
+    let log_dir = match std::env::var_os("SENTINEL_LOG_DIR") {
+        Some(p) => PathBuf::from(p),
+        None => {
+            let home = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/tmp"));
+            home.join("Library").join("Logs").join("Sentinel")
+        }
+    };
+    std::fs::create_dir_all(&log_dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(
+            &log_dir,
+            std::fs::Permissions::from_mode(0o700),
+        );
+    }
+    let log_writer = LogWriter::spawn(log_dir.join("sentinel.log"))
+        .map_err(|e| std::io::Error::other(format!("spawn log_writer: {e}")))?;
+    info!(path = %log_dir.join("sentinel.log").display(), "log_writer spawned");
+
+    // Phase 3: install_artifacts store opens against the same sentinel.db
+    // that RuleStore already migrated above.
+    let install_artifact_store = Arc::new(
+        InstallArtifactStore::open(&db_path(&state_dir))
+            .map_err(|e| std::io::Error::other(format!("open install_artifact_store: {e}")))?,
+    );
+
+    // Phase 3: prompt + baseline subsystems.
+    let prompt_dedup = Arc::new(PromptDedup::new());
+    let recent_gaps = Arc::new(RecentGapsRing::new());
+    let baseline_staging = Arc::new(BaselineStaging::new());
+
     let process_tree = Arc::new(ProcessTree::new());
     let gap_detector = Arc::new(GapDetector::new());
-    let state = Arc::new(DaemonState::new(
-        process_tree.clone(),
+    let state = Arc::new(DaemonState {
+        process_tree: process_tree.clone(),
         gap_detector,
         rule_store,
         curated,
-        state_dir.clone(),
-    ));
+        state_dir: state_dir.clone(),
+        install_artifact_store,
+        log_writer,
+        prompt_dedup,
+        recent_gaps,
+        baseline_staging,
+    });
+
+    // TODO(03-08): wire gap_detector → log_writer + recent_gaps when the gap fires.
+    //   - hardened-runtime gap (csops): plan 03-08 extends gap_detector closure
+    //   - env-not-propagated gap (TREE-06): plan 03-08 extends EnvNotPropagatedGap handler
     let server = IpcServer::bind(&socket_path(&state_dir), state)?;
     let pid = unsafe { libc::getpid() };
     let now = std::time::SystemTime::now()

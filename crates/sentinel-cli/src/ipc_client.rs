@@ -53,15 +53,13 @@ pub(crate) fn connect_with_timeout(sock: &Path) -> Result<UnixStream, CliError> 
         })?;
     socket.set_read_timeout(Some(READ_TIMEOUT)).ok();
     socket.set_write_timeout(Some(WRITE_TIMEOUT)).ok();
-    // Convert socket2::Socket → std::net::TcpStream-like → UnixStream.
-    // socket2::Socket implements Into<std::net::TcpStream>... actually it implements
-    // From<Socket> for std::os::unix::net::UnixStream via Into<std::fs::File> on Unix.
-    // We use the os-level RawFd conversion.
-    use std::os::unix::io::FromRawFd;
-    use std::os::unix::io::IntoRawFd;
-    let fd = socket.into_raw_fd();
-    // SAFETY: fd is a valid open Unix domain socket descriptor we own.
-    let stream = unsafe { UnixStream::from_raw_fd(fd) };
+    // WR-02: socket2 0.5+ implements `From<Socket> for UnixStream` on Unix.
+    // The previous `into_raw_fd` + `unsafe { from_raw_fd }` dance was correct
+    // in the happy path but had no guard against future fallible code being
+    // inserted between the two operations — `into_raw_fd` consumes the
+    // Socket (so its Drop no longer runs) and a panic before `from_raw_fd`
+    // would leak the fd. The safe `Into` conversion has no such risk.
+    let stream: UnixStream = socket.into();
     Ok(stream)
 }
 

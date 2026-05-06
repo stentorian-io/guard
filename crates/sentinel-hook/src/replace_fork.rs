@@ -14,7 +14,10 @@
 //! do anything that mutates parent stack frames. The vfork child path here
 //! resets IN_HOOK and returns 0 — the IPC is sent from the parent's path.
 
-use crate::ipc_client::{copy_cstr_to_buf, send_exec_event_sync, send_fork_event_sync, IpcClientError};
+use crate::ipc_client::{
+    copy_cstr_to_buf, send_env_not_propagated_gap_sync, send_exec_event_sync, send_fork_event_sync,
+    IpcClientError,
+};
 use crate::reentrancy::IN_HOOK;
 use sentinel_ipc::AuditTokenWire;
 
@@ -216,6 +219,27 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
             return unsafe { libc::posix_spawn(pid_out, path, file_actions, attrp, argv, envp) };
         }
     };
+    // TREE-06 (gap-closure 02-09): inspect envp pre-spawn for missing Sentinel
+    // env vars. If any are absent, emit a best-effort EnvNotPropagatedGap IPC
+    // BEFORE the real posix_spawn fires (so the gap is recorded even if the
+    // child is never created). Failure is logged but NOT fail-closed —
+    // TREE-06 is informational, not enforcement.
+    if unsafe { crate::envp::should_emit_env_not_propagated_gap(envp) } {
+        let mut path_buf = [0u8; 1024];
+        let n = copy_cstr_to_buf(path, &mut path_buf);
+        let detected_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let _ = send_env_not_propagated_gap_sync(
+            current_audit_token_wire(),
+            &path_buf[..n],
+            detected_at_ms,
+            IPC_TIMEOUT_MS,
+        );
+        // Continue regardless — best-effort.
+    }
+
     // BLOCKER-05 assumption (Phase 2 review): we hold IN_HOOK=true across
     // the libc::posix_spawn call. Apple's posix_spawn(2) implementation
     // atomically fork+execs without invoking user-visible interpose records
@@ -313,6 +337,24 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
             return unsafe { libc::posix_spawnp(pid_out, path, file_actions, attrp, argv, envp) };
         }
     };
+    // TREE-06 (gap-closure 02-09): same pre-spawn envp inspection as
+    // sentinel_posix_spawn. Best-effort — see that function's comment.
+    if unsafe { crate::envp::should_emit_env_not_propagated_gap(envp) } {
+        let mut path_buf = [0u8; 1024];
+        let n = copy_cstr_to_buf(path, &mut path_buf);
+        let detected_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let _ = send_env_not_propagated_gap_sync(
+            current_audit_token_wire(),
+            &path_buf[..n],
+            detected_at_ms,
+            IPC_TIMEOUT_MS,
+        );
+        // Continue regardless — best-effort.
+    }
+
     // BLOCKER-05: see `sentinel_posix_spawn` for the IN_HOOK-thread-local
     // reentrancy assumption — same logic applies to posix_spawnp.
     let rc = unsafe { libc::posix_spawnp(pid_out, path, file_actions, attrp, argv, envp) };

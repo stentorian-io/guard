@@ -90,6 +90,86 @@ pub fn lock_originals_page() {
     }
 }
 
+// ============================================================================
+// Phase 2 plan 02-05 fork/exec interpose records (D-32) — 7 new
+// __DATA,__interpose entries appended to Phase 1's existing 4 records (in
+// replace_libc.rs). Each record is a [shadow_fn, real_fn] pair; dyld swaps
+// every load-time call to real_fn with shadow_fn process-wide.
+//
+// Why 7, not 10: execl/execlp/execle are intentionally OMITTED from the
+// interpose table because their variadic ABI cannot be intercepted by a
+// non-variadic Rust shadow without unstable language features. libc's
+// internal execl/execlp/execle implementation ultimately calls execve via
+// direct PC-relative branch (NOT via symbol lookup) — and execve IS in our
+// interpose table. So coverage is preserved transitively.
+// ============================================================================
+
+#[allow(dead_code)]
+struct SyncPtr2(*const c_void);
+unsafe impl Sync for SyncPtr2 {}
+
+unsafe extern "C" {
+    // libc 0.2.x does NOT export vfork on BSD; declare it locally so we can
+    // take its address as the "real" pointer in the interpose pair.
+    fn vfork() -> libc::pid_t;
+}
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_FORK: [SyncPtr2; 2] = [
+    SyncPtr2(crate::replace_fork::sentinel_fork as *const c_void),
+    SyncPtr2(libc::fork as *const c_void),
+];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_VFORK: [SyncPtr2; 2] = [
+    SyncPtr2(crate::replace_fork::sentinel_vfork as *const c_void),
+    SyncPtr2(vfork as *const c_void),
+];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_POSIX_SPAWN: [SyncPtr2; 2] = [
+    SyncPtr2(crate::replace_fork::sentinel_posix_spawn as *const c_void),
+    SyncPtr2(libc::posix_spawn as *const c_void),
+];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_POSIX_SPAWNP: [SyncPtr2; 2] = [
+    SyncPtr2(crate::replace_fork::sentinel_posix_spawnp as *const c_void),
+    SyncPtr2(libc::posix_spawnp as *const c_void),
+];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_EXECVE: [SyncPtr2; 2] = [
+    SyncPtr2(crate::replace_exec::sentinel_execve as *const c_void),
+    SyncPtr2(libc::execve as *const c_void),
+];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_EXECVP: [SyncPtr2; 2] = [
+    SyncPtr2(crate::replace_exec::sentinel_execvp as *const c_void),
+    SyncPtr2(libc::execvp as *const c_void),
+];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_EXECV: [SyncPtr2; 2] = [
+    SyncPtr2(crate::replace_exec::sentinel_execv as *const c_void),
+    SyncPtr2(libc::execv as *const c_void),
+];
+
 /// ISS-12 remediation: confirm OUR `__DATA,__interpose` record on `connect`
 /// actually took effect for this process. Resolution rule for two competing
 /// interpose records on the same symbol is implementation-defined; this probe

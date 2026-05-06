@@ -39,6 +39,13 @@ ctor = "1.0.1"
 rusqlite = { version = "0.39", features = ["bundled"] }
 rusqlite_migration = "2.5"
 uuid = { version = "1", features = ["v4"] }
+dialoguer = "0.12"
+toml_edit = "0.23"
+notify = "8.2"
+similar = "2.7"
+flate2 = "1.1"
+serde_json = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # Internal crates
 sentinel-core = { path = "crates/sentinel-core" }

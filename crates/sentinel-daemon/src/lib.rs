@@ -1,4 +1,5 @@
 //! sentineld library — exposes the daemon internals to integration tests.
+pub mod curated;
 pub mod state_dir;
 pub mod snapshot;
 pub mod manifest;

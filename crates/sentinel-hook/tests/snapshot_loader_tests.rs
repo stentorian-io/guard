@@ -73,9 +73,12 @@ fn with_fake_home<F: FnOnce(&std::path::Path)>(f: F) -> tempfile::TempDir {
 }
 
 #[test]
-fn happy_path_loads_phase1_default_snapshot() {
+fn happy_path_loads_phase2_default_snapshot() {
     let _t = with_fake_home(|state_dir| {
-        let snap = Snapshot::phase1_default();
+        // Plan 02-06a migration: was phase1_default. Snapshot::decode now rejects
+        // SCHEMA_V1 (plan 02-01 made decode fail-closed); phase2_default produces
+        // a SCHEMA_V2 snapshot with non-empty entries (loopback v4/v6 + npmjs).
+        let snap = Snapshot::phase2_default();
         let pub_ = publish(state_dir, &snap, 0xCAFE_BABE).unwrap();
         manifest::write(state_dir, &pub_).unwrap();
         unsafe {
@@ -85,7 +88,7 @@ fn happy_path_loads_phase1_default_snapshot() {
             );
         }
         let loaded = load_from_env().expect("happy path");
-        assert_eq!(loaded.schema_version, 1);
+        assert_eq!(loaded.schema_version, 2);
         assert!(!loaded.entries.is_empty());
     });
 }
@@ -121,7 +124,9 @@ fn fail_closed_when_manifest_path_outside_state_dir() {
 #[test]
 fn fail_closed_on_digest_mismatch() {
     let _t = with_fake_home(|state_dir| {
-        let snap = Snapshot::phase1_default();
+        // Plan 02-06a migration: was phase1_default. SCHEMA_V2 fixture so the
+        // decoder doesn't short-circuit before reaching the digest check.
+        let snap = Snapshot::phase2_default();
         let pub_ = publish(state_dir, &snap, 1).unwrap();
         // Tamper with the snapshot file AFTER manifest is written → digest mismatch.
         manifest::write(state_dir, &pub_).unwrap();

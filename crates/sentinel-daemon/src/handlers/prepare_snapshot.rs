@@ -1,0 +1,174 @@
+//! PrepareSnapshot handler (D-29).
+//!
+//! Flow per `sentinel run`:
+//!   1. CLI sends PrepareSnapshot { cwd } before posix_spawn
+//!   2. Daemon walks up cwd to find .sentinel.toml (plan 02-03)
+//!   3. If found and trusted (RuleStore::is_trusted), parses rules → ProjectAllow / ProjectDeny tier
+//!   4. Concatenates curated YAML (plan 02-02) + SQLite user rules (plan 02-03) + project rules
+//!   5. Sorts by RuleTier (Ord derived in plan 02-01)
+//!   6. Writes runs/{uuid}.cbor + runs/{uuid}.manifest atomically
+//!   7. Inserts RunRecord into ProcessTree (plan 02-07 GC will use it on tracked-root exit)
+//!   8. Returns SnapshotReply::Ok { manifest_path, run_uuid }
+
+use crate::policy_file::{find_sentinel_toml, parse_file, sha256_of_file};
+use crate::rule_store::RuleStore;
+use crate::snapshot::publish_run;
+use crate::state_dir::run_manifest_path;
+use crate::tracked::{ProcessTree, RunRecord};
+use sentinel_core::{AllowlistEntry, RuleKind, RuleTier, SCHEMA_V2, Snapshot};
+use sentinel_ipc::SnapshotReply;
+use std::path::Path;
+use std::sync::Arc;
+use tracing::{debug, info, warn};
+use uuid::Uuid;
+
+#[derive(Debug, thiserror::Error)]
+pub enum PrepareError {
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("rule_store: {0}")]
+    RuleStore(String),
+    #[error("merge: {0}")]
+    Merge(String),
+}
+
+/// Result of `resolve_project_entries`: (project_entries, project_toml_path, project_toml_sha256).
+/// Both metadata fields are `None` when no `.sentinel.toml` was found, `Some` (with empty
+/// entries) when one was found but is not trusted (so the snapshot can name the file in
+/// downstream block-log entries), and `Some` (with non-empty entries) when found and trusted.
+type ProjectResolution = (Vec<AllowlistEntry>, Option<String>, Option<String>);
+
+/// Inputs are passed by reference; outputs are the SnapshotReply to write back.
+pub fn handle_prepare_snapshot(
+    cwd: &Path,
+    curated: &[AllowlistEntry],
+    rule_store: &RuleStore,
+    process_tree: &Arc<ProcessTree>,
+    state_dir: &Path,
+) -> SnapshotReply {
+    let run_uuid = Uuid::new_v4().to_string();
+
+    // 1. Walk-up + trust check + parse.
+    let (project_entries, project_path, project_sha256) =
+        match resolve_project_entries(cwd, rule_store) {
+            Ok(triple) => triple,
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "PrepareSnapshot: project entries resolution failed; proceeding without project rules"
+                );
+                (Vec::new(), None, None)
+            }
+        };
+
+    // 2. SQLite user rules.
+    let user_entries = match rule_store.all_user_rules() {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(
+                error = %e,
+                "PrepareSnapshot: rule_store read failed; proceeding without user rules"
+            );
+            Vec::new()
+        }
+    };
+
+    // 3. Concatenate + sort by tier.
+    let mut entries: Vec<AllowlistEntry> =
+        Vec::with_capacity(curated.len() + user_entries.len() + project_entries.len());
+    entries.extend_from_slice(curated);
+    entries.extend(project_entries);
+    entries.extend(user_entries);
+    entries.sort_by_key(|e| e.tier);
+
+    // 4. Build snapshot.
+    let snap = Snapshot {
+        schema_version: SCHEMA_V2,
+        generated_at_unix_ms: unix_ms_now(),
+        entries,
+        run_uuid: Some(run_uuid.clone()),
+        project_toml_path: project_path.clone(),
+        project_toml_sha256: project_sha256.clone(),
+    };
+
+    // 5. Publish per-run snapshot.
+    let pub_ = match publish_run(state_dir, &snap, &run_uuid) {
+        Ok(p) => p,
+        Err(e) => {
+            return SnapshotReply::err(format!("publish_run: {e}"));
+        }
+    };
+
+    // 6. Insert RunRecord. The tracked_root is unknown at this point (the
+    //    CLI hasn't sent RegisterRoot yet). We record the run with a zero
+    //    audit_token; plan 02-04's RegisterRoot handler updates it later.
+    process_tree.insert_run(RunRecord {
+        run_uuid: run_uuid.clone(),
+        tracked_root: sentinel_core::AuditToken { val: [0; 8] },
+        snapshot_path: pub_.path.clone(),
+        manifest_path: run_manifest_path(state_dir, &run_uuid),
+    });
+
+    info!(
+        run_uuid = %run_uuid,
+        project_toml = ?project_path,
+        snapshot = %pub_.path.display(),
+        "PrepareSnapshot OK"
+    );
+    SnapshotReply::ok(
+        run_manifest_path(state_dir, &run_uuid).display().to_string(),
+        run_uuid,
+    )
+}
+
+fn resolve_project_entries(
+    cwd: &Path,
+    rule_store: &RuleStore,
+) -> Result<ProjectResolution, PrepareError> {
+    let toml_path = match find_sentinel_toml(cwd) {
+        Some(p) => p,
+        None => return Ok((Vec::new(), None, None)),
+    };
+    let path_str = toml_path.display().to_string();
+    let sha = sha256_of_file(&toml_path)?;
+
+    let trusted = rule_store
+        .is_trusted(&path_str, &sha)
+        .map_err(|e| PrepareError::RuleStore(e.to_string()))?;
+
+    if !trusted {
+        info!(
+            path = %path_str,
+            sha = %sha,
+            "found .sentinel.toml but not trusted; ignoring rules"
+        );
+        // We DO record the path + sha in the snapshot metadata so block-log
+        // entries can name the untrusted file (e.g. "denied — closest .sentinel.toml at ... is untrusted").
+        return Ok((Vec::new(), Some(path_str), Some(sha)));
+    }
+
+    let toml = parse_file(&toml_path).map_err(|e| PrepareError::Merge(e.to_string()))?;
+    let mut out = Vec::with_capacity(toml.rules.len());
+    for r in toml.rules {
+        let tier = match r.kind {
+            RuleKind::Allow => RuleTier::ProjectAllow,
+            RuleKind::Deny => RuleTier::ProjectDeny,
+        };
+        out.push(AllowlistEntry {
+            kind: r.kind,
+            tier,
+            match_type: r.match_type,
+            pattern: r.pattern,
+            reason: r.reason,
+        });
+    }
+    debug!(path = %path_str, count = out.len(), "loaded project rules");
+    Ok((out, Some(path_str), Some(sha)))
+}
+
+fn unix_ms_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}

@@ -1,10 +1,21 @@
 //! Build the release dylib and verify __DATA,__interpose section size
-//! matches 4 records × 16 bytes = 64 bytes (0x40).
+//! matches the expected number of records × 16 bytes.
+//!
+//! Phase 1 had 4 records (connect, connectx, sendto, sendmsg). Plan 02-05
+//! added 7 more (fork, vfork, posix_spawn, posix_spawnp, execve, execvp, execv) —
+//! see plan 02-05 SUMMARY "Interpose count rationale" for why execl/execlp/execle
+//! are intentionally OMITTED. Total: 11 records.
 
 use std::process::Command;
 
+/// Total number of __DATA,__interpose records the release dylib must expose.
+/// Phase 1 = 4 (connect, connectx, sendto, sendmsg).
+/// Phase 2 plan 02-05 = +7 (fork, vfork, posix_spawn, posix_spawnp, execve,
+///                          execvp, execv).
+const EXPECTED_INTERPOSE_RECORDS: u64 = 11;
+
 #[test]
-fn release_dylib_has_four_interpose_records() {
+fn release_dylib_has_expected_interpose_records() {
     let out = Command::new("cargo")
         .args(["build", "-p", "sentinel-hook", "--release"])
         .output()
@@ -45,15 +56,10 @@ fn release_dylib_has_four_interpose_records() {
         }
     }
     let size = found_size.expect("expected __interpose section in otool output");
-    // 4 records: connect, connectx, sendto, sendmsg.
-    // getaddrinfo was removed in plan 01-09: DYLD_INSERT_LIBRARIES patches every
-    // symbol-table path, so the real connect cannot be reached via dlsym(RTLD_NEXT)
-    // from inside our shadow. Connect-level IP allowlisting suffices for Phase 1;
-    // a safer getaddrinfo strategy is deferred to a later phase.
+    let expected_bytes = EXPECTED_INTERPOSE_RECORDS * 16;
     assert_eq!(
-        size,
-        4 * 16,
-        "expected 4 records × 16 bytes = 64; got {size} (otool full text head: {})",
+        size, expected_bytes,
+        "expected {EXPECTED_INTERPOSE_RECORDS} records × 16 bytes = {expected_bytes}; got {size} (otool full text head: {})",
         text.lines().take(40).collect::<Vec<_>>().join("\n")
     );
 }

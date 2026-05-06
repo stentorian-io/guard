@@ -27,7 +27,8 @@ use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     DylibLoaded, DylibLoadedAck, ExecAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IpcError,
-    RegisterRoot, Reply,
+    PrepareSnapshot, RegisterRoot, Reply, Resolve, ResolveReply, SnapshotReply, TrustPolicy,
+    TrustPolicyReply,
 };
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -44,18 +45,25 @@ pub const ACCEPT_QUEUE_DEPTH: usize = 64;
 pub struct DaemonState {
     pub process_tree: Arc<ProcessTree>,
     pub gap_detector: Arc<GapDetector>,
-    /* Plan 02-06 adds:
-     *   pub rule_store: Arc<crate::rule_store::RuleStore>,
-     *   pub curated:    Arc<Vec<sentinel_core::AllowlistEntry>>,
-     *   pub state_dir:  std::path::PathBuf,
-     */
+    pub rule_store: Arc<crate::rule_store::RuleStore>,
+    pub curated: Arc<Vec<sentinel_core::AllowlistEntry>>,
+    pub state_dir: std::path::PathBuf,
 }
 
 impl DaemonState {
-    pub fn new(process_tree: Arc<ProcessTree>, gap_detector: Arc<GapDetector>) -> Self {
+    pub fn new(
+        process_tree: Arc<ProcessTree>,
+        gap_detector: Arc<GapDetector>,
+        rule_store: Arc<crate::rule_store::RuleStore>,
+        curated: Arc<Vec<sentinel_core::AllowlistEntry>>,
+        state_dir: std::path::PathBuf,
+    ) -> Self {
         Self {
             process_tree,
             gap_detector,
+            rule_store,
+            curated,
+            state_dir,
         }
     }
 }
@@ -168,15 +176,14 @@ impl IpcServer {
             FrameKind::Tagged(MessageTag::DylibLoaded) => {
                 handle_dylib_loaded(&mut stream, peer_token, state);
             }
-            FrameKind::Tagged(other) => {
-                // Tags 0x02 (PrepareSnapshot), 0x06 (Resolve), 0x07 (TrustPolicy)
-                // are owned by plan 02-06. Until that plan lands, reject with a
-                // clear error so the CLI/dylib can surface a useful diagnostic.
-                warn!(?other, "tag not yet implemented in this build");
-                let _ = write_legacy_err(
-                    &mut stream,
-                    format!("tag {other:?} not implemented (plan 02-06)"),
-                );
+            FrameKind::Tagged(MessageTag::PrepareSnapshot) => {
+                handle_prepare_snapshot_frame(&mut stream, peer_token, state);
+            }
+            FrameKind::Tagged(MessageTag::TrustPolicy) => {
+                handle_trust_policy_frame(&mut stream, peer_token, state);
+            }
+            FrameKind::Tagged(MessageTag::Resolve) => {
+                handle_resolve_frame(&mut stream, peer_token, state);
             }
         }
     }
@@ -430,4 +437,114 @@ fn unix_ms_now() -> u64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+fn handle_prepare_snapshot_frame(
+    stream: &mut UnixStream,
+    _peer_token: AuditToken,
+    state: &Arc<DaemonState>,
+) {
+    let req: PrepareSnapshot = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "PrepareSnapshot decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::PrepareSnapshot,
+                &SnapshotReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V2 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::PrepareSnapshot,
+            &SnapshotReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V2",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let cwd = std::path::PathBuf::from(req.cwd);
+    let reply = crate::handlers::prepare_snapshot::handle_prepare_snapshot(
+        &cwd,
+        &state.curated,
+        &state.rule_store,
+        &state.process_tree,
+        &state.state_dir,
+    );
+    if let Err(e) = write_tagged(stream, MessageTag::PrepareSnapshot, &reply) {
+        error!(error = %e, "failed to send SnapshotReply");
+    }
+}
+
+fn handle_trust_policy_frame(
+    stream: &mut UnixStream,
+    _peer_token: AuditToken,
+    state: &Arc<DaemonState>,
+) {
+    let req: TrustPolicy = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "TrustPolicy decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::TrustPolicy,
+                &TrustPolicyReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V2 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::TrustPolicy,
+            &TrustPolicyReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V2",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let reply =
+        crate::handlers::trust_policy::handle_trust_policy(&req.path, &req.sha256, &state.rule_store);
+    if let Err(e) = write_tagged(stream, MessageTag::TrustPolicy, &reply) {
+        error!(error = %e, "failed to send TrustPolicyReply");
+    }
+}
+
+fn handle_resolve_frame(
+    stream: &mut UnixStream,
+    _peer_token: AuditToken,
+    _state: &Arc<DaemonState>,
+) {
+    let req: Resolve = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "Resolve decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::Resolve,
+                &ResolveReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V2 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::Resolve,
+            &ResolveReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V2",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
+    if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
+        error!(error = %e, "failed to send ResolveReply");
+    }
 }

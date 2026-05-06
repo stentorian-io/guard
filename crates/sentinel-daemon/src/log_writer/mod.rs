@@ -36,6 +36,21 @@ pub struct LogWriter {
 }
 
 impl LogWriter {
+    /// Create a no-op LogWriter whose channel is immediately disconnected.
+    /// Used by DaemonState::new (the Phase 2 compat constructor) and in tests
+    /// where a live writer thread is undesirable.
+    pub fn noop() -> Self {
+        let (tx, _rx) = bounded::<LogRow>(1);
+        // Drop _rx immediately — the sender will see Disconnected on any send,
+        // which `send()` already handles gracefully (tracing::error log only).
+        Self {
+            tx,
+            blocks_today: Arc::new(AtomicU64::new(0)),
+            allows_today: Arc::new(AtomicU64::new(0)),
+            gaps_today: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
     /// Spawn the dedicated writer thread.
     /// Caller passes the active log path (e.g. `~/Library/Logs/Sentinel/sentinel.log`).
     pub fn spawn(log_path: PathBuf) -> io::Result<Self> {

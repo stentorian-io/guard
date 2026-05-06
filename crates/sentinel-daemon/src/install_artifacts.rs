@@ -24,6 +24,27 @@ impl InstallArtifactStore {
         Ok(Self { conn: Mutex::new(conn), db_path: db_path.to_path_buf() })
     }
 
+    /// Open an ephemeral in-memory store (for use in DaemonState::new stub / tests).
+    /// The install_artifacts table is created inline since there is no migration runner
+    /// for the in-memory case.
+    pub fn open_in_memory() -> SqlResult<Self> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS install_artifacts (
+                artifact_kind    TEXT NOT NULL,
+                target_path      TEXT NOT NULL,
+                content_hash     TEXT,
+                installed_at     INTEGER NOT NULL,
+                sentinel_version TEXT NOT NULL,
+                PRIMARY KEY (artifact_kind, target_path)
+            );",
+        )?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+            db_path: std::path::PathBuf::from(":memory:"),
+        })
+    }
+
     pub fn db_path(&self) -> &Path { &self.db_path }
 
     pub fn list_all(&self) -> SqlResult<Vec<InstallArtifact>> {

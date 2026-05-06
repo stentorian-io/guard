@@ -17,10 +17,14 @@
 //! recognize that case as a benign liveness probe: log at debug, mutate no
 //! state, write no Reply, close.
 
+use crate::baseline_staging::BaselineStaging;
 use crate::gap_detector::GapDetector;
+use crate::install_artifacts::InstallArtifactStore;
 use crate::ipc_dispatch::{classify_frame, DispatchError, FrameKind, MessageTag};
+use crate::log_writer::LogWriter;
 use crate::os_ffi::is_hardened_runtime;
 use crate::peer_auth::authenticate;
+use crate::prompt::{PromptDedup, RecentGapsRing};
 use crate::tracked::{CoverageGap, ProcessTree};
 use crossbeam_channel::{bounded, TrySendError};
 use sentinel_core::AuditToken;
@@ -42,12 +46,23 @@ pub const WORKER_THREADS: usize = 16;
 pub const ACCEPT_QUEUE_DEPTH: usize = 64;
 
 /// Shared daemon state passed to every worker handler.
+///
+/// Phase 3 plan 03-07: extended with log_writer, install_artifact_store,
+/// prompt_dedup, recent_gaps, baseline_staging. All Phase 3 handlers access
+/// these via an Arc<DaemonState> clone.
 pub struct DaemonState {
+    // Phase 2 fields (preserved)
     pub process_tree: Arc<ProcessTree>,
     pub gap_detector: Arc<GapDetector>,
     pub rule_store: Arc<crate::rule_store::RuleStore>,
     pub curated: Arc<Vec<sentinel_core::AllowlistEntry>>,
     pub state_dir: std::path::PathBuf,
+    // Phase 3 plan 03-07 additions
+    pub install_artifact_store: Arc<InstallArtifactStore>,
+    pub log_writer: LogWriter,          // already Clone (backed by Arc<channel>)
+    pub prompt_dedup: Arc<PromptDedup>,
+    pub recent_gaps: Arc<RecentGapsRing>,
+    pub baseline_staging: Arc<BaselineStaging>,
 }
 
 impl DaemonState {
@@ -58,13 +73,34 @@ impl DaemonState {
         curated: Arc<Vec<sentinel_core::AllowlistEntry>>,
         state_dir: std::path::PathBuf,
     ) -> Self {
+        // Phase 2 constructor preserved for backward compat with tests.
+        // Phase 3 subsystems are stubbed with no-op defaults here so existing
+        // ipc_server tests compile without changes. main.rs uses `DaemonState { .. }`
+        // struct literal with all fields when constructing the live daemon.
+        let install_artifact_store = Arc::new(
+            InstallArtifactStore::open_in_memory()
+                .expect("in-memory install_artifact_store"),
+        );
+        let log_writer = LogWriter::noop();
+        let prompt_dedup = Arc::new(PromptDedup::new());
+        let recent_gaps = Arc::new(RecentGapsRing::new());
+        let baseline_staging = Arc::new(BaselineStaging::new());
         Self {
             process_tree,
             gap_detector,
             rule_store,
             curated,
             state_dir,
+            install_artifact_store,
+            log_writer,
+            prompt_dedup,
+            recent_gaps,
+            baseline_staging,
         }
+    }
+
+    pub fn db_path(&self) -> std::path::PathBuf {
+        self.state_dir.join("sentinel.db")
     }
 }
 

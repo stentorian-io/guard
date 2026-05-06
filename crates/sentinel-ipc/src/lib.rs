@@ -38,4 +38,36 @@ pub use messages::{
     TrustPolicyReply,
     // Phase 3
     IPC_SCHEMA_V3,
+    // Phase 3 — Status (tag 0x09)
+    DaemonStateKind,
+    FeedInfo,
+    GapInfo,
+    InstallArtifact,
+    InstallInfo,
+    Status,
+    StatusCounters,
+    StatusReply,
+    TrackedRootInfo,
+    // Phase 3 — Prompt channel (tag 0x0A)
+    PromptChannelInit,
+    PromptChannelInitAck,
+    // Phase 3 — Prompt request/response/cancel (channel-internal)
+    PackageContext,
+    ProcessCtx,
+    PromptCancel,
+    PromptRequest,
+    PromptResponse,
+    PromptVerdict,
+    RulePattern,
+    SuggestedRule,
+    // Phase 3 — InsertUserRule (tag 0x0B)
+    InsertUserRule,
+    InsertUserRuleReply,
+    // Phase 3 — ReadInstallArtifacts (tag 0x0C)
+    ReadInstallArtifacts,
+    ReadInstallArtifactsReply,
+    // Phase 3 — BaselineCommit (tag 0x0D)
+    BaselineCommit,
+    BaselineCommitReply,
+    ProposedRule,
 };

@@ -36,6 +36,7 @@ pub enum RuleStoreError {
 }
 
 const SQL_001_INITIAL: &str = include_str!("../migrations/001_initial.sql");
+const SQL_002_INSTALL_ARTIFACTS: &str = include_str!("../migrations/002_install_artifacts.sql");
 
 pub struct RuleStore {
     /// Long-lived connection used for migrations + the write path
@@ -59,7 +60,7 @@ impl RuleStore {
             let _ = std::fs::set_permissions(db_path, perms);
         }
 
-        let migrations = Migrations::new(vec![M::up(SQL_001_INITIAL)]);
+        let migrations = Migrations::new(vec![M::up(SQL_001_INITIAL), M::up(SQL_002_INSTALL_ARTIFACTS)]);
         migrations
             .to_latest(&mut conn)
             .map_err(|e| RuleStoreError::Migrate(e.to_string()))?;

@@ -3,6 +3,7 @@
 
 pub mod approve;
 pub mod audit_token;
+pub mod baseline;
 pub mod cli;
 pub mod install;
 pub mod ipc_client;
@@ -11,7 +12,9 @@ pub mod logs;
 pub mod logs_follow;
 pub mod prompt_channel;
 pub mod prompt_render;
+pub mod run_orchestrator;
 pub mod shell_setup;
+pub mod sigint_handler;
 pub mod spawn;
 pub mod status;
 pub mod trust_policy;

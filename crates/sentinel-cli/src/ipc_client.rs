@@ -159,6 +159,28 @@ pub fn prepare_snapshot(sock: &Path, cwd: &Path) -> Result<(PathBuf, String), Cl
     }
 }
 
+/// Phase 3 plan 03-13: V3 PrepareSnapshot with is_tty + baseline_mode (D-73, D-58).
+/// Used by run_orchestrator instead of prepare_snapshot.
+pub fn prepare_snapshot_v3(
+    sock: &Path,
+    cwd: &Path,
+    is_tty: bool,
+    baseline_mode: bool,
+) -> Result<(PathBuf, String), CliError> {
+    let req = PrepareSnapshot::new_v3(cwd.display().to_string(), is_tty, baseline_mode);
+    let reply: SnapshotReply = send_tagged_request(sock, TAG_PREPARE_SNAPSHOT, &req)?;
+    match reply {
+        SnapshotReply::Ok {
+            manifest_path,
+            run_uuid,
+            ..
+        } => Ok((PathBuf::from(manifest_path), run_uuid)),
+        SnapshotReply::Err { message, .. } => {
+            Err(CliError::Other(format!("PrepareSnapshot V3: {message}")))
+        }
+    }
+}
+
 /// Phase 3 tag 0x09: request daemon status.
 pub fn status_request(sock: &Path) -> Result<sentinel_ipc::StatusReply, CliError> {
     let req = sentinel_ipc::Status::new();

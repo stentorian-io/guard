@@ -2,9 +2,8 @@
 
 use clap::Parser;
 use sentinel_cli::cli::{Cli, Cmd};
-use sentinel_cli::{approve, audit_token, install, ipc_client, locate, shell_setup, spawn, trust_policy, uninstall, CliError};
+use sentinel_cli::{approve, install, ipc_client, run_orchestrator, shell_setup, trust_policy, uninstall, CliError};
 use sentinel_daemon::state_dir::{default_state_dir, socket_path};
-use std::ffi::OsStr;
 use std::path::PathBuf;
 
 fn main() {
@@ -31,57 +30,12 @@ fn real_main() -> Result<i32, CliError> {
     let sock = socket_path(&state);
 
     match cli.cmd {
-        Cmd::Run { command } => {
+        Cmd::Run { command, baseline } => {
             if command.is_empty() {
                 eprintln!("sentinel run: missing command");
                 return Ok(64); // EX_USAGE
             }
-            let program = PathBuf::from(&command[0]);
-            let args: Vec<&OsStr> = command[1..].iter().map(|s| s.as_os_str()).collect();
-            let dylib =
-                locate::find_dylib().map_err(|e| CliError::DylibNotFound(e.to_string()))?;
-
-            // ISS-08 remediation — DAEMON-FIRST SEQUENCING:
-            // Probe the daemon BEFORE asking it to do anything. T-01-08-06
-            // promises the CLI exits 70 BEFORE having spawned the child if
-            // the daemon is unreachable.
-            ipc_client::probe_daemon_alive(&sock)?;
-
-            // Phase 2 D-29: PrepareSnapshot — ask the daemon to walk cwd for
-            // .sentinel.toml, merge curated + project + user rules, and write
-            // a per-run snapshot. The returned manifest path is what the
-            // dylib will read at ctor time via SENTINEL_SNAPSHOT_MANIFEST.
-            //
-            // This replaces Phase 1's daemon-startup snapshot: each `sentinel
-            // run` invocation now gets a fresh per-run snapshot tailored to
-            // its working directory.
-            let cwd =
-                std::env::current_dir().map_err(|e| CliError::Other(format!("getcwd: {e}")))?;
-            let (manifest_path, _run_uuid) = ipc_client::prepare_snapshot(&sock, &cwd)?;
-
-            // Daemon is alive and per-run snapshot is published — spawn the
-            // wrapped child with both SENTINEL_SNAPSHOT_MANIFEST (per-run) and
-            // SENTINEL_DAEMON_SOCKET (so the dylib's IPC client can talk back
-            // for fork/exec/dylib_loaded events).
-            let pid = spawn::spawn_wrapped(&program, &args, &dylib, &manifest_path, &sock)?;
-
-            // Derive audit token, register with daemon (Phase 1 unchanged).
-            let token = audit_token::audit_token_for_pid(pid)
-                .map_err(|e| CliError::DaemonUnreachable(format!("audit_token: {e}")))?;
-            ipc_client::register_root_with_daemon(&sock, token)?;
-
-            // Wait for child exit.
-            let mut status: libc::c_int = 0;
-            let waited = unsafe { libc::waitpid(pid, &mut status, 0) };
-            if waited < 0 {
-                return Err(CliError::Io(std::io::Error::last_os_error()));
-            }
-            let exit_code = if libc::WIFEXITED(status) {
-                libc::WEXITSTATUS(status)
-            } else {
-                128 + libc::WTERMSIG(status)
-            };
-            Ok(exit_code)
+            run_orchestrator::run(&sock, &state, command, baseline)
         }
         Cmd::TrustPolicy { path } => {
             // Probe the daemon first so the user gets a clean DaemonUnreachable

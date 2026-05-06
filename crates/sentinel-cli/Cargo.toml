@@ -35,6 +35,7 @@ plist = { workspace = true }
 similar = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
+signal-hook = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

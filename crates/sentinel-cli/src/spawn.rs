@@ -7,8 +7,14 @@
 //! Phase 2 plan 02-06b: SENTINEL_DAEMON_SOCKET added so the dylib's
 //! `cache_daemon_socket_from_env` (plan 02-05) finds the daemon socket and
 //! can send ForkEvent / ExecEvent / DylibLoaded events.
+//!
+//! Phase 3 plan 03-13: `spawn_wrapped_with_pgid` added — uses
+//! `std::process::Command` to return a `Child` handle (so the orchestrator can
+//! wait AFTER installing the SIGINT handler). POSIX_SPAWN_SETPGROUP is applied
+//! so the child becomes its own pgid leader; pgid = child.id() as i32.
 
 use std::ffi::{CString, OsStr};
+use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
@@ -118,4 +124,71 @@ pub fn spawn_wrapped(
         return Err(std::io::Error::from_raw_os_error(rc));
     }
     Ok(pid)
+}
+
+/// Phase 3 plan 03-13: Spawn the wrapped command and return (`Child`, `pgid`).
+///
+/// Unlike `spawn_wrapped` (which uses raw `posix_spawnp` and returns a bare pid),
+/// this variant uses `std::process::Command` so the orchestrator can:
+///   1. Install the SIGINT handler with the known pgid BEFORE calling `child.wait()`.
+///   2. Call `child.wait()` after the SIGINT handler is in place.
+///
+/// The child is set as its own process-group leader via `std::os::unix::process::CommandExt::process_group(0)`
+/// which internally calls `setpgid(0,0)` in the child before exec — equivalent to
+/// POSIX_SPAWN_SETPGROUP. The returned pgid is `child.id() as i32`.
+///
+/// Environment setup mirrors `spawn_wrapped`: inherits current env, strips the
+/// three managed vars, then adds DYLD_INSERT_LIBRARIES, SENTINEL_SNAPSHOT_MANIFEST,
+/// and SENTINEL_DAEMON_SOCKET.
+pub fn spawn_wrapped_with_pgid(
+    command: &[OsString],
+    sock: &Path,
+    manifest_path: &Path,
+    _run_uuid: &str,
+) -> Result<(std::process::Child, i32), crate::CliError> {
+    use std::os::unix::process::CommandExt;
+
+    if command.is_empty() {
+        return Err(crate::CliError::Other("command is empty".into()));
+    }
+
+    let dylib = crate::locate::find_dylib()
+        .map_err(|e| crate::CliError::DylibNotFound(e.to_string()))?;
+
+    // Build the environment: inherit current env minus the three managed vars.
+    let prior_dyld = std::env::var_os(ENV_DYLD).unwrap_or_default();
+    let mut dyld_value = dylib.as_os_str().to_os_string();
+    if !prior_dyld.is_empty() {
+        let mut v = std::ffi::OsString::from(":");
+        v.push(&prior_dyld);
+        dyld_value.push(v);
+    }
+
+    let mut cmd = std::process::Command::new(&command[0]);
+    cmd.args(&command[1..]);
+
+    // Inherit current environment, stripping our managed vars.
+    for (k, v) in std::env::vars_os() {
+        let kb = k.as_bytes();
+        if kb == ENV_DYLD.as_bytes()
+            || kb == ENV_MANIFEST.as_bytes()
+            || kb == ENV_DAEMON_SOCKET.as_bytes()
+        {
+            continue;
+        }
+        cmd.env(k, v);
+    }
+
+    // Inject managed vars.
+    cmd.env(ENV_DYLD, &dyld_value);
+    cmd.env(ENV_MANIFEST, manifest_path);
+    cmd.env(ENV_DAEMON_SOCKET, sock);
+
+    // Make the child its own pgid leader (POSIX_SPAWN_SETPGROUP equivalent).
+    // process_group(0) calls setpgid(0,0) in the child, making it its own leader.
+    cmd.process_group(0);
+
+    let child = cmd.spawn().map_err(crate::CliError::Io)?;
+    let pgid = child.id() as i32;
+    Ok((child, pgid))
 }

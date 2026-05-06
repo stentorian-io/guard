@@ -11,6 +11,7 @@ description = "Sentinel IPC wire schemas + Unix socket transport with peer audit
 [dependencies]
 sentinel-core = { workspace = true }
 serde = { workspace = true }
+serde_bytes = { workspace = true }
 ciborium = { workspace = true }
 libc = { workspace = true }
 nix = { workspace = true }

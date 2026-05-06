@@ -30,8 +30,34 @@ use std::time::Duration;
 pub(crate) const TAG_FORK_EVENT: u8 = 0x03;
 pub(crate) const TAG_EXEC_EVENT: u8 = 0x04;
 pub(crate) const TAG_DYLIB_LOADED: u8 = 0x05;
+pub(crate) const TAG_RESOLVE: u8 = 0x06;
 
 static DAEMON_SOCKET_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// Per-test override for the daemon socket path.
+///
+/// OnceLock is correct for production (set once at ctor time from SENTINEL_DAEMON_SOCKET,
+/// never changes). Integration tests need a per-test override so each test can point at
+/// its own stub Unix socket without racing on the OnceLock.
+///
+/// The `_` prefix signals test-only usage. These helpers are compiled unconditionally
+/// (not behind #[cfg(test)]) because integration tests in `tests/` are separate crates
+/// that cannot see #[cfg(test)] items in the library. In production builds, these
+/// functions compile to a simple Mutex<Option> write/clear — no observable behavior
+/// difference as long as nothing calls them outside of tests.
+static TEST_SOCKET_OVERRIDE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Override the daemon socket path for the current test. Test-only by convention.
+pub fn _set_daemon_socket_for_test(path: PathBuf) {
+    let mut g = TEST_SOCKET_OVERRIDE.lock().expect("test socket override mutex");
+    *g = Some(path);
+}
+
+/// Clear the test socket override. Call after a test to avoid leaking state.
+pub fn _clear_daemon_socket_for_test() {
+    let mut g = TEST_SOCKET_OVERRIDE.lock().expect("test socket override mutex");
+    *g = None;
+}
 
 #[derive(Debug)]
 pub enum IpcClientError {
@@ -85,12 +111,20 @@ pub fn cache_daemon_socket_from_env() {
     });
 }
 
-/// Returns the cached socket path, if configured.
-pub fn daemon_socket_path() -> Option<&'static Path> {
-    DAEMON_SOCKET_PATH.get().and_then(|o| o.as_deref())
+/// Returns the daemon socket path. The test override (set via `_set_daemon_socket_for_test`)
+/// is consulted first; in production, the OnceLock value (set once at ctor time from
+/// SENTINEL_DAEMON_SOCKET env var) is used.
+pub fn daemon_socket_path() -> Option<PathBuf> {
+    // Test override takes precedence — allows integration tests to inject a stub socket.
+    let g = TEST_SOCKET_OVERRIDE.lock().expect("test socket override mutex");
+    if let Some(ref p) = *g {
+        return Some(p.clone());
+    }
+    drop(g);
+    DAEMON_SOCKET_PATH.get().and_then(|o| o.clone())
 }
 
-fn connect_with_timeout(sock: &Path, total_ms: u64) -> Result<UnixStream, IpcClientError> {
+pub(crate) fn connect_with_timeout(sock: &Path, total_ms: u64) -> Result<UnixStream, IpcClientError> {
     let addr = SockAddr::unix(sock).map_err(IpcClientError::Io)?;
     let socket = Socket::new(Domain::UNIX, Type::STREAM, None).map_err(IpcClientError::Io)?;
     // 1/5 of total budget for connect, 2/5 each for read/write.
@@ -115,7 +149,7 @@ fn map_io_to_timeout(e: std::io::Error) -> IpcClientError {
     }
 }
 
-fn send_tagged_and_recv_ack<Req, Ack>(
+pub(crate) fn send_tagged_and_recv_ack<Req, Ack>(
     tag: u8,
     msg: &Req,
     timeout_ms: u64,
@@ -125,7 +159,7 @@ where
     Ack: serde::de::DeserializeOwned,
 {
     let sock = daemon_socket_path().ok_or(IpcClientError::NotConfigured)?;
-    let mut stream = connect_with_timeout(sock, timeout_ms)?;
+    let mut stream = connect_with_timeout(&sock, timeout_ms)?;
     // Tag byte first.
     stream.write_all(&[tag]).map_err(map_io_to_timeout)?;
     // Length-prefixed CBOR body.

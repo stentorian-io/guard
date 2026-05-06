@@ -17,6 +17,7 @@ ctor = { workspace = true }
 memmap2 = { workspace = true }
 ciborium = { workspace = true }
 crossbeam-queue = { workspace = true }
+serde = { workspace = true }
 sentinel-core = { workspace = true }
 sentinel-ipc = { workspace = true }
 socket2 = { workspace = true }

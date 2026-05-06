@@ -10,6 +10,7 @@
 
 pub mod cache;
 pub mod interpose; // Filled in by task 2; symbol re-export only at this point
+pub mod ipc_client; // Phase 2 plan 02-05: blocking IPC for ForkEvent / ExecEvent / DylibLoaded
 pub mod log_buffer;
 pub mod reentrancy;
 pub mod replace_libc; // Filled in by task 2

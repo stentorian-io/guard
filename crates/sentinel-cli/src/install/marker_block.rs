@@ -31,10 +31,45 @@ pub fn detect_rc_files() -> Vec<PathBuf> {
     candidates.into_iter().filter(|p| p.exists()).collect()
 }
 
+/// CR-03: capture the existing file's mode (and uid/gid as best-effort) before
+/// `tf.persist` clobbers them. `tempfile::NamedTempFile` creates with mode
+/// 0600 and the current uid/gid; `persist` calls rename(2) which replaces the
+/// target inode, dropping the original mode/owner/group. We re-apply the
+/// captured permissions afterwards so a user's `.zshrc` (typically 0644)
+/// stays 0644 instead of silently becoming 0600.
+fn capture_metadata(target: &Path) -> Option<std::fs::Metadata> {
+    std::fs::metadata(target).ok()
+}
+
+fn restore_metadata(target: &Path, meta: Option<&std::fs::Metadata>) {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let Some(meta) = meta else { return };
+    // Restore mode bits.
+    let mode = meta.permissions().mode();
+    let _ = std::fs::set_permissions(target, std::fs::Permissions::from_mode(mode));
+    // Best-effort uid/gid restore. Sentinel runs as the user with no privilege
+    // boundary so the typical case is a no-op (uid/gid already match), but if
+    // the rc file was originally owned by a different uid we'd otherwise leave
+    // it owned by the CLI's current uid after persist.
+    let uid = meta.uid();
+    let gid = meta.gid();
+    let cstr = match std::ffi::CString::new(target.as_os_str().as_encoded_bytes()) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    // SAFETY: CString outlives the call; chown returns -1 on failure which we ignore.
+    unsafe {
+        let _ = libc::chown(cstr.as_ptr(), uid, gid);
+    }
+}
+
 /// Install (or replace) the marker block. Returns the canonical path actually
 /// written (the symlink target if rc_path is a symlink — R-04 mitigation).
 pub fn install(rc_path: &Path) -> std::io::Result<PathBuf> {
     let target = std::fs::canonicalize(rc_path).unwrap_or_else(|_| rc_path.to_path_buf());
+    // CR-03: snapshot the current rc file's mode/owner BEFORE we rename our
+    // tempfile over it. None when the rc file does not yet exist (first install).
+    let original_meta = capture_metadata(&target);
     let original = std::fs::read_to_string(&target).unwrap_or_default();
     let new = upsert_block(&original);
     let parent = target.parent().ok_or_else(|| std::io::Error::other("rc has no parent"))?;
@@ -42,6 +77,8 @@ pub fn install(rc_path: &Path) -> std::io::Result<PathBuf> {
     tf.write_all(new.as_bytes())?;
     tf.as_file().sync_all()?;
     tf.persist(&target).map_err(|e| std::io::Error::other(format!("persist: {e}")))?;
+    // CR-03: re-apply the original mode/owner so a 0644 .zshrc stays 0644.
+    restore_metadata(&target, original_meta.as_ref());
     Ok(target)
 }
 
@@ -55,10 +92,13 @@ pub fn strip(rc_path: &Path) -> std::io::Result<()> {
     let stripped = remove_block(&original);
     if stripped == original { return Ok(()); }
     let parent = target.parent().ok_or_else(|| std::io::Error::other("rc has no parent"))?;
+    // CR-03: capture metadata before persist; re-apply after.
+    let original_meta = capture_metadata(&target);
     let mut tf = tempfile::NamedTempFile::new_in(parent)?;
     tf.write_all(stripped.as_bytes())?;
     tf.as_file().sync_all()?;
     tf.persist(&target).map_err(|e| std::io::Error::other(format!("persist: {e}")))?;
+    restore_metadata(&target, original_meta.as_ref());
     Ok(())
 }
 

@@ -1,0 +1,12 @@
+[package]
+name = "env_clear_posix_spawn"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "env_clear_posix_spawn"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"

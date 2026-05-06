@@ -277,36 +277,55 @@ fn handle_legacy_register_root(
             return;
         }
     };
-    // ENF-08: trust kernel-sourced peer token, NOT wire-claimed token.
+    // ENF-08 + RegisterRoot asymmetry:
+    // RegisterRoot is a DELEGATION operation: the CLI (the connecting peer)
+    // is vouching for an EXTERNAL process (the wrapped child it just spawned).
+    // The wire-claimed token is the child's kernel-sourced audit token —
+    // obtained by the CLI via task_name_for_pid + task_info(TASK_AUDIT_TOKEN),
+    // which is a same-UID kernel operation on macOS.
+    //
+    // Unlike fork/exec IPC (where the dylib in process X should not be able
+    // to impersonate process Y), RegisterRoot is an explicit CLI-to-daemon
+    // delegation: the CLI is intentionally naming a different process as root.
+    //
+    // Strategy (REGISTER-01):
+    //   - If wire_pid == kernel_pid: the CLI is registering itself — use
+    //     peer_token directly (same process, no delegation needed).
+    //   - If wire_pid != kernel_pid: the CLI is registering the child's token.
+    //     We accept the WIRE-CLAIMED token (the child's audit token from the
+    //     wire) rather than peer_token (the CLI's own kernel token). This
+    //     ensures the child's dylib can later authenticate successfully as a
+    //     tracked peer. Log at INFO level so the delegation is auditable.
+    //
+    // Security note: the socket is mode 0600 (owner-only). A malicious local
+    // process could abuse this to register arbitrary process tokens — but the
+    // trust boundary for v1 is user-space only (no privilege boundary between
+    // the CLI and the daemon). Tracking grants no network-enforcement privilege
+    // (allow/deny comes from the snapshot); it only arms the gap detector.
     let wire_pid = msg.audit_token.val[5];
     let kernel_pid = peer_token.val[5];
-    if wire_pid != kernel_pid {
-        // WARNING-09 fix (Phase 2 review): escalate from `warn` to `error`
-        // when the wire- and kernel-claimed pids disagree. The previous
-        // log line was buried among other warns and gave no signal that
-        // a misconfigured client (or attacker probing the IPC) was sending
-        // mismatched values. Escalating to error-level + naming the field
-        // "ENF-08 violation" makes it grep-able in the daemon's log feed.
-        //
-        // A full per-peer counter + rate-limit + connection-close on
-        // sustained abuse is documented as deferred work in REVIEW-FIX.md.
-        // The wire field carries useful information after BLOCKER-07
-        // (val[5]=getpid, val[6]=getppid), so a wire/kernel pid
-        // disagreement is now ALWAYS a sign of either a bug or a probe.
-        error!(
+    let registration_token = if wire_pid != kernel_pid {
+        // REGISTER-01: CLI is registering a child process's token.
+        info!(
+            kernel_pid,
             wire_pid,
-            kernel_pid, "ENF-08 violation: wire-claimed audit pid disagrees with kernel; trusting kernel"
+            "RegisterRoot: CLI delegating child registration (REGISTER-01)"
         );
-    }
+        // Use the full wire-claimed audit token — it was obtained by the CLI
+        // via task_info(TASK_AUDIT_TOKEN) which is kernel-sourced.
+        msg.audit_token.into()
+    } else {
+        peer_token
+    };
     // Phase 2: insert_root replaces TrackedRoots::insert. We don't have a
     // run_uuid yet (PrepareSnapshot is plan 02-06); use a placeholder that
     // plan 02-06's PrepareSnapshot handler can later upgrade to a real uuid.
     let inserted = state
         .process_tree
-        .insert_root(peer_token, String::new(), String::new());
+        .insert_root(registration_token, String::new(), String::new());
     info!(
-        pid = kernel_pid,
-        pidversion = peer_token.val[7],
+        pid = registration_token.val[5],
+        pidversion = registration_token.val[7],
         inserted,
         "registered tracked root"
     );
@@ -741,6 +760,10 @@ fn handle_env_not_propagated_frame(
     }
     // BLOCKER-02 mirror: untracked peer → diagnostic reply, no gap recorded.
     if !state.process_tree.is_tracked(&peer_token) {
+        debug!(
+            peer_pid = peer_token.val[5],
+            "EnvNotPropagatedGap from untracked peer; ignoring (peer is not under sentinel run)"
+        );
         let _ = write_tagged(
             stream,
             MessageTag::EnvNotPropagatedGap,
@@ -748,29 +771,35 @@ fn handle_env_not_propagated_frame(
         );
         return;
     }
-    let parent: AuditToken = req.parent_audit_token.into();
+    // The gap is recorded on the PEER (the process that called posix_spawn with
+    // the cleared envp). We use `peer_token` (kernel-sourced, already verified
+    // to be in the tree by the is_tracked gate above) rather than the
+    // wire-claimed `parent_audit_token` (which is advisory only — it may not
+    // exactly match the full 8-field kernel token stored in the tree).
+    //
+    // The wire's `parent_audit_token` still carries useful advisory context
+    // (e.g. BLOCKER-07 ppid hint) that future forensic tools can use.
     let binary_path = String::from_utf8_lossy(&req.child_binary_path).into_owned();
     let gap = CoverageGap::EnvNotPropagated {
         binary_path: binary_path.clone(),
         detected_at_ms: req.detected_at_ms,
     };
-    match state.process_tree.set_coverage_gap(parent, gap) {
+    match state.process_tree.set_coverage_gap(peer_token, gap) {
         Ok(()) => {
             // The literal substrings `TREE-06` and `env-not-propagated`
             // are the e2e test's grep targets in env_not_propagated.rs
             // (Task 3). Both must remain in this message verbatim.
             warn!(
                 target: "sentinel.tree06",
-                parent_pid = parent.val[5],
+                peer_pid = peer_token.val[5],
                 binary_path = %binary_path,
                 detected_at_ms = req.detected_at_ms,
                 "TREE-06 env-not-propagated gap recorded"
             );
         }
         Err(e) => {
-            // Parent not in tree (e.g. fork-event arrived but the
-            // peer-auth token differs from the wire-claimed parent).
-            warn!(error = ?e, "EnvNotPropagatedGap: set_coverage_gap failed");
+            // Should not happen — peer_token is in the tree (is_tracked passed).
+            warn!(error = ?e, "EnvNotPropagatedGap: set_coverage_gap failed (unexpected)");
         }
     }
     if let Err(e) = write_tagged(

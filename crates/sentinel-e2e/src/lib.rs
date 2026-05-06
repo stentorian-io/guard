@@ -102,6 +102,49 @@ impl DaemonHarness {
             _state_tmp: state_tmp,
         })
     }
+
+    /// Drains the daemon child's currently-buffered stderr into a String without
+    /// blocking and without consuming `self`. Sets the underlying pipe to
+    /// non-blocking via `fcntl(O_NONBLOCK)` for the duration of the read so
+    /// the call returns whatever is available right now.
+    ///
+    /// Used by e2e tests that need to make HARD assertions on the daemon's log
+    /// output (e.g. TREE-06 gap markers in env_not_propagated.rs).
+    ///
+    /// Repeated calls return cumulative stderr produced since the process was
+    /// started (the OS pipe buffer grows until drained; this drains everything
+    /// currently available).
+    pub fn drain_stderr(&mut self) -> String {
+        use std::io::Read;
+        use std::os::fd::AsRawFd;
+
+        let stderr = match self.child.stderr.as_mut() {
+            Some(s) => s,
+            None => return String::new(),
+        };
+        let fd = stderr.as_raw_fd();
+        // Set O_NONBLOCK so we don't hang waiting for EOF.
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+            if flags >= 0 {
+                libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+            }
+        }
+        let mut buf = Vec::with_capacity(4096);
+        let mut chunk = [0u8; 1024];
+        loop {
+            match stderr.read(&mut chunk) {
+                Ok(0) => break,                                                    // EOF
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,    // no more data
+                Err(_) => break,
+            }
+            if buf.len() > (1 << 20) {
+                break; // 1 MiB cap, defensive
+            }
+        }
+        String::from_utf8_lossy(&buf).into_owned()
+    }
 }
 
 impl Drop for DaemonHarness {

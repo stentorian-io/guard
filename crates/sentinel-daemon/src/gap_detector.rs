@@ -10,10 +10,16 @@
 //! to 500 ms or until a cancel signal arrives via crossbeam-channel.
 //! Threads are short-lived (≤ 500 ms) so peak thread count is bounded
 //! by ExecEvent rate × 500 ms.
+//!
+//! Phase 3 plan 03-08: on gap fire, ALSO push to `recent_gaps` ring and
+//! emit a `LogRow::Gap` to `log_writer` (T-03-08-05 repudiation mitigation).
 
+use crate::log_writer::{GapRecord, LogRow, LogWriter, JSONL_SCHEMA_VERSION, now_rfc3339};
+use crate::prompt::RecentGapsRing;
 use crate::tracked::{CoverageGap, ProcessTree};
 use crossbeam_channel::{bounded, Sender};
 use sentinel_core::AuditToken;
+use sentinel_ipc::GapInfo;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -33,11 +39,28 @@ impl GapDetector {
     /// Arm a timeout. If `cancel(audit_token)` is not called within
     /// GAP_TIMEOUT_MS, sets `pending_gap` on the node in `tree`.
     /// Re-arming the same token cancels the prior timer.
+    ///
+    /// Phase 3 plan 03-08: on timeout, ALSO push to `recent_gaps` + `log_writer`
+    /// (T-03-08-05: two independent forensic records of every gap).
     pub fn arm(
         &self,
         audit_token: AuditToken,
         pending_gap: CoverageGap,
         tree: Arc<ProcessTree>,
+    ) {
+        self.arm_with_forensics(audit_token, pending_gap, tree, None, None)
+    }
+
+    /// Extended arm that also records the gap in `recent_gaps` and `log_writer`
+    /// when provided. Called from ipc_server.rs after Phase 3 plan 03-08 wires
+    /// the forensic sinks into the ExecEvent / ForkEvent handlers.
+    pub fn arm_with_forensics(
+        &self,
+        audit_token: AuditToken,
+        pending_gap: CoverageGap,
+        tree: Arc<ProcessTree>,
+        recent_gaps: Option<Arc<RecentGapsRing>>,
+        log_writer: Option<LogWriter>,
     ) {
         let (tx, rx) = bounded::<()>(1);
 
@@ -54,7 +77,71 @@ impl GapDetector {
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     // No DylibLoaded within window → record the gap.
-                    let _ = tree.set_coverage_gap(audit_token, pending_gap);
+                    let _ = tree.set_coverage_gap(audit_token, pending_gap.clone());
+
+                    // Phase 3 plan 03-08 (T-03-08-05): forensic publication.
+                    // Look up run_uuid from the node for GapInfo + LogRow.
+                    let (run_uuid, binary_path) = match &pending_gap {
+                        CoverageGap::ConfirmedHardened { binary_path, .. } => {
+                            let run_uuid = tree
+                                .get_node(&audit_token)
+                                .map(|n| n.run_uuid.clone())
+                                .unwrap_or_default();
+                            (run_uuid, binary_path.clone())
+                        }
+                        CoverageGap::UnknownInjectionFailure { binary_path, .. } => {
+                            let run_uuid = tree
+                                .get_node(&audit_token)
+                                .map(|n| n.run_uuid.clone())
+                                .unwrap_or_default();
+                            (run_uuid, binary_path.clone())
+                        }
+                        CoverageGap::EnvNotPropagated { binary_path, .. } => {
+                            let run_uuid = tree
+                                .get_node(&audit_token)
+                                .map(|n| n.run_uuid.clone())
+                                .unwrap_or_default();
+                            (run_uuid, binary_path.clone())
+                        }
+                    };
+                    let gap_kind_str: &'static str = match &pending_gap {
+                        CoverageGap::ConfirmedHardened { .. } => "hardened-runtime",
+                        CoverageGap::UnknownInjectionFailure { .. } => "unknown-injection-failure",
+                        CoverageGap::EnvNotPropagated { .. } => "env-not-propagated",
+                    };
+                    let detected_at_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    let binary_path_opt = if binary_path.is_empty() {
+                        None
+                    } else {
+                        Some(binary_path.clone())
+                    };
+                    let gap_info = GapInfo {
+                        run_uuid: run_uuid.clone(),
+                        gap_kind: gap_kind_str.to_string(),
+                        binary_path: binary_path_opt.clone(),
+                        detected_at_ms,
+                    };
+                    if let Some(rg) = &recent_gaps {
+                        rg.push(gap_info);
+                    }
+                    if let Some(lw) = &log_writer {
+                        lw.send(LogRow::Gap(GapRecord {
+                            schema_version: JSONL_SCHEMA_VERSION,
+                            ts: now_rfc3339(),
+                            run_uuid,
+                            gap_kind: gap_kind_str,
+                            process: crate::log_writer::ProcessCtxLog {
+                                pid: audit_token.val[5],
+                                pidversion: audit_token.val[7],
+                                argv: vec![],
+                                cwd: String::new(),
+                            },
+                            binary_path: binary_path_opt,
+                        }));
+                    }
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
                     // Detector dropped tx (re-armed or detector freed).

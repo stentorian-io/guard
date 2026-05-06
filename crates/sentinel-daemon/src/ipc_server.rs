@@ -275,18 +275,148 @@ impl IpcServer {
             FrameKind::Tagged(MessageTag::EnvNotPropagatedGap) => {
                 handle_env_not_propagated_frame(&mut stream, peer_token, state);
             }
-            // Phase 3 tags — handlers wired in plan 03-08.
-            // Gracefully reject with error reply so the connection closes cleanly
-            // rather than panicking on an unmatched variant.
-            FrameKind::Tagged(MessageTag::Status)
-            | FrameKind::Tagged(MessageTag::PromptChannelInit)
-            | FrameKind::Tagged(MessageTag::InsertUserRule)
-            | FrameKind::Tagged(MessageTag::ReadInstallArtifacts)
-            | FrameKind::Tagged(MessageTag::BaselineCommit) => {
-                // TODO(03-08): wire Phase 3 handlers here
-                let _ = write_legacy_err(&mut stream, "handler not yet wired (plan 03-08)");
+            // Phase 3 plan 03-08: request-reply handlers for the CLI surface.
+            FrameKind::Tagged(MessageTag::Status) => {
+                handle_status_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(MessageTag::InsertUserRule) => {
+                handle_insert_user_rule_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(MessageTag::ReadInstallArtifacts) => {
+                handle_read_install_artifacts_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(MessageTag::BaselineCommit) => {
+                handle_baseline_commit_frame(&mut stream, state);
+            }
+            // Phase 3 plan 03-12 owns PromptChannelInit — stub returns explicit error Ack
+            // so the CLI's PromptChannel::open fails cleanly (T-03-08-04).
+            FrameKind::Tagged(MessageTag::PromptChannelInit) => {
+                let _ = write_tagged(
+                    &mut stream,
+                    MessageTag::PromptChannelInit,
+                    &PromptChannelInitAck::err("PromptChannelInit not yet wired (plan 03-12)"),
+                );
             }
         }
+    }
+}
+
+// ============================================================================
+// Phase 3 plan 03-08: request-reply frame handlers for CLI IPC surface
+// ============================================================================
+
+fn handle_status_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: Status = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "Status decode failed");
+            let _ = write_tagged(stream, MessageTag::Status, &StatusReply::err(format!("decode: {e}")));
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V3 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::Status,
+            &StatusReply::err(format!("schema_version {} != IPC_SCHEMA_V3", req.schema_version)),
+        );
+        return;
+    }
+    let reply = crate::handlers::status::handle_status(state);
+    if let Err(e) = write_tagged(stream, MessageTag::Status, &reply) {
+        error!(error = %e, "failed to send StatusReply");
+    }
+}
+
+fn handle_insert_user_rule_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: InsertUserRule = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "InsertUserRule decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::InsertUserRule,
+                &InsertUserRuleReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V3 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::InsertUserRule,
+            &InsertUserRuleReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V3",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let reply = crate::handlers::insert_user_rule::handle_insert_user_rule(&req, &state.rule_store);
+    if let Err(e) = write_tagged(stream, MessageTag::InsertUserRule, &reply) {
+        error!(error = %e, "failed to send InsertUserRuleReply");
+    }
+}
+
+fn handle_read_install_artifacts_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: ReadInstallArtifacts = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "ReadInstallArtifacts decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::ReadInstallArtifacts,
+                &ReadInstallArtifactsReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V3 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::ReadInstallArtifacts,
+            &ReadInstallArtifactsReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V3",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let reply = crate::handlers::read_install_artifacts::handle_read_install_artifacts(
+        &state.install_artifact_store,
+    );
+    if let Err(e) = write_tagged(stream, MessageTag::ReadInstallArtifacts, &reply) {
+        error!(error = %e, "failed to send ReadInstallArtifactsReply");
+    }
+}
+
+fn handle_baseline_commit_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: BaselineCommit = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "BaselineCommit decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::BaselineCommit,
+                &BaselineCommitReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V3 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::BaselineCommit,
+            &BaselineCommitReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V3",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let reply = crate::handlers::baseline_commit::handle_baseline_commit(&req, state);
+    if let Err(e) = write_tagged(stream, MessageTag::BaselineCommit, &reply) {
+        error!(error = %e, "failed to send BaselineCommitReply");
     }
 }
 
@@ -510,9 +640,15 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
                 binary_path: String::new(), // filled by ExecEvent if/when it arrives
                 detected_at_ms: unix_ms_now(),
             };
-            state
-                .gap_detector
-                .arm(child, gap, state.process_tree.clone());
+            // Phase 3 plan 03-08: pass forensic sinks so the gap fire also
+            // updates recent_gaps + log_writer (T-03-08-05).
+            state.gap_detector.arm_with_forensics(
+                child,
+                gap,
+                state.process_tree.clone(),
+                Some(state.recent_gaps.clone()),
+                Some(state.log_writer.clone()),
+            );
         }
     }
     if let Err(e) = write_tagged(stream, MessageTag::ForkEvent, &reply) {
@@ -615,9 +751,15 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
             binary_path: target_path,
             detected_at_ms: unix_ms_now(),
         };
-        state
-            .gap_detector
-            .arm(peer_token, gap, state.process_tree.clone());
+        // Phase 3 plan 03-08: pass forensic sinks so the gap fire also
+        // updates recent_gaps + log_writer (T-03-08-05).
+        state.gap_detector.arm_with_forensics(
+            peer_token,
+            gap,
+            state.process_tree.clone(),
+            Some(state.recent_gaps.clone()),
+            Some(state.log_writer.clone()),
+        );
     }
     if let Err(e) = write_tagged(stream, MessageTag::ExecEvent, &ExecAck::ok()) {
         error!(error = %e, "failed to send ExecAck");
@@ -865,6 +1007,41 @@ fn handle_env_not_propagated_frame(
                 detected_at_ms = req.detected_at_ms,
                 "TREE-06 env-not-propagated gap recorded"
             );
+
+            // Phase 3 plan 03-08 (T-03-08-05): also publish to recent_gaps + log_writer.
+            // Use the run_uuid from the node for forensic correlation.
+            let run_uuid = state
+                .process_tree
+                .get_node(&peer_token)
+                .map(|n| n.run_uuid.clone())
+                .unwrap_or_default();
+            let binary_path_opt = if binary_path.is_empty() {
+                None
+            } else {
+                Some(binary_path.clone())
+            };
+            let gap_info = sentinel_ipc::GapInfo {
+                run_uuid: run_uuid.clone(),
+                gap_kind: "env-not-propagated".to_string(),
+                binary_path: binary_path_opt.clone(),
+                detected_at_ms: req.detected_at_ms,
+            };
+            state.recent_gaps.push(gap_info);
+            state.log_writer.send(crate::log_writer::LogRow::Gap(
+                crate::log_writer::GapRecord {
+                    schema_version: crate::log_writer::JSONL_SCHEMA_VERSION,
+                    ts: crate::log_writer::now_rfc3339(),
+                    run_uuid,
+                    gap_kind: "env-not-propagated",
+                    process: crate::log_writer::ProcessCtxLog {
+                        pid: peer_token.val[5],
+                        pidversion: peer_token.val[7],
+                        argv: vec![],
+                        cwd: String::new(),
+                    },
+                    binary_path: binary_path_opt,
+                },
+            ));
         }
         Err(e) => {
             // Should not happen — peer_token is in the tree (is_tracked passed).

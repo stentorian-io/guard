@@ -4,6 +4,7 @@ pub mod gap_detector;
 pub mod handlers;
 pub mod state_dir;
 pub mod snapshot;
+pub mod snapshot_gc;
 pub mod manifest;
 pub mod ipc_dispatch;
 pub mod ipc_server;

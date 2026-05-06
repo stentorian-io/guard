@@ -10,6 +10,10 @@ description = "End-to-end smoke harness for Sentinel Phase 1 success criteria."
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "zero_config_probe"
+path = "harness/zero_config_probe.rs"
+
 [dependencies]
 sentinel-core = { workspace = true }
 sentinel-daemon = { path = "../sentinel-daemon" }

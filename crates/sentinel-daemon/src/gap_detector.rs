@@ -128,6 +128,18 @@ impl GapDetector {
                         rg.push(gap_info);
                     }
                     if let Some(lw) = &log_writer {
+                        // WR-09: synthesize argv[0] from the ProcessNode's
+                        // recorded binary_path so the gap row is forensically
+                        // useful (an analyst needs SOMETHING to identify the
+                        // process beyond pid + pidversion). ProcessNode does
+                        // not record full argv or cwd in v1; document that
+                        // limitation on the row by leaving cwd empty rather
+                        // than fabricating a value.
+                        let argv = if binary_path.is_empty() {
+                            Vec::new()
+                        } else {
+                            vec![binary_path.clone()]
+                        };
                         lw.send(LogRow::Gap(GapRecord {
                             schema_version: JSONL_SCHEMA_VERSION,
                             ts: now_rfc3339(),
@@ -136,7 +148,7 @@ impl GapDetector {
                             process: crate::log_writer::ProcessCtxLog {
                                 pid: audit_token.val[5],
                                 pidversion: audit_token.val[7],
-                                argv: vec![],
+                                argv,
                                 cwd: String::new(),
                             },
                             binary_path: binary_path_opt,

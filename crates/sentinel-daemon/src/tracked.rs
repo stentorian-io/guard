@@ -30,4 +30,8 @@ impl TrackedRoots {
     pub fn len(&self) -> usize {
         self.inner.lock().expect("tracked roots mutex").len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().expect("tracked roots mutex").is_empty()
+    }
 }

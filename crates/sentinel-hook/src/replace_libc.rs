@@ -11,7 +11,20 @@ use crate::ALLOWLIST;
 use core::ffi::{c_char, c_int, c_void};
 use core::sync::atomic::Ordering;
 use libc::{msghdr, size_t, ssize_t, sockaddr, socklen_t};
-use sentinel_core::{match_hostname, AllowlistEntry, Verdict};
+use sentinel_core::{evaluate_rule, AllowlistEntry, Verdict};
+
+/// Phase-1 compatibility shim: walk a flat `entries` slice and return the
+/// FIRST matching entry's verdict; Deny if no entry matches. Plan 02-02 will
+/// replace callers of this with the tier-walk `evaluate_policy` evaluator.
+#[inline]
+fn match_hostname_compat(entries: &[AllowlistEntry], host: &[u8]) -> Verdict {
+    for e in entries {
+        if let Some(v) = evaluate_rule(e, host) {
+            return v;
+        }
+    }
+    Verdict::Deny
+}
 
 // BL-04 fix: RAII reentrancy guard.
 //
@@ -369,7 +382,7 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
         })
     });
     match host {
-        Some((buf, n)) => match_hostname(entries, &buf[..n]),
+        Some((buf, n)) => match_hostname_compat(entries, &buf[..n]),
         None => {
             // No prior getaddrinfo for this sockaddr → could be hardcoded-IP egress.
             // D-17: deny by default within tracked subtrees.
@@ -391,7 +404,7 @@ fn decide_for_ip_sockaddr(
     let mut buf = [0u8; 64];
     let s = unsafe { ip_to_str(addr, addrlen, &mut buf) };
     if let Some(slice) = s {
-        match_hostname(entries, slice)
+        match_hostname_compat(entries, slice)
     } else {
         Verdict::Deny
     }

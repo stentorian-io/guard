@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use sentinel_cli::cli::{Cli, Cmd};
-use sentinel_cli::{audit_token, ipc_client, locate, spawn, trust_policy, CliError};
+use sentinel_cli::{audit_token, install, ipc_client, locate, shell_setup, spawn, trust_policy, uninstall, CliError};
 use sentinel_daemon::state_dir::{default_state_dir, socket_path};
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -88,6 +88,27 @@ fn real_main() -> Result<i32, CliError> {
             // error instead of a hang on the tagged frame's connect.
             ipc_client::probe_daemon_alive(&sock)?;
             trust_policy::run_trust_policy(&sock, &path)?;
+            Ok(0)
+        }
+        Cmd::Install { no_shell_integration, reinstall } => {
+            install::run_install(&sock, &state, no_shell_integration, reinstall)
+        }
+        Cmd::Uninstall { force } => {
+            uninstall::run_uninstall(&sock, &state, force)
+        }
+        Cmd::ShellSetup => {
+            shell_setup::run_shell_setup()
+        }
+        Cmd::Status { .. } => {
+            eprintln!("sentinel status: pending plan 03-10");
+            Ok(0)
+        }
+        Cmd::Logs { .. } => {
+            eprintln!("sentinel logs: pending plan 03-10");
+            Ok(0)
+        }
+        Cmd::Approve { .. } => {
+            eprintln!("sentinel approve: pending plan 03-11");
             Ok(0)
         }
     }

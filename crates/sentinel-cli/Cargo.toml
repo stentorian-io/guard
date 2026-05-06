@@ -31,6 +31,7 @@ tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 dialoguer = { workspace = true }
 notify = { workspace = true }
+plist = { workspace = true }
 similar = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

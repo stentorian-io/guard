@@ -3,10 +3,14 @@
 
 pub mod audit_token;
 pub mod cli;
+pub mod install;
 pub mod ipc_client;
 pub mod locate;
+pub mod shell_setup;
 pub mod spawn;
 pub mod trust_policy;
+pub mod tty;
+pub mod uninstall;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {

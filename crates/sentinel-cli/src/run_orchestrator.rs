@@ -23,11 +23,19 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, baseline_mode:
 
     // Open PromptChannel BEFORE spawning the wrapped child. The shared mutex is
     // shared between the render-loop and the SIGINT handler.
+    //
+    // CR-02: take the reader out of the channel before stashing the channel in
+    // the SharedChannel mutex. The render thread drives reads through the
+    // exclusively-owned reader (no lock contention). The writer half stays in
+    // the SharedChannel mutex so the SIGINT handler can call `cancel` on it
+    // even while the render thread is parked in `next_prompt`.
     let shared_channel: crate::sigint_handler::SharedChannel = Arc::new(Mutex::new(None));
+    let mut prompt_reader: Option<crate::prompt_channel::PromptReader> = None;
     let inflight_handle: Option<crate::prompt_channel::InflightPrompts> = if is_tty && !baseline_mode {
         match crate::prompt_channel::PromptChannel::open(sock, &run_uuid) {
-            Ok(channel) => {
+            Ok(mut channel) => {
                 let inflight = channel.inflight_handle();
+                prompt_reader = channel.take_reader();
                 *shared_channel.lock().unwrap() = Some(channel);
                 Some(inflight)
             }
@@ -60,14 +68,19 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, baseline_mode:
     )?;
 
     // Render-loop thread (only when interactive AND not baseline-recording).
+    //
+    // CR-02: the thread owns the `PromptReader` directly and reads without
+    // holding the SharedChannel mutex. Writes (`answer`/`cancel`) go through
+    // the SharedChannel mutex which is also held briefly by the SIGINT
+    // handler — but never simultaneously with a blocking read.
     let stop_flag = Arc::new(AtomicBool::new(false));
-    let render_handle = if inflight_handle.is_some() {
+    let render_handle = if let Some(reader) = prompt_reader.take() {
         let shared = Arc::clone(&shared_channel);
         let stop = Arc::clone(&stop_flag);
         Some(
             std::thread::Builder::new()
                 .name("sentinel-prompt-render".into())
-                .spawn(move || render_loop(shared, stop))
+                .spawn(move || render_loop(reader, shared, stop))
                 .map_err(|e| CliError::Other(format!("render thread: {e}")))?,
         )
     } else {
@@ -85,7 +98,15 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, baseline_mode:
         }
     }
 
-    // Stop render loop.
+    // WR-13: drop the SharedChannel writer half so the render thread's blocked
+    // `read_frame` returns Err (the daemon-side reader exits when our writer
+    // closes the socket; on its half-close the kernel propagates EOF back to
+    // our reader). Without this, `render_handle.join()` would sit forever
+    // because the daemon won't proactively close the channel after the run
+    // ends — it relies on the CLI side to drop the socket on exit.
+    if let Ok(mut g) = shared_channel.lock() {
+        *g = None;
+    }
     stop_flag.store(true, Ordering::SeqCst);
     if let Some(h) = render_handle {
         let _ = h.join();
@@ -94,41 +115,35 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, baseline_mode:
 }
 
 fn render_loop(
+    mut reader: crate::prompt_channel::PromptReader,
     shared_channel: crate::sigint_handler::SharedChannel,
     stop: Arc<AtomicBool>,
 ) {
     while !stop.load(Ordering::SeqCst) {
-        let req_result = {
-            let mut g = match shared_channel.lock() {
-                Ok(g) => g,
-                Err(_) => return,
-            };
-            match g.as_mut() {
-                Some(c) => Some(c.next_prompt()),
-                None => None,
-            }
+        // CR-02: blocking read happens on the exclusively-owned reader half;
+        // we DO NOT hold the SharedChannel lock while parked here. The SIGINT
+        // handler can therefore acquire the SharedChannel lock to call cancel
+        // on the writer half while we're still parked.
+        let req = match reader.next_prompt() {
+            Ok(r) => r,
+            Err(_) => break, // EOF / disconnect / channel teardown
         };
-        match req_result {
-            Some(Ok(req)) => {
-                match crate::prompt_render::render_and_choose(&req) {
-                    Ok(resp) => {
-                        if let Ok(mut g) = shared_channel.lock() {
-                            if let Some(c) = g.as_mut() {
-                                let _ = c.answer(resp);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "prompt render failed; cancelling");
-                        if let Ok(mut g) = shared_channel.lock() {
-                            if let Some(c) = g.as_mut() {
-                                let _ = c.cancel(&req.prompt_id);
-                            }
-                        }
+        match crate::prompt_render::render_and_choose(&req) {
+            Ok(resp) => {
+                if let Ok(mut g) = shared_channel.lock() {
+                    if let Some(c) = g.as_mut() {
+                        let _ = c.answer(resp);
                     }
                 }
             }
-            Some(Err(_)) | None => break,
+            Err(e) => {
+                tracing::warn!(error = %e, "prompt render failed; cancelling");
+                if let Ok(mut g) = shared_channel.lock() {
+                    if let Some(c) = g.as_mut() {
+                        let _ = c.cancel(&req.prompt_id);
+                    }
+                }
+            }
         }
     }
 }

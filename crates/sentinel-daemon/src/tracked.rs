@@ -37,7 +37,11 @@ pub enum CoverageGap {
     /// csops pre-check was NOT hardened but DylibLoaded never arrived — DYLD
     /// env var was lost (e.g. via `setsid`+ explicit env-clearing posix_spawn).
     UnknownInjectionFailure { binary_path: String, detected_at_ms: u64 },
-    /// Future use: explicit env-not-propagated detection (TREE-06 polish path).
+    /// TREE-06: parent's posix_spawn was called with envp missing one or
+    /// more of {DYLD_INSERT_LIBRARIES, SENTINEL_DAEMON_SOCKET,
+    /// SENTINEL_SNAPSHOT_MANIFEST}. The child cannot inherit dylib
+    /// injection. Detected by the dylib's posix_spawn shadow PRE-SPAWN.
+    /// Recorded on the PARENT's ProcessNode (gap-closure 02-09).
     EnvNotPropagated { binary_path: String, detected_at_ms: u64 },
 }
 

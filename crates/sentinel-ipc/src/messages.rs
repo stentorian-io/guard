@@ -369,3 +369,59 @@ impl TrustPolicyReply {
         }
     }
 }
+
+// --- EnvNotPropagatedGap / Ack (TREE-06 — gap-closure 02-09) -----------------
+
+/// Dylib → daemon: parent process detected pre-spawn that the envp passed to
+/// libc::posix_spawn is missing one or more required Sentinel env vars
+/// (DYLD_INSERT_LIBRARIES, SENTINEL_DAEMON_SOCKET, or SENTINEL_SNAPSHOT_MANIFEST).
+/// The about-to-be-spawned child cannot inherit the dylib injection.
+///
+/// This is informational (not enforcement) — the dylib emits the IPC and
+/// continues; the daemon records the gap on the PARENT's ProcessNode (the child
+/// does not yet exist at pre-spawn time).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EnvNotPropagatedGap {
+    pub schema_version: u16,
+    pub parent_audit_token: AuditTokenWire,
+    #[serde(with = "serde_bytes")]
+    pub child_binary_path: Vec<u8>, // capped at MAX_TARGET_PATH = 1024 (mirror ExecEvent contract)
+    pub detected_at_ms: u64,
+}
+
+impl EnvNotPropagatedGap {
+    pub const MAX_TARGET_PATH: usize = 1024;
+
+    pub fn new(parent: AuditTokenWire, path: Vec<u8>, ts_ms: u64) -> Self {
+        let mut p = path;
+        if p.len() > Self::MAX_TARGET_PATH {
+            p.truncate(Self::MAX_TARGET_PATH);
+        }
+        Self {
+            schema_version: IPC_SCHEMA_V2,
+            parent_audit_token: parent,
+            child_binary_path: p,
+            detected_at_ms: ts_ms,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EnvNotPropagatedGapAck {
+    Ok { schema_version: u16 },
+    Err { schema_version: u16, message: String },
+}
+
+impl EnvNotPropagatedGapAck {
+    pub fn ok() -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V2,
+        }
+    }
+    pub fn err(m: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V2,
+            message: m.into(),
+        }
+    }
+}

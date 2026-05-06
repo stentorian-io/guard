@@ -8,13 +8,13 @@
 //! integer per `sentinel-ipc/src/frame.rs`. The frame size is bounded by
 //! `MAX_FRAME_BYTES = 64 * 1024 = 0x10000`, so a valid legacy length-prefix high
 //! byte is ALWAYS 0x00. Any other high byte is either a Phase 2 tag
-//! (0x02..=0x07) or a protocol violation.
+//! (0x02..=0x08) or a protocol violation.
 //!
 //! WARNING-06 fix (Phase 2 review): the previous comment claimed any byte in
-//! 0x00..=0x01 ∪ 0x08..=0xff was "legacy length-prefix high byte" — but a
+//! 0x00..=0x01 ∪ 0x09..=0xff was "legacy length-prefix high byte" — but a
 //! valid legacy frame has only 0x00 in the high byte (0x01 already implies
 //! a 16+ MiB body, far above MAX_FRAME_BYTES). The dispatcher now treats:
-//!   - 0x02..=0x07            → tagged Phase 2 message
+//!   - 0x02..=0x08            → tagged Phase 2 message (0x08 = EnvNotPropagatedGap, plan 02-09)
 //!   - 0x00                   → legacy RegisterRoot (Phase 1)
 //!   - everything else        → protocol violation (rejected immediately)
 //!
@@ -35,6 +35,7 @@ pub enum MessageTag {
     DylibLoaded = 0x05,
     Resolve = 0x06,
     TrustPolicy = 0x07,
+    EnvNotPropagatedGap = 0x08,
 }
 
 impl MessageTag {
@@ -46,6 +47,7 @@ impl MessageTag {
             0x05 => Some(Self::DylibLoaded),
             0x06 => Some(Self::Resolve),
             0x07 => Some(Self::TrustPolicy),
+            0x08 => Some(Self::EnvNotPropagatedGap),
             _ => None,
         }
     }
@@ -117,6 +119,7 @@ mod tests {
             MessageTag::DylibLoaded,
             MessageTag::Resolve,
             MessageTag::TrustPolicy,
+            MessageTag::EnvNotPropagatedGap,
         ] {
             let b = tag.as_byte();
             assert_eq!(MessageTag::from_byte(b), Some(tag));
@@ -129,8 +132,8 @@ mod tests {
         assert!(MessageTag::from_byte(0x00).is_none());
         // 0x01 — was reserved for RegisterRoot in early drafts; legacy path now.
         assert!(MessageTag::from_byte(0x01).is_none());
-        // 0x08+ — unassigned tag space.
-        assert!(MessageTag::from_byte(0x08).is_none());
+        // 0x09+ — unassigned tag space (0x08 = EnvNotPropagatedGap, plan 02-09).
+        assert!(MessageTag::from_byte(0x09).is_none());
         assert!(MessageTag::from_byte(0xff).is_none());
     }
 
@@ -143,5 +146,6 @@ mod tests {
         assert_eq!(MessageTag::DylibLoaded.as_byte(), 0x05);
         assert_eq!(MessageTag::Resolve.as_byte(), 0x06);
         assert_eq!(MessageTag::TrustPolicy.as_byte(), 0x07);
+        assert_eq!(MessageTag::EnvNotPropagatedGap.as_byte(), 0x08);
     }
 }

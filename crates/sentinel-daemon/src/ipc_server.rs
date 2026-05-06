@@ -278,9 +278,21 @@ fn handle_legacy_register_root(
     let wire_pid = msg.audit_token.val[5];
     let kernel_pid = peer_token.val[5];
     if wire_pid != kernel_pid {
-        warn!(
+        // WARNING-09 fix (Phase 2 review): escalate from `warn` to `error`
+        // when the wire- and kernel-claimed pids disagree. The previous
+        // log line was buried among other warns and gave no signal that
+        // a misconfigured client (or attacker probing the IPC) was sending
+        // mismatched values. Escalating to error-level + naming the field
+        // "ENF-08 violation" makes it grep-able in the daemon's log feed.
+        //
+        // A full per-peer counter + rate-limit + connection-close on
+        // sustained abuse is documented as deferred work in REVIEW-FIX.md.
+        // The wire field carries useful information after BLOCKER-07
+        // (val[5]=getpid, val[6]=getppid), so a wire/kernel pid
+        // disagreement is now ALWAYS a sign of either a bug or a probe.
+        error!(
             wire_pid,
-            kernel_pid, "wire-claimed audit token disagrees with kernel-sourced; trusting kernel"
+            kernel_pid, "ENF-08 violation: wire-claimed audit pid disagrees with kernel; trusting kernel"
         );
     }
     // Phase 2: insert_root replaces TrackedRoots::insert. We don't have a
@@ -371,9 +383,11 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     let wire_parent_pid = ev.parent_audit_token.val[5];
     let kernel_pid = peer_token.val[5];
     if wire_parent_pid != kernel_pid {
-        warn!(
+        // WARNING-09: escalate to error — see handle_legacy_register_root
+        // for the full rationale.
+        error!(
             wire_parent_pid, kernel_pid,
-            "ForkEvent wire-claimed parent disagrees with peer-auth; trusting peer-auth"
+            "ENF-08 violation: ForkEvent wire-claimed parent disagrees with peer-auth; trusting peer-auth"
         );
     }
     // Construct child audit token from wire pid + pidversion.

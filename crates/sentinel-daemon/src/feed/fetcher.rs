@@ -322,7 +322,16 @@ fn fetch_one_feed_impl(
                     .get_or_insert_with(|| parsed.schema_version_observed.clone());
                 let added = build_rows_from_parsed(feed_name, &parsed, &mut rows);
                 host_iocs_count += parsed.host_iocs.len();
-                records_parsed += added.max(1);
+                // WR-04 fix: count `records_parsed` by the rows actually
+                // produced. The previous `.max(1)` floor over-counted
+                // structurally empty records (e.g., a withdrawn advisory
+                // with no affected blocks AND no host_iocs), inflating
+                // `feed_metadata.record_count` AND breaking the
+                // `all_failures_schema_unknown` reclassification gate
+                // below — a single empty-but-valid record bumped
+                // records_parsed to 1 and suppressed the schema_unknown
+                // outcome.
+                records_parsed += added;
             }
             Err(e) => {
                 records_failed += 1;
@@ -1069,6 +1078,59 @@ mod tests {
 
         let md = store.read_metadata("OSV").expect("read").expect("present");
         assert_eq!(md.last_pull_outcome, "parse_error");
+    }
+
+    /// WR-04 regression: a record with valid schema but zero affected
+    /// blocks AND zero host_iocs (e.g., a withdrawn advisory that's still
+    /// shipped in the feed) must NOT bump `records_parsed` from 0 to 1 via
+    /// the previous `.max(1)` floor — otherwise mixing one such empty
+    /// record with one schema_unknown failure suppresses the
+    /// `last_pull_outcome = "schema_unknown"` reclassification and the
+    /// generic "parse_error" surfaces instead.
+    const EMPTY_VALID_OSV: &str = r#"{
+        "schema_version": "1.7.4",
+        "id": "MAL-2026-EMPTY",
+        "modified": "2026-01-15T00:00:00Z",
+        "published": "2026-01-15T00:00:00Z",
+        "summary": "withdrawn",
+        "affected": []
+    }"#;
+
+    #[test]
+    fn fetcher_empty_valid_record_does_not_inflate_records_parsed() {
+        let fixture_dir = tempdir().expect("fixture");
+        let fixture_repo = fixture_dir.path().join("repo");
+        let _sha = build_fixture_repo(
+            &fixture_repo,
+            &[
+                ("MAL-EMPTY.json", EMPTY_VALID_OSV),
+                ("MAL-NEW.json", SCHEMA_UNKNOWN_OSV),
+            ],
+        );
+        let url = file_url(&fixture_repo);
+
+        let clone_dir = tempdir().expect("clone");
+        let local = clone_dir.path().join("clone");
+        let (_db_dir, store) = open_store();
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let outcome = fetch_one_feed("OSV", &url, &local, deadline, 30, &store).expect("fetch");
+
+        // The empty-but-valid record contributes 0 rows; the schema-unknown
+        // record fails. records_parsed must stay 0 so the
+        // all_failures_schema_unknown gate still fires.
+        assert_eq!(
+            outcome.records_parsed, 0,
+            "empty valid record must not bump records_parsed (WR-04)"
+        );
+        assert_eq!(outcome.records_failed, 1);
+
+        let md = store.read_metadata("OSV").expect("read").expect("present");
+        assert_eq!(
+            md.last_pull_outcome, "schema_unknown",
+            "with WR-04 fixed, all-failures-schema-unknown reclassification \
+             must NOT be suppressed by an empty-but-valid sibling record"
+        );
     }
 
     #[test]

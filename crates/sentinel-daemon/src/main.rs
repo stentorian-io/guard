@@ -131,6 +131,18 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     let recent_gaps = Arc::new(RecentGapsRing::new());
     let baseline_staging = Arc::new(BaselineStaging::new());
 
+    // Phase 4 plan 04-03: feed_store opens against the same sentinel.db that
+    // RuleStore::open migrated (migration 003 added feed_iocs/feed_metadata
+    // and applied WAL via runtime pragma). feed_fetch_mutex serializes
+    // PrepareSnapshot fetch calls; last_fetch_result holds the most recent
+    // outcome for D-86 shared-result optimization across concurrent runs.
+    let feed_store = Arc::new(
+        sentinel_daemon::feed::store::FeedStore::open(&db_path(&state_dir))
+            .map_err(|e| std::io::Error::other(format!("open feed_store: {e}")))?,
+    );
+    let feed_fetch_mutex = Arc::new(std::sync::Mutex::new(()));
+    let last_fetch_result = Arc::new(std::sync::RwLock::new(None));
+
     let process_tree = Arc::new(ProcessTree::new());
     let gap_detector = Arc::new(GapDetector::new());
     let state = Arc::new(DaemonState {
@@ -146,6 +158,9 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         baseline_staging,
         last_snapshot_publish_failed: std::sync::atomic::AtomicBool::new(false),
         deferred_resolve: std::sync::Arc::new(sentinel_daemon::ipc_server::DeferredResolveTable::new()),
+        feed_store,
+        feed_fetch_mutex,
+        last_fetch_result,
     });
 
     // TODO(03-08): wire gap_detector → log_writer + recent_gaps when the gap fires.

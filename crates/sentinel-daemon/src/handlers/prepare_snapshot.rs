@@ -16,13 +16,14 @@
 //! passes those fields through as arguments. V2 callers receive false/false defaults
 //! via #[serde(default)] on the wire fields.
 
+use crate::ipc_server::DaemonState;
 use crate::policy_file::{find_sentinel_toml, parse_file, sha256_of_file};
 use crate::rule_store::RuleStore;
 use crate::snapshot::publish_run;
 use crate::state_dir::run_manifest_path;
 use crate::tracked::{ProcessTree, RunRecord};
 use sentinel_core::{AllowlistEntry, RuleKind, RuleTier, SCHEMA_V2, Snapshot};
-use sentinel_ipc::SnapshotReply;
+use sentinel_ipc::{FeedWarning, SnapshotReply};
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -49,6 +50,19 @@ type ProjectResolution = (Vec<AllowlistEntry>, Option<String>, Option<String>);
 /// Phase 3 plan 03-07: `is_tty` and `baseline_mode` are V3 fields; they default
 /// to false on V2 callers. Propagated via `set_run_is_tty` / `set_run_baseline_mode`
 /// after RunRecord insertion.
+///
+/// Phase 4 plan 04-03 (D-83 + D-85 + D-90): the production handler is
+/// [`handle_prepare_snapshot_v4`], which performs:
+///   1. `fetch_feeds_blocking(...)` BEFORE building the snapshot (D-83 pure
+///      on-demand). Strict-fail on fetch error (D-85) → SnapshotReply::Err.
+///   2. Project / user / curated entries assembly (existing Phase 2 path).
+///   3. `build_feeddeny_entries(feed_store)` merge step (D-90).
+///   4. Sort + publish per-run snapshot.
+///   5. SnapshotReply::ok_v4 carrying any non-fatal `feed_warnings`.
+///
+/// This pre-Phase-4 entry point delegates to `handle_prepare_snapshot_v4` and
+/// is kept as a thin shim so existing tests that pass individual subsystems
+/// (rather than a full DaemonState) still compile.
 pub fn handle_prepare_snapshot(
     cwd: &Path,
     curated: &[AllowlistEntry],
@@ -57,6 +71,113 @@ pub fn handle_prepare_snapshot(
     state_dir: &Path,
     is_tty: bool,
     baseline_mode: bool,
+) -> SnapshotReply {
+    handle_prepare_snapshot_inner(
+        cwd,
+        curated,
+        rule_store,
+        process_tree,
+        state_dir,
+        is_tty,
+        baseline_mode,
+        /* feed_store */ None,
+        /* feed_fetch_mutex */ None,
+        /* last_fetch_result */ None,
+    )
+}
+
+/// Phase 4 plan 04-03 entry point. Production callers (the IPC dispatcher in
+/// `ipc_server.rs`) hand the entire `DaemonState` so the handler can call
+/// `fetch_feeds_blocking` and `build_feeddeny_entries` without surface-area
+/// growth on the per-arg signature.
+pub fn handle_prepare_snapshot_v4(state: &Arc<DaemonState>, cwd: &Path) -> SnapshotReply {
+    handle_prepare_snapshot_inner(
+        cwd,
+        &state.curated,
+        &state.rule_store,
+        &state.process_tree,
+        &state.state_dir,
+        // is_tty + baseline_mode are V3 fields on the wire, not on DaemonState.
+        // The dispatcher passes them through `handle_prepare_snapshot_v4_full`
+        // when it has them; otherwise default to false (V2 wire default).
+        false,
+        false,
+        Some(&state.feed_store),
+        Some(&state.feed_fetch_mutex),
+        Some(&state.last_fetch_result),
+    )
+}
+
+/// Full Phase 4 entry point used by the V3 IPC dispatcher path: takes the
+/// V3-specific `is_tty` + `baseline_mode` fields plus the DaemonState for feed
+/// access. This is what `ipc_server.rs::handle_prepare_snapshot_frame` calls.
+pub fn handle_prepare_snapshot_v4_full(
+    state: &Arc<DaemonState>,
+    cwd: &Path,
+    is_tty: bool,
+    baseline_mode: bool,
+) -> SnapshotReply {
+    handle_prepare_snapshot_inner(
+        cwd,
+        &state.curated,
+        &state.rule_store,
+        &state.process_tree,
+        &state.state_dir,
+        is_tty,
+        baseline_mode,
+        Some(&state.feed_store),
+        Some(&state.feed_fetch_mutex),
+        Some(&state.last_fetch_result),
+    )
+}
+
+/// Test seam: same shape as the private `handle_prepare_snapshot_inner` but
+/// public so integration tests in `tests/prepare_snapshot_tests.rs` can
+/// exercise the V4 path with custom `curated` slices (the V4 entry points
+/// always read `state.curated`, which is empty in the test DaemonState).
+#[allow(clippy::too_many_arguments)]
+pub fn handle_prepare_snapshot_inner_for_tests(
+    cwd: &Path,
+    curated: &[AllowlistEntry],
+    rule_store: &RuleStore,
+    process_tree: &Arc<ProcessTree>,
+    state_dir: &Path,
+    is_tty: bool,
+    baseline_mode: bool,
+    feed_store: Option<&Arc<crate::feed::store::FeedStore>>,
+    feed_fetch_mutex: Option<&Arc<std::sync::Mutex<()>>>,
+    last_fetch_result: Option<
+        &Arc<std::sync::RwLock<Option<crate::feed::concurrency::LastFetchResult>>>,
+    >,
+) -> SnapshotReply {
+    handle_prepare_snapshot_inner(
+        cwd,
+        curated,
+        rule_store,
+        process_tree,
+        state_dir,
+        is_tty,
+        baseline_mode,
+        feed_store,
+        feed_fetch_mutex,
+        last_fetch_result,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_prepare_snapshot_inner(
+    cwd: &Path,
+    curated: &[AllowlistEntry],
+    rule_store: &RuleStore,
+    process_tree: &Arc<ProcessTree>,
+    state_dir: &Path,
+    is_tty: bool,
+    baseline_mode: bool,
+    feed_store: Option<&Arc<crate::feed::store::FeedStore>>,
+    feed_fetch_mutex: Option<&Arc<std::sync::Mutex<()>>>,
+    last_fetch_result: Option<
+        &Arc<std::sync::RwLock<Option<crate::feed::concurrency::LastFetchResult>>>,
+    >,
 ) -> SnapshotReply {
     let run_uuid = Uuid::new_v4().to_string();
 
@@ -73,6 +194,26 @@ pub fn handle_prepare_snapshot(
         }
     };
     let cwd = cwd.as_path();
+
+    // Phase 4 plan 04-03 step 0 (D-83): pre-flight feed fetch BEFORE building
+    // the snapshot. Strict-fail on Err per D-85 — no last-cached fallback at
+    // the run gate. Skip when no feed_store is wired (legacy callers + unit
+    // tests that don't exercise the feed path).
+    let feed_warnings: Vec<FeedWarning> =
+        match (feed_store, feed_fetch_mutex, last_fetch_result) {
+            (Some(fs), Some(mtx), Some(last)) => {
+                match crate::feed::concurrency::fetch_feeds_blocking(state_dir, mtx, last, fs) {
+                    Ok(outcomes) => {
+                        outcomes.iter().flat_map(|o| o.warnings.iter().cloned()).collect()
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "PrepareSnapshot: feed fetch failed");
+                        return SnapshotReply::err(format!("feed fetch: {e}"));
+                    }
+                }
+            }
+            _ => Vec::new(),
+        };
 
     // 1. Walk-up + trust check + parse.
     let (project_entries, project_path, project_sha256) =
@@ -99,12 +240,34 @@ pub fn handle_prepare_snapshot(
         }
     };
 
+    // 2a. Phase 4 plan 04-03 (D-90): merge FeedDeny entries derived from
+    //     feed_iocs WHERE host_ioc IS NOT NULL. Non-fatal failure path follows
+    //     the existing project-entries / user-entries discipline (warn + empty
+    //     vec). The structural POL-06 invariant — `RuleTier::CuratedAllow=1 <
+    //     RuleTier::FeedDeny=4` — is enforced by the sort step below; this
+    //     handler does NOT need to special-case curated overrides.
+    let feeddeny_entries: Vec<AllowlistEntry> = match feed_store {
+        Some(fs) => match crate::feed::build_feeddeny_entries(fs) {
+            Ok(e) => e,
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    "PrepareSnapshot: feed_iocs read failed; proceeding without FeedDeny"
+                );
+                Vec::new()
+            }
+        },
+        None => Vec::new(),
+    };
+
     // 3. Concatenate + sort by tier.
-    let mut entries: Vec<AllowlistEntry> =
-        Vec::with_capacity(curated.len() + user_entries.len() + project_entries.len());
+    let mut entries: Vec<AllowlistEntry> = Vec::with_capacity(
+        curated.len() + user_entries.len() + project_entries.len() + feeddeny_entries.len(),
+    );
     entries.extend_from_slice(curated);
     entries.extend(project_entries);
     entries.extend(user_entries);
+    entries.extend(feeddeny_entries);
     entries.sort_by_key(|e| e.tier);
 
     // 4. Build snapshot.
@@ -155,11 +318,13 @@ pub fn handle_prepare_snapshot(
         is_tty,
         baseline_mode,
         snapshot = %pub_.path.display(),
+        feed_warnings_n = feed_warnings.len(),
         "PrepareSnapshot OK"
     );
-    SnapshotReply::ok(
+    SnapshotReply::ok_v4(
         run_manifest_path(state_dir, &run_uuid).display().to_string(),
         run_uuid,
+        feed_warnings,
     )
 }
 

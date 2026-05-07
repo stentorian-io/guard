@@ -12,10 +12,12 @@ pub mod concurrency;
 pub mod fetcher;
 pub mod matcher;
 pub mod parser;
+pub mod snapshot_merge;
 pub mod store;
 
 pub use concurrency::{fetch_feeds_blocking, LastFetchResult, SHARED_RESULT_TTL};
 pub use fetcher::{FeedFetchError, FetchOutcome};
+pub use snapshot_merge::build_feeddeny_entries;
 
 #[cfg(test)]
 mod spike_gix;

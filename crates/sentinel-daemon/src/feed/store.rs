@@ -84,6 +84,14 @@ impl FeedStore {
         &self.db_path
     }
 
+    /// True iff the store was constructed via `open_in_memory()` — the read
+    /// helpers below detect this and serve reads from the writer connection
+    /// rather than opening a fresh `:memory:` reader (which would be a brand-
+    /// new empty SQLite database, not the same one carrying the schema).
+    fn is_in_memory(&self) -> bool {
+        self.db_path.as_os_str() == ":memory:"
+    }
+
     fn open_reader(&self) -> SqlResult<Connection> {
         Connection::open_with_flags(
             &self.db_path,
@@ -149,12 +157,22 @@ impl FeedStore {
         ecosystem: &str,
         package: &str,
     ) -> Result<Vec<FeedIocRow>, FeedStoreError> {
-        let conn = self.open_reader()?;
-        let mut stmt = conn.prepare(
+        const SQL: &str =
             "SELECT feed, advisory_id, ecosystem, package, versions_json, severity, tag, \
              first_seen_ms, host_ioc, schema_version_observed \
-             FROM feed_iocs WHERE ecosystem = ?1 AND package = ?2",
-        )?;
+             FROM feed_iocs WHERE ecosystem = ?1 AND package = ?2";
+        if self.is_in_memory() {
+            let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+            let mut stmt = conn.prepare(SQL)?;
+            let rows = stmt.query_map(params![ecosystem, package], row_to_ioc)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            return Ok(out);
+        }
+        let conn = self.open_reader()?;
+        let mut stmt = conn.prepare(SQL)?;
         let rows = stmt.query_map(params![ecosystem, package], row_to_ioc)?;
         let mut out = Vec::new();
         for r in rows {
@@ -164,12 +182,22 @@ impl FeedStore {
     }
 
     pub fn host_iocs(&self) -> Result<Vec<FeedIocRow>, FeedStoreError> {
-        let conn = self.open_reader()?;
-        let mut stmt = conn.prepare(
+        const SQL: &str =
             "SELECT feed, advisory_id, ecosystem, package, versions_json, severity, tag, \
              first_seen_ms, host_ioc, schema_version_observed \
-             FROM feed_iocs WHERE host_ioc IS NOT NULL",
-        )?;
+             FROM feed_iocs WHERE host_ioc IS NOT NULL";
+        if self.is_in_memory() {
+            let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+            let mut stmt = conn.prepare(SQL)?;
+            let rows = stmt.query_map([], row_to_ioc)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            return Ok(out);
+        }
+        let conn = self.open_reader()?;
+        let mut stmt = conn.prepare(SQL)?;
         let rows = stmt.query_map([], row_to_ioc)?;
         let mut out = Vec::new();
         for r in rows {
@@ -183,13 +211,11 @@ impl FeedStore {
             matches!(feed, "OSV" | "GHSA"),
             "feed must be 'OSV' or 'GHSA'; got {feed}"
         );
-        let conn = self.open_reader()?;
-        let mut stmt = conn.prepare(
+        const SQL: &str =
             "SELECT feed, last_pull_ms, last_pull_outcome, last_commit_sha, \
              schema_version_observed, error_message, record_count \
-             FROM feed_metadata WHERE feed = ?1",
-        )?;
-        let mut rows = stmt.query_map(params![feed], |row| {
+             FROM feed_metadata WHERE feed = ?1";
+        let map = |row: &rusqlite::Row<'_>| -> SqlResult<FeedMetadataRow> {
             Ok(FeedMetadataRow {
                 feed: row.get(0)?,
                 last_pull_ms: row.get(1)?,
@@ -199,11 +225,63 @@ impl FeedStore {
                 error_message: row.get(5)?,
                 record_count: row.get(6)?,
             })
-        })?;
+        };
+        if self.is_in_memory() {
+            let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+            let mut stmt = conn.prepare(SQL)?;
+            let mut rows = stmt.query_map(params![feed], map)?;
+            return match rows.next() {
+                Some(r) => Ok(Some(r?)),
+                None => Ok(None),
+            };
+        }
+        let conn = self.open_reader()?;
+        let mut stmt = conn.prepare(SQL)?;
+        let mut rows = stmt.query_map(params![feed], map)?;
         match rows.next() {
             Some(r) => Ok(Some(r?)),
             None => Ok(None),
         }
+    }
+
+    /// Read every row of `feed_metadata` (typically 0..2 rows: OSV + GHSA).
+    /// Used by `compute_daemon_state` (plan 04-03) to inspect per-feed
+    /// `last_pull_outcome` so the daemon can promote to `Degraded` on parse
+    /// failures (TI-06 surfacing).
+    pub fn read_all_metadata(&self) -> Result<Vec<FeedMetadataRow>, FeedStoreError> {
+        const SQL: &str =
+            "SELECT feed, last_pull_ms, last_pull_outcome, last_commit_sha, \
+             schema_version_observed, error_message, record_count \
+             FROM feed_metadata";
+        let map = |row: &rusqlite::Row<'_>| -> SqlResult<FeedMetadataRow> {
+            Ok(FeedMetadataRow {
+                feed: row.get(0)?,
+                last_pull_ms: row.get(1)?,
+                last_pull_outcome: row.get(2)?,
+                last_commit_sha: row.get(3)?,
+                schema_version_observed: row.get(4)?,
+                error_message: row.get(5)?,
+                record_count: row.get(6)?,
+            })
+        };
+        if self.is_in_memory() {
+            let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+            let mut stmt = conn.prepare(SQL)?;
+            let rows = stmt.query_map([], map)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            return Ok(out);
+        }
+        let conn = self.open_reader()?;
+        let mut stmt = conn.prepare(SQL)?;
+        let rows = stmt.query_map([], map)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     pub fn update_metadata(&self, row: &FeedMetadataRow) -> Result<(), FeedStoreError> {

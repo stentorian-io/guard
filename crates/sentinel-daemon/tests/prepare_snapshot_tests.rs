@@ -223,7 +223,8 @@ fn prime_shared_result_err(state: &Arc<DaemonState>) {
     *w = Some(sentinel_daemon::feed::concurrency::LastFetchResult {
         completed_at: std::time::Instant::now(),
         outcome: Err(sentinel_daemon::feed::concurrency::FeedFetchErrorSnapshot {
-            kind: "git:OSV".to_string(),
+            kind: sentinel_daemon::feed::concurrency::FeedFetchErrorKind::Git,
+            feed: "OSV".to_string(),
             message: "synthetic test failure".to_string(),
         }),
     });

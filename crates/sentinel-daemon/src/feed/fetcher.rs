@@ -54,6 +54,20 @@ pub const FEEDS: &[(&str, &str)] = &[
 /// the fetcher SKIPS the store-write step (D-87 last-good-cache path).
 pub const PARSE_FAILURE_RATIO_THRESHOLD: f64 = 0.5;
 
+/// WR-09 fix: cap on per-feed `feed_warnings` returned in the
+/// PrepareSnapshot V4 reply. The IPC frame is bounded by
+/// `sentinel_ipc::frame::MAX_FRAME_BYTES` (64 KiB); a malicious or
+/// corrupted feed snapshot with thousands of malformed records used to
+/// inflate `Vec<FeedWarning>` past the frame budget, causing
+/// `write_frame` to fail and the entire PrepareSnapshot RPC to error
+/// out — even when the underlying last-good-cache path was intact.
+/// 8 warnings × ~150 bytes = ~1.2 KiB CBOR per feed (2 feeds → ~2.4
+/// KiB), well under the frame budget. The full warnings still reach
+/// `tracing::warn!` (target = "sentinel.feed.fetch") for forensic
+/// analysis; the IPC reply is just inline UX, where 8 + a "truncated"
+/// counter line is more than enough.
+pub const MAX_FEED_WARNINGS_PER_FEED: usize = 8;
+
 #[derive(Debug, thiserror::Error)]
 pub enum FeedFetchError {
     #[error("io: {0}")]
@@ -561,6 +575,9 @@ fn build_rows_from_parsed(feed_name: &str, p: &ParsedRecord, rows: &mut Vec<Feed
 }
 
 fn handle_parse_error(feed_name: &str, e: &FeedParseError, warnings: &mut Vec<FeedWarning>) {
+    // Always log to tracing at warn level — full forensic detail goes here
+    // regardless of the IPC-warnings cap below, so a malicious-feed scenario
+    // still produces a complete audit trail in the unified log.
     match e {
         FeedParseError::SchemaUnknown { observed } => {
             // W-9 structured tracing event — load-bearing for plan 04-04
@@ -575,14 +592,6 @@ fn handle_parse_error(feed_name: &str, e: &FeedParseError, warnings: &mut Vec<Fe
                 schema_version_observed = ?observed,
                 "feed record rejected: schema_version outside accepted range"
             );
-            warnings.push(FeedWarning {
-                feed: feed_name.to_string(),
-                kind: "schema_unknown".to_string(),
-                message: format!(
-                    "schema_version {:?} outside accepted range >=1.4.0,<2.0.0",
-                    observed
-                ),
-            });
         }
         FeedParseError::OversizedRecord { bytes, cap } => {
             tracing::warn!(
@@ -594,11 +603,6 @@ fn handle_parse_error(feed_name: &str, e: &FeedParseError, warnings: &mut Vec<Fe
                 cap,
                 "feed record rejected: oversized"
             );
-            warnings.push(FeedWarning {
-                feed: feed_name.to_string(),
-                kind: "parse_error".to_string(),
-                message: format!("oversized record: {bytes} bytes (cap {cap})"),
-            });
         }
         other => {
             tracing::warn!(
@@ -609,13 +613,52 @@ fn handle_parse_error(feed_name: &str, e: &FeedParseError, warnings: &mut Vec<Fe
                 error = %other,
                 "feed record failed to parse"
             );
-            warnings.push(FeedWarning {
+        }
+    }
+
+    // WR-09 fix: cap the per-feed `feed_warnings` Vec returned over IPC.
+    // The cap protects the 64 KiB IPC frame budget against pathological
+    // malformed-feed scenarios (50K+ malformed records × ~150 bytes
+    // each would overflow). The total Vec length never exceeds
+    // `MAX_FEED_WARNINGS_PER_FEED`: we accumulate up to (cap - 1) real
+    // warnings, then the next overflow replaces the final slot with a
+    // single "truncated" marker, and any further calls are silently
+    // dropped. The tracing::warn above always captured full forensic
+    // detail regardless of the IPC cap, so a malicious-feed scenario
+    // still produces a complete audit trail in the unified log.
+    let cap = MAX_FEED_WARNINGS_PER_FEED;
+    if warnings.len() < cap.saturating_sub(1) {
+        let warning = match e {
+            FeedParseError::SchemaUnknown { observed } => FeedWarning {
+                feed: feed_name.to_string(),
+                kind: "schema_unknown".to_string(),
+                message: format!(
+                    "schema_version {:?} outside accepted range >=1.4.0,<2.0.0",
+                    observed
+                ),
+            },
+            FeedParseError::OversizedRecord { bytes, cap } => FeedWarning {
+                feed: feed_name.to_string(),
+                kind: "parse_error".to_string(),
+                message: format!("oversized record: {bytes} bytes (cap {cap})"),
+            },
+            other => FeedWarning {
                 feed: feed_name.to_string(),
                 kind: "parse_error".to_string(),
                 message: other.to_string(),
-            });
-        }
+            },
+        };
+        warnings.push(warning);
+    } else if warnings.len() == cap.saturating_sub(1) {
+        warnings.push(FeedWarning {
+            feed: feed_name.to_string(),
+            kind: "truncated".to_string(),
+            message: format!(
+                "further warnings suppressed (per-feed cap {cap})"
+            ),
+        });
     }
+    // warnings.len() >= cap → silently drop further IPC warnings.
 }
 
 fn check_deadline(
@@ -1099,6 +1142,58 @@ mod tests {
 
         let md = store.read_metadata("OSV").expect("read").expect("present");
         assert_eq!(md.last_pull_outcome, "parse_error");
+    }
+
+    #[test]
+    fn fetcher_caps_per_feed_warnings_with_truncated_marker() {
+        // WR-09 fix: feed many malformed records (well above the cap) and
+        // verify the resulting `feed_warnings` Vec is bounded at
+        // MAX_FEED_WARNINGS_PER_FEED with a single trailing "truncated"
+        // marker. This protects the 64 KiB IPC frame from pathological
+        // malformed-feed inflation.
+        let fixture_dir = tempdir().expect("fixture");
+        let fixture_repo = fixture_dir.path().join("repo");
+        // 20 malformed records is well above MAX_FEED_WARNINGS_PER_FEED (8).
+        let mut files: Vec<(String, &str)> = (0..20)
+            .map(|i| (format!("MAL-BAD-{i:02}.json"), MALFORMED_OSV))
+            .collect();
+        let files_ref: Vec<(&str, &str)> =
+            files.iter_mut().map(|(n, b)| (n.as_str(), *b)).collect();
+        let _sha = build_fixture_repo(&fixture_repo, &files_ref);
+        let url = file_url(&fixture_repo);
+
+        let clone_dir = tempdir().expect("clone");
+        let local = clone_dir.path().join("clone");
+        let (_db_dir, store) = open_store();
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let outcome = fetch_one_feed("OSV", &url, &local, deadline, 30, &store).expect("fetch");
+
+        // Many records failed.
+        assert!(outcome.records_failed >= 20);
+        // But the IPC-bound warnings vec is capped.
+        assert_eq!(
+            outcome.warnings.len(),
+            MAX_FEED_WARNINGS_PER_FEED,
+            "warnings must be capped at {} (got {})",
+            MAX_FEED_WARNINGS_PER_FEED,
+            outcome.warnings.len(),
+        );
+        // The last warning is the truncated marker.
+        let last = outcome.warnings.last().expect("at least one warning");
+        assert_eq!(last.kind, "truncated", "last warning is the truncated marker");
+        assert!(
+            last.message.contains("suppressed"),
+            "truncated message mentions suppression: {:?}",
+            last.message,
+        );
+        // Earlier warnings are NOT truncated markers (i.e., real entries).
+        for (i, w) in outcome.warnings[..MAX_FEED_WARNINGS_PER_FEED - 1].iter().enumerate() {
+            assert_ne!(
+                w.kind, "truncated",
+                "warning at position {i} should be a real entry, not the marker"
+            );
+        }
     }
 
     /// WR-04 regression: a record with valid schema but zero affected

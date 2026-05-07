@@ -25,22 +25,61 @@ use crate::feed::store::FeedStore;
 pub const SHARED_RESULT_TTL: Duration = Duration::from_secs(5);
 
 /// FeedFetchError is not Clone because std::io::Error and rusqlite::Error
-/// don't impl Clone. Snapshot it as a simple kind+message string for
-/// shared-result reuse.
+/// don't impl Clone. Snapshot it as a tagged variant + feed + message so
+/// shared-result reuse reconstructs the SAME variant the original fetch
+/// produced — preserves error-kind fidelity for downstream log greps and
+/// `feed_metadata.error_message` attribution.
+///
+/// WR-01 fix: prior shape collapsed `kind: String` for every variant and
+/// rebuilt every cached error as `FeedFetchError::Git { feed: kind,
+/// message }`. A panic variant round-tripped as
+/// `git (panic:OSV): <msg>`, mis-attributing a panic as a git failure
+/// in any caller that wrote the reconstituted error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FeedFetchErrorKind {
+    Io,
+    Git,
+    Timeout { seconds: u64 },
+    Panic,
+    Store,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeedFetchErrorSnapshot {
-    pub kind: String,
+    pub kind: FeedFetchErrorKind,
+    pub feed: String,
     pub message: String,
 }
 
 impl FeedFetchErrorSnapshot {
     pub fn into_error(self) -> FeedFetchError {
-        // Reconstitute as a Git-shaped error preserving kind+message; the
-        // schema-version observability isn't lost because the shared-result
-        // path is only used within a 5s window for a single underlying fetch.
-        FeedFetchError::Git {
-            feed: self.kind,
-            message: self.message,
+        // WR-01: reconstruct faithfully so a cached panic surfaces as
+        // FeedFetchError::Panic (not Git), a cached timeout as Timeout, etc.
+        // Io and Store are slightly lossy (the original std::io::Error /
+        // FeedStoreError carried richer context that doesn't serialize) — we
+        // wrap as std::io::Error::other / FeedStoreError::Sql + InvalidQuery
+        // proxy so the variant tag is preserved.
+        match self.kind {
+            FeedFetchErrorKind::Git => FeedFetchError::Git {
+                feed: self.feed,
+                message: self.message,
+            },
+            FeedFetchErrorKind::Panic => FeedFetchError::Panic {
+                feed: self.feed,
+                message: self.message,
+            },
+            FeedFetchErrorKind::Timeout { seconds } => FeedFetchError::Timeout {
+                feed: self.feed,
+                seconds,
+            },
+            FeedFetchErrorKind::Io => {
+                FeedFetchError::Io(std::io::Error::other(self.message))
+            }
+            FeedFetchErrorKind::Store => FeedFetchError::Store(
+                crate::feed::store::FeedStoreError::Sql(
+                    rusqlite::Error::InvalidQuery,
+                ),
+            ),
         }
     }
 }
@@ -195,22 +234,35 @@ fn log_skip_feed_fetch_warning_once() {
 }
 
 fn snapshot_err(e: &FeedFetchError) -> FeedFetchErrorSnapshot {
-    let (kind, message) = match e {
-        FeedFetchError::Io(err) => ("io".to_string(), err.to_string()),
-        FeedFetchError::Git { feed, message } => {
-            (format!("git:{feed}"), message.clone())
-        }
-        FeedFetchError::Timeout { feed, seconds } => (
-            format!("timeout:{feed}"),
-            format!("exceeded {seconds}s ceiling"),
-        ),
-        FeedFetchError::Panic { feed, message } => (
-            format!("panic:{feed}"),
-            message.clone(),
-        ),
-        FeedFetchError::Store(err) => ("store".to_string(), err.to_string()),
-    };
-    FeedFetchErrorSnapshot { kind, message }
+    // WR-01 fix: tag the variant explicitly so `into_error` round-trips it
+    // back to the SAME variant. Feed name + message ride alongside.
+    match e {
+        FeedFetchError::Io(err) => FeedFetchErrorSnapshot {
+            kind: FeedFetchErrorKind::Io,
+            feed: String::new(), // Io errors have no per-feed attribution
+            message: err.to_string(),
+        },
+        FeedFetchError::Git { feed, message } => FeedFetchErrorSnapshot {
+            kind: FeedFetchErrorKind::Git,
+            feed: feed.clone(),
+            message: message.clone(),
+        },
+        FeedFetchError::Timeout { feed, seconds } => FeedFetchErrorSnapshot {
+            kind: FeedFetchErrorKind::Timeout { seconds: *seconds },
+            feed: feed.clone(),
+            message: format!("exceeded {seconds}s ceiling"),
+        },
+        FeedFetchError::Panic { feed, message } => FeedFetchErrorSnapshot {
+            kind: FeedFetchErrorKind::Panic,
+            feed: feed.clone(),
+            message: message.clone(),
+        },
+        FeedFetchError::Store(err) => FeedFetchErrorSnapshot {
+            kind: FeedFetchErrorKind::Store,
+            feed: String::new(), // Store errors have no per-feed attribution
+            message: err.to_string(),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -373,7 +425,63 @@ mod tests {
             seconds: 60,
         };
         let s = snapshot_err(&e);
-        assert!(s.kind.contains("timeout"));
+        assert!(matches!(s.kind, FeedFetchErrorKind::Timeout { seconds: 60 }));
+        assert_eq!(s.feed, "OSV");
         assert!(s.message.contains("60"));
+    }
+
+    #[test]
+    fn snapshot_err_round_trip_preserves_panic_variant() {
+        // WR-01 fix: a Panic error must round-trip through the snapshot
+        // back to FeedFetchError::Panic, NOT collapse to FeedFetchError::Git.
+        let original = FeedFetchError::Panic {
+            feed: "OSV".to_string(),
+            message: "gix unwound".to_string(),
+        };
+        let snap = snapshot_err(&original);
+        assert!(matches!(snap.kind, FeedFetchErrorKind::Panic));
+        assert_eq!(snap.feed, "OSV");
+        let recovered = snap.into_error();
+        match recovered {
+            FeedFetchError::Panic { feed, message } => {
+                assert_eq!(feed, "OSV");
+                assert_eq!(message, "gix unwound");
+            }
+            other => panic!("expected Panic, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn snapshot_err_round_trip_preserves_timeout_variant() {
+        let original = FeedFetchError::Timeout {
+            feed: "GHSA".to_string(),
+            seconds: 120,
+        };
+        let snap = snapshot_err(&original);
+        let recovered = snap.into_error();
+        match recovered {
+            FeedFetchError::Timeout { feed, seconds } => {
+                assert_eq!(feed, "GHSA");
+                assert_eq!(seconds, 120);
+            }
+            other => panic!("expected Timeout, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn snapshot_err_round_trip_preserves_git_variant() {
+        let original = FeedFetchError::Git {
+            feed: "OSV".to_string(),
+            message: "connect refused".to_string(),
+        };
+        let snap = snapshot_err(&original);
+        let recovered = snap.into_error();
+        match recovered {
+            FeedFetchError::Git { feed, message } => {
+                assert_eq!(feed, "OSV");
+                assert_eq!(message, "connect refused");
+            }
+            other => panic!("expected Git, got {other:?}"),
+        }
     }
 }

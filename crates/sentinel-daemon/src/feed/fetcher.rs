@@ -162,6 +162,19 @@ fn fetch_one_feed_impl(
     deadline: Instant,
     feed_store: &FeedStore,
 ) -> Result<FetchOutcome, FeedFetchError> {
+    // TI-08 observability: emit a structured tracing event at the START of
+    // every actual outbound fetch attempt. Plan 04-04 task 4's
+    // feed_no_per_query.rs counts `op="fetch_start"` substrings — a stable
+    // probe for "did the daemon make an outbound fetch?" without being
+    // confused by other tracing events on the same target.
+    tracing::info!(
+        target = "sentinel.feed.fetch",
+        op = "fetch_start",
+        feed = feed_name,
+        url = url,
+        "fetch starting",
+    );
+
     // Ensure the parent directory exists (per-feed cache lives at
     // $state_dir/feeds/<feed>/, the parent feeds_dir is created by
     // concurrency::fetch_feeds_blocking before this entry point).
@@ -365,12 +378,26 @@ fn fetch_one_feed_impl(
     feed_store.update_metadata(&FeedMetadataRow {
         feed: feed_name.to_string(),
         last_pull_ms: unix_ms_now(),
-        last_pull_outcome: final_outcome,
+        last_pull_outcome: final_outcome.clone(),
         last_commit_sha: Some(commit_sha.clone()),
         schema_version_observed: schema_version_observed.clone(),
         error_message: None,
         record_count: records_parsed as i64,
     })?;
+
+    // TI-08 observability: pair the fetch_start event above with a fetch_done
+    // event on the success path. The plan 04-04 task 4 feed_no_per_query.rs
+    // counts `op="fetch_start"` ONLY (not fetch_done) so the two events stay
+    // distinguishable.
+    tracing::info!(
+        target = "sentinel.feed.fetch",
+        op = "fetch_done",
+        feed = feed_name,
+        outcome = final_outcome,
+        records_parsed,
+        records_failed,
+        "fetch completed",
+    );
 
     Ok(FetchOutcome {
         feed: feed_name.to_string(),

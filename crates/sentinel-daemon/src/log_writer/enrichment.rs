@@ -43,6 +43,18 @@ pub fn enrich(feed_store: &FeedStore, pkg: &PackageContext) -> Vec<IntelMatch> {
     if pkg.ecosystem.is_empty() || pkg.package.is_empty() {
         return Vec::new();
     }
+    // TI-08 differentiation: emit on `sentinel.feed.enrich` (NOT
+    // `sentinel.feed.fetch`) so the feed_no_per_query.rs e2e test can
+    // distinguish enrichment SQLite reads (local cache; never an outbound
+    // fetch) from the actual fetch path. The two events share no
+    // common substring.
+    tracing::debug!(
+        target = "sentinel.feed.enrich",
+        ecosystem = %pkg.ecosystem,
+        package = %pkg.package,
+        version = %pkg.version,
+        "log enrichment query (local SQLite read; not a network fetch)",
+    );
     let candidates = match feed_store.query_by_pkg(&pkg.ecosystem, &pkg.package) {
         Ok(v) => v,
         Err(e) => {

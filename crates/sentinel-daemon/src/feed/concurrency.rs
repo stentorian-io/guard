@@ -101,6 +101,16 @@ pub fn fetch_feeds_blocking_with(
         let prev = last_result.read().unwrap_or_else(|p| p.into_inner());
         if let Some(ref lr) = *prev {
             if lr.completed_at.elapsed() < SHARED_RESULT_TTL {
+                // TI-08 observability: emit a fetch_cached_share event so the
+                // feed_no_per_query.rs e2e test can distinguish "actually
+                // fetched" from "served from D-86 shared-result cache". Both
+                // share `target = "sentinel.feed.fetch"` but only fetch_start
+                // represents an outbound fetch attempt.
+                tracing::info!(
+                    target = "sentinel.feed.fetch",
+                    op = "fetch_cached_share",
+                    "reusing prior fetch outcome (D-86 shared-result within TTL)",
+                );
                 return match &lr.outcome {
                     Ok(o) => Ok(o.clone()),
                     Err(snap) => Err(snap.clone().into_error()),

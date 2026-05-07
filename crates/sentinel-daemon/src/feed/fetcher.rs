@@ -350,8 +350,14 @@ fn fetch_one_feed_impl(
     };
 
     if !too_many_failed && !rows.is_empty() {
-        feed_store.delete_feed(feed_name)?;
-        feed_store.upsert_iocs(&rows)?;
+        // CR-01 fix: atomic delete+insert in a single transaction so a
+        // concurrent reader on a separate WAL connection cannot observe an
+        // empty feed_iocs window between two writes. The previous two-step
+        // delete_feed + upsert_iocs sequence let a parallel `sentinel run`
+        // land an empty FeedDeny set in its snapshot during the refresh
+        // window — directly threatens project core value (compromised
+        // package can slip past during refresh).
+        feed_store.replace_feed_iocs(feed_name, &rows)?;
     } else if too_many_failed {
         tracing::warn!(
             target = "sentinel.feed.fetch",

@@ -102,19 +102,25 @@ pub fn enrich(feed_store: &FeedStore, pkg: &PackageContext) -> Vec<IntelMatch> {
 /// equals a feed `host_ioc`, populate the host-source intel even when the
 /// package_context is None. Returns an empty Vec when (a) host is empty or
 /// (b) the SQLite query fails.
+///
+/// WR-08 fix: previously fetched ALL host-bearing rows via `host_iocs()`
+/// (an unbounded `WHERE host_ioc IS NOT NULL` SELECT) and filtered in
+/// memory. With thousands of host-IoC rows across both feeds this both
+/// wasted IO and widened the visibility window for in-flight writes.
+/// Now uses `iocs_for_host(host)` which leverages migration 003's
+/// `idx_feed_iocs_host` index for an O(matches) lookup.
 pub fn enrich_for_host(feed_store: &FeedStore, host: &str) -> Vec<IntelMatch> {
     if host.is_empty() {
         return Vec::new();
     }
-    let rows = match feed_store.host_iocs() {
+    let rows = match feed_store.iocs_for_host(host) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!(error = %e, "log_writer enrichment: host_iocs query failed");
+            tracing::warn!(error = %e, "log_writer enrichment: iocs_for_host query failed");
             return Vec::new();
         }
     };
     rows.into_iter()
-        .filter(|r| r.host_ioc.as_deref() == Some(host))
         .map(|r| IntelMatch {
             feed: r.feed,
             advisory_id: r.advisory_id,

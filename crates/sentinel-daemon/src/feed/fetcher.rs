@@ -101,6 +101,7 @@ pub fn fetch_one_feed(
     url: &str,
     local: &Path,
     deadline: Instant,
+    deadline_seconds: u64,
     feed_store: &FeedStore,
 ) -> Result<FetchOutcome, FeedFetchError> {
     // Watchdog: a sleeper thread flips `interrupt` to true at deadline.
@@ -115,7 +116,15 @@ pub fn fetch_one_feed(
     // unwind via test-runner profile).
     let feed_name_owned = feed_name.to_string();
     let result = catch_unwind(AssertUnwindSafe(|| {
-        fetch_one_feed_impl(feed_name, url, local, &interrupt, deadline, feed_store)
+        fetch_one_feed_impl(
+            feed_name,
+            url,
+            local,
+            &interrupt,
+            deadline,
+            deadline_seconds,
+            feed_store,
+        )
     }));
 
     // Signal the watchdog to exit; join is best-effort (its sleep wakes
@@ -160,6 +169,7 @@ fn fetch_one_feed_impl(
     local: &Path,
     interrupt: &AtomicBool,
     deadline: Instant,
+    deadline_seconds: u64,
     feed_store: &FeedStore,
 ) -> Result<FetchOutcome, FeedFetchError> {
     // TI-08 observability: emit a structured tracing event at the START of
@@ -220,7 +230,7 @@ fn fetch_one_feed_impl(
             // Best-effort: remove the cache. If removal fails, fresh-clone
             // will fail too and surface a clear error.
             let _ = std::fs::remove_dir_all(local);
-            clone_fresh(feed_name, url, local, interrupt, deadline)?
+            clone_fresh(feed_name, url, local, interrupt, deadline, deadline_seconds)?
         } else {
             // SPIKE-API-VERIFIED: gix 0.83 incremental-fetch call chain.
             //   1. gix::open(local) -> Repository
@@ -249,17 +259,17 @@ fn fetch_one_feed_impl(
                     feed: feed_name.to_string(),
                     message: format!("prepare_fetch: {e}"),
                 })?;
-            check_deadline(feed_name, deadline, interrupt)?;
+            check_deadline(feed_name, deadline, deadline_seconds, interrupt)?;
             let _outcome = prepared
                 .with_shallow(gix::remote::fetch::Shallow::DepthAtRemote(
                     NonZeroU32::new(1).expect("nonzero"),
                 ))
                 .receive(&mut progress, interrupt)
-                .map_err(|e| classify_git_err(feed_name, deadline, interrupt, e))?;
+                .map_err(|e| classify_git_err(feed_name, deadline, deadline_seconds, interrupt, e))?;
             repo
         }
     } else {
-        clone_fresh(feed_name, url, local, interrupt, deadline)?
+        clone_fresh(feed_name, url, local, interrupt, deadline, deadline_seconds)?
     };
 
     let commit_sha = head_sha(&repo).map_err(|e| FeedFetchError::Git {
@@ -294,7 +304,7 @@ fn fetch_one_feed_impl(
         if Instant::now() >= deadline || interrupt.load(Ordering::SeqCst) {
             return Err(FeedFetchError::Timeout {
                 feed: feed_name.to_string(),
-                seconds: total_deadline_seconds(feed_name),
+                seconds: deadline_seconds,
             });
         }
 
@@ -440,8 +450,9 @@ fn clone_fresh(
     local: &Path,
     interrupt: &AtomicBool,
     deadline: Instant,
+    deadline_seconds: u64,
 ) -> Result<gix::Repository, FeedFetchError> {
-    check_deadline(feed_name, deadline, interrupt)?;
+    check_deadline(feed_name, deadline, deadline_seconds, interrupt)?;
     let mut prepare = gix::clone::PrepareFetch::new(
         url,
         local,
@@ -458,11 +469,11 @@ fn clone_fresh(
     ));
     let (mut checkout, _outcome) = prepare
         .fetch_then_checkout(gix::progress::Discard, interrupt)
-        .map_err(|e| classify_git_err(feed_name, deadline, interrupt, e))?;
-    check_deadline(feed_name, deadline, interrupt)?;
+        .map_err(|e| classify_git_err(feed_name, deadline, deadline_seconds, interrupt, e))?;
+    check_deadline(feed_name, deadline, deadline_seconds, interrupt)?;
     let (repo, _checkout_outcome) = checkout
         .main_worktree(gix::progress::Discard, interrupt)
-        .map_err(|e| classify_git_err(feed_name, deadline, interrupt, e))?;
+        .map_err(|e| classify_git_err(feed_name, deadline, deadline_seconds, interrupt, e))?;
     Ok(repo)
 }
 
@@ -601,12 +612,13 @@ fn handle_parse_error(feed_name: &str, e: &FeedParseError, warnings: &mut Vec<Fe
 fn check_deadline(
     feed_name: &str,
     deadline: Instant,
+    deadline_seconds: u64,
     interrupt: &AtomicBool,
 ) -> Result<(), FeedFetchError> {
     if Instant::now() >= deadline || interrupt.load(Ordering::SeqCst) {
         return Err(FeedFetchError::Timeout {
             feed: feed_name.to_string(),
-            seconds: total_deadline_seconds(feed_name),
+            seconds: deadline_seconds,
         });
     }
     Ok(())
@@ -675,23 +687,28 @@ fn canonicalize_git_path(p: &[u8]) -> Vec<u8> {
     out
 }
 
-fn total_deadline_seconds(_feed_name: &str) -> u64 {
-    // Reported in error message; we don't track per-feed which deadline was
-    // chosen at this layer (concurrency::fetch_feeds_blocking picks).
-    // Emit the worst-case (first-run) ceiling for informational clarity.
-    FETCH_DEADLINE_FIRST_RUN.as_secs()
-}
+// WR-03 fix: removed `total_deadline_seconds` — it always returned the
+// worst-case 120s ceiling regardless of which deadline was actually
+// applied (60s incremental vs 120s first-run). Every Timeout error
+// surfaced "exceeded 120s ceiling" even when the real applied deadline
+// was 60s, making JSONL log triage and `feed_metadata.error_message`
+// attribution wrong. The actual deadline-seconds value is now threaded
+// through `fetch_one_feed` → `fetch_one_feed_impl` → helpers as
+// `deadline_seconds: u64`, sourced from `concurrency::fetch_feeds_blocking`
+// where the choice between FETCH_DEADLINE_FIRST_RUN and
+// FETCH_DEADLINE_INCREMENTAL is made.
 
 fn classify_git_err<E: std::fmt::Display>(
     feed_name: &str,
     deadline: Instant,
+    deadline_seconds: u64,
     interrupt: &AtomicBool,
     e: E,
 ) -> FeedFetchError {
     if Instant::now() >= deadline || interrupt.load(Ordering::SeqCst) {
         return FeedFetchError::Timeout {
             feed: feed_name.to_string(),
-            seconds: total_deadline_seconds(feed_name),
+            seconds: deadline_seconds,
         };
     }
     FeedFetchError::Git {
@@ -821,7 +838,7 @@ mod tests {
         let (_db_dir, store) = open_store();
 
         let deadline = Instant::now() + Duration::from_secs(30);
-        let outcome = fetch_one_feed("OSV", &url, &local, deadline, &store).expect("fetch");
+        let outcome = fetch_one_feed("OSV", &url, &local, deadline, 30, &store).expect("fetch");
 
         assert_eq!(outcome.feed, "OSV");
         assert_eq!(outcome.records_failed, 1, "MAL-BAD malformed JSON");
@@ -849,7 +866,7 @@ mod tests {
 
         // First run: clone.
         let d1 = Instant::now() + Duration::from_secs(30);
-        let _o1 = fetch_one_feed("OSV", &url, &local, d1, &store).expect("first fetch");
+        let _o1 = fetch_one_feed("OSV", &url, &local, d1, 30, &store).expect("first fetch");
         assert!(local.join(".git").exists(), "first run produced .git/");
 
         // Second run: incremental fetch path. Should complete fast against
@@ -857,7 +874,7 @@ mod tests {
         // commits land).
         let started = Instant::now();
         let d2 = Instant::now() + Duration::from_secs(30);
-        let o2 = fetch_one_feed("OSV", &url, &local, d2, &store).expect("incremental");
+        let o2 = fetch_one_feed("OSV", &url, &local, d2, 30, &store).expect("incremental");
         assert!(
             started.elapsed() < Duration::from_secs(10),
             "incremental fetch took {:?} (expected < 10s)",
@@ -890,6 +907,7 @@ mod tests {
             &url_a,
             &local,
             Instant::now() + Duration::from_secs(30),
+            30,
             &store,
         )
         .expect("fetch A");
@@ -899,6 +917,7 @@ mod tests {
             &url_b,
             &local,
             Instant::now() + Duration::from_secs(30),
+            30,
             &store,
         )
         .expect("fetch B");
@@ -933,9 +952,15 @@ mod tests {
         // Already-expired deadline: the very-first check_deadline call inside
         // clone_fresh fires.
         let deadline = Instant::now() - Duration::from_secs(1);
-        let err = fetch_one_feed("OSV", &url, &local, deadline, &store).expect_err("must err");
+        let err = fetch_one_feed("OSV", &url, &local, deadline, 60, &store).expect_err("must err");
         match err {
-            FeedFetchError::Timeout { .. } => {}
+            FeedFetchError::Timeout { feed, seconds } => {
+                // WR-03: confirm the surfaced deadline-seconds is the value
+                // we passed (60), not the previous always-120 hardcoded
+                // worst case.
+                assert_eq!(feed, "OSV");
+                assert_eq!(seconds, 60, "expected configured 60s, got {seconds}");
+            }
             other => panic!("expected Timeout, got {other:?}"),
         }
     }
@@ -958,7 +983,7 @@ mod tests {
         let (_db_dir, store) = open_store();
 
         let deadline = Instant::now() + Duration::from_secs(30);
-        let outcome = fetch_one_feed("OSV", &url, &local, deadline, &store).expect("fetch");
+        let outcome = fetch_one_feed("OSV", &url, &local, deadline, 30, &store).expect("fetch");
         assert_eq!(outcome.records_parsed, 0);
         assert_eq!(outcome.records_failed, 1);
 
@@ -991,7 +1016,7 @@ mod tests {
         let (_db_dir, store) = open_store();
 
         let deadline = Instant::now() + Duration::from_secs(30);
-        let outcome = fetch_one_feed("OSV", &url, &local, deadline, &store).expect("fetch");
+        let outcome = fetch_one_feed("OSV", &url, &local, deadline, 30, &store).expect("fetch");
         assert_eq!(outcome.records_failed, 1, "schema_unknown counts as failure");
         assert!(
             outcome
@@ -1034,7 +1059,7 @@ mod tests {
         let clone_dir = tempdir().expect("clone");
         let local = clone_dir.path().join("clone");
         let deadline = Instant::now() + Duration::from_secs(30);
-        let outcome = fetch_one_feed("OSV", &url, &local, deadline, &store).expect("fetch");
+        let outcome = fetch_one_feed("OSV", &url, &local, deadline, 30, &store).expect("fetch");
         assert_eq!(outcome.records_parsed, 0);
         assert!(outcome.records_failed >= 2);
 

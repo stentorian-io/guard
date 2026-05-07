@@ -249,6 +249,7 @@ fn fetch_one_feed_impl(
 
     let mut records_parsed = 0usize;
     let mut records_failed = 0usize;
+    let mut records_schema_unknown = 0usize;
     let mut warnings: Vec<FeedWarning> = Vec::new();
     let mut schema_version_observed: Option<String> = None;
     let mut total_records = 0usize;
@@ -289,6 +290,17 @@ fn fetch_one_feed_impl(
             }
             Err(e) => {
                 records_failed += 1;
+                if matches!(e, FeedParseError::SchemaUnknown { .. }) {
+                    records_schema_unknown += 1;
+                    // Capture the observed schema version so feed_metadata's
+                    // schema_version_observed field reflects what was rejected
+                    // (helps `sentinel status --verbose` debugging).
+                    if schema_version_observed.is_none() {
+                        if let FeedParseError::SchemaUnknown { observed: Some(v) } = &e {
+                            schema_version_observed = Some(v.clone());
+                        }
+                    }
+                }
                 handle_parse_error(feed_name, &e, &mut warnings);
             }
         }
@@ -302,7 +314,18 @@ fn fetch_one_feed_impl(
         && records_failed > 0
         && (records_failed as f64 / total_records as f64) > PARSE_FAILURE_RATIO_THRESHOLD;
 
-    let outcome_kind = if too_many_failed {
+    // TI-06 surfacing: when EVERY parse failure is a SchemaUnknown rejection
+    // (and there are no successful records — i.e. the feed has zero rows we
+    // could accept), record `last_pull_outcome = "schema_unknown"` rather
+    // than the generic "parse_error". This is the load-bearing signal for
+    // `sentinel status --json` to surface "feed schema-version newer than
+    // sentinel knows about — please upgrade" rather than the generic
+    // "parse_error" diagnostic.
+    let all_failures_schema_unknown =
+        records_failed > 0 && records_schema_unknown == records_failed && records_parsed == 0;
+    let outcome_kind = if all_failures_schema_unknown {
+        "schema_unknown"
+    } else if too_many_failed {
         "parse_error"
     } else if records_failed > 0 {
         // Some failed but under threshold — still mark parse_error so the
@@ -328,7 +351,11 @@ fn fetch_one_feed_impl(
         );
     }
 
-    let final_outcome = if too_many_failed {
+    let final_outcome = if all_failures_schema_unknown {
+        // Schema-unknown signals "feed format newer than sentinel knows" —
+        // preserve that signal even when last-good-cache is retained.
+        "schema_unknown".to_string()
+    } else if too_many_failed {
         // Override to ensure metadata reflects the last-good-cache decision.
         "parse_error".to_string()
     } else {
@@ -802,6 +829,42 @@ mod tests {
             FeedFetchError::Timeout { .. } => {}
             other => panic!("expected Timeout, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn fetcher_records_schema_unknown_outcome_when_all_records_fail_schema() {
+        // TI-06 surfacing pin: when EVERY parse failure is SchemaUnknown and
+        // zero records succeed, last_pull_outcome must be "schema_unknown" —
+        // not the generic "parse_error". Plan 04-04 task 3 fix.
+        let fixture_dir = tempdir().expect("fixture");
+        let fixture_repo = fixture_dir.path().join("repo");
+        let _sha = build_fixture_repo(
+            &fixture_repo,
+            &[("MAL-NEW.json", SCHEMA_UNKNOWN_OSV)],
+        );
+        let url = file_url(&fixture_repo);
+
+        let clone_dir = tempdir().expect("clone");
+        let local = clone_dir.path().join("clone");
+        let (_db_dir, store) = open_store();
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let outcome = fetch_one_feed("OSV", &url, &local, deadline, &store).expect("fetch");
+        assert_eq!(outcome.records_parsed, 0);
+        assert_eq!(outcome.records_failed, 1);
+
+        let md = store.read_metadata("OSV").expect("read").expect("present");
+        assert_eq!(
+            md.last_pull_outcome, "schema_unknown",
+            "all-schema-unknown failures must surface as 'schema_unknown' outcome"
+        );
+        // schema_version_observed surfaces what was rejected so users can
+        // see "we got 2.0.0; sentinel knows >=1.4.0,<2.0.0".
+        assert_eq!(
+            md.schema_version_observed.as_deref(),
+            Some("2.0.0"),
+            "schema_version_observed must capture the rejected version"
+        );
     }
 
     #[test]

@@ -15,11 +15,12 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use sentinel_ipc::{PromptCancel, PromptRequest, PromptResponse, PromptVerdict};
+use sentinel_ipc::{PackageContext, PromptCancel, PromptRequest, PromptResponse, PromptVerdict};
 
 use crate::ipc_server::DaemonState;
 use crate::log_writer::{
-    now_rfc3339, Decision, GapRecord, LogRow, ProcessCtxLog, RootCtxLog, JSONL_SCHEMA_VERSION,
+    self, now_rfc3339, Decision, GapRecord, LogRow, ProcessCtxLog, RootCtxLog,
+    JSONL_SCHEMA_VERSION,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -141,10 +142,30 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
 
 fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) {
     let now = now_rfc3339();
-    // Determine verdict + side-effects, THEN signal the parked oneshot.
+    // BLOCKER #3 / WR-11: peek the deferred entry to recover the (host, port)
+    // tuple for the row we're about to emit. We must NOT call take_full here
+    // because the verdict signal (sender.send) needs to fire AFTER the
+    // decision row is written. Look up via take_full at the end and recover
+    // the host before then via a deferred-table snapshot read.
+    //
+    // The DeferredResolveTable currently only exposes `take_full`, so do a
+    // best-effort read by taking the entry up front, holding the host/port,
+    // and re-routing the sender after the row emit. Since we're about to
+    // resolve the entry anyway this re-orders one tiny step without changing
+    // observable behavior.
+    let entry_opt = state.deferred_resolve.take_full(&resp.prompt_id);
+    let dest_host = entry_opt
+        .as_ref()
+        .map(|e| e.host.clone())
+        .unwrap_or_default();
+    let dest_port = entry_opt.as_ref().map(|e| e.port).unwrap_or(0);
+
     let verdict_for_dylib = match &resp.verdict {
         PromptVerdict::AllowOnce => {
-            emit_decision_row(state, run_uuid, &now, "Allow", "prompt_allow_once");
+            emit_decision_row(
+                state, run_uuid, &now, "Allow", "prompt_allow_once",
+                &dest_host, dest_port, None,
+            );
             sentinel_core::Verdict::Allow
         }
         PromptVerdict::AllowAlwaysMachine => {
@@ -156,7 +177,10 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
                     &format!("user-approved via prompt run {run_uuid}"),
                 );
             }
-            emit_decision_row(state, run_uuid, &now, "Allow", "prompt_allow_machine");
+            emit_decision_row(
+                state, run_uuid, &now, "Allow", "prompt_allow_machine",
+                &dest_host, dest_port, None,
+            );
             sentinel_core::Verdict::Allow
         }
         PromptVerdict::AllowAlwaysProject => {
@@ -184,21 +208,25 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
                     source_kind = "prompt_allow_once_after_persist_failure";
                 }
             }
-            emit_decision_row(state, run_uuid, &now, "Allow", source_kind);
+            emit_decision_row(
+                state, run_uuid, &now, "Allow", source_kind,
+                &dest_host, dest_port, None,
+            );
             sentinel_core::Verdict::Allow
         }
         PromptVerdict::Deny => {
-            emit_decision_row(state, run_uuid, &now, "Deny", "prompt_deny");
+            emit_decision_row(
+                state, run_uuid, &now, "Deny", "prompt_deny",
+                &dest_host, dest_port, None,
+            );
             sentinel_core::Verdict::Deny
         }
     };
 
     // Signal the parked Resolve handler thread.
-    // WR-11: use take_full so we know the (run_uuid, host, port) and can
-    // forget() the dedup entry. Otherwise PromptDedup entries pile up over
-    // the run's lifetime and a re-attempt to the same host within the 5s
-    // dedup window would reuse the dead prompt_id.
-    if let Some(entry) = state.deferred_resolve.take_full(&resp.prompt_id) {
+    // WR-11: forget() the dedup entry so PromptDedup doesn't pile up over the
+    // run's lifetime.
+    if let Some(entry) = entry_opt {
         let _ = entry.sender.send(verdict_for_dylib);
         state
             .prompt_dedup
@@ -235,19 +263,54 @@ fn dispatch_cancel(state: &DaemonState, run_uuid: &str, cancel: PromptCancel) {
     state.log_writer.send(row);
 }
 
+/// Emit a Decision row to the log writer.
+///
+/// Phase 4 plan 04-03 (D-90 + D-93): the helper now takes `dest_host` and an
+/// optional `package_context` so the IPC handler context (which knows both)
+/// can drive log_writer enrichment caller-side, NOT in the writer thread
+/// (Phase 3 D-54 contention discipline).
+///
+/// `intel` is computed by combining package-source matches (when
+/// package_context is provided) with host-source matches (always probed when
+/// the source_kind looks like a feed-deny verdict, since FeedDeny is the
+/// principal D-90 path that a host_ioc-derived row produces).
+#[allow(clippy::too_many_arguments)]
 fn emit_decision_row(
     state: &DaemonState,
     run_uuid: &str,
     ts: &str,
     verdict: &'static str,
     source_kind: &str,
+    dest_host: &str,
+    dest_port: u16,
+    package_context: Option<&PackageContext>,
 ) {
+    // Phase 4 D-93: combine package-source enrichment (when we have package
+    // context) with host-source enrichment (when the verdict source looks
+    // like a feed-deny match OR the dest_host is non-empty and we want to
+    // attribute any feed signals on it). Caller-side (NOT writer thread).
+    let mut intel_combined: Vec<sentinel_ipc::IntelMatch> = Vec::new();
+    if let Some(pkg) = package_context {
+        intel_combined.extend(log_writer::enrich(&state.feed_store, pkg));
+    }
+    // Probe host-source intel only when the source attributes a feed-deny
+    // (so we don't pay an SQLite round-trip on every prompt-allow decision
+    // that has nothing to do with feeds).
+    if matches!(source_kind, "FeedDeny" | "feed-deny" | "feed_deny") {
+        intel_combined.extend(log_writer::enrich_for_host(&state.feed_store, dest_host));
+    }
+    let intel = if intel_combined.is_empty() {
+        None
+    } else {
+        Some(intel_combined)
+    };
+
     let dec = Decision {
         schema_version: JSONL_SCHEMA_VERSION,
         ts: ts.to_string(),
         verdict,
-        dest_host: String::new(),
-        dest_port: 0,
+        dest_host: dest_host.to_string(),
+        dest_port,
         dest_ip: None,
         run_uuid: run_uuid.to_string(),
         source_kind: source_kind.to_string(),
@@ -268,8 +331,8 @@ fn emit_decision_row(
             audit_token: [0; 8],
             argv: vec![],
         },
-        package_context: None,
-        intel: None,
+        package_context: package_context.cloned(),
+        intel,
     };
     if verdict == "Allow" {
         state.log_writer.send(LogRow::Allow(dec));

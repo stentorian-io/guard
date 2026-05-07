@@ -242,6 +242,37 @@ impl FeedStore {
         Ok(out)
     }
 
+    /// WR-08 fix: indexed query for "give me the rows whose host_ioc
+    /// equals X". Migration 003 already creates `idx_feed_iocs_host` on
+    /// the `host_ioc` column; this query uses it directly via a
+    /// parameterized WHERE clause, replacing the `host_iocs() + filter
+    /// in Rust` pattern in `enrich_for_host` (which scanned every
+    /// host-bearing row, then filtered in memory).
+    pub fn iocs_for_host(&self, host: &str) -> Result<Vec<FeedIocRow>, FeedStoreError> {
+        const SQL: &str =
+            "SELECT feed, advisory_id, ecosystem, package, versions_json, severity, tag, \
+             first_seen_ms, host_ioc, schema_version_observed \
+             FROM feed_iocs WHERE host_ioc = ?1";
+        if self.is_in_memory() {
+            let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+            let mut stmt = conn.prepare(SQL)?;
+            let rows = stmt.query_map(params![host], row_to_ioc)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            return Ok(out);
+        }
+        let conn = self.open_reader()?;
+        let mut stmt = conn.prepare(SQL)?;
+        let rows = stmt.query_map(params![host], row_to_ioc)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     pub fn host_iocs(&self) -> Result<Vec<FeedIocRow>, FeedStoreError> {
         const SQL: &str =
             "SELECT feed, advisory_id, ecosystem, package, versions_json, severity, tag, \
@@ -489,6 +520,32 @@ mod tests {
         let ids: Vec<&str> = got.iter().map(|r| r.advisory_id.as_str()).collect();
         assert!(ids.contains(&"MAL-2026-1"));
         assert!(ids.contains(&"MAL-2026-2"));
+    }
+
+    #[test]
+    fn feed_store_iocs_for_host_uses_indexed_path() {
+        // WR-08 fix: `iocs_for_host(host)` returns ONLY rows whose host_ioc
+        // equals `host`, and excludes both null-host rows and rows for
+        // other hosts. Migration 003's idx_feed_iocs_host backs the lookup.
+        let (_dir, store) = open_with_migrations();
+        store
+            .upsert_iocs(&[
+                sample_row("OSV", "MAL-A", Some("evil.example.com")),
+                sample_row("OSV", "MAL-B", Some("other.example.com")),
+                sample_row("OSV", "MAL-C", None),
+            ])
+            .expect("upsert");
+
+        let evil = store.iocs_for_host("evil.example.com").expect("query");
+        assert_eq!(evil.len(), 1);
+        assert_eq!(evil[0].advisory_id, "MAL-A");
+
+        let other = store.iocs_for_host("other.example.com").expect("query");
+        assert_eq!(other.len(), 1);
+        assert_eq!(other[0].advisory_id, "MAL-B");
+
+        let none = store.iocs_for_host("absent.example.com").expect("query");
+        assert!(none.is_empty(), "absent host returns no rows");
     }
 
     #[test]

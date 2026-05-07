@@ -5,6 +5,7 @@ pub mod daemon_state;
 pub mod log_writer;
 pub mod prompt;
 pub mod env_capture;
+pub mod feed;
 pub mod gap_detector;
 pub mod install_artifacts;
 pub mod handlers;

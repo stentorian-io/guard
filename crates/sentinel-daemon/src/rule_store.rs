@@ -37,6 +37,7 @@ pub enum RuleStoreError {
 
 const SQL_001_INITIAL: &str = include_str!("../migrations/001_initial.sql");
 const SQL_002_INSTALL_ARTIFACTS: &str = include_str!("../migrations/002_install_artifacts.sql");
+const SQL_003_FEED_IOCS_AND_WAL: &str = include_str!("../migrations/003_feed_iocs_and_wal.sql");
 
 pub struct RuleStore {
     /// Long-lived connection used for migrations + the write path
@@ -60,10 +61,30 @@ impl RuleStore {
             let _ = std::fs::set_permissions(db_path, perms);
         }
 
-        let migrations = Migrations::new(vec![M::up(SQL_001_INITIAL), M::up(SQL_002_INSTALL_ARTIFACTS)]);
+        let migrations = Migrations::new(vec![
+            M::up(SQL_001_INITIAL),
+            M::up(SQL_002_INSTALL_ARTIFACTS),
+            M::up(SQL_003_FEED_IOCS_AND_WAL),
+        ]);
         migrations
             .to_latest(&mut conn)
             .map_err(|e| RuleStoreError::Migrate(e.to_string()))?;
+
+        // Phase 4 (D-89, plan 04-02): WAL applied at runtime per
+        // 04-SPIKE-RESULTS.md A3 outcome. A PRAGMA-only M::up step silently
+        // leaves journal_mode = delete (rusqlite_migration wraps each step in a
+        // transaction; WAL change is rolled back). The runtime pragma_update
+        // path works as expected.
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(|e| RuleStoreError::Migrate(format!("WAL pragma: {e}")))?;
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .map_err(|e| RuleStoreError::Migrate(format!("verify WAL: {e}")))?;
+        debug_assert_eq!(
+            mode.to_lowercase(),
+            "wal",
+            "WAL mode must be active after migration (got {mode})"
+        );
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -205,7 +226,7 @@ impl RuleStore {
     }
 }
 
-fn unix_ms_now() -> i64 {
+pub fn unix_ms_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

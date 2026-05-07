@@ -4,9 +4,11 @@
 //! shallow-clone API, panic-isolation viability, rusqlite_migration PRAGMA
 //! support, and the empirical `database_specific.iocs` host-IoC signal.
 //!
-//! Plan 04-02 (this plan): populates this module with `store` (now), and
-//! `parser`, `matcher`, `fetcher`, `concurrency` (subsequent tasks).
+//! Plan 04-02 (this plan): populates this module with `store`, `parser`,
+//! `matcher` (now), and `fetcher`, `concurrency` (next task).
 
+pub mod matcher;
+pub mod parser;
 pub mod store;
 
 #[cfg(test)]

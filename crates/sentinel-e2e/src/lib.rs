@@ -46,6 +46,29 @@ impl DaemonHarness {
     /// (e.g. /tmp/se2e_XXXXXXXX/sentineld.sock — around 36 bytes) and a
     /// SEPARATE home dir (which does not need to hold the socket).
     pub fn start() -> std::io::Result<Self> {
+        // Phase 4 plan 04-03: e2e tests must NOT trigger real OSV/GHSA git
+        // fetches against github.com (offline CI flakes; per-run network
+        // cost). The default `start()` keeps Phase 1/2/3 e2e tests hermetic
+        // by setting SENTINEL_SKIP_FEED_FETCH=1. Hermetic Phase 4 e2e tests
+        // (plan 04-04) opt out via `start_with_env` and point at file://
+        // fixtures via SENTINEL_FEED_URL_OVERRIDE_*.
+        Self::start_with_env(&[("SENTINEL_SKIP_FEED_FETCH", "1")])
+    }
+
+    /// Phase 4 plan 04-04: env-aware variant. Replaces (does NOT augment) the
+    /// default SENTINEL_SKIP_FEED_FETCH baseline so callers can opt out of
+    /// fetch-skipping by NOT including it in `extra` AND opt INTO real git
+    /// fetches against `file://` fixtures via `SENTINEL_FEED_URL_OVERRIDE_*`.
+    ///
+    /// Pairs in `extra` later in the slice override earlier ones; `extra`
+    /// overrides the harness baseline (HOME / PATH / RUST_LOG=info).
+    ///
+    /// Important: callers that want feeds OFF should pass
+    /// `("SENTINEL_SKIP_FEED_FETCH", "1")` in `extra`. Callers that want feeds
+    /// ON (Phase 4 hermetic e2e against file:// fixtures) should pass the
+    /// `SENTINEL_FEED_URL_OVERRIDE_OSV` + `SENTINEL_FEED_URL_OVERRIDE_GHSA`
+    /// env vars in `extra` and OMIT `SENTINEL_SKIP_FEED_FETCH`.
+    pub fn start_with_env(extra: &[(&str, &str)]) -> std::io::Result<Self> {
         let home = tempfile::tempdir()?;
 
         // Short state dir under /tmp so the socket path stays under 104 bytes.
@@ -66,20 +89,18 @@ impl DaemonHarness {
             )));
         }
 
-        let child = Command::new(&daemon_bin)
-            .arg("serve")
+        let mut cmd = Command::new(&daemon_bin);
+        cmd.arg("serve")
             .arg("--state-dir")
             .arg(&state_dir)
             .env_clear() // clean slate; no leaked DYLD_*
             .env("HOME", home.path())
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .env("RUST_LOG", "info")
-            // Phase 4 plan 04-03: e2e tests must NOT trigger real OSV/GHSA
-            // git fetches against github.com (offline CI flakes; per-run
-            // network cost). Hermetic Phase 4 e2e tests (plan 04-04) opt out
-            // of this skip and point at file:// fixtures via
-            // SENTINEL_FEED_URL_OVERRIDE_*.
-            .env("SENTINEL_SKIP_FEED_FETCH", "1")
+            .env("RUST_LOG", "info");
+        for (k, v) in extra {
+            cmd.env(*k, *v);
+        }
+        let child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
@@ -284,4 +305,66 @@ pub fn resolve_dylib() -> PathBuf {
 /// Path to the sentinel CLI binary.
 pub fn resolve_cli() -> PathBuf {
     cargo_target_dir().join("sentinel")
+}
+
+/// Phase 4 plan 04-04 — prepare a feed fixture as a real git repo.
+///
+/// The source tree carries plain JSON + an `init.sh`; this helper copies the
+/// fixture into a `tempfile::TempDir`, runs `init.sh` to produce a real
+/// `.git/`, and returns `(tempdir, file:// URL)` for use with the daemon's
+/// `SENTINEL_FEED_URL_OVERRIDE_OSV` / `SENTINEL_FEED_URL_OVERRIDE_GHSA` env
+/// shim.
+///
+/// The TempDir's lifetime governs the fixture cleanup — keep it alive for the
+/// duration of the test (drop after assertions).
+pub fn prepare_feed_fixture(name: &str) -> (tempfile::TempDir, String) {
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures")
+        .join(name);
+    assert!(src.exists(), "fixture not found: {}", src.display());
+
+    // Use /tmp prefix to keep file:// paths short — gix's HTTP-style URL
+    // parser is fine with /var/folders/... but /tmp is friendlier for log
+    // diagnostics in failed tests.
+    let dest = tempfile::Builder::new()
+        .prefix(".se2e-feed-")
+        .tempdir_in("/tmp")
+        .expect("tempdir for fixture");
+    copy_dir_recursive(&src, dest.path()).expect("copy fixture");
+
+    let init_sh = dest.path().join("init.sh");
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(
+            &init_sh,
+            std::fs::Permissions::from_mode(0o755),
+        );
+    }
+    let output = Command::new(&init_sh)
+        .arg(dest.path())
+        .output()
+        .expect("run init.sh");
+    assert!(
+        output.status.success(),
+        "init.sh failed: stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let url = format!("file://{}", dest.path().display());
+    (dest, url)
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let dst_path = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&entry.path(), &dst_path)?;
+        } else {
+            std::fs::copy(entry.path(), &dst_path)?;
+        }
+    }
+    Ok(())
 }

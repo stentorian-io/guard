@@ -3,6 +3,7 @@
 pub mod allowlist;
 pub mod error;
 pub mod identity;
+pub mod osv_match;
 pub mod policy;
 pub mod policy_file;
 pub mod policy_file_writer;

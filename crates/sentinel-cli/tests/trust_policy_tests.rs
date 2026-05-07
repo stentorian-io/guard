@@ -26,6 +26,20 @@ fn build_state(state_dir: &Path) -> Arc<DaemonState> {
 
 #[test]
 fn prepare_snapshot_round_trips_against_live_daemon() {
+    // Phase 4 plan 04-03: the daemon's PrepareSnapshot now pre-flights a feed
+    // fetch (D-83). This Phase 2 round-trip test runs in-process and has no
+    // git fixture; we set SENTINEL_SKIP_FEED_FETCH=1 to short-circuit the
+    // fetch with an empty Ok outcome.
+    //
+    // SAFETY: `set_var` is unsafe in Rust 2024 because it isn't synchronized
+    // with concurrent `var()` reads. We accept the risk here: the test is
+    // single-threaded with respect to feed-fetch (the daemon thread we spawn
+    // below is the only consumer), and the env var is read once at the top
+    // of `fetch_feeds_blocking_with`.
+    unsafe {
+        std::env::set_var("SENTINEL_SKIP_FEED_FETCH", "1");
+    }
+
     let tmp = tempfile::tempdir().unwrap();
     ensure_state_dir(tmp.path()).unwrap();
     ensure_runs_dir(tmp.path()).unwrap();
@@ -49,6 +63,10 @@ fn prepare_snapshot_round_trips_against_live_daemon() {
     assert!(!run_uuid.is_empty(), "run_uuid must be a UUID string");
     // UUID v4 is 36 chars (8-4-4-4-12 with hyphens)
     assert_eq!(run_uuid.len(), 36, "UUID v4 string is 36 chars: got {run_uuid:?}");
+
+    unsafe {
+        std::env::remove_var("SENTINEL_SKIP_FEED_FETCH");
+    }
 }
 
 #[test]

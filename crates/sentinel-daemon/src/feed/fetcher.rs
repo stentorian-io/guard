@@ -187,11 +187,24 @@ fn fetch_one_feed_impl(
         // Open existing — verify origin URL (Pitfall 6 mitigation: e.g.
         // `remote.origin.url` may be stale if SENTINEL_FEED_URL_OVERRIDE_*
         // changed between runs).
+        //
+        // WR-02 fix: prior comparison was `u.to_bstring().to_string() == url`,
+        // which is too strict — `gix::Url::to_bstring()` produces a canonical
+        // serialized form that can differ from a user-supplied input string in
+        // trailing `.git`, trailing slash, lowercased host, default ports,
+        // IPv6 bracket normalization, and file:// path canonicalization. A
+        // production switch between
+        //   https://github.com/ossf/malicious-packages
+        // and
+        //   https://github.com/ossf/malicious-packages.git
+        // would burn ~78s of fresh-clone wall time even though the user's
+        // intent and the stored origin agree. Normalize BOTH sides through
+        // `gix::url::parse` and compare the resulting `gix::Url` values.
         let origin_matches = match gix::open(local) {
             Ok(repo) => match repo.find_remote("origin") {
                 Ok(remote) => remote
                     .url(gix::remote::Direction::Fetch)
-                    .map(|u| u.to_bstring().to_string() == url)
+                    .map(|u| urls_match(u, url))
                     .unwrap_or(false),
                 Err(_) => false,
             },
@@ -599,6 +612,69 @@ fn check_deadline(
     Ok(())
 }
 
+/// WR-02 fix: compare two git URLs after normalization. Both sides are
+/// parsed through `gix::url::parse` (which canonicalizes scheme case,
+/// host case, default ports, and IPv6 brackets), then we compare the
+/// stable component triple `(scheme, host, path-without-trailing-.git)`.
+///
+/// Why a custom equality rather than `==` on `gix::Url`: `gix::url::parse`
+/// preserves the `.git` suffix and any trailing slash on the path
+/// verbatim — so a stored origin of
+///   https://github.com/ossf/malicious-packages.git
+/// compares non-equal to a user-supplied target of
+///   https://github.com/ossf/malicious-packages
+/// even though both name the same upstream. That false negative would
+/// burn ~78s of fresh-clone wall-time on every fetch (the Pitfall 6
+/// mitigation becomes a Pitfall 6 amplifier). We strip a single trailing
+/// `.git` and trailing slashes from each side before path comparison.
+///
+/// Returns `false` if either side fails to parse — this conservatively
+/// triggers a wipe-and-reclone (previous behavior's failure mode).
+fn urls_match(stored: &gix::Url, target: &str) -> bool {
+    let target_parsed = match gix::url::parse(target.as_bytes().into()) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+    // Scheme and host should match after gix's canonicalization (scheme
+    // case + default-port stripping etc. handled by gix::url::parse).
+    if stored.scheme != target_parsed.scheme {
+        return false;
+    }
+    if stored.host() != target_parsed.host() {
+        return false;
+    }
+    if stored.port != target_parsed.port {
+        return false;
+    }
+    // Path: strip trailing `.git` and trailing `/` so equivalent forms
+    // compare equal.
+    let s_path = canonicalize_git_path(stored.path.as_ref());
+    let t_path = canonicalize_git_path(target_parsed.path.as_ref());
+    s_path == t_path
+}
+
+/// Strip a single trailing `.git` and any trailing slashes from a git
+/// URL path. Operates on the byte buffer that `gix::Url::path` exposes
+/// (which is a `BString`).
+fn canonicalize_git_path(p: &[u8]) -> Vec<u8> {
+    let mut out = p.to_vec();
+    // Strip trailing slashes first.
+    while out.last() == Some(&b'/') {
+        out.pop();
+    }
+    // Then strip a single trailing `.git`.
+    if out.ends_with(b".git") {
+        let new_len = out.len() - 4;
+        out.truncate(new_len);
+    }
+    // Strip any further trailing slashes uncovered by the .git removal
+    // (handles ".../foo.git/" → ".../foo").
+    while out.last() == Some(&b'/') {
+        out.pop();
+    }
+    out
+}
+
 fn total_deadline_seconds(_feed_name: &str) -> u64 {
     // Reported in error message; we don't track per-feed which deadline was
     // chosen at this layer (concurrency::fetch_feeds_blocking picks).
@@ -968,6 +1044,51 @@ mod tests {
 
         let md = store.read_metadata("OSV").expect("read").expect("present");
         assert_eq!(md.last_pull_outcome, "parse_error");
+    }
+
+    #[test]
+    fn urls_match_handles_dotgit_suffix_difference() {
+        // WR-02 fix: a stored origin of `.../malicious-packages` should match
+        // a target of `.../malicious-packages.git` (and vice versa) after
+        // normalization. gix's parser treats both as the same URL.
+        let stored = gix::url::parse(
+            "https://github.com/ossf/malicious-packages.git".as_bytes().into(),
+        )
+        .expect("parse stored");
+        let target = "https://github.com/ossf/malicious-packages";
+        assert!(
+            urls_match(&stored, target),
+            "stored .git suffix should match target without .git"
+        );
+
+        let stored2 =
+            gix::url::parse("https://github.com/ossf/malicious-packages".as_bytes().into())
+                .expect("parse stored2");
+        let target2 = "https://github.com/ossf/malicious-packages.git";
+        assert!(
+            urls_match(&stored2, target2),
+            "stored without .git should match target with .git"
+        );
+    }
+
+    #[test]
+    fn urls_match_rejects_genuinely_different_urls() {
+        // A different host should NOT match — wipe-and-reclone is correct here.
+        let stored =
+            gix::url::parse("https://github.com/ossf/malicious-packages".as_bytes().into())
+                .expect("parse");
+        let target = "https://github.com/github/advisory-database.git";
+        assert!(!urls_match(&stored, target), "different repos must not match");
+    }
+
+    #[test]
+    fn urls_match_rejects_unparseable_target() {
+        // An unparseable target conservatively returns false (triggers
+        // wipe+reclone) rather than panicking.
+        let stored =
+            gix::url::parse("https://github.com/ossf/malicious-packages".as_bytes().into())
+                .expect("parse");
+        assert!(!urls_match(&stored, "::not a url::"));
     }
 
     #[test]

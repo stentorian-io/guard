@@ -83,3 +83,20 @@ strip = "symbols"
 # it terminates the host process immediately with a clear diagnostic instead of
 # corrupting the stack. All crates share this profile setting.
 panic = "abort"
+
+# Phase 4 (D-87 / RESEARCH.md Pitfall 2): the daemon would benefit from
+# panic = "unwind" so std::panic::catch_unwind can isolate gix panics. But
+# cargo REJECTS panic settings in per-package profiles with the error
+# "`panic` may not be specified in a `package` profile" (verified via Wave 0
+# Spike A2, see 04-SPIKE-RESULTS.md). Workspace-wide panic = "abort" remains
+# the only viable setting because the dylib (sentinel-hook) cannot unwind
+# through foreign C++ frames.
+#
+# Implication for plan 02: catch_unwind is a no-op in abort mode; gix panics
+# terminate the daemon. Phase 3's launchd LaunchAgent KeepAlive=true restarts
+# it within seconds. feed_metadata.last_pull_outcome = 'panic' (D-87 path).
+# The blocks below are KEPT as commented documentation of the rejected path.
+# [profile.release.package.sentinel-daemon]
+# panic = "unwind"   # REJECTED by cargo — see SPIKE-RESULTS.md Spike A2
+# [profile.dev.package.sentinel-daemon]
+# panic = "unwind"   # REJECTED by cargo — see SPIKE-RESULTS.md Spike A2

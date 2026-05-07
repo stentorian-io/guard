@@ -304,6 +304,26 @@ mod tests {
     static FETCH_DELAY_MS: AtomicUsize = AtomicUsize::new(0);
     static TEST_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// WR-06 fix: scope-guard that sets `FETCH_DELAY_MS` on construction
+    /// and resets it to 0 on Drop. Without it, a panicking assertion
+    /// between manual `FETCH_DELAY_MS.store(x)` and a manual reset
+    /// would leak the delay into subsequent tests — TEST_GUARD's
+    /// poisoned-mutex recovery (`unwrap_or_else(|p| p.into_inner())`)
+    /// means a sibling test would acquire the mutex and observe the
+    /// stale delay, slowing it or introducing timing flakes.
+    struct DelayGuard;
+    impl DelayGuard {
+        fn set(ms: usize) -> Self {
+            FETCH_DELAY_MS.store(ms, Ordering::SeqCst);
+            Self
+        }
+    }
+    impl Drop for DelayGuard {
+        fn drop(&mut self) {
+            FETCH_DELAY_MS.store(0, Ordering::SeqCst);
+        }
+    }
+
     fn counting_fetch(
         feed_name: &str,
         _url: &str,
@@ -370,7 +390,12 @@ mod tests {
         // last_result is fresh and skip the per-feed fetch entirely. Net:
         // FEEDS.len() actual fetches (one batch) regardless of N threads.
         FETCH_COUNTER.store(0, Ordering::SeqCst);
-        FETCH_DELAY_MS.store(100, Ordering::SeqCst);
+        // WR-06 fix: scope-guard the FETCH_DELAY_MS mutation so it always
+        // resets to 0 even on assertion panic. Previously the manual
+        // `FETCH_DELAY_MS.store(0)` at the bottom of the test body would
+        // be skipped if any prior assertion fired, leaking the delay
+        // into sibling tests via the poisoned-lock recovery path.
+        let _delay = DelayGuard::set(100);
         let (_dir, store, state_dir) = open_store_at_state_dir();
         let store = Arc::new(store);
         let mtx = Arc::new(Mutex::new(()));
@@ -398,7 +423,7 @@ mod tests {
             FEEDS.len(),
             FETCH_COUNTER.load(Ordering::SeqCst)
         );
-        FETCH_DELAY_MS.store(0, Ordering::SeqCst);
+        // _delay's Drop resets FETCH_DELAY_MS to 0 here.
     }
 
     #[test]

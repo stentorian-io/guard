@@ -8,10 +8,12 @@
 //! - Retention pruning enforced after each rotation (D-50: 7 archives + 256 MiB cap)
 //! - Atomic counters expose blocks_today / allows_today / gaps_today for StatusReply
 
+pub mod enrichment;
 pub mod jsonl_row;
 pub mod rotation;
 pub mod package_context;
 
+pub use enrichment::{enrich, enrich_for_host};
 pub use jsonl_row::{LogRow, Decision, GapRecord, ProcessCtxLog, RootCtxLog,
                     JSONL_SCHEMA_VERSION, truncate_argv, now_rfc3339};
 pub use package_context::infer_package_context;

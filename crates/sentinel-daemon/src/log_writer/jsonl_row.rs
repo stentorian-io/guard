@@ -3,9 +3,14 @@
 //! Phase 3 plan 03-05 — JSONL row serde shapes (D-49). One JSON object per file line.
 
 use serde::Serialize;
-use sentinel_ipc::PackageContext;
+use sentinel_ipc::{IntelMatch, PackageContext};
 
-pub const JSONL_SCHEMA_VERSION: u16 = 1;
+/// JSONL row schema version. Phase 3 shipped V1; Phase 4 plan 04-03 bumps to
+/// V2 because the `Decision.intel` field type changed from `Option<()>` (a
+/// reserved placeholder) to `Option<Vec<IntelMatch>>` (the real shape).
+/// Downstream consumers that decode against the old type need to know to
+/// re-skip the field — a schema bump is the right discipline per Phase 2 D-30.
+pub const JSONL_SCHEMA_VERSION: u16 = 2;
 pub const MAX_ARGV_BYTES: usize = 1024;
 
 /// WR-12: cap on the number of argv elements logged per row. A malicious or
@@ -36,8 +41,15 @@ pub struct Decision {
     pub process: ProcessCtxLog,
     pub parent: ProcessCtxLog,
     pub root: RootCtxLog,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub package_context: Option<PackageContext>,
-    pub intel: Option<()>,                            // Phase 4 reserved (always None in Phase 3)
+    /// Phase 4 (D-93): array of feed-derived match records. Type-changed
+    /// from `Option<()>` placeholder to `Option<Vec<IntelMatch>>` at JSONL
+    /// schema_version 2. Per Phase 3 D-56 omit-when-empty, callers MUST set
+    /// `None` (not `Some(vec![])`) when no matches were found so the field
+    /// is omitted from the on-disk row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intel: Option<Vec<IntelMatch>>,
 }
 
 #[derive(Serialize)]
@@ -134,6 +146,80 @@ mod tests {
         let s = serde_json::to_string(&row).unwrap();
         assert!(s.starts_with("{\"event\":\"block\""), "got: {s}");
         assert!(s.contains("\"verdict\":\"Deny\""));
+        // Phase 3 D-56 + Phase 4 D-93 omit-when-empty: intel field must NOT
+        // appear when it's None (skip_serializing_if). Same for package_context.
+        assert!(!s.contains("\"intel\""), "intel field should be omitted when None: {s}");
+        assert!(
+            !s.contains("\"package_context\""),
+            "package_context field should be omitted when None: {s}"
+        );
+    }
+
+    #[test]
+    fn jsonl_schema_version_is_2_for_phase_4() {
+        assert_eq!(
+            JSONL_SCHEMA_VERSION, 2,
+            "Phase 4 plan 04-03 bumps JSONL_SCHEMA_VERSION to 2 for the intel field type change"
+        );
+    }
+
+    #[test]
+    fn decision_intel_some_serializes_array() {
+        // When intel is Some(vec![...]), the field is included as a JSON array.
+        let m = IntelMatch {
+            feed: "OSV".to_string(),
+            advisory_id: "MAL-2026-1".to_string(),
+            source: "package".to_string(),
+            severity: Some("HIGH".to_string()),
+            tag: Some("malicious".to_string()),
+            first_seen_ms: 1_700_000_000_000,
+        };
+        let row = LogRow::Block(Decision {
+            schema_version: JSONL_SCHEMA_VERSION,
+            ts: "2026-05-08T17:42:01.234Z".into(),
+            verdict: "Deny",
+            dest_host: "evil.example.com".into(),
+            dest_port: 443,
+            dest_ip: None,
+            run_uuid: "r1".into(),
+            source_kind: "feed-deny".into(),
+            source_locator: None,
+            process: ctx(1),
+            parent: ctx(2),
+            root: root(),
+            package_context: None,
+            intel: Some(vec![m]),
+        });
+        let s = serde_json::to_string(&row).unwrap();
+        assert!(s.contains("\"intel\":["), "intel array must serialize: {s}");
+        assert!(s.contains("\"feed\":\"OSV\""));
+        assert!(s.contains("\"source\":\"package\""));
+        assert!(s.contains("\"advisory_id\":\"MAL-2026-1\""));
+    }
+
+    #[test]
+    fn decision_intel_some_empty_vec_still_serializes_empty_array() {
+        // Document the contract: callers MUST pass `None` (not Some(vec![]))
+        // when they want the field omitted. An explicit empty Some serializes
+        // as an empty array (still cheap on-disk; helpful test seam).
+        let row = LogRow::Block(Decision {
+            schema_version: JSONL_SCHEMA_VERSION,
+            ts: "2026-05-08T17:42:01.234Z".into(),
+            verdict: "Deny",
+            dest_host: "x.example.com".into(),
+            dest_port: 443,
+            dest_ip: None,
+            run_uuid: "r1".into(),
+            source_kind: "default_deny".into(),
+            source_locator: None,
+            process: ctx(1),
+            parent: ctx(2),
+            root: root(),
+            package_context: None,
+            intel: Some(Vec::new()),
+        });
+        let s = serde_json::to_string(&row).unwrap();
+        assert!(s.contains("\"intel\":[]"));
     }
 
     #[test]

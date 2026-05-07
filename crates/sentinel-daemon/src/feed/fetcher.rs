@@ -738,6 +738,22 @@ fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
 
 /// Spawn a watchdog thread that flips `interrupt` to true at `deadline`
 /// (or when `done` is set, whichever comes first).
+///
+/// WR-05 fix: re-check `done` AFTER observing the deadline-passed
+/// condition, before tripping `interrupt`. Without the re-check, this
+/// race leaks an `interrupt = true` flag for a successful fetch:
+///
+///   1. Watchdog reads `done` → false (loop top).
+///   2. Main thread completes fetch successfully and calls
+///      `done.store(true)`.
+///   3. Watchdog observes `Instant::now() >= deadline` (e.g., happy-path
+///      fetch took 119s of the 120s ceiling) → branches into the
+///      interrupt-store before reading `done` again.
+///
+/// The local `Arc<AtomicBool>` is dropped after the just-completed
+/// `fetch_one_feed_impl` call so the spurious flag is harmless TODAY,
+/// but the guarantee was clearly "if done, don't trip interrupt" and
+/// the original code violated it. The re-check costs one atomic load.
 fn spawn_deadline_watchdog(
     interrupt: Arc<AtomicBool>,
     done: Arc<AtomicBool>,
@@ -753,7 +769,12 @@ fn spawn_deadline_watchdog(
                 return;
             }
             if Instant::now() >= deadline {
-                interrupt.store(true, Ordering::SeqCst);
+                // WR-05: re-check done so a race with main-thread
+                // completion does NOT spuriously trip interrupt for a
+                // successful fetch.
+                if !done.load(Ordering::SeqCst) {
+                    interrupt.store(true, Ordering::SeqCst);
+                }
                 return;
             }
             std::thread::sleep(tick);

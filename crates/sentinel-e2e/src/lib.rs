@@ -74,6 +74,12 @@ impl DaemonHarness {
             .env("HOME", home.path())
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .env("RUST_LOG", "info")
+            // Phase 4 plan 04-03: e2e tests must NOT trigger real OSV/GHSA
+            // git fetches against github.com (offline CI flakes; per-run
+            // network cost). Hermetic Phase 4 e2e tests (plan 04-04) opt out
+            // of this skip and point at file:// fixtures via
+            // SENTINEL_FEED_URL_OVERRIDE_*.
+            .env("SENTINEL_SKIP_FEED_FETCH", "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;

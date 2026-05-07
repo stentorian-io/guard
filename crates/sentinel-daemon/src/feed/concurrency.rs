@@ -81,6 +81,18 @@ pub fn fetch_feeds_blocking_with(
 ) -> Result<Vec<FetchOutcome>, FeedFetchError> {
     let _guard = fetch_mutex.lock().unwrap_or_else(|p| p.into_inner());
 
+    // Test seam: `SENTINEL_SKIP_FEED_FETCH=1` short-circuits the fetch
+    // entirely with an empty Ok outcome. Used by Phase 2/3 integration tests
+    // that exercise the IPC pipeline against a real DaemonState — those tests
+    // pre-date Phase 4 and have no real git fixture to point at, so without
+    // this seam every `prepare_snapshot` round-trip would attempt a real
+    // network fetch against github.com and hang past the 5s read timeout.
+    // Hermetic Phase 4 e2e tests (plan 04-04) point at a `file://` fixture
+    // via `SENTINEL_FEED_URL_OVERRIDE_*` and do NOT set this var.
+    if std::env::var_os("SENTINEL_SKIP_FEED_FETCH").is_some() {
+        return Ok(Vec::new());
+    }
+
     // Shared-result reuse (D-86): if a previous run completed within
     // SHARED_RESULT_TTL, return its snapshotted outcome. Concurrent waiters
     // unblock as soon as the lock above is released and observe the cached

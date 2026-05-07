@@ -11,7 +11,7 @@ use crate::CliError;
 use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
-    BaselineCommit, BaselineCommitReply, InsertUserRule, InsertUserRuleReply,
+    BaselineCommit, BaselineCommitReply, FeedWarning, InsertUserRule, InsertUserRuleReply,
     PrepareSnapshot, ReadInstallArtifacts, ReadInstallArtifactsReply,
     RegisterRoot, Reply, SnapshotReply, TrustPolicy, TrustPolicyReply,
     InstallArtifact,
@@ -157,22 +157,42 @@ pub fn prepare_snapshot(sock: &Path, cwd: &Path) -> Result<(PathBuf, String), Cl
     }
 }
 
+/// Outcome of a PrepareSnapshot v3 call. Phase 4 plan 04-03 added the
+/// `feed_warnings` field so callers (run_orchestrator) can surface non-fatal
+/// post-fetch parse problems inline on stderr after the reply.
+#[derive(Debug, Clone)]
+pub struct PrepareSnapshotOutcome {
+    pub manifest_path: PathBuf,
+    pub run_uuid: String,
+    pub feed_warnings: Vec<FeedWarning>,
+}
+
 /// Phase 3 plan 03-13: V3 PrepareSnapshot with is_tty + baseline_mode (D-73, D-58).
 /// Used by run_orchestrator instead of prepare_snapshot.
+///
+/// Phase 4 plan 04-03: returns `PrepareSnapshotOutcome` carrying
+/// `feed_warnings` from the V4-shaped reply. V3 daemons (no Phase 4 wiring)
+/// reply with `feed_warnings = vec![]` via `#[serde(default)]`, so this
+/// function is forward-compatible against pre-Phase-4 daemons.
 pub fn prepare_snapshot_v3(
     sock: &Path,
     cwd: &Path,
     is_tty: bool,
     baseline_mode: bool,
-) -> Result<(PathBuf, String), CliError> {
+) -> Result<PrepareSnapshotOutcome, CliError> {
     let req = PrepareSnapshot::new_v3(cwd.display().to_string(), is_tty, baseline_mode);
     let reply: SnapshotReply = send_tagged_request(sock, TAG_PREPARE_SNAPSHOT, &req)?;
     match reply {
         SnapshotReply::Ok {
             manifest_path,
             run_uuid,
+            feed_warnings,
             ..
-        } => Ok((PathBuf::from(manifest_path), run_uuid)),
+        } => Ok(PrepareSnapshotOutcome {
+            manifest_path: PathBuf::from(manifest_path),
+            run_uuid,
+            feed_warnings,
+        }),
         SnapshotReply::Err { message, .. } => {
             Err(CliError::Other(format!("PrepareSnapshot V3: {message}")))
         }

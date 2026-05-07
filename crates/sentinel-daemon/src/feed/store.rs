@@ -152,6 +152,67 @@ impl FeedStore {
         Ok(n)
     }
 
+    /// CR-01 fix: Atomically replace ALL rows for `feed` with `rows` in a
+    /// single SQLite transaction. Without this, a concurrent reader on a
+    /// separate WAL connection (e.g., another `sentinel run`'s
+    /// `build_feeddeny_entries`, or a log-enrichment `host_iocs()` call) can
+    /// observe an empty `feed_iocs` window between a `delete_feed` commit
+    /// and the subsequent `upsert_iocs` commit — landing an empty FeedDeny
+    /// set in a parallel snapshot and silently weakening core
+    /// supply-chain enforcement during the refresh window.
+    ///
+    /// Returns the number of rows inserted (same shape as `upsert_iocs`).
+    /// `feed_fetch_mutex` only serializes WRITERS; readers do not contend
+    /// on it (by WARNING-08 design), so the atomicity guarantee here is
+    /// reader-visibility, not writer-serialization.
+    pub fn replace_feed_iocs(
+        &self,
+        feed: &str,
+        rows: &[FeedIocRow],
+    ) -> Result<usize, FeedStoreError> {
+        debug_assert!(
+            matches!(feed, "OSV" | "GHSA"),
+            "feed must be 'OSV' or 'GHSA'; got {feed}"
+        );
+        let mut conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM feed_iocs WHERE feed = ?1", params![feed])?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR REPLACE INTO feed_iocs \
+                 (feed, advisory_id, ecosystem, package, versions_json, severity, tag, \
+                  first_seen_ms, host_ioc, schema_version_observed) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            )?;
+            for r in rows {
+                debug_assert!(
+                    matches!(r.feed.as_str(), "OSV" | "GHSA"),
+                    "feed must be 'OSV' or 'GHSA'; got {}",
+                    r.feed
+                );
+                debug_assert!(
+                    r.feed.as_str() == feed,
+                    "replace_feed_iocs: row feed mismatch: outer={feed}, row={}",
+                    r.feed
+                );
+                stmt.execute(params![
+                    r.feed,
+                    r.advisory_id,
+                    r.ecosystem,
+                    r.package,
+                    r.versions_json,
+                    r.severity,
+                    r.tag,
+                    r.first_seen_ms,
+                    r.host_ioc,
+                    r.schema_version_observed,
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(rows.len())
+    }
+
     pub fn query_by_pkg(
         &self,
         ecosystem: &str,
@@ -463,6 +524,62 @@ mod tests {
         // None for unknown feed (GHSA never written).
         let ghsa = store.read_metadata("GHSA").expect("read GHSA");
         assert!(ghsa.is_none());
+    }
+
+    #[test]
+    fn feed_store_replace_feed_iocs_is_atomic_swap() {
+        // CR-01 fix: pre-seed rows for a feed, then call replace_feed_iocs
+        // with a different rowset. The DELETE + INSERTs must run in a single
+        // transaction so the on-disk view either holds the old rows or the
+        // new rows — never an empty intermediate set.
+        let (_dir, store) = open_with_migrations();
+        store
+            .upsert_iocs(&[
+                sample_row("OSV", "MAL-2026-OLD", None),
+                sample_row("OSV", "MAL-2026-OLD-2", None),
+            ])
+            .expect("seed");
+
+        let new_rows = vec![sample_row("OSV", "MAL-2026-NEW", None)];
+        let n = store
+            .replace_feed_iocs("OSV", &new_rows)
+            .expect("replace");
+        assert_eq!(n, 1);
+
+        let after = store.query_by_pkg("npm", "evil-pkg").expect("query");
+        let ids: Vec<&str> = after.iter().map(|r| r.advisory_id.as_str()).collect();
+        assert!(ids.contains(&"MAL-2026-NEW"), "new row present: {ids:?}");
+        assert!(!ids.contains(&"MAL-2026-OLD"), "old row purged: {ids:?}");
+        assert!(
+            !ids.contains(&"MAL-2026-OLD-2"),
+            "second old row purged: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn feed_store_replace_feed_iocs_per_feed_isolation() {
+        // replace_feed_iocs("OSV", ...) must NOT touch GHSA rows.
+        let (_dir, store) = open_with_migrations();
+        store
+            .upsert_iocs(&[
+                sample_row("OSV", "MAL-2026-OSV-OLD", None),
+                sample_row("GHSA", "GHSA-KEEP-1", None),
+            ])
+            .expect("seed");
+
+        let new_osv = vec![sample_row("OSV", "MAL-2026-OSV-NEW", None)];
+        store
+            .replace_feed_iocs("OSV", &new_osv)
+            .expect("replace OSV");
+
+        let rows = store.query_by_pkg("npm", "evil-pkg").expect("query");
+        let ids: Vec<&str> = rows.iter().map(|r| r.advisory_id.as_str()).collect();
+        assert!(ids.contains(&"GHSA-KEEP-1"), "GHSA untouched: {ids:?}");
+        assert!(ids.contains(&"MAL-2026-OSV-NEW"), "OSV swapped: {ids:?}");
+        assert!(
+            !ids.contains(&"MAL-2026-OSV-OLD"),
+            "old OSV purged: {ids:?}"
+        );
     }
 
     #[test]

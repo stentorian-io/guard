@@ -52,7 +52,7 @@ type ProjectResolution = (Vec<AllowlistEntry>, Option<String>, Option<String>);
 /// after RunRecord insertion.
 ///
 /// Phase 4 plan 04-03 (D-83 + D-85 + D-90): the production handler is
-/// [`handle_prepare_snapshot_v4`], which performs:
+/// [`handle_prepare_snapshot_v4_full`], which performs:
 ///   1. `fetch_feeds_blocking(...)` BEFORE building the snapshot (D-83 pure
 ///      on-demand). Strict-fail on fetch error (D-85) → SnapshotReply::Err.
 ///   2. Project / user / curated entries assembly (existing Phase 2 path).
@@ -60,8 +60,9 @@ type ProjectResolution = (Vec<AllowlistEntry>, Option<String>, Option<String>);
 ///   4. Sort + publish per-run snapshot.
 ///   5. SnapshotReply::ok_v4 carrying any non-fatal `feed_warnings`.
 ///
-/// This pre-Phase-4 entry point delegates to `handle_prepare_snapshot_v4` and
-/// is kept as a thin shim so existing tests that pass individual subsystems
+/// This pre-Phase-4 entry point delegates to `handle_prepare_snapshot_inner`
+/// with `feed_store = None` (so the fetch-and-merge step is skipped) and is
+/// kept as a thin shim so existing tests that pass individual subsystems
 /// (rather than a full DaemonState) still compile.
 pub fn handle_prepare_snapshot(
     cwd: &Path,
@@ -86,31 +87,24 @@ pub fn handle_prepare_snapshot(
     )
 }
 
-/// Phase 4 plan 04-03 entry point. Production callers (the IPC dispatcher in
-/// `ipc_server.rs`) hand the entire `DaemonState` so the handler can call
-/// `fetch_feeds_blocking` and `build_feeddeny_entries` without surface-area
-/// growth on the per-arg signature.
-pub fn handle_prepare_snapshot_v4(state: &Arc<DaemonState>, cwd: &Path) -> SnapshotReply {
-    handle_prepare_snapshot_inner(
-        cwd,
-        &state.curated,
-        &state.rule_store,
-        &state.process_tree,
-        &state.state_dir,
-        // is_tty + baseline_mode are V3 fields on the wire, not on DaemonState.
-        // The dispatcher passes them through `handle_prepare_snapshot_v4_full`
-        // when it has them; otherwise default to false (V2 wire default).
-        false,
-        false,
-        Some(&state.feed_store),
-        Some(&state.feed_fetch_mutex),
-        Some(&state.last_fetch_result),
-    )
-}
+// WR-10 fix: removed `handle_prepare_snapshot_v4(state, cwd)` —
+// it always defaulted `is_tty` + `baseline_mode` to false and was
+// never reached at runtime (the IPC dispatcher in
+// `ipc_server.rs::handle_prepare_snapshot_frame` calls
+// `handle_prepare_snapshot_v4_full` with the on-wire V3 fields).
+// Keeping a dead-code shim was a maintenance trap: a future refactor
+// could accidentally route to the shim and silently drop the V3 TTY
+// signal (suppressing baseline-mode dispatch / interactive prompts).
+//
+// Production V4 entry point follows.
 
 /// Full Phase 4 entry point used by the V3 IPC dispatcher path: takes the
 /// V3-specific `is_tty` + `baseline_mode` fields plus the DaemonState for feed
 /// access. This is what `ipc_server.rs::handle_prepare_snapshot_frame` calls.
+///
+/// This is the ONLY production entry point that wires feed primitives
+/// from `DaemonState`. The legacy `handle_prepare_snapshot` (above) is
+/// retained for unit tests that build subsystems by hand.
 pub fn handle_prepare_snapshot_v4_full(
     state: &Arc<DaemonState>,
     cwd: &Path,

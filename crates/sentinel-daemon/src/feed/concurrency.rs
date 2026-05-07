@@ -93,11 +93,17 @@ pub struct LastFetchResult {
 /// Function pointer type for the per-feed fetch step. Tests inject a
 /// counting closure so they can assert "only N actual fetches occurred for
 /// M concurrent fetch_feeds_blocking calls".
+///
+/// WR-03 fix: `deadline_seconds: u64` parameter added so the inner fetch
+/// can surface the ACTUAL applied deadline (60s incremental / 120s first-
+/// run / e2e-fixture overrides) in `FeedFetchError::Timeout`, rather than
+/// the previously hardcoded worst-case 120s.
 pub type FetchFn = fn(
     feed_name: &str,
     url: &str,
     local: &Path,
     deadline: Instant,
+    deadline_seconds: u64,
     feed_store: &FeedStore,
 ) -> Result<FetchOutcome, FeedFetchError>;
 
@@ -186,9 +192,13 @@ pub fn fetch_feeds_blocking_with(
         } else {
             FETCH_DEADLINE_INCREMENTAL
         };
+        // WR-03 fix: pass the ACTUAL chosen deadline-seconds value alongside
+        // the Instant so the fetcher's Timeout errors report the real
+        // ceiling (60 vs 120) instead of always-120.
+        let deadline_seconds = deadline_dur.as_secs();
         let deadline = Instant::now() + deadline_dur;
 
-        match fetch_fn(feed_name, &url, &local, deadline, feed_store) {
+        match fetch_fn(feed_name, &url, &local, deadline, deadline_seconds, feed_store) {
             Ok(outcome) => outcomes.push(outcome),
             Err(e) => {
                 let snapshot = snapshot_err(&e);
@@ -299,6 +309,7 @@ mod tests {
         _url: &str,
         _local: &Path,
         _deadline: Instant,
+        _deadline_seconds: u64,
         _feed_store: &FeedStore,
     ) -> Result<FetchOutcome, FeedFetchError> {
         FETCH_COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -322,6 +333,7 @@ mod tests {
         _url: &str,
         _local: &Path,
         _deadline: Instant,
+        _deadline_seconds: u64,
         _feed_store: &FeedStore,
     ) -> Result<FetchOutcome, FeedFetchError> {
         FETCH_COUNTER.fetch_add(1, Ordering::SeqCst);

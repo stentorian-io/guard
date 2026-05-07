@@ -36,6 +36,21 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// WR-11 fix: PrepareSnapshot's read timeout must EXCEED the daemon's
+/// `fetch_feeds_blocking` worst-case deadline. The daemon allows up to
+/// 120s for first-run shallow clones (`FETCH_DEADLINE_FIRST_RUN`) +
+/// 60s for incremental fetches; if the CLI tripped its 5s read timeout
+/// FIRST, the user would see `DaemonUnreachable("read reply: ...")`
+/// while the daemon was actually working hard on a legitimate fetch.
+///
+/// 150s gives the daemon's 120s ceiling room to either complete OR
+/// produce a graceful `feed fetch timeout` SnapshotReply::Err. If the
+/// daemon's deadline propagation itself broke and the fetch hung
+/// past 150s, the CLI's read timeout fires (defense-in-depth) and
+/// produces DaemonUnreachable — but THAT is a true daemon-side bug,
+/// not a normal-operation timeout.
+const PREPARE_SNAPSHOT_READ_TIMEOUT: Duration = Duration::from_secs(150);
+
 /// Connect to the daemon socket with an explicit 5s connect timeout. Returns
 /// a blocking `UnixStream` on success. ISS-08: the prior implementation used
 /// `UnixStream::connect` which has no documented timeout and could block
@@ -115,7 +130,32 @@ where
     Req: serde::Serialize,
     ReplyT: serde::de::DeserializeOwned,
 {
+    send_tagged_request_with_read_timeout(sock, tag, req, READ_TIMEOUT)
+}
+
+/// WR-11 fix: variant of `send_tagged_request` that overrides the read
+/// timeout for the reply. Used by `prepare_snapshot_v3` so the CLI
+/// doesn't trip its default 5s read timeout while the daemon is in the
+/// middle of a 60s/120s `fetch_feeds_blocking` call (which would
+/// surface "DaemonUnreachable" instead of a genuine fetch error).
+fn send_tagged_request_with_read_timeout<Req, ReplyT>(
+    sock: &Path,
+    tag: u8,
+    req: &Req,
+    read_timeout: Duration,
+) -> Result<ReplyT, CliError>
+where
+    Req: serde::Serialize,
+    ReplyT: serde::de::DeserializeOwned,
+{
     let mut stream = connect_with_timeout(sock)?;
+    // Override the per-stream read timeout if it differs from the default
+    // already set by `connect_with_timeout`. `set_read_timeout` is a
+    // best-effort; if it fails the request still proceeds (the CLI just
+    // uses the previously-set 5s default).
+    if read_timeout != READ_TIMEOUT {
+        let _ = stream.set_read_timeout(Some(read_timeout));
+    }
     stream
         .write_all(&[tag])
         .map_err(|e| CliError::DaemonUnreachable(format!("tag write: {e}")))?;
@@ -144,7 +184,14 @@ where
 /// loads the per-run policy.
 pub fn prepare_snapshot(sock: &Path, cwd: &Path) -> Result<(PathBuf, String), CliError> {
     let req = PrepareSnapshot::new(cwd.display().to_string());
-    let reply: SnapshotReply = send_tagged_request(sock, TAG_PREPARE_SNAPSHOT, &req)?;
+    // WR-11: use the extended read timeout so the CLI doesn't trip a
+    // false "DaemonUnreachable" while the daemon is mid-fetch.
+    let reply: SnapshotReply = send_tagged_request_with_read_timeout(
+        sock,
+        TAG_PREPARE_SNAPSHOT,
+        &req,
+        PREPARE_SNAPSHOT_READ_TIMEOUT,
+    )?;
     match reply {
         SnapshotReply::Ok {
             manifest_path,
@@ -181,7 +228,18 @@ pub fn prepare_snapshot_v3(
     baseline_mode: bool,
 ) -> Result<PrepareSnapshotOutcome, CliError> {
     let req = PrepareSnapshot::new_v3(cwd.display().to_string(), is_tty, baseline_mode);
-    let reply: SnapshotReply = send_tagged_request(sock, TAG_PREPARE_SNAPSHOT, &req)?;
+    // WR-11: 150s read timeout (vs the default 5s) so a legitimate
+    // first-run shallow clone (up to ~78s for GHSA on Apple Silicon
+    // per RESEARCH.md Pitfall 1, with the daemon's 120s ceiling)
+    // doesn't surface as DaemonUnreachable. The daemon's own fetch
+    // deadline still fires first on a real timeout, producing a clean
+    // SnapshotReply::Err("feed fetch: ...").
+    let reply: SnapshotReply = send_tagged_request_with_read_timeout(
+        sock,
+        TAG_PREPARE_SNAPSHOT,
+        &req,
+        PREPARE_SNAPSHOT_READ_TIMEOUT,
+    )?;
     match reply {
         SnapshotReply::Ok {
             manifest_path,

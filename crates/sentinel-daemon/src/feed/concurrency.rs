@@ -12,6 +12,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
+#[cfg(any(test, debug_assertions))]
+use std::sync::Once;
 use std::time::{Duration, Instant};
 
 use crate::feed::fetcher::{
@@ -81,16 +83,30 @@ pub fn fetch_feeds_blocking_with(
 ) -> Result<Vec<FetchOutcome>, FeedFetchError> {
     let _guard = fetch_mutex.lock().unwrap_or_else(|p| p.into_inner());
 
-    // Test seam: `SENTINEL_SKIP_FEED_FETCH=1` short-circuits the fetch
-    // entirely with an empty Ok outcome. Used by Phase 2/3 integration tests
-    // that exercise the IPC pipeline against a real DaemonState — those tests
-    // pre-date Phase 4 and have no real git fixture to point at, so without
-    // this seam every `prepare_snapshot` round-trip would attempt a real
-    // network fetch against github.com and hang past the 5s read timeout.
-    // Hermetic Phase 4 e2e tests (plan 04-04) point at a `file://` fixture
-    // via `SENTINEL_FEED_URL_OVERRIDE_*` and do NOT set this var.
-    if std::env::var_os("SENTINEL_SKIP_FEED_FETCH").is_some() {
-        return Ok(Vec::new());
+    // CR-02 fix: SENTINEL_SKIP_FEED_FETCH is a TEST-ONLY seam — it is
+    // compile-time gated to non-release builds (`cfg(any(test,
+    // debug_assertions))`) so a Homebrew-distributed release `sentineld`
+    // CANNOT have feed enforcement disabled by setting an env var (e.g.
+    // `launchctl setenv SENTINEL_SKIP_FEED_FETCH 1`). Even in non-release
+    // builds we emit a once-per-process loud `tracing::warn!` so a
+    // developer running tests is told the seam is active. This protects
+    // the project's stated "core value" (block compromised packages
+    // phoning home) from being silently disabled by environment.
+    //
+    // Production callers (sentineld release binary): the env var is a
+    // no-op — feeds are always fetched.
+    //
+    // Test callers (Phase 2/3 in-process IPC tests, sentinel-e2e
+    // DaemonHarness): cargo test runs in debug mode by default which
+    // enables `debug_assertions`, so the seam works for them. Hermetic
+    // Phase 4 e2e tests (plan 04-04) explicitly OPT OUT of the skip and
+    // point at a `file://` fixture via `SENTINEL_FEED_URL_OVERRIDE_*`.
+    #[cfg(any(test, debug_assertions))]
+    {
+        if std::env::var_os("SENTINEL_SKIP_FEED_FETCH").is_some() {
+            log_skip_feed_fetch_warning_once();
+            return Ok(Vec::new());
+        }
     }
 
     // Shared-result reuse (D-86): if a previous run completed within
@@ -153,6 +169,29 @@ pub fn fetch_feeds_blocking_with(
         outcome: Ok(outcomes.clone()),
     });
     Ok(outcomes)
+}
+
+/// CR-02 fix: emit a single loud structured warning the first time
+/// `SENTINEL_SKIP_FEED_FETCH` is observed in this process. The seam is
+/// already compile-time-gated to non-release builds (so a release
+/// daemon never reaches this function), but even in test/debug mode we
+/// want the developer to know they have temporarily disabled feed
+/// enforcement — silent disablement is the foot-gun the original
+/// review flagged.
+#[cfg(any(test, debug_assertions))]
+fn log_skip_feed_fetch_warning_once() {
+    static WARN_ONCE: Once = Once::new();
+    WARN_ONCE.call_once(|| {
+        tracing::warn!(
+            target = "sentinel.feed.fetch",
+            event = "feed_disabled_by_env",
+            env_var = "SENTINEL_SKIP_FEED_FETCH",
+            "FEED ENFORCEMENT DISABLED via SENTINEL_SKIP_FEED_FETCH \
+             — this is a TEST-ONLY seam (release builds compile it \
+             out). sentineld will NOT block compromised-package \
+             threat-intel hosts while this env var is set."
+        );
+    });
 }
 
 fn snapshot_err(e: &FeedFetchError) -> FeedFetchErrorSnapshot {

@@ -70,4 +70,8 @@ pub use messages::{
     BaselineCommit,
     BaselineCommitReply,
     ProposedRule,
+    // Phase 4 — Threat-intel (D-93) and SnapshotReply::Ok V4 schema bump
+    IPC_SCHEMA_V4,
+    IntelMatch,
+    FeedWarning,
 };

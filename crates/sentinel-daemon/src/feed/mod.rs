@@ -5,11 +5,17 @@
 //! support, and the empirical `database_specific.iocs` host-IoC signal.
 //!
 //! Plan 04-02 (this plan): populates this module with `store`, `parser`,
-//! `matcher` (now), and `fetcher`, `concurrency` (next task).
+//! `matcher`, `fetcher`, and `concurrency`. Plan 04-03 wires
+//! `fetch_feeds_blocking` into PrepareSnapshot, log_writer, and Status.
 
+pub mod concurrency;
+pub mod fetcher;
 pub mod matcher;
 pub mod parser;
 pub mod store;
+
+pub use concurrency::{fetch_feeds_blocking, LastFetchResult, SHARED_RESULT_TTL};
+pub use fetcher::{FeedFetchError, FetchOutcome};
 
 #[cfg(test)]
 mod spike_gix;

@@ -149,6 +149,16 @@ pub struct DaemonState {
     // Phase 3 plan 03-12 (D-45 / BLOCKER #3): deferred-resolve table for
     // park-pending-prompt mechanism in the Resolve handler.
     pub deferred_resolve: Arc<DeferredResolveTable>,
+    // Phase 4 plan 04-03 — feed-store + per-fetch concurrency primitives.
+    // `feed_store` opens against the same `sentinel.db` migrated by
+    // `RuleStore::open` (plan 04-02 wired migration 003 there). The mutex
+    // serializes `fetch_feeds_blocking` calls (D-86); the rwlock holds the
+    // last fetch's outcome+timestamp so concurrent runs share a single
+    // underlying fetch when they arrive within `SHARED_RESULT_TTL`.
+    pub feed_store: Arc<crate::feed::store::FeedStore>,
+    pub feed_fetch_mutex: Arc<Mutex<()>>,
+    pub last_fetch_result:
+        Arc<std::sync::RwLock<Option<crate::feed::concurrency::LastFetchResult>>>,
 }
 
 impl DaemonState {
@@ -171,6 +181,13 @@ impl DaemonState {
         let prompt_dedup = Arc::new(PromptDedup::new());
         let recent_gaps = Arc::new(RecentGapsRing::new());
         let baseline_staging = Arc::new(BaselineStaging::new());
+        // Phase 4 plan 04-03 — in-memory feed store + fresh mutex/rwlock.
+        let feed_store = Arc::new(
+            crate::feed::store::FeedStore::open_in_memory()
+                .expect("in-memory feed_store"),
+        );
+        let feed_fetch_mutex = Arc::new(Mutex::new(()));
+        let last_fetch_result = Arc::new(std::sync::RwLock::new(None));
         Self {
             process_tree,
             gap_detector,
@@ -184,6 +201,9 @@ impl DaemonState {
             baseline_staging,
             last_snapshot_publish_failed: AtomicBool::new(false),
             deferred_resolve: Arc::new(DeferredResolveTable::new()),
+            feed_store,
+            feed_fetch_mutex,
+            last_fetch_result,
         }
     }
 
@@ -1067,12 +1087,12 @@ fn handle_prepare_snapshot_frame(
         return;
     }
     let cwd = std::path::PathBuf::from(req.cwd);
-    let reply = crate::handlers::prepare_snapshot::handle_prepare_snapshot(
+    // Phase 4 plan 04-03: use the V4 entry point so the handler pre-flights
+    // `fetch_feeds_blocking` (D-83) and merges feed-derived FeedDeny entries
+    // (D-90). The reply is `SnapshotReply::ok_v4(..., feed_warnings)`.
+    let reply = crate::handlers::prepare_snapshot::handle_prepare_snapshot_v4_full(
+        state,
         &cwd,
-        &state.curated,
-        &state.rule_store,
-        &state.process_tree,
-        &state.state_dir,
         req.is_tty,
         req.baseline_mode,
     );

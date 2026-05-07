@@ -82,6 +82,35 @@ impl Reply {
 
 pub const IPC_SCHEMA_V2: u16 = 2;
 pub const IPC_SCHEMA_V3: u16 = 3;
+pub const IPC_SCHEMA_V4: u16 = 4;
+
+// ============================================================
+// Phase 4 (D-93) — Threat-intel match record + non-fatal feed warning.
+// ============================================================
+
+/// Per-feed match record attached to JSONL block-log entries via the `intel`
+/// array, and to PromptRequest for pre-prompt enrichment. Multiple matches
+/// preserve cross-feed cross-reference (a malicious package present in both
+/// OSV and GHSA shows two rows).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IntelMatch {
+    pub feed: String,           // "OSV" | "GHSA"
+    pub advisory_id: String,
+    pub source: String,         // "package" | "host"
+    pub severity: Option<String>,
+    pub tag: Option<String>,
+    pub first_seen_ms: u64,
+}
+
+/// Non-fatal post-fetch parse problem surfaced inline to the CLI via
+/// SnapshotReply::Ok.feed_warnings. Hard fetch failure (D-85) returns
+/// SnapshotReply::Err instead.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FeedWarning {
+    pub feed: String,
+    pub kind: String,           // "parse_error" | "schema_unknown" | "partial"
+    pub message: String,
+}
 
 // --- PrepareSnapshot / SnapshotReply (D-29, D-30) --------------------------
 
@@ -130,6 +159,11 @@ pub enum SnapshotReply {
         schema_version: u16,
         manifest_path: String,
         run_uuid: String,
+        /// Phase 4 (V4 addition): non-fatal post-fetch warnings the CLI surfaces
+        /// inline (e.g. `schema_version unknown` records skipped). Empty by
+        /// default; `#[serde(default)]` ensures V2/V3 senders decode cleanly.
+        #[serde(default)]
+        feed_warnings: Vec<FeedWarning>,
     },
     Err {
         schema_version: u16,
@@ -138,13 +172,31 @@ pub enum SnapshotReply {
 }
 
 impl SnapshotReply {
+    /// V2-compatible constructor — emits V2 schema_version with empty
+    /// feed_warnings (so existing Phase 2/3 callers don't break).
     pub fn ok(manifest_path: impl Into<String>, run_uuid: impl Into<String>) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V2,
             manifest_path: manifest_path.into(),
             run_uuid: run_uuid.into(),
+            feed_warnings: Vec::new(),
         }
     }
+
+    /// V4 constructor — opt-in to feed_warnings (Phase 4 D-Discretion).
+    pub fn ok_v4(
+        manifest_path: impl Into<String>,
+        run_uuid: impl Into<String>,
+        feed_warnings: Vec<FeedWarning>,
+    ) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V4,
+            manifest_path: manifest_path.into(),
+            run_uuid: run_uuid.into(),
+            feed_warnings,
+        }
+    }
+
     pub fn err(message: impl Into<String>) -> Self {
         Self::Err {
             schema_version: IPC_SCHEMA_V2,
@@ -683,7 +735,12 @@ pub struct PromptRequest {
     pub source_locator: Option<String>,
     pub package_context: Option<PackageContext>,
     pub process: ProcessCtx,
-    pub intel: Option<()>,                  // Phase 4 reserved; always None in Phase 3
+    /// Phase 4 (D-93) type unification: changed from `Option<()>` placeholder
+    /// to `Option<Vec<IntelMatch>>`. Always `None` in plan 04-02 — populating
+    /// the prompt-time enrichment is a v2 hookpoint per 04-CONTEXT.md (no TI-*
+    /// requirement covers it in v1). Existing `intel: None` callers remain
+    /// valid since `None` is still a valid value for the new type.
+    pub intel: Option<Vec<IntelMatch>>,
     pub suggested_rules: Vec<SuggestedRule>,
 }
 

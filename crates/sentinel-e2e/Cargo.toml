@@ -27,6 +27,7 @@ predicates = { workspace = true }
 serde_json = { workspace = true }
 rusqlite = { workspace = true }
 portable-pty = "0.9"
+sha2 = { workspace = true }   # plan 05-05: corrupt-snapshot test computes manifest digest
 
 [features]
 # Opt-in feature for tests that require a real launchd user session

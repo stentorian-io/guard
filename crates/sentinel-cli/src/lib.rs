@@ -14,6 +14,7 @@ pub mod logs_follow;
 pub mod prompt_channel;
 pub mod prompt_render;
 pub mod run_orchestrator;
+pub mod setup;
 pub mod shell_setup;
 pub mod sigint_handler;
 pub mod spawn;

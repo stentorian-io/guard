@@ -102,14 +102,63 @@ fn corrupt_snapshot_causes_dylib_to_fail_closed() {
         .output()
         .expect("spawn node");
     let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    // WR-06: tighten the assertion. Previously the test only checked that
+    // node printed \"DENIED\" — but \"DENIED:\" can fire on ANY connect error
+    // (DNS failure, transient network blip, OS pressure), not just on the
+    // dylib's FAIL_CLOSED interceptor returning -1. To distinguish
+    // \"fail-closed engaged\" from \"unrelated network failure\" we require:
+    //
+    //   (1) node exited non-zero AND printed \"DENIED:\" — proves the
+    //       connect failed AND the failure path fired before the 4s
+    //       timeout (TIMEOUT exits with code 2; LEAKED with code 0).
+    //   (2) The error code (after \"DENIED:\") looks like a connect-layer
+    //       deny rather than a DNS-resolution failure. The dylib's libc
+    //       interceptor returns -1 with EHOSTUNREACH / ECONNREFUSED /
+    //       EPERM / ENETUNREACH; node maps those to e.code values like
+    //       \"EHOSTUNREACH\", \"ECONNREFUSED\", \"EPERM\", \"ENETUNREACH\".
+    //       A DNS failure surfaces as \"ENOTFOUND\" or \"EAI_AGAIN\" — those
+    //       are genuine network problems, not proof of fail-closed.
+    //
+    // If the dylib's FAIL_CLOSED ctor ever starts emitting an explicit
+    // stderr marker (currently it only writes to an in-process LOG_RING),
+    // tighten further to grep for that marker. Today the connect-error-code
+    // shape is the strongest signal available without changing the dylib.
     assert!(
         !out.status.success() && stdout.contains("DENIED"),
         "VAL-04 D-12 HARD assertion failed: node did NOT fail-closed under corrupt snapshot.\n\
          exit: {:?}\n\
          stdout: {stdout}\n\
-         stderr: {}",
+         stderr: {stderr}",
         out.status.code(),
-        String::from_utf8_lossy(&out.stderr),
+    );
+    let denied_line = stdout
+        .lines()
+        .find(|l| l.contains("DENIED:"))
+        .expect("DENIED line present per assertion above");
+    let connect_layer_codes = [
+        "EHOSTUNREACH",
+        "ECONNREFUSED",
+        "EPERM",
+        "ENETUNREACH",
+        "EACCES",
+    ];
+    let dns_codes = ["ENOTFOUND", "EAI_AGAIN", "EAI_NONAME"];
+    let is_connect_layer = connect_layer_codes
+        .iter()
+        .any(|c| denied_line.contains(c));
+    let is_dns = dns_codes.iter().any(|c| denied_line.contains(c));
+    assert!(
+        is_connect_layer && !is_dns,
+        "VAL-04 D-12 WR-06 HARD assertion failed: node printed DENIED but the error \
+         code does not match a connect-layer fail-closed shape. Could be unrelated \
+         network failure rather than the dylib's interceptor.\n\
+         denied line: {denied_line}\n\
+         expected one of: {connect_layer_codes:?}\n\
+         must NOT match: {dns_codes:?}\n\
+         full stdout: {stdout}\n\
+         stderr: {stderr}",
     );
 
     drop(harness);

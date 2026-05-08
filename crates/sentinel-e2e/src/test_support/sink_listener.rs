@@ -108,6 +108,12 @@ impl Drop for HostsRewriter {
 // SinkListener — localhost TCP variant (fallback when sudo unavailable)
 // ===========================================================================
 
+/// WR-04: cap the accepted-peer log to a forensic-useful count. Without this
+/// cap, a fail-open scenario (dylib silently allows the connect) plus a
+/// connection-storm (npm install retry loop hitting the sink) can grow the
+/// vector to MiBs over a single test process's lifetime.
+const MAX_ACCEPTED_LOG: usize = 256;
+
 /// RAII localhost listener. Bind a TCP socket on 127.0.0.1:<port> and
 /// accept-and-discard. Drop signals the accept thread to exit and joins.
 pub struct SinkListener {
@@ -143,7 +149,13 @@ impl SinkListener {
                         // forensic artifact. eprintln! routes to test stderr.
                         eprintln!("[sink_listener] accepted from {peer}");
                         if let Ok(mut log) = accepted_clone.lock() {
-                            log.push(peer);
+                            // WR-04: bounded forensic log; drop additional
+                            // peers silently once the cap is hit so a
+                            // fail-open + connection-storm can't grow this
+                            // vector to MiBs.
+                            if log.len() < MAX_ACCEPTED_LOG {
+                                log.push(peer);
+                            }
                         }
                         // Drain a few bytes so the client sees data move,
                         // then drop the stream. Keep total drain bounded to

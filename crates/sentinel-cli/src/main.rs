@@ -30,12 +30,21 @@ fn real_main() -> Result<i32, CliError> {
     let sock = socket_path(&state);
 
     match cli.cmd {
-        Cmd::Run { command, baseline } => {
-            if command.is_empty() {
-                eprintln!("sentinel run: missing command");
+        Cmd::External(argv) => {
+            if argv.is_empty() {
+                // Defensive — clap won't reach this with an empty external,
+                // but Vec<OsString> is structurally non-empty by clap's contract.
+                eprintln!("sentinel: missing command to wrap");
                 return Ok(64); // EX_USAGE
             }
-            run_orchestrator::run(&sock, &state, command, baseline)
+            if cli.learn && !sentinel_cli::tty::stdin_is_tty() {
+                eprintln!(
+                    "sentinel: --learn requires an interactive terminal \
+                     (run on a developer machine, not in CI)"
+                );
+                return Ok(64); // EX_USAGE
+            }
+            run_orchestrator::run(&sock, &state, argv, cli.learn)
         }
         Cmd::TrustPolicy { path } => {
             // Probe the daemon first so the user gets a clean DaemonUnreachable

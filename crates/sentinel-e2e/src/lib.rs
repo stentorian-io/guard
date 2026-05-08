@@ -80,51 +80,12 @@ impl DaemonHarness {
             .tempdir_in("/tmp")?;
         let state_dir = state_tmp.path().to_path_buf();
 
-        let logs = home.path().join("Library/Logs/Sentinel");
-        std::fs::create_dir_all(&logs)?;
-
-        let daemon_bin = cargo_target_dir().join("sentineld");
-        if !daemon_bin.exists() {
-            return Err(std::io::Error::other(format!(
-                "sentineld binary not found at {} — run cargo build first",
-                daemon_bin.display()
-            )));
-        }
-
-        let mut cmd = Command::new(&daemon_bin);
-        cmd.arg("serve")
-            .arg("--state-dir")
-            .arg(&state_dir)
-            .env_clear() // clean slate; no leaked DYLD_*
-            .env("HOME", home.path())
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .env("RUST_LOG", "info");
-        for (k, v) in extra {
-            cmd.env(*k, *v);
-        }
-        let child = cmd
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-
-        let ready = sentinel_daemon::state_dir::ready_path(&state_dir);
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            if ready.exists() {
-                break;
-            }
-            if Instant::now() > deadline {
-                return Err(std::io::Error::other(format!(
-                    "daemon.ready not appeared at {} within 5s",
-                    ready.display()
-                )));
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        let (socket, manifest, child) =
+            spawn_daemon_into(&state_dir, home.path(), extra)?;
 
         Ok(Self {
-            socket: sentinel_daemon::state_dir::socket_path(&state_dir),
-            manifest: sentinel_daemon::state_dir::manifest_path(&state_dir),
+            socket,
+            manifest,
             state_dir,
             home,
             child,
@@ -369,4 +330,186 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Phase 5 plan 05-02: shared spawn helper used by both
+/// `DaemonHarness::start_with_env` (initial start, owns fresh tempdirs) and
+/// `StoppedHarness::restart_with_env` (re-spawn against preserved tempdirs).
+///
+/// Ensures both code paths use identical spawn semantics — the env baseline
+/// (env_clear + HOME + PATH + RUST_LOG=info), the SIGTERM-on-Drop chain
+/// (handled by DaemonHarness::Drop), and the daemon.ready 5s wait. Tempdir
+/// CREATION is the caller's responsibility; this helper takes pre-existing
+/// state_dir + home_path borrows and returns the (socket, manifest, child)
+/// triple the caller assembles into a DaemonHarness.
+fn spawn_daemon_into(
+    state_dir: &Path,
+    home_path: &Path,
+    extra: &[(&str, &str)],
+) -> std::io::Result<(PathBuf, PathBuf, Child)> {
+    let logs = home_path.join("Library/Logs/Sentinel");
+    std::fs::create_dir_all(&logs)?;
+
+    let daemon_bin = cargo_target_dir().join("sentineld");
+    if !daemon_bin.exists() {
+        return Err(std::io::Error::other(format!(
+            "sentineld binary not found at {} — run cargo build first",
+            daemon_bin.display()
+        )));
+    }
+
+    let mut cmd = Command::new(&daemon_bin);
+    cmd.arg("serve")
+        .arg("--state-dir")
+        .arg(state_dir)
+        .env_clear() // clean slate; no leaked DYLD_*
+        .env("HOME", home_path)
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("RUST_LOG", "info");
+    for (k, v) in extra {
+        cmd.env(*k, *v);
+    }
+    let child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let ready = sentinel_daemon::state_dir::ready_path(state_dir);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if ready.exists() {
+            break;
+        }
+        if Instant::now() > deadline {
+            return Err(std::io::Error::other(format!(
+                "daemon.ready not appeared at {} within 5s",
+                ready.display()
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let socket = sentinel_daemon::state_dir::socket_path(state_dir);
+    let manifest = sentinel_daemon::state_dir::manifest_path(state_dir);
+    Ok((socket, manifest, child))
+}
+
+/// A daemon that has been gracefully stopped while preserving its state_dir
+/// and home tempdirs for restart. See `DaemonHarness::stop_preserving_state`.
+pub struct StoppedHarness {
+    pub state_dir: PathBuf,
+    pub home: tempfile::TempDir,
+    _state_tmp: tempfile::TempDir, // owns state_dir lifetime across restart
+}
+
+impl DaemonHarness {
+    /// Stop the daemon (SIGTERM, wait up to 2s, SIGKILL fallback) WITHOUT
+    /// dropping the state_dir or home tempdirs. Returns a StoppedHarness that
+    /// holds the dirs alive; call `restart_with_env(...)` to spawn a fresh
+    /// daemon over the same state.
+    ///
+    /// Used by Plan 05-07's stale-feed test: start daemon to create the
+    /// `feed_metadata` schema, stop it, write a stale row via direct
+    /// rusqlite, then restart so `compute_daemon_state` sees the stale row.
+    pub fn stop_preserving_state(mut self) -> std::io::Result<StoppedHarness> {
+        // Mirror the SIGTERM->wait->SIGKILL chain from Drop.
+        let pid = self.child.id() as libc::pid_t;
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {
+                    if Instant::now() > deadline {
+                        unsafe {
+                            libc::kill(pid, libc::SIGKILL);
+                        }
+                        let _ = self.child.wait();
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(_) => break,
+            }
+        }
+        // We need to move state_dir + home + _state_tmp out of `self` while
+        // preventing `DaemonHarness::Drop` from running (its child has been
+        // waited above; running Drop would attempt a second wait, which is
+        // harmless but redundant — and direct field-by-field move is forbidden
+        // for types implementing Drop). Use ManuallyDrop + ptr::read.
+        //
+        // SAFETY: `self.child` has already been waited (or killed and waited)
+        // above. `state_dir`, `socket`, and `manifest` are PathBufs (POD-like;
+        // their Drops only release String capacity). After the three reads
+        // below, we never touch `me` again. ManuallyDrop suppresses the
+        // type's destructor, so the unread fields (`child`, `socket`,
+        // `manifest`) are simply leaked-then-deallocated when `me` itself
+        // goes out of scope (no double-drop, no resource leak that matters
+        // because their resources were already cleaned up).
+        let me = std::mem::ManuallyDrop::new(self);
+        unsafe {
+            let state_dir = std::ptr::read(&me.state_dir);
+            let home = std::ptr::read(&me.home);
+            let _state_tmp = std::ptr::read(&me._state_tmp);
+            // Explicitly drop the unused fields so we don't leak Child handle
+            // memory or PathBuf allocations. `child` was already waited; this
+            // just releases the Child wrapper itself.
+            let _ = std::ptr::read(&me.child);
+            let _ = std::ptr::read(&me.socket);
+            let _ = std::ptr::read(&me.manifest);
+            Ok(StoppedHarness {
+                state_dir,
+                home,
+                _state_tmp,
+            })
+        }
+    }
+}
+
+impl StoppedHarness {
+    /// Spawn a fresh daemon over the preserved state_dir + home. Mirrors
+    /// DaemonHarness::start_with_env spawn semantics (uses the same
+    /// `spawn_daemon_into` helper) but skips tempdir creation.
+    pub fn restart_with_env(
+        self,
+        extra_env: &[(&str, &str)],
+    ) -> std::io::Result<DaemonHarness> {
+        let StoppedHarness {
+            state_dir,
+            home,
+            _state_tmp,
+        } = self;
+        let (socket, manifest, child) =
+            spawn_daemon_into(&state_dir, home.path(), extra_env)?;
+        Ok(DaemonHarness {
+            state_dir,
+            socket,
+            manifest,
+            home,
+            child,
+            _state_tmp,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(not(target_os = "macos"), ignore)]
+    #[test]
+    fn stop_preserving_state_roundtrip() {
+        let h = DaemonHarness::start().expect("start");
+        let preserved_state = h.state_dir.clone();
+        let preserved_home = h.home.path().to_path_buf();
+        let stopped = h.stop_preserving_state().expect("stop");
+        assert_eq!(stopped.state_dir, preserved_state);
+        assert_eq!(stopped.home.path(), preserved_home);
+        let h2 = stopped.restart_with_env(&[]).expect("restart");
+        assert_eq!(h2.state_dir, preserved_state);
+        assert_eq!(h2.home.path(), preserved_home);
+        // Drop h2 normally — confirms the post-restart Drop chain works.
+    }
 }

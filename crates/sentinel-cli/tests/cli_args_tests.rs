@@ -170,6 +170,44 @@ fn non_tty_learn_returns_exit_64() {
     );
 }
 
+/// CR-01 regression: `sentinel --learn <named-verb>` MUST exit 64 with a clear
+/// error before dispatching, even on a TTY. --learn is only meaningful on the
+/// wrap path; without this gate it would be silently dropped on every named
+/// verb arm and the CLI-10 non-TTY guard would only fire for External.
+#[test]
+fn learn_flag_rejected_with_named_verb() {
+    use std::process::{Command, Stdio};
+
+    let sentinel = env!("CARGO_BIN_EXE_sentinel");
+
+    // `install` is a named verb; combining --learn with it must be a parse-time
+    // dispatch error, not a silent flag-drop.
+    let output = Command::new(sentinel)
+        .arg("--learn")
+        .arg("install")
+        .arg("--no-shell-integration")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env_remove("SENTINEL_HOOK_DYLIB")
+        .output()
+        .expect("spawn sentinel");
+
+    assert_eq!(
+        output.status.code(),
+        Some(64),
+        "expected exit 64 (EX_USAGE) for `--learn install`, got {:?}; stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--learn is only valid when wrapping"),
+        "expected --learn-with-named-verb error in stderr; got: {stderr:?}",
+    );
+}
+
 // ---- Existing non-parser tests preserved verbatim from v0.1 ---------------
 
 #[test]

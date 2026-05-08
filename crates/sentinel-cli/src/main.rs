@@ -29,6 +29,20 @@ fn real_main() -> Result<i32, CliError> {
         .unwrap_or_else(default_state_dir);
     let sock = socket_path(&state);
 
+    // CLI-10 / CR-01: --learn is only meaningful on the wrap path (Cmd::External).
+    // Reject it on every named verb so the flag cannot be silently dropped — the
+    // top-level placement makes clap accept it on any subcommand, but only the
+    // wrap path consults it. Without this guard, `sentinel --learn install`
+    // would bypass the non-TTY gate that CLI-10 fail-clear behavior depends on.
+    if cli.learn && !matches!(cli.cmd, Cmd::External(_)) {
+        eprintln!(
+            "sentinel: --learn is only valid when wrapping a command \
+             (e.g., `sentinel --learn npm install`); it cannot be combined \
+             with named verbs"
+        );
+        return Ok(64); // EX_USAGE
+    }
+
     match cli.cmd {
         Cmd::External(argv) => {
             if argv.is_empty() {

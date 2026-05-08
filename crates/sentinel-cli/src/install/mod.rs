@@ -3,6 +3,7 @@
 //! Phase 3 plan 03-09 — `sentinel install` orchestrator.
 
 pub mod artifacts;
+pub mod drift;
 pub mod init_script;
 pub mod launchagent;
 pub mod marker_block;
@@ -95,7 +96,10 @@ pub fn run_install(
     Ok(0)
 }
 
-fn resolve_daemon_binary() -> Result<PathBuf, CliError> {
+/// Phase 07 plan 02: promoted to `pub(crate)` so `install::drift` can resolve
+/// the daemon binary path when reconstructing the canonical plist for content
+/// comparison.
+pub(crate) fn resolve_daemon_binary() -> Result<PathBuf, CliError> {
     if let Some(path) = std::env::var_os("SENTINEL_DAEMON_BINARY") {
         return Ok(PathBuf::from(path));
     }

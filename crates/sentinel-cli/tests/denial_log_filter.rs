@@ -1,8 +1,8 @@
-//! Phase 3 plan 03-11 — sentinel approve --from-log filter unit test.
-
-// Phase 07 plan 02 (D-22): the parser moved from `approve` to `denial_log`.
-// Test file rename to `denial_log_filter.rs` is deferred to Plan 05; here
-// we only update the import path.
+//! Phase 3 plan 03-11 — denial_log block-destination filter unit tests.
+//!
+//! Phase 07 plan 02 (D-22): the parser moved from `approve` to `denial_log`.
+//! Phase 07 plan 05 (D-22, D-26): file renamed from `approve_from_log_filter.rs`
+//! to `denial_log_filter.rs` so the test path matches the module under test.
 use sentinel_cli::denial_log::{filter_block_destinations, BlockEntry};
 
 #[test]

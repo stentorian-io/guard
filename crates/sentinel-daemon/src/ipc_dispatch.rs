@@ -14,7 +14,8 @@
 //! 0x00..=0x01 ∪ 0x09..=0xff was "legacy length-prefix high byte" — but a
 //! valid legacy frame has only 0x00 in the high byte (0x01 already implies
 //! a 16+ MiB body, far above MAX_FRAME_BYTES). The dispatcher now treats:
-//!   - 0x02..=0x0D            → tagged Phase 2/3 message (0x0D = BaselineCommit, plan 03-02)
+//!   - 0x02..=0x11            → tagged Phase 2/3/07 message
+//!                              (0x0E..=0x11 = ListRules/ListTrust/IsTrusted/DeleteInstallArtifacts, plan 07-01)
 //!   - 0x00                   → legacy RegisterRoot (Phase 1)
 //!   - everything else        → protocol violation (rejected immediately)
 //!
@@ -42,6 +43,11 @@ pub enum MessageTag {
     InsertUserRule = 0x0B,
     ReadInstallArtifacts = 0x0C,
     BaselineCommit = 0x0D,
+    // Phase 07 plan 01 — management-IPC family (additive at IPC_SCHEMA_V3):
+    ListRules = 0x0E,
+    ListTrust = 0x0F,
+    IsTrusted = 0x10,
+    DeleteInstallArtifacts = 0x11,
 }
 
 impl MessageTag {
@@ -60,6 +66,11 @@ impl MessageTag {
             0x0B => Some(Self::InsertUserRule),
             0x0C => Some(Self::ReadInstallArtifacts),
             0x0D => Some(Self::BaselineCommit),
+            // Phase 07 plan 01:
+            0x0E => Some(Self::ListRules),
+            0x0F => Some(Self::ListTrust),
+            0x10 => Some(Self::IsTrusted),
+            0x11 => Some(Self::DeleteInstallArtifacts),
             _ => None,
         }
     }
@@ -138,6 +149,11 @@ mod tests {
             MessageTag::InsertUserRule,
             MessageTag::ReadInstallArtifacts,
             MessageTag::BaselineCommit,
+            // Phase 07 plan 01:
+            MessageTag::ListRules,
+            MessageTag::ListTrust,
+            MessageTag::IsTrusted,
+            MessageTag::DeleteInstallArtifacts,
         ] {
             let b = tag.as_byte();
             assert_eq!(MessageTag::from_byte(b), Some(tag));
@@ -150,8 +166,8 @@ mod tests {
         assert!(MessageTag::from_byte(0x00).is_none());
         // 0x01 — was reserved for RegisterRoot in early drafts; legacy path now.
         assert!(MessageTag::from_byte(0x01).is_none());
-        // 0x0E+ — unassigned tag space (0x0D = BaselineCommit, plan 03-02).
-        assert!(MessageTag::from_byte(0x0E).is_none());
+        // 0x12+ — unassigned tag space (0x11 = DeleteInstallArtifacts, plan 07-01).
+        assert!(MessageTag::from_byte(0x12).is_none());
         assert!(MessageTag::from_byte(0xff).is_none());
     }
 
@@ -172,6 +188,11 @@ mod tests {
         assert_eq!(MessageTag::InsertUserRule.as_byte(), 0x0B);
         assert_eq!(MessageTag::ReadInstallArtifacts.as_byte(), 0x0C);
         assert_eq!(MessageTag::BaselineCommit.as_byte(), 0x0D);
+        // Phase 07 plan 01:
+        assert_eq!(MessageTag::ListRules as u8, 0x0E);
+        assert_eq!(MessageTag::ListTrust as u8, 0x0F);
+        assert_eq!(MessageTag::IsTrusted as u8, 0x10);
+        assert_eq!(MessageTag::DeleteInstallArtifacts as u8, 0x11);
         // from_byte round-trips for all Phase 3 tags:
         assert!(matches!(MessageTag::from_byte(0x09), Some(MessageTag::Status)));
         assert!(matches!(
@@ -190,7 +211,15 @@ mod tests {
             MessageTag::from_byte(0x0D),
             Some(MessageTag::BaselineCommit)
         ));
-        // 0x0E is unassigned — must return None:
-        assert!(matches!(MessageTag::from_byte(0x0E), None));
+        // Phase 07 plan 01:
+        assert_eq!(MessageTag::from_byte(0x0E), Some(MessageTag::ListRules));
+        assert_eq!(MessageTag::from_byte(0x0F), Some(MessageTag::ListTrust));
+        assert_eq!(MessageTag::from_byte(0x10), Some(MessageTag::IsTrusted));
+        assert_eq!(
+            MessageTag::from_byte(0x11),
+            Some(MessageTag::DeleteInstallArtifacts)
+        );
+        // 0x12 is unassigned — must return None:
+        assert_eq!(MessageTag::from_byte(0x12), None);
     }
 }

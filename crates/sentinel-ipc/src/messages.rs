@@ -918,3 +918,252 @@ impl BaselineCommitReply {
         }
     }
 }
+
+// ============================================================
+// Phase 07 — ListRules (tag 0x0E; sentinel status rules)
+// ============================================================
+
+/// CLI → daemon: enumerate rules visible to the daemon.
+///
+/// Additive at IPC_SCHEMA_V3 (RESEARCH.md §"IPC schema bump"). The phase-07
+/// management-IPC family lives at the V3 schema level — new tag, new wire
+/// shape, no schema bump because this neither modifies an existing message
+/// body nor breaks an existing discriminator.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ListRules {
+    pub schema_version: u16, // V3
+    /// Include built-in registry-allowlist rules in the response (CLI: --all).
+    pub include_builtins: bool,
+    /// If Some(path), filter to rules sourced from the .sentinel.toml at this
+    /// canonical path (CLI: --project, walked from cwd by the CLI before sending).
+    pub project_filter: Option<String>,
+}
+
+impl ListRules {
+    pub fn new(include_builtins: bool, project_filter: Option<String>) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V3,
+            include_builtins,
+            project_filter,
+        }
+    }
+}
+
+impl Default for ListRules {
+    fn default() -> Self {
+        Self::new(false, None)
+    }
+}
+
+/// Wire-friendly rule row. String discriminators match the InsertUserRule
+/// convention; downstream tooling can pattern-match on `source` / `kind` /
+/// `match_type` strings without importing core enum types.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuleRow {
+    pub source: String,     // "user" | "trusted_toml" | "builtin"
+    pub kind: String,       // "allow" | "deny"
+    pub match_type: String, // "exact" | "suffix" | "ip"
+    pub pattern: String,
+    pub reason: String,
+    /// For trusted_toml rows: canonical path of the source .sentinel.toml.
+    pub source_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ListRulesReply {
+    Ok {
+        schema_version: u16,
+        rules: Vec<RuleRow>,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl ListRulesReply {
+    pub fn ok(rules: Vec<RuleRow>) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V3,
+            rules,
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V3,
+            message: message.into(),
+        }
+    }
+}
+
+// ============================================================
+// Phase 07 — ListTrust (tag 0x0F; sentinel status trust)
+// ============================================================
+
+/// CLI → daemon: enumerate trusted .sentinel.toml entries.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ListTrust {
+    pub schema_version: u16, // V3
+}
+
+impl ListTrust {
+    pub fn new() -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V3,
+        }
+    }
+}
+
+impl Default for ListTrust {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrustRow {
+    /// Canonical absolute path of the trusted .sentinel.toml.
+    pub canonical_path: String,
+    /// SHA-256 hex of the trusted file content (lowercase).
+    pub sha256: String,
+    /// Unix-millis timestamp the row was inserted.
+    pub trusted_at_ms: u64,
+    /// "cli" | "prompt" — provenance of the trust decision.
+    pub trusted_via: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ListTrustReply {
+    Ok {
+        schema_version: u16,
+        entries: Vec<TrustRow>,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl ListTrustReply {
+    pub fn ok(entries: Vec<TrustRow>) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V3,
+            entries,
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V3,
+            message: message.into(),
+        }
+    }
+}
+
+// ============================================================
+// Phase 07 — IsTrusted (tag 0x10; first-trust pre-check, D-24)
+// ============================================================
+
+/// CLI → daemon: check whether a `(canonical_path, sha256)` pair is trusted.
+///
+/// Read-only existence check. CLI MUST canonicalize the path before sending;
+/// the daemon-side handler rejects non-canonical input as defense-in-depth
+/// (mirrors the BLOCKER-03 fix in `handle_trust_policy`).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IsTrusted {
+    pub schema_version: u16, // V3
+    pub path: String,
+    /// SHA-256 hex of the file the CLI hashed; lookup is by (path, sha256).
+    pub sha256: String,
+}
+
+impl IsTrusted {
+    pub fn new(path: impl Into<String>, sha256: impl Into<String>) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V3,
+            path: path.into(),
+            sha256: sha256.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum IsTrustedReply {
+    Ok {
+        schema_version: u16,
+        trusted: bool,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl IsTrustedReply {
+    pub fn ok(trusted: bool) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V3,
+            trusted,
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V3,
+            message: message.into(),
+        }
+    }
+}
+
+// ============================================================
+// Phase 07 — DeleteInstallArtifacts (tag 0x11; per-target
+// remove of install_artifacts rows). Symmetric of the existing
+// ReadInstallArtifacts handler. Used by `setup [target] --remove`
+// so the install_artifacts table reflects on-disk reality after
+// a per-target wipe (D-15 + WARNING-5 fix).
+// ============================================================
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeleteInstallArtifacts {
+    pub schema_version: u16, // V3
+    /// artifact_kind values to remove. The daemon iterates each value
+    /// and calls InstallArtifactStore::delete_by_kind for it.
+    /// Caller-controlled vocabulary: "launchagent" | "binary" |
+    /// "marker_block" | "init_script" | "state_dir" | "log_dir".
+    /// Unknown kinds are accepted (delete is a no-op for unmatched rows).
+    pub kinds: Vec<String>,
+}
+
+impl DeleteInstallArtifacts {
+    pub fn new(kinds: Vec<String>) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V3,
+            kinds,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DeleteInstallArtifactsReply {
+    Ok {
+        schema_version: u16,
+        removed: u64,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl DeleteInstallArtifactsReply {
+    pub fn ok(removed: u64) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V3,
+            removed,
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V3,
+            message: message.into(),
+        }
+    }
+}

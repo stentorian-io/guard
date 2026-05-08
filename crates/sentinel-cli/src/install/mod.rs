@@ -1,6 +1,17 @@
 //! crates/sentinel-cli/src/install/mod.rs
 //!
 //! Phase 3 plan 03-09 — `sentinel install` orchestrator.
+//!
+//! Phase 07 plan 03 — factor the install body out of `run_install` so
+//! the new `setup::apply_daemon` drift-repair path can re-apply on
+//! Drifted state without going through the v0.1 TTY "Proceed?" confirm
+//! and the no-package-managers-detected error gate. Idempotence
+//! verified pre-task: `launchctl_bootstrap` is bootout-before-bootstrap
+//! (Pitfall 6, `launchagent.rs:75-77`); `marker_block::install` uses
+//! upsert; `init_script::install` is tempfile+atomic-rename;
+//! `record_artifact` is INSERT OR REPLACE. The only non-idempotent
+//! v0.1 surface (the unconditional TTY confirm and the pkg-mgr-required
+//! error) is exactly what `apply_install_steps` deliberately omits.
 
 pub mod artifacts;
 pub mod drift;
@@ -16,21 +27,16 @@ use crate::CliError;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub fn run_install(
-    _sock: &Path,
-    state_dir: &Path,
-    no_shell_integration: bool,
-    _reinstall: bool,
-) -> Result<i32, CliError> {
-    let daemon_binary = resolve_daemon_binary()?;
-    let plist = launchagent::plist_path();
-    let log_dir = launchagent::logs_dir();
-    let init_script = init_script::init_script_path();
-    let db_path = state_dir.join("sentinel.db");
+pub fn run_install(sock: &Path, state_dir: &Path, no_shell_integration: bool, reinstall: bool) -> Result<i32, CliError> {
+    // Phase 07 D-13: when `reinstall == true`, wipe before re-installing.
+    // run_remove handles its own confirmation (it uses tty::confirm which
+    // refuses non-TTY stdin); we pass yes=true here because the caller
+    // (install --reinstall) has already opted in to wiping.
+    if reinstall {
+        crate::uninstall::run_remove(sock, state_dir, /*target=*/ None, /*yes=*/ true)?;
+    }
 
     let detected = tui::detect_package_managers();
-    let rc_files: Vec<PathBuf> = if no_shell_integration { Vec::new() } else { marker_block::detect_rc_files() };
-
     if !no_shell_integration && detected.is_empty() {
         return Err(CliError::Other(
             "no package managers detected on PATH; pass --no-shell-integration to skip dotfile mutation".into()
@@ -43,17 +49,8 @@ pub fn run_install(
         let _ = tui::pick_aliases(&detected)?;
     }
 
-    println!("sentinel install plan:");
-    println!("  daemon:    {}", daemon_binary.display());
-    println!("  plist:     {}", plist.display());
-    println!("  log dir:   {}", log_dir.display());
-    println!("  state dir: {}", state_dir.display());
-    println!("  init.sh:   {}", init_script.display());
-    if no_shell_integration {
-        println!("  rc files:  (none — --no-shell-integration)");
-    } else {
-        for rc in &rc_files { println!("  rc file:   {}", rc.display()); }
-    }
+    print_install_plan(state_dir, no_shell_integration);
+
     if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
         if !confirm_yn("Proceed?")? {
             println!("Aborted.");
@@ -61,7 +58,46 @@ pub fn run_install(
         }
     }
 
-    // Apply.
+    apply_install_steps(sock, state_dir, no_shell_integration)?;
+    println!("Installed. Run `sentinel status` to verify.");
+    Ok(0)
+}
+
+/// Phase 07 D-19: idempotent re-apply path for drift repair. Identical to
+/// `run_install(.., no_shell_integration, reinstall=false)` minus the TTY
+/// "Proceed?" confirm AND the no-package-managers-detected error gate.
+/// Used by `setup::apply_daemon` / `setup::apply_shell` when they detect
+/// `ComponentState::Drifted` or `Missing` and need to re-apply canonical
+/// content without prompting the user.
+pub fn run_install_unattended(
+    sock: &Path,
+    state_dir: &Path,
+    no_shell_integration: bool,
+) -> Result<i32, CliError> {
+    apply_install_steps(sock, state_dir, no_shell_integration)
+}
+
+/// File-private helper: the actual idempotent install body. Both
+/// `run_install` (interactive) and `run_install_unattended` (drift-repair)
+/// call this. Each step is re-runnable without duplication; see the
+/// idempotence rationale in the module-level doc comment above.
+fn apply_install_steps(
+    sock: &Path,
+    state_dir: &Path,
+    no_shell_integration: bool,
+) -> Result<i32, CliError> {
+    let _ = sock; // currently unused but kept for future IPC pre-checks
+    let daemon_binary = resolve_daemon_binary()?;
+    let plist = launchagent::plist_path();
+    let log_dir = launchagent::logs_dir();
+    let init_script = init_script::init_script_path();
+    let db_path = state_dir.join("sentinel.db");
+    let rc_files: Vec<PathBuf> = if no_shell_integration {
+        Vec::new()
+    } else {
+        marker_block::detect_rc_files()
+    };
+
     std::fs::create_dir_all(state_dir).ok();
     std::fs::create_dir_all(&log_dir).ok();
 
@@ -89,11 +125,41 @@ pub fn run_install(
     // 5. binary path (informational)
     artifacts::record_artifact(&db_path, "binary", &daemon_binary.display().to_string(), None, VERSION)?;
 
-    // 6. launchctl bootstrap
+    // 6. launchctl bootstrap (Pitfall 6: bootout-before-bootstrap is
+    //    handled inside this helper for idempotence).
     launchagent::launchctl_bootstrap(&plist).map_err(|e| CliError::Other(format!("bootstrap: {e}")))?;
 
-    println!("Installed. Run `sentinel status` to verify.");
     Ok(0)
+}
+
+/// Print the v0.1-shape "sentinel install plan: ..." block. Only called
+/// from interactive `run_install`. `run_install_unattended` (drift repair)
+/// uses `setup::apply_*`'s "sentinel: repaired/installed <path>" line per
+/// D-19, so this is intentionally not called from the unattended path.
+fn print_install_plan(state_dir: &Path, no_shell_integration: bool) {
+    let plist = launchagent::plist_path();
+    let log_dir = launchagent::logs_dir();
+    let init_script = init_script::init_script_path();
+    let rc_files: Vec<PathBuf> = if no_shell_integration {
+        Vec::new()
+    } else {
+        marker_block::detect_rc_files()
+    };
+    println!("sentinel install plan:");
+    if let Ok(daemon_binary) = resolve_daemon_binary() {
+        println!("  daemon:    {}", daemon_binary.display());
+    }
+    println!("  plist:     {}", plist.display());
+    println!("  log dir:   {}", log_dir.display());
+    println!("  state dir: {}", state_dir.display());
+    println!("  init.sh:   {}", init_script.display());
+    if no_shell_integration {
+        println!("  rc files:  (none — --no-shell-integration)");
+    } else {
+        for rc in &rc_files {
+            println!("  rc file:   {}", rc.display());
+        }
+    }
 }
 
 /// Phase 07 plan 02: promoted to `pub(crate)` so `install::drift` can resolve

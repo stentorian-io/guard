@@ -24,10 +24,10 @@ fn trust_policy_requires_path_arg() {
 }
 
 #[test]
-fn run_subcommand_still_parses() {
-    // Sanity: adding TrustPolicy does not break the existing Run variant.
-    let cli = Cli::try_parse_from(["sentinel", "run", "echo", "hello"]).expect("parse");
-    assert!(matches!(cli.cmd, Cmd::Run { .. }));
+fn external_subcommand_still_parses_alongside_trust_policy() {
+    // Sanity: adding TrustPolicy does not break the External wrap shape (D-03).
+    let cli = Cli::try_parse_from(["sentinel", "echo", "hello"]).expect("parse");
+    assert!(matches!(cli.cmd, Cmd::External(_)));
 }
 
 /// Non-TTY (CI/scripts) calling `run_trust_policy` MUST fail with a diagnostic

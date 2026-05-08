@@ -142,6 +142,26 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
 
 fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) {
     let now = now_rfc3339();
+    // CR-02: enforce per-run prompt_id ownership. Without this, a malicious or
+    // misbehaving dylib running under run-A could send a PromptResponse with
+    // a prompt_id parked under run-B (sequential 8-digit ids are predictable),
+    // causing the daemon to insert allow rules for run-B, wake run-B's parked
+    // Resolve handler, AND mis-attribute the Decision row to run-A's run_uuid.
+    let entry_opt = match state
+        .deferred_resolve
+        .take_full_if_owned(&resp.prompt_id, run_uuid)
+    {
+        Ok(opt) => opt,
+        Err(foreign_run_uuid) => {
+            tracing::warn!(
+                run_uuid = %run_uuid,
+                foreign_run_uuid = %foreign_run_uuid,
+                foreign_prompt_id = %resp.prompt_id,
+                "CR-02: refused cross-run PromptResponse (per-run prompt_id ownership)"
+            );
+            return;
+        }
+    };
     // BLOCKER #3 / WR-11: peek the deferred entry to recover the (host, port)
     // tuple for the row we're about to emit. We must NOT call take_full here
     // because the verdict signal (sender.send) needs to fire AFTER the
@@ -153,7 +173,6 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
     // and re-routing the sender after the row emit. Since we're about to
     // resolve the entry anyway this re-orders one tiny step without changing
     // observable behavior.
-    let entry_opt = state.deferred_resolve.take_full(&resp.prompt_id);
     let dest_host = entry_opt
         .as_ref()
         .map(|e| e.host.clone())
@@ -247,8 +266,25 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
 }
 
 fn dispatch_cancel(state: &DaemonState, run_uuid: &str, cancel: PromptCancel) {
+    // CR-02: enforce per-run prompt_id ownership. Without this, run-A could
+    // cancel any parked prompt in run-B by guessing the prompt_id.
+    let entry_opt = match state
+        .deferred_resolve
+        .take_full_if_owned(&cancel.prompt_id, run_uuid)
+    {
+        Ok(opt) => opt,
+        Err(foreign_run_uuid) => {
+            tracing::warn!(
+                run_uuid = %run_uuid,
+                foreign_run_uuid = %foreign_run_uuid,
+                foreign_prompt_id = %cancel.prompt_id,
+                "CR-02: refused cross-run PromptCancel (per-run prompt_id ownership)"
+            );
+            return;
+        }
+    };
     // WR-11: same as dispatch_response — clear the dedup entry on cancel.
-    if let Some(entry) = state.deferred_resolve.take_full(&cancel.prompt_id) {
+    if let Some(entry) = entry_opt {
         let _ = entry.sender.send(sentinel_core::Verdict::Deny);
         state
             .prompt_dedup

@@ -106,6 +106,46 @@ impl DeferredResolveTable {
         g.remove(prompt_id)
     }
 
+    /// CR-02: per-run prompt_id ownership. Returns the entry only when its
+    /// `run_uuid` matches `run_uuid`. On mismatch the entry stays in the
+    /// table (so its rightful owner can still resolve it). Atomic w.r.t.
+    /// concurrent take/insert because the peek and remove run under the
+    /// same mutex guard — eliminates the take-then-reinsert race.
+    ///
+    /// Returns:
+    /// - Some(entry) when the entry exists and run_uuid matches.
+    /// - None when the entry is absent OR the run_uuid does not match.
+    ///   Callers cannot distinguish absent-vs-foreign through the return
+    ///   alone; the boolean fork is exposed via `take_full_if_owned` for
+    ///   handlers that need to log the cross-run case.
+    pub fn take_full_for_run(&self, prompt_id: &str, run_uuid: &str) -> Option<DeferredEntry> {
+        let mut g = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+        match g.get(prompt_id) {
+            Some(e) if e.run_uuid != run_uuid => None,
+            _ => g.remove(prompt_id),
+        }
+    }
+
+    /// CR-02 helper for handlers that need to distinguish "not present" from
+    /// "present but owned by another run". Returns:
+    /// - `Ok(Some(entry))` — entry was present AND run_uuid matched; entry consumed.
+    /// - `Ok(None)`        — entry was absent (already taken or never inserted).
+    /// - `Err(foreign_run_uuid)` — entry was present but owned by a different
+    ///   run; entry left in place. Caller should log a structured warning and
+    ///   ignore the wire-side response.
+    pub fn take_full_if_owned(
+        &self,
+        prompt_id: &str,
+        run_uuid: &str,
+    ) -> Result<Option<DeferredEntry>, String> {
+        let mut g = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+        match g.get(prompt_id) {
+            None => Ok(None),
+            Some(e) if e.run_uuid == run_uuid => Ok(g.remove(prompt_id)),
+            Some(e) => Err(e.run_uuid.clone()),
+        }
+    }
+
     /// Send Deny on every sender whose entry.run_uuid matches; remove those entries.
     /// Called during prompt-channel teardown to prevent parked Resolve handler thread leaks.
     pub fn drain_for_run(&self, run_uuid: &str) {

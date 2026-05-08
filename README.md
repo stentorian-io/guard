@@ -1,7 +1,7 @@
 # Sentinel
 
 Free, open-source macOS supply-chain firewall. Default-deny outbound network
-enforcement inside `sentinel run <command>` subtrees. Defends developer
+enforcement inside `sentinel <command>` subtrees. Defends developer
 laptops against compromised npm / pip / cargo / etc. dependencies.
 
 **Status:** pre-release; Phase 1 (foundations + hook hello-world).

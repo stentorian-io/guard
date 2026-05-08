@@ -1,8 +1,19 @@
-//! crates/sentinel-cli/src/status.rs
+//! crates/sentinel-cli/src/status/mod.rs
 //!
 //! Phase 3 plan 03-10 — `sentinel status` (CLI-02, D-69..D-72).
 //! Phase 3 plan 03-17 — render_* refactored to pub(crate) _to variants for unit
 //! testing (gap-closure UAT #2).
+//!
+//! Phase 07 plan 03 — converted from a leaf `status.rs` file into a
+//! `status/` directory with submodules for the new `sentinel status
+//! <noun>` verbs (`rules`, `trust`, `denials`, `review`). The bare-status
+//! path (`run_status`) below is preserved verbatim — Plan 04's dispatch
+//! arm continues to call `crate::status::run_status` unchanged.
+
+pub mod denials;
+pub mod review;
+pub mod rules;
+pub mod trust;
 
 use std::path::Path;
 

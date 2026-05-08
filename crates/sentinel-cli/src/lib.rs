@@ -5,6 +5,7 @@ pub mod approve;
 pub mod audit_token;
 pub mod baseline;
 pub mod cli;
+pub mod denial_log;
 pub mod install;
 pub mod ipc_client;
 pub mod locate;

@@ -11,9 +11,14 @@
 
 use sentinel_core::policy_file::{parse as parse_toml, PolicyFileError as ParseError, SentinelToml};
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-pub const MAX_DEPTH: usize = 8;
+// Phase 07 plan 02 (D-22 / Q12): `find_sentinel_toml` and `MAX_DEPTH` were
+// lifted to `sentinel-core::policy_file` so the CLI can reuse the walker
+// without depending on this crate. Re-exported here so existing daemon
+// callers (`prepare_snapshot.rs`, `tests/policy_file_tests.rs`) continue
+// to resolve `crate::policy_file::find_sentinel_toml` / `MAX_DEPTH`.
+pub use sentinel_core::policy_file::{find_sentinel_toml, MAX_DEPTH};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PolicyFileError {
@@ -27,32 +32,6 @@ pub enum PolicyFileError {
     UnsupportedVersion(u16),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-}
-
-/// Walk up from `start`, stopping at the first `.sentinel.toml` OR `.git`
-/// encountered, depth-capped at MAX_DEPTH. Returns the canonicalized path of
-/// the .sentinel.toml or None.
-///
-/// Symlink handling (Pitfall 5 in RESEARCH.md): canonicalize() resolves
-/// symlinks once at the start; subsequent `.parent()` operates on the
-/// canonical filesystem tree, so symlink loops cannot drive infinite walks.
-pub fn find_sentinel_toml(start: &Path) -> Option<PathBuf> {
-    let mut current = start.canonicalize().ok()?;
-    for _ in 0..MAX_DEPTH {
-        let toml_candidate = current.join(".sentinel.toml");
-        if toml_candidate.exists() {
-            return toml_candidate.canonicalize().ok();
-        }
-        let git_candidate = current.join(".git");
-        if git_candidate.exists() {
-            return None; // D-36 boundary: .git stops the walk
-        }
-        match current.parent() {
-            Some(p) => current = p.to_owned(),
-            None => break,
-        }
-    }
-    None
 }
 
 /// SHA-256 of the file's content as 64-char lowercase hex.

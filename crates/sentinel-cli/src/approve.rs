@@ -6,6 +6,7 @@ use std::io::{IsTerminal, Write, BufRead};
 use std::path::{Path, PathBuf};
 
 use crate::CliError;
+use crate::denial_log::filter_block_destinations;
 
 pub struct ApproveArgs {
     pub pattern: Option<String>,
@@ -158,63 +159,5 @@ pub(crate) fn run_approve_from_log(sock: &Path, uuid: &str, yes: bool) -> Result
     Ok(0)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockEntry {
-    pub host: String,
-    pub port: u16,
-    pub source_kind: String,
-}
-
-/// WR-05: cap the unique-host count we accumulate when filtering block
-/// destinations. Without a cap, a hostile package making thousands of unique
-/// hostnames per run could OOM the CLI. 10000 is comfortably above any
-/// legitimate single-run cardinality (typical npm install has < 200 unique
-/// hosts).
-const MAX_UNIQUE_BLOCK_HOSTS: usize = 10_000;
-/// WR-05: cap the per-host hostname length we accept. The daemon's log writer
-/// doesn't bound dest_host length on the way in, so a malicious package could
-/// emit log entries with multi-KiB hostnames. We discard entries whose host
-/// exceeds this length rather than silently storing them.
-const MAX_HOST_LENGTH: usize = 256;
-
-pub fn filter_block_destinations(log_path: &Path, run_uuid: &str)
-    -> Result<Vec<BlockEntry>, CliError>
-{
-    use std::io::{BufReader};
-    let file = match std::fs::File::open(log_path) {
-        Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(CliError::Other(format!("log file missing: {}", log_path.display())));
-        }
-        Err(e) => return Err(CliError::Other(format!("open log: {e}"))),
-    };
-    let reader = BufReader::new(file);
-    let mut seen: std::collections::HashSet<(String, u16)> = std::collections::HashSet::new();
-    let mut out = Vec::new();
-    for line in reader.lines() {
-        let line = match line { Ok(l) => l, Err(_) => continue };
-        if line.trim().is_empty() { continue; }
-        let v: serde_json::Value = match serde_json::from_str(&line) { Ok(v) => v, Err(_) => continue };
-        if v.get("event").and_then(|e| e.as_str()) != Some("block") { continue; }
-        if v.get("run_uuid").and_then(|r| r.as_str()) != Some(run_uuid) { continue; }
-        let host = v.get("dest_host").and_then(|h| h.as_str()).unwrap_or("");
-        let port = v.get("dest_port").and_then(|p| p.as_u64()).unwrap_or(0) as u16;
-        let source_kind = v.get("source_kind").and_then(|s| s.as_str()).unwrap_or("").to_string();
-        if host.is_empty() { continue; }
-        // WR-05: bound dest_host length defensively. The daemon's log writer
-        // doesn't truncate on the way in, so a hostile package could emit
-        // entries with multi-KiB hosts.
-        if host.len() > MAX_HOST_LENGTH { continue; }
-        if seen.insert((host.to_string(), port)) {
-            out.push(BlockEntry { host: host.to_string(), port, source_kind });
-            // WR-05: cap unique hosts to keep memory bounded.
-            if out.len() >= MAX_UNIQUE_BLOCK_HOSTS {
-                return Err(CliError::Other(format!(
-                    "log contains > {MAX_UNIQUE_BLOCK_HOSTS} unique blocked hosts for run {run_uuid}; \
-                     refusing to load — re-run after rotating the log"
-                )));
-            }
-        }
-    }
-    Ok(out)
-}
+// Phase 07 plan 02 (D-22): BlockEntry / filter_block_destinations / WR-05
+// caps now live in `crate::denial_log`. Imported via `use` at the top.

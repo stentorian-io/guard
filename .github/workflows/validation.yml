@@ -77,8 +77,21 @@ jobs:
           # README. We grep the script to verify the script's pinned hash
           # matches the on-disk file. Drift here means the maintainer ran the
           # vendor script without committing the new bytes — fail loud.
-          pinned=$(grep '^EXPECTED_OUTPUT_SHA256=' tools/vendor-ua-parser-js.sh \
-                   | head -1 | cut -d'"' -f2)
+          #
+          # WR-01: anchor the regex strictly (line-start, double-quoted 64-hex
+          # value, line-end) AND assert exactly one match. The previous form
+          # (`grep | head -1 | cut -d'"' -f2`) silently degraded if the
+          # script's assignment was reformatted to single-quotes or if a
+          # second documentation line shadowed the canonical assignment.
+          matches=$(grep -c '^EXPECTED_OUTPUT_SHA256="[a-f0-9]\{64\}"$' \
+                    tools/vendor-ua-parser-js.sh || true)
+          if [ "$matches" -ne 1 ]; then
+            echo "FATAL: expected exactly one EXPECTED_OUTPUT_SHA256=\"<64-hex>\" line in tools/vendor-ua-parser-js.sh, found $matches"
+            exit 1
+          fi
+          pinned=$(grep '^EXPECTED_OUTPUT_SHA256="[a-f0-9]\{64\}"$' \
+                   tools/vendor-ua-parser-js.sh \
+                   | sed -E 's/^EXPECTED_OUTPUT_SHA256="([a-f0-9]{64})"$/\1/')
           if [ -z "$pinned" ] || [ "$pinned" = "<FILL_ON_FIRST_RUN>" ]; then
             echo "FATAL: tools/vendor-ua-parser-js.sh has no committed pinned hash"
             exit 1

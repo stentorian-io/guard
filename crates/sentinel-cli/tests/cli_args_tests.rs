@@ -139,13 +139,12 @@ fn baseline_flag_is_no_longer_accepted() {
 fn non_tty_learn_returns_exit_64() {
     use std::process::{Command, Stdio};
 
-    // Resolve the sentinel binary built by `cargo build`. Tests can be
-    // invoked via `cargo test`, which builds the binary as a sibling
-    // target. Use CARGO_BIN_EXE_sentinel to find it.
-    let sentinel = std::env::var("CARGO_BIN_EXE_sentinel")
-        .expect("CARGO_BIN_EXE_sentinel set by cargo when running integration tests");
+    // CARGO_BIN_EXE_<bin> is set by cargo at *compile time* for integration
+    // tests in the same package as the binary, so it must be read with the
+    // env! macro (not std::env::var, which queries runtime environment).
+    let sentinel = env!("CARGO_BIN_EXE_sentinel");
 
-    let output = Command::new(&sentinel)
+    let output = Command::new(sentinel)
         .arg("--learn")
         .arg("echo")
         .arg("hi")

@@ -16,6 +16,6 @@ pub use policy::{
     SourceKind, evaluate_policy, is_cloud_metadata_host, is_cloud_metadata_ip, is_loopback_host,
     is_loopback_ip,
 };
-pub use policy_file::{PolicyFileError, PolicyRule, SentinelToml};
+pub use policy_file::{find_sentinel_toml, PolicyFileError, PolicyRule, SentinelToml, MAX_DEPTH};
 pub use policy_file_writer::{WriteError, append_rule, append_rules};
 pub use snapshot::{SCHEMA_V1, SCHEMA_V2, Snapshot};

@@ -30,11 +30,13 @@ use crossbeam_channel::{bounded, TrySendError};
 use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
-    BaselineCommit, BaselineCommitReply, DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap,
-    EnvNotPropagatedGapAck, ExecAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3,
-    InsertUserRule, InsertUserRuleReply, IpcError, PrepareSnapshot, PromptChannelInit,
-    PromptChannelInitAck, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply,
-    Resolve, ResolveReply, SnapshotReply, Status, StatusReply, TrustPolicy, TrustPolicyReply,
+    BaselineCommit, BaselineCommitReply, DeleteInstallArtifacts, DeleteInstallArtifactsReply,
+    DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap, EnvNotPropagatedGapAck, ExecAck, ExecEvent,
+    ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3, InsertUserRule, InsertUserRuleReply,
+    IpcError, IsTrusted, IsTrustedReply, ListRules, ListRulesReply, ListTrust, ListTrustReply,
+    PrepareSnapshot, PromptChannelInit, PromptChannelInitAck, ReadInstallArtifacts,
+    ReadInstallArtifactsReply, RegisterRoot, Reply, Resolve, ResolveReply, SnapshotReply, Status,
+    StatusReply, TrustPolicy, TrustPolicyReply,
 };
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
@@ -447,6 +449,19 @@ impl IpcServer {
                 // NB: return here — the stream is now owned by the prompt-channel thread.
                 return;
             }
+            // Phase 07 plan 01 — management-IPC family.
+            FrameKind::Tagged(MessageTag::ListRules) => {
+                handle_list_rules_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(MessageTag::ListTrust) => {
+                handle_list_trust_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(MessageTag::IsTrusted) => {
+                handle_is_trusted_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(MessageTag::DeleteInstallArtifacts) => {
+                handle_delete_install_artifacts_frame(&mut stream, state);
+            }
         }
     }
 }
@@ -567,6 +582,140 @@ fn handle_baseline_commit_frame(stream: &mut UnixStream, state: &Arc<DaemonState
     let reply = crate::handlers::baseline_commit::handle_baseline_commit(&req, state);
     if let Err(e) = write_tagged(stream, MessageTag::BaselineCommit, &reply) {
         error!(error = %e, "failed to send BaselineCommitReply");
+    }
+}
+
+// ============================================================================
+// Phase 07 plan 01 — management-IPC frame handlers (ListRules / ListTrust /
+// IsTrusted / DeleteInstallArtifacts). Each is a verbatim copy of the
+// `handle_read_install_artifacts_frame` shape with type names swapped.
+// All four enforce `schema_version == IPC_SCHEMA_V3`.
+// ============================================================================
+
+fn handle_list_rules_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: ListRules = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "ListRules decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::ListRules,
+                &ListRulesReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V3 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::ListRules,
+            &ListRulesReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V3",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let reply = crate::handlers::list_rules::handle_list_rules(
+        &req,
+        &state.rule_store,
+        state.curated.as_ref(),
+    );
+    if let Err(e) = write_tagged(stream, MessageTag::ListRules, &reply) {
+        error!(error = %e, "failed to send ListRulesReply");
+    }
+}
+
+fn handle_list_trust_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: ListTrust = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "ListTrust decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::ListTrust,
+                &ListTrustReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V3 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::ListTrust,
+            &ListTrustReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V3",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let reply = crate::handlers::list_trust::handle_list_trust(&req, &state.rule_store);
+    if let Err(e) = write_tagged(stream, MessageTag::ListTrust, &reply) {
+        error!(error = %e, "failed to send ListTrustReply");
+    }
+}
+
+fn handle_is_trusted_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: IsTrusted = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "IsTrusted decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::IsTrusted,
+                &IsTrustedReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V3 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::IsTrusted,
+            &IsTrustedReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V3",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let reply = crate::handlers::is_trusted::handle_is_trusted(&req, &state.rule_store);
+    if let Err(e) = write_tagged(stream, MessageTag::IsTrusted, &reply) {
+        error!(error = %e, "failed to send IsTrustedReply");
+    }
+}
+
+fn handle_delete_install_artifacts_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: DeleteInstallArtifacts = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "DeleteInstallArtifacts decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::DeleteInstallArtifacts,
+                &DeleteInstallArtifactsReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V3 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::DeleteInstallArtifacts,
+            &DeleteInstallArtifactsReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V3",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let reply = crate::handlers::delete_install_artifacts::handle_delete_install_artifacts(
+        &req,
+        &state.install_artifact_store,
+    );
+    if let Err(e) = write_tagged(stream, MessageTag::DeleteInstallArtifacts, &reply) {
+        error!(error = %e, "failed to send DeleteInstallArtifactsReply");
     }
 }
 

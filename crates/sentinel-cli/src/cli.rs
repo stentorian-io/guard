@@ -1,31 +1,40 @@
-//! clap derive structs for the `sentinel` CLI.
+//! clap derive structs for the `sentinel` CLI (Phase 06 redesign — D-03 root-default-wrap, D-04 --learn).
 
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "sentinel", version, about = "Default-deny outbound network enforcement for wrapped commands")]
+#[command(
+    name = "sentinel",
+    version,
+    about = "Default-deny outbound network enforcement for wrapped commands",
+    long_about = "\
+Sentinel sandboxes outbound network egress from a command and its children.
+
+USAGE:
+  sentinel <cmd> [args...]            Wrap a command under enforcement
+  sentinel --learn <cmd> [args...]    Record unknown destinations to .sentinel.toml
+                                      (TTY required; fails clear in non-TTY)
+
+  sentinel install | uninstall | status | logs | approve | trust-policy | shell-setup
+
+To wrap a binary whose name collides with a Sentinel verb, pass its full path:
+  sentinel /usr/local/bin/status
+"
+)]
 pub struct Cli {
+    /// Auto-allow unknown destinations and record them to .sentinel.toml.
+    /// TTY required; refuses to run in non-interactive environments.
+    #[arg(long, global = false)]
+    pub learn: bool,
+
     #[command(subcommand)]
     pub cmd: Cmd,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
-    /// Wrap and execute a command under default-deny network enforcement.
-    ///
-    /// Use `--` to separate sentinel options from the wrapped command:
-    ///   sentinel run -- node -e 'require("net").connect(443, "host")'
-    Run {
-        /// The wrapped command and its arguments.
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1.., required = true)]
-        command: Vec<OsString>,
-        /// Record allow-and-log to per-project .sentinel.toml; show diff+confirm on exit (POL-04).
-        #[arg(long)]
-        baseline: bool,
-    },
-
     /// Trust a project-local `.sentinel.toml` so its rules apply to subsequent
     /// `sentinel run` invocations from that working tree (D-38).
     ///
@@ -89,4 +98,9 @@ pub enum Cmd {
         #[arg(long, short)]
         yes: bool,
     },
+
+    /// (Default) Wrap a command under enforcement.
+    /// `argv[0]` is the binary name; subsequent elements are passed verbatim.
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
 }

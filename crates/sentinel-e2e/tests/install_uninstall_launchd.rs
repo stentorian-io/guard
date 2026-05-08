@@ -33,27 +33,28 @@ fn launchctl_bootstrap_and_bootout_round_trip() {
     let cli = resolve_cli();
     let daemon_bin = cargo_target_dir().join("sentineld");
 
-    // INSTALL — no SENTINEL_SKIP_LAUNCHCTL. Real launchctl bootstrap fires.
+    // SETUP DAEMON — no SENTINEL_SKIP_LAUNCHCTL. Real launchctl bootstrap fires.
+    // Phase 07 plan 05 (D-09, D-10): `install --no-shell-integration` → `setup daemon`.
     let mut child = Command::new(&cli)
-        .arg("install").arg("--no-shell-integration")
+        .arg("setup").arg("daemon")
         .env_clear()
         .env("HOME", home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("SENTINEL_DAEMON_BINARY", &daemon_bin)
         .env("SENTINEL_STATE_DIR", &state_dir)
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().expect("spawn sentinel install");
+        .spawn().expect("spawn sentinel setup daemon");
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(b"y\n");
     }
-    let install_out = child.wait_with_output().expect("install wait");
+    let install_out = child.wait_with_output().expect("setup daemon wait");
     if !install_out.status.success() {
         // launchctl bootstrap commonly fails on CI runners without a GUI
         // session. Print stderr and skip rather than fail; the maintainer
         // running this with --features ci-launchd has signalled they expect
         // launchctl to work.
         panic!(
-            "sentinel install failed; launchctl unavailable on this runner?\n\
+            "sentinel setup daemon failed; launchctl unavailable on this runner?\n\
              stdout: {}\nstderr: {}",
             String::from_utf8_lossy(&install_out.stdout),
             String::from_utf8_lossy(&install_out.stderr),
@@ -77,16 +78,17 @@ fn launchctl_bootstrap_and_bootout_round_trip() {
         String::from_utf8_lossy(&print_out.stdout),
         String::from_utf8_lossy(&print_out.stderr));
 
-    // UNINSTALL — real launchctl bootout fires.
+    // SETUP --REMOVE -y — real launchctl bootout fires.
+    // Phase 07 plan 05 (D-09, D-10): `uninstall --force` → `setup --remove -y`.
     let uninstall_out = Command::new(&cli)
-        .arg("uninstall").arg("--force")
+        .arg("setup").arg("--remove").arg("-y")
         .env_clear()
         .env("HOME", home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("SENTINEL_STATE_DIR", &state_dir)
-        .output().expect("uninstall wait");
+        .output().expect("setup --remove wait");
     assert!(uninstall_out.status.success(),
-        "uninstall failed: stderr={}", String::from_utf8_lossy(&uninstall_out.stderr));
+        "setup --remove failed: stderr={}", String::from_utf8_lossy(&uninstall_out.stderr));
 
     std::thread::sleep(Duration::from_millis(500));
 

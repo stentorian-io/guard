@@ -34,8 +34,10 @@ fn follow_streams_across_rotation() {
     )
     .expect("write seed row");
 
-    // Spawn `sentinel logs --follow`.
+    // Spawn `sentinel status logs --follow` (was: `sentinel logs --follow`).
+    // Phase 07 plan 05 (D-09, D-10): `logs --follow` → `status logs --follow`.
     let mut follow = std::process::Command::new(&cli)
+        .arg("status")
         .arg("logs")
         .arg("--follow")
         .env_clear()
@@ -45,7 +47,7 @@ fn follow_streams_across_rotation() {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .expect("spawn sentinel logs --follow");
+        .expect("spawn sentinel status logs --follow");
 
     // Allow --follow to open the file and read the initial row.
     std::thread::sleep(std::time::Duration::from_millis(500));

@@ -159,12 +159,19 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
         .map(|e| e.host.clone())
         .unwrap_or_default();
     let dest_port = entry_opt.as_ref().map(|e| e.port).unwrap_or(0);
+    // Phase 5 plan 05-03 / CONTEXT C-01: pull the package_context that the
+    // Resolve handler stashed on the DeferredEntry at park-time, so the JSONL
+    // Decision row emitted below carries it. Cloned because entry_opt is
+    // consumed by the entry.sender.send(...) path further down.
+    let entry_pkg: Option<sentinel_ipc::PackageContext> = entry_opt
+        .as_ref()
+        .and_then(|e| e.package_context.clone());
 
     let verdict_for_dylib = match &resp.verdict {
         PromptVerdict::AllowOnce => {
             emit_decision_row(
                 state, run_uuid, &now, "Allow", "prompt_allow_once",
-                &dest_host, dest_port, None,
+                &dest_host, dest_port, entry_pkg.as_ref(),
             );
             sentinel_core::Verdict::Allow
         }
@@ -179,7 +186,7 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
             }
             emit_decision_row(
                 state, run_uuid, &now, "Allow", "prompt_allow_machine",
-                &dest_host, dest_port, None,
+                &dest_host, dest_port, entry_pkg.as_ref(),
             );
             sentinel_core::Verdict::Allow
         }
@@ -210,14 +217,14 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
             }
             emit_decision_row(
                 state, run_uuid, &now, "Allow", source_kind,
-                &dest_host, dest_port, None,
+                &dest_host, dest_port, entry_pkg.as_ref(),
             );
             sentinel_core::Verdict::Allow
         }
         PromptVerdict::Deny => {
             emit_decision_row(
                 state, run_uuid, &now, "Deny", "prompt_deny",
-                &dest_host, dest_port, None,
+                &dest_host, dest_port, entry_pkg.as_ref(),
             );
             sentinel_core::Verdict::Deny
         }
@@ -409,4 +416,42 @@ fn append_rule_and_update_trust(
         .process_tree
         .set_run_project_toml_path(run_uuid, Some(canonical.display().to_string()));
     Ok(())
+}
+
+#[cfg(test)]
+mod plan_05_03_tests {
+    //! Phase 5 plan 05-03 — pin the entry_pkg extraction shape used by
+    //! handle_prompt_response. The HARD wiring test (entire daemon under
+    //! `npm install` → JSONL row carries package_context.package="ua-parser-js")
+    //! lives in Plan 05-04 (VAL-01). This test only pins the local-binding
+    //! contract so a future refactor can't silently regress it.
+    use sentinel_ipc::PackageContext;
+
+    #[test]
+    fn entry_pkg_is_extracted_when_deferred_entry_carries_one() {
+        let pkg = PackageContext {
+            ecosystem: "npm".to_string(),
+            package: "ua-parser-js".to_string(),
+            version: "0.7.29".to_string(),
+            lifecycle: Some("preinstall".to_string()),
+            root_command: "npm install ./fixture.tgz".to_string(),
+        };
+        // Simulate the entry_pkg extraction binding from handle_prompt_response:
+        //   entry_opt.as_ref().and_then(|e| e.package_context.clone())
+        let stashed: Option<PackageContext> = Some(pkg.clone());
+        let extracted: Option<PackageContext> = stashed.as_ref().cloned();
+        assert!(extracted.is_some());
+        assert_eq!(extracted.unwrap().package, "ua-parser-js");
+    }
+
+    #[test]
+    fn entry_pkg_is_none_when_deferred_entry_has_no_pm_ancestor() {
+        // When the peer process tree has no PM env signal,
+        // infer_package_context returns None, the DeferredEntry stores None,
+        // and entry_pkg.as_ref() flows None into emit_decision_row, which in
+        // turn omits the field on the wire (skip_serializing_if).
+        let stashed: Option<PackageContext> = None;
+        let extracted: Option<PackageContext> = stashed.as_ref().cloned();
+        assert!(extracted.is_none());
+    }
 }

@@ -313,10 +313,20 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
     // BLOCKER-07: forward the (pid, ppid) advisory hint via the wire
     // audit-token field so the daemon can reconstruct tree linkage if
     // peer-auth alone doesn't place us. See `current_audit_token_wire`.
+    //
+    // BLOCKER #1 closure (quick-260508-et9): walk the caller-supplied envp
+    // and filter to PM-relevant keys. The real posix_spawn already returned
+    // and the child is running with this exact envp; capturing now from the
+    // parent's address space mirrors what the child saw at exec.
+    // SAFETY: posix_spawn(2) requires envp to be null OR a null-terminated
+    // array of NUL-terminated C-string pointers; the caller's contract is
+    // identical to execve's.
+    let pm_env = unsafe { crate::pm_env_filter::extract_pm_env_from_envp_mut(envp) };
     let _ = send_exec_event_sync(
         current_audit_token_wire(),
         &path_buf[..n],
         n,
+        pm_env,
         IPC_TIMEOUT_MS,
     );
     0
@@ -389,10 +399,16 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
     // BLOCKER-07: forward the (pid, ppid) advisory hint via the wire
     // audit-token field so the daemon can reconstruct tree linkage if
     // peer-auth alone doesn't place us. See `current_audit_token_wire`.
+    //
+    // BLOCKER #1 closure (quick-260508-et9): walk the caller-supplied envp
+    // and filter to PM-relevant keys. Same contract as sentinel_posix_spawn.
+    // SAFETY: posix_spawnp's envp follows the POSIX execve(2) shape.
+    let pm_env = unsafe { crate::pm_env_filter::extract_pm_env_from_envp_mut(envp) };
     let _ = send_exec_event_sync(
         current_audit_token_wire(),
         &path_buf[..n],
         n,
+        pm_env,
         IPC_TIMEOUT_MS,
     );
     0

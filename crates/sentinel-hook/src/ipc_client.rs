@@ -16,7 +16,7 @@ use core::ffi::{c_char, CStr};
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     AuditTokenWire, DylibLoaded, DylibLoadedAck, ExecAck, ExecEvent, ForkAck, ForkEvent,
-    IPC_SCHEMA_V2, Resolve, ResolveReply, SOCKADDR_WIRE_LEN,
+    IPC_SCHEMA_V2, IPC_SCHEMA_V3, Resolve, ResolveReply, SOCKADDR_WIRE_LEN,
 };
 use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
@@ -206,20 +206,39 @@ pub fn send_fork_event_sync(
 /// bytes already copied from the user's `path` argument; this function caps
 /// the slice at `ExecEvent::MAX_TARGET_PATH (1024)` before serializing
 /// (T-02-01-06 closure carry-forward).
+///
+/// `pm_env` is the filtered package-manager environment captured at exec
+/// time (closes v0.1 milestone audit BLOCKER #1 — LOG-02 + VAL-01). Pass
+/// `Vec::new()` for callers that have no envp to walk (e.g. fork-without-
+/// exec); pass the result of
+/// `pm_env_filter::extract_pm_env_from_envp{_mut}` for exec/posix_spawn
+/// shadows.
+///
+/// When `pm_env` is non-empty the wire frame is upgraded to
+/// `IPC_SCHEMA_V3` so the daemon's V3 handler picks up the new field;
+/// when empty, the frame stays at `IPC_SCHEMA_V2` and serializes
+/// identically to the previous shape (forward-compatible — daemon
+/// `handle_exec_event_frame` accepts both V2 and V3).
 pub fn send_exec_event_sync(
     audit_token: AuditTokenWire,
     target_path: &[u8],
     target_path_len: usize,
+    pm_env: Vec<(String, String)>,
     timeout_ms: u64,
 ) -> Result<(), IpcClientError> {
     let len = target_path_len
         .min(target_path.len())
         .min(ExecEvent::MAX_TARGET_PATH);
+    let schema_version = if pm_env.is_empty() {
+        IPC_SCHEMA_V2
+    } else {
+        IPC_SCHEMA_V3
+    };
     let ev = ExecEvent {
-        schema_version: IPC_SCHEMA_V2,
+        schema_version,
         audit_token,
         target_path: target_path[..len].to_vec(),
-        pm_env: Vec::new(), // V2 caller — pm_env capture added in plan 03-04
+        pm_env,
     };
     let ack: ExecAck = send_tagged_and_recv_ack(TAG_EXEC_EVENT, &ev, timeout_ms)?;
     match ack {

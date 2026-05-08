@@ -74,4 +74,18 @@ pub use messages::{
     IPC_SCHEMA_V4,
     IntelMatch,
     FeedWarning,
+    // Phase 07 — ListRules (tag 0x0E)
+    ListRules,
+    ListRulesReply,
+    RuleRow,
+    // Phase 07 — ListTrust (tag 0x0F)
+    ListTrust,
+    ListTrustReply,
+    TrustRow,
+    // Phase 07 — IsTrusted (tag 0x10)
+    IsTrusted,
+    IsTrustedReply,
+    // Phase 07 — DeleteInstallArtifacts (tag 0x11; D-15 WARNING-5 fix)
+    DeleteInstallArtifacts,
+    DeleteInstallArtifactsReply,
 };

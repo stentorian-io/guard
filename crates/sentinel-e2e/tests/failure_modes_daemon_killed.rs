@@ -188,12 +188,28 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
     let _ = wrapped.kill();
     let _ = wrapped.wait();
 
-    // Assertion (per WARNING-5): denied OR timeout pass; leaked fails;
-    // None (no marker observed within deadline) is also a fail (test never
-    // saw a definitive phase-2 outcome — could indicate stdout pipe hang).
-    let pass = matches!(phase2_outcome, Some("denied") | Some("timeout"));
+    // Assertion (per WARNING-5 + WR-07): split strict and lenient passes so
+    // the test stays green today but the timeout-shape regression risk is
+    // visible.
+    //
+    // Pass shapes:
+    //   - 'denied'  — explicit cache-miss-deny from the dylib's libc::connect
+    //                 interceptor. PROVES fail-closed.
+    //   - 'timeout' — node's internal 4s deadline fired without daemon
+    //                 involvement. AMBIGUOUS — does not, on its own, prove
+    //                 the dylib refused; only proves node gave up. Accepted
+    //                 today per WARNING-5 because send_resolve_sync against
+    //                 a dead socket has no explicit timeout in v1; tighten
+    //                 to require 'denied' once the post-v1 hardening pass
+    //                 closes that gap.
+    // Fail shapes:
+    //   - 'leaked'  — connect succeeded; catastrophic.
+    //   - None      — no phase-2 marker before deadline; treat as fail
+    //                 (test could not observe the outcome).
+    let pass_lenient = matches!(phase2_outcome, Some("denied") | Some("timeout"));
+    let pass_strict = matches!(phase2_outcome, Some("denied"));
     assert!(
-        pass,
+        pass_lenient,
         "VAL-04 D-09 HARD assertion failed: PHASE2 did not fail closed.\n\
          Acceptable outcomes: 'denied' (explicit deny from cache-miss) OR \
          'timeout' (dylib hung against dead daemon socket → node 4s deadline).\n\
@@ -205,6 +221,15 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
         phase2_outcome,
         harness.drain_stderr()
     );
+    if !pass_strict {
+        eprintln!(
+            "[VAL-04 D-09 SOFT WR-07] PHASE2_TIMEOUT observed — fail-closed shape \
+             ambiguous (node gave up rather than dylib explicitly denying). \
+             Accepting per WARNING-5 but flagging for post-v1 tightening: when \
+             send_resolve_sync grows an explicit timeout against a dead socket, \
+             this test should require 'denied' specifically."
+        );
+    }
 
     // Drop harness — its Drop sends SIGTERM/SIGKILL to harness.child but harness.child
     // is already dead from the SIGKILL above. lib.rs:140-164 handles try_wait → SIGKILL

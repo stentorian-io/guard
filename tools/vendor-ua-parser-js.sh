@@ -48,8 +48,8 @@
 # macOS BSD shell tooling (RESEARCH §Environment Availability):
 #   - shasum -a 256       (NOT sha256sum — Apple ships shasum)
 #   - sed -i ''           (BSD sed: empty string after -i is REQUIRED in-place; GNU sed differs)
-#   - tar (libarchive)    (BSD/libarchive bsdtar 3.x — accepts --uid/--gid/--uname/--gname/
-#                          --options=!timestamp for deterministic output)
+#   - tar (libarchive)    (BSD/libarchive bsdtar 3.x — accepts --uid/--gid/--uname/--gname
+#                          for normalized ownership; mtime determinism via touch + gzip -n)
 #
 # Zip-slip safety note: this script does not extract any input tarball
 # (synthetic mocks have no upstream source). The `--no-same-owner` and
@@ -70,7 +70,7 @@ trap 'rm -rf "$tempdir"' EXIT
 # ---------------------------------------------------------------------------
 # Pinned hash. Replace <FILL_ON_FIRST_RUN> via the --update-pin flow above.
 # ---------------------------------------------------------------------------
-EXPECTED_OUTPUT_SHA256="<FILL_ON_FIRST_RUN>"
+EXPECTED_OUTPUT_SHA256="9398ea5503135f17bc0c424e6373ddce7c0e113d23577a136638dd7ddcdce984"
 
 # Determinism knobs.
 SOURCE_DATE_EPOCH=1577836800   # 2020-01-01T00:00:00Z UTC
@@ -141,27 +141,41 @@ echo ">>> Step 2: pack -> deterministic .tgz"
 out_tgz="$tempdir/ua-parser-js-0.7.29-sanitized.tgz"
 
 # Determinism strategy:
-#   - Fixed mtime via SOURCE_DATE_EPOCH (touch every file before packing).
+#   - Fixed mtime via touch -t (every file + the package/ dir).
 #   - bsdtar accepts --uid/--gid/--uname/--gname for normalized ownership.
-#   - Sort entries alphabetically (BSD find | sort) so archive layout is stable.
+#   - Sort entries alphabetically (find | LC_ALL=C sort) so archive layout
+#     is stable regardless of filesystem traversal order.
 #   - gzip -n strips embedded mtime/filename from gzip header.
-#   - Use bsdtar's --options=!timestamp (libarchive option) to suppress any
-#     intermediate timestamps libarchive would otherwise emit.
 #
-# Note: Apple-shipped /usr/bin/tar is libarchive bsdtar (verified by
+# Note: Apple-shipped /usr/bin/tar is libarchive bsdtar 3.x (verified by
 # `tar --version`). The flags below are bsdtar-specific. If a host has GNU
-# tar on PATH ahead of /usr/bin/tar, this script may produce a non-matching
-# hash; pin failure will catch it.
-touch -d "@$SOURCE_DATE_EPOCH" "$pkg_dir/package.json" "$pkg_dir/preinstall.js" "$pkg_dir/index.js" "$pkg_dir"
+# tar on PATH ahead of /usr/bin/tar, the explicit /usr/bin/tar invocation
+# below sidesteps it; if /usr/bin/tar is itself replaced, the pin failure
+# is the safety net.
+# BSD touch does not accept `-d @epoch` (that's GNU). Use `-t [[CC]YY]MMDDhhmm[.SS]`.
+# SOURCE_DATE_EPOCH=1577836800 -> 2020-01-01T00:00:00Z -> 202001010000.00
+# (Directory mtime is not used — tar packs file entries only; see -type f below.)
+touch -t 202001010000.00 \
+    "$pkg_dir/package.json" "$pkg_dir/preinstall.js" "$pkg_dir/index.js"
 
 uncompressed_tar="$tempdir/sanitized.tar"
 (
     cd "$build_dir"
     # Sorted entry list keeps tar layout stable across filesystem ordering.
-    find package -print | LC_ALL=C sort | \
+    # mtimes are already normalized by the touch above; tar is bsdtar
+    # (libarchive) on macOS — verified by `tar --version`. --uid/--gid/
+    # --uname/--gname normalize ownership without depending on the host
+    # filesystem's recorded uids/gids.
+    #
+    # find ... -type f (NOT -print) lists only file entries. Listing the
+    # directory `package/` AND its descendants would cause tar to add each
+    # file twice (once when tar recurses into the dir entry, once when the
+    # explicit file entry is processed). The directory header is created
+    # implicitly by tar when the first file under `package/` is added; npm
+    # pack output is structured the same way.
+    find package -type f -print | LC_ALL=C sort | \
         /usr/bin/tar -cf "$uncompressed_tar" \
             --uid 0 --gid 0 --uname '' --gname '' \
-            --options='!timestamp' \
             -T -
 )
 

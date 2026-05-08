@@ -1,6 +1,6 @@
 //! crates/sentinel-cli/src/baseline.rs
 //!
-//! Phase 3 plan 03-13 — `sentinel run --baseline` exit flow (POL-04 / D-58, D-59, D-60).
+//! Phase 3 plan 03-13 (Phase 06 rename) — `sentinel --learn <cmd>` exit flow (POL-04 / D-58, D-59, D-60).
 //! BLOCKER #2: D-60 3-way diff + 4-choice merge menu when existing .sentinel.toml has rules.
 
 use std::collections::HashSet;

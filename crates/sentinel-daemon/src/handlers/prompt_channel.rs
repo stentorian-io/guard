@@ -59,7 +59,14 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
     // first.
     let reader_state = Arc::clone(&state);
     let reader_uuid_for_cleanup = reader_uuid.clone();
-    let _ = std::thread::Builder::new()
+    // WR-02: capture the spawn result and tear down on failure. Previously a
+    // `let _ = ... .spawn(...)` swallowed any spawn error silently. With no
+    // reader thread, the main `select!` loop never receives a
+    // ClientChannelFrame; the only escape hatch is the rx (PromptRequest)
+    // arm closing on run teardown — meanwhile this handler holds an open
+    // prompt-channel slot under R-05 cap. Failing fast here returns the
+    // slot to the budget immediately.
+    let reader_spawn = std::thread::Builder::new()
         .name(format!(
             "sentineld-prompt-rdr-{}",
             &run_uuid[..8.min(run_uuid.len())]
@@ -103,6 +110,15 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
                 .take_prompt_channel(&reader_uuid_for_cleanup);
             tracing::debug!(run_uuid = %reader_uuid_for_cleanup, "prompt_channel reader exited");
         });
+    if let Err(e) = reader_spawn {
+        tracing::error!(
+            error = %e,
+            run_uuid = %run_uuid,
+            "prompt_channel: reader thread spawn failed; tearing down channel"
+        );
+        state.process_tree.take_prompt_channel(&run_uuid);
+        return;
+    }
 
     // WR-11: periodic dedup-window GC. The dispatch arms call forget() on
     // every successful response/cancel, but a Resolve that times out without

@@ -1,18 +1,46 @@
 #!/bin/bash
-# tools/vendor-ua-parser-js.sh — one-shot reconstruction of a sanitized
-# ua-parser-js@0.7.29 tarball. Run by maintainers, NOT by CI. Output is
-# committed to crates/sentinel-e2e/fixtures/ua-parser-js-0.7.29-sanitized/.
+# tools/vendor-ua-parser-js.sh — deterministic builder for the synthetic
+# ua-parser-js@0.7.29 fixture used by Sentinel's VAL-01 e2e validation.
 #
-# Reconstruction recipe per CONTEXT C-02:
-#   1. Pull ua-parser-js@0.7.28 from npm via `npm pack` (still published; pinned SHA-256).
-#   2. Extract tarball into a tempdir with --no-same-owner --no-same-permissions.
-#   3. Add preinstall.{js,sh,bat} from github commits 90fb09d8 / 8742775c / e09c01ed.
-#   4. Bump `version` to "0.7.29" in package.json.
-#   5. Apply the C-03 darwin-platform patch (rewrite the platform string check
-#      so the malicious dispatch fires on macOS).
-#   6. sed-rewrite ALL known C2 hostnames/IPs to `c2-sink.test.invalid`.
-#   7. `npm pack` to produce the sanitized tarball.
-#   8. Verify output `shasum -a 256` matches EXPECTED_OUTPUT_SHA256 pin.
+# *** SYNTHETIC MOCK ***
+#
+# This script does NOT vendor any real malicious bytes. It constructs a
+# hand-rolled mock that reproduces the SHAPE of the historical 2021
+# ua-parser-js@0.7.29 supply-chain attack — a postinstall script that opens
+# an outbound TCP connection — without containing any real malware, miner
+# payload, exfil keylogger, or live C2 hostname.
+#
+# Why synthetic instead of a real-tarball reconstruction?
+#   The original Plan 05-01 specified reconstruction from public github
+#   commits 90fb09d8 / 8742775c / e09c01ed. Those commits were SCRUBBED
+#   from github.com/faisalman/ua-parser-js in early 2026 (404 on github,
+#   no Wayback snapshot). CONTEXT D-06 explicitly named "synthetic mock"
+#   as the legitimate v0.2+ alternative if upstream fidelity becomes
+#   unattainable. Per the orchestrator-confirmed Rule 4 architectural
+#   pivot recorded in Plan 05-01 SUMMARY, that escape hatch is now
+#   invoked.
+#
+# What this script DOES (deterministic, byte-identical across hosts):
+#   1. Construct an in-tempdir `package/` tree:
+#      - package.json (synthetic, declares preinstall script)
+#      - preinstall.js (opens TCP to c2-sink.test.invalid:443, exits 0)
+#      - index.js (empty stub so `require('ua-parser-js')` does not throw)
+#   2. Pack the tree into a .tgz with normalized owner/group/mtime so the
+#      output is byte-identical regardless of build host.
+#   3. Compute shasum -a 256 of the output and verify it matches the
+#      EXPECTED_OUTPUT_SHA256 pin embedded in this script.
+#   4. Copy the verified .tgz into the fixture directory.
+#
+# Pin bootstrap workflow:
+#   First run:               bash tools/vendor-ua-parser-js.sh
+#                            (script prints actual hash, refuses to write
+#                             fixture; pin is still <FILL_ON_FIRST_RUN>)
+#   Embed the pin:           bash tools/vendor-ua-parser-js.sh --update-pin
+#                            (script accepts the freshly-computed hash and
+#                             rewrites EXPECTED_OUTPUT_SHA256 in place)
+#   Verify clean re-run:     bash tools/vendor-ua-parser-js.sh
+#                            (exit 0; fixture written; subsequent runs are
+#                             tamper-detection)
 #
 # CI never runs this script. CI verifies the COMMITTED tarball against the
 # pinned EXPECTED_OUTPUT_SHA256 (per CONTEXT D-02 / D-15).
@@ -20,9 +48,16 @@
 # macOS BSD shell tooling (RESEARCH §Environment Availability):
 #   - shasum -a 256       (NOT sha256sum — Apple ships shasum)
 #   - sed -i ''           (BSD sed: empty string after -i is REQUIRED in-place; GNU sed differs)
-#   - tar -xzf            (BSD tar; --no-same-owner --no-same-permissions are accepted)
-#   - npm pack            (npm 10.x; required for repacking)
-#   - git                 (required for `git show <SHA>:<file>` of the malicious commits)
+#   - tar (libarchive)    (BSD/libarchive bsdtar 3.x — accepts --uid/--gid/--uname/--gname/
+#                          --options=!timestamp for deterministic output)
+#
+# Zip-slip safety note: this script does not extract any input tarball
+# (synthetic mocks have no upstream source). The `--no-same-owner` and
+# `--no-same-permissions` extraction guards from the original
+# reconstruction recipe are therefore not present. If a future revision
+# re-introduces an extraction step, those flags MUST be re-added — see
+# RESEARCH §Security Domain V12.
+#
 set -euo pipefail
 
 # Paths.
@@ -32,153 +67,146 @@ fixture_dir="$repo_root/crates/sentinel-e2e/fixtures/ua-parser-js-0.7.29-sanitiz
 tempdir="$(mktemp -d)"
 trap 'rm -rf "$tempdir"' EXIT
 
-# Pinned hashes — fill in on first successful run, then commit alongside the tarball.
-# Replace the literal "<FILL_ON_FIRST_RUN>" with real hashes after the first script
-# execution; subsequent runs MUST match the pinned values byte-for-byte.
-EXPECTED_SOURCE_SHA256="<FILL_ON_FIRST_RUN>"
+# ---------------------------------------------------------------------------
+# Pinned hash. Replace <FILL_ON_FIRST_RUN> via the --update-pin flow above.
+# ---------------------------------------------------------------------------
 EXPECTED_OUTPUT_SHA256="<FILL_ON_FIRST_RUN>"
 
-# Pinned malicious commits per CONTEXT C-02.
-COMMIT_PRIMARY="90fb09d8"
-COMMIT_RELATED_1="8742775c"
-COMMIT_RELATED_2="e09c01ed"
-GITHUB_REPO="https://github.com/faisalman/ua-parser-js.git"
+# Determinism knobs.
+SOURCE_DATE_EPOCH=1577836800   # 2020-01-01T00:00:00Z UTC
+SINK_HOST="c2-sink.test.invalid"
+SINK_PORT="443"
 
-# Step 1: pull ua-parser-js@0.7.28 from npm.
-echo ">>> Step 1: npm pack ua-parser-js@0.7.28"
-(cd "$tempdir" && npm pack ua-parser-js@0.7.28 >/dev/null)
-source_tgz="$tempdir/ua-parser-js-0.7.28.tgz"
-[ -f "$source_tgz" ] || { echo "FATAL: npm pack did not produce expected tarball"; exit 1; }
+# CLI flag: --update-pin rewrites EXPECTED_OUTPUT_SHA256 in this script in-place.
+update_pin=0
+if [ "${1:-}" = "--update-pin" ]; then
+    update_pin=1
+fi
 
-# Verify source SHA-256 matches pin (BSD shasum, not GNU sha256sum).
-actual_source=$(shasum -a 256 "$source_tgz" | awk '{print $1}')
-if [ "$EXPECTED_SOURCE_SHA256" != "<FILL_ON_FIRST_RUN>" ] && [ "$actual_source" != "$EXPECTED_SOURCE_SHA256" ]; then
-    echo "FATAL: source tarball hash mismatch"
-    echo "  expected: $EXPECTED_SOURCE_SHA256"
-    echo "  actual:   $actual_source"
+# ---------------------------------------------------------------------------
+# Step 1: write the synthetic package/ tree.
+# ---------------------------------------------------------------------------
+echo ">>> Step 1: write synthetic package/ tree"
+build_dir="$tempdir/build"
+pkg_dir="$build_dir/package"
+mkdir -p "$pkg_dir"
+
+cat > "$pkg_dir/package.json" <<'JSON'
+{
+  "name": "ua-parser-js",
+  "version": "0.7.29",
+  "description": "Synthetic mock of ua-parser-js@0.7.29 for Sentinel VAL-01 e2e validation. Reproduces the postinstall->network-egress supply-chain attack shape; contains no real malicious bytes.",
+  "scripts": {
+    "preinstall": "node preinstall.js"
+  },
+  "main": "index.js"
+}
+JSON
+
+# preinstall.js — synthetic postinstall hook. Opens an outbound TCP connection
+# to a sink host (c2-sink.test.invalid) on port 443, prints a marker line to
+# stdout, and exits 0 regardless of connect outcome. Sentinel's hook dylib
+# blocks the connect at libc; the test harness asserts on the JSONL Decision
+# row emitted by the daemon.
+cat > "$pkg_dir/preinstall.js" <<JS
+// Synthetic supply-chain attack shape — reproduces postinstall->network-egress
+// without containing any real malicious bytes. Sentinel VAL-01 asserts that
+// the connection attempt below is intercepted and denied.
+'use strict';
+var net = require('net');
+process.stdout.write('ua-parser-js-mock: attempting connect to ${SINK_HOST}:${SINK_PORT}\n');
+var sock = net.createConnection({ host: '${SINK_HOST}', port: ${SINK_PORT} });
+sock.on('error', function () { /* swallow — Sentinel may EHOSTUNREACH us */ });
+sock.on('connect', function () { try { sock.destroy(); } catch (_) {} });
+// Exit 0 immediately so npm install does not abort before Sentinel's
+// JSONL Decision row is observable. The connection attempt is the
+// observable side-effect VAL-01 asserts on.
+process.exit(0);
+JS
+
+# index.js — empty stub so require('ua-parser-js') after install succeeds.
+cat > "$pkg_dir/index.js" <<'JS'
+'use strict';
+module.exports = {};
+JS
+
+echo "    package/package.json:  $(wc -c < "$pkg_dir/package.json" | tr -d ' ') bytes"
+echo "    package/preinstall.js: $(wc -c < "$pkg_dir/preinstall.js" | tr -d ' ') bytes"
+echo "    package/index.js:      $(wc -c < "$pkg_dir/index.js" | tr -d ' ') bytes"
+
+# ---------------------------------------------------------------------------
+# Step 2: deterministic pack.
+# ---------------------------------------------------------------------------
+echo ">>> Step 2: pack -> deterministic .tgz"
+out_tgz="$tempdir/ua-parser-js-0.7.29-sanitized.tgz"
+
+# Determinism strategy:
+#   - Fixed mtime via SOURCE_DATE_EPOCH (touch every file before packing).
+#   - bsdtar accepts --uid/--gid/--uname/--gname for normalized ownership.
+#   - Sort entries alphabetically (BSD find | sort) so archive layout is stable.
+#   - gzip -n strips embedded mtime/filename from gzip header.
+#   - Use bsdtar's --options=!timestamp (libarchive option) to suppress any
+#     intermediate timestamps libarchive would otherwise emit.
+#
+# Note: Apple-shipped /usr/bin/tar is libarchive bsdtar (verified by
+# `tar --version`). The flags below are bsdtar-specific. If a host has GNU
+# tar on PATH ahead of /usr/bin/tar, this script may produce a non-matching
+# hash; pin failure will catch it.
+touch -d "@$SOURCE_DATE_EPOCH" "$pkg_dir/package.json" "$pkg_dir/preinstall.js" "$pkg_dir/index.js" "$pkg_dir"
+
+uncompressed_tar="$tempdir/sanitized.tar"
+(
+    cd "$build_dir"
+    # Sorted entry list keeps tar layout stable across filesystem ordering.
+    find package -print | LC_ALL=C sort | \
+        /usr/bin/tar -cf "$uncompressed_tar" \
+            --uid 0 --gid 0 --uname '' --gname '' \
+            --options='!timestamp' \
+            -T -
+)
+
+# gzip -n suppresses original-filename and mtime fields in the gzip header.
+gzip -n -9 < "$uncompressed_tar" > "$out_tgz"
+
+# ---------------------------------------------------------------------------
+# Step 3: hash + verify against pin.
+# ---------------------------------------------------------------------------
+actual_output=$(shasum -a 256 "$out_tgz" | awk '{print $1}')
+echo "    output SHA-256: $actual_output"
+
+if [ "$update_pin" = "1" ]; then
+    # In-place rewrite of EXPECTED_OUTPUT_SHA256. BSD sed in-place: `sed -i ''`.
+    sed -i '' \
+        "s|^EXPECTED_OUTPUT_SHA256=\".*\"|EXPECTED_OUTPUT_SHA256=\"$actual_output\"|" \
+        "$script_dir/vendor-ua-parser-js.sh"
+    echo ""
+    echo "EXPECTED_OUTPUT_SHA256 pin updated in-place to:"
+    echo "  $actual_output"
+    echo ""
+    echo "Re-run \`bash tools/vendor-ua-parser-js.sh\` (without --update-pin) to verify."
+    exit 0
+fi
+
+if [ "$EXPECTED_OUTPUT_SHA256" = "<FILL_ON_FIRST_RUN>" ]; then
+    echo ""
+    echo "Pin not yet set. Re-run with --update-pin to embed the hash above:"
+    echo "  bash tools/vendor-ua-parser-js.sh --update-pin"
     exit 1
 fi
-echo "    source SHA-256: $actual_source"
 
-# Step 2: extract with safety flags (V12 zip-slip mitigation).
-echo ">>> Step 2: extract tarball (--no-same-owner --no-same-permissions)"
-extract_dir="$tempdir/extract"
-mkdir -p "$extract_dir"
-tar -xzf "$source_tgz" -C "$extract_dir" --no-same-owner --no-same-permissions
-# Defense-in-depth: reject any path containing `..` post-extract.
-if find "$extract_dir" -name '..' -print0 | grep -q .; then
-    echo "FATAL: zip-slip detected in extracted tarball"; exit 1
-fi
-pkg_dir="$extract_dir/package"
-[ -d "$pkg_dir" ] || { echo "FATAL: tarball did not contain package/ dir"; exit 1; }
-
-# Step 3: fetch malicious preinstall files from github commits and copy in.
-echo ">>> Step 3: fetch preinstall.{js,sh,bat} from commits $COMMIT_PRIMARY / $COMMIT_RELATED_1 / $COMMIT_RELATED_2"
-git_clone="$tempdir/ua-parser-js-clone"
-git clone --quiet "$GITHUB_REPO" "$git_clone"
-# Try the primary commit first; fall back to related commits if a file is missing.
-for file in preinstall.js preinstall.sh preinstall.bat; do
-    found=""
-    for sha in "$COMMIT_PRIMARY" "$COMMIT_RELATED_1" "$COMMIT_RELATED_2"; do
-        if git -C "$git_clone" show "$sha:$file" > "$pkg_dir/$file" 2>/dev/null; then
-            found="$sha"
-            break
-        fi
-    done
-    [ -n "$found" ] || { echo "FATAL: $file not found in any pinned commit"; exit 1; }
-    echo "    $file <- commit $found"
-done
-
-# Step 4: bump version.
-echo ">>> Step 4: bump version to 0.7.29 in package.json"
-# BSD sed in-place requires `''` after -i.
-sed -i '' 's/"version": *"0\.7\.28"/"version": "0.7.29"/' "$pkg_dir/package.json"
-grep -q '"version": *"0.7.29"' "$pkg_dir/package.json" || { echo "FATAL: version bump failed"; exit 1; }
-
-# Step 5: C-03 darwin-platform patch — make the malicious branch fire on macOS.
-# preinstall.js has `if (opsys === "MacOS") return;` (or equivalent) that no-ops on darwin.
-# Rewrite the platform check so darwin dispatches to the (now-sanitized) malicious branch.
-echo ">>> Step 5: C-03 darwin-platform patch"
-# Cover both single- and double-quoted forms; cover both `process.platform` and an
-# `opsys`-style platform variable assigned from process.platform.
-sed -i '' \
-    "s|process.platform === 'darwin'|process.platform === '__sentinel_disabled__'|g" \
-    "$pkg_dir/preinstall.js"
-sed -i '' \
-    's|process.platform === "darwin"|process.platform === "__sentinel_disabled__"|g' \
-    "$pkg_dir/preinstall.js"
-sed -i '' \
-    "s|opsys == 'MacOS'|opsys == '__sentinel_disabled__'|g" \
-    "$pkg_dir/preinstall.js"
-sed -i '' \
-    's|opsys == "MacOS"|opsys == "__sentinel_disabled__"|g' \
-    "$pkg_dir/preinstall.js"
-sed -i '' \
-    "s|opsys === 'MacOS'|opsys === '__sentinel_disabled__'|g" \
-    "$pkg_dir/preinstall.js"
-sed -i '' \
-    's|opsys === "MacOS"|opsys === "__sentinel_disabled__"|g' \
-    "$pkg_dir/preinstall.js"
-# Verify SOMETHING was patched (preinstall.js MUST contain the disabled marker now).
-grep -q '__sentinel_disabled__' "$pkg_dir/preinstall.js" || \
-    { echo "FATAL: C-03 darwin patch had no effect — preinstall.js platform check shape changed"; exit 1; }
-
-# Step 6: sink-rewrite all C2 hostnames/IPs (per RESEARCH §Tertiary IoC list).
-# These are the historical IoCs documented in the public CVE writeups for
-# ua-parser-js@0.7.29; we rewrite each to a sink hostname that does not exist.
-echo ">>> Step 6: rewrite C2 hosts to c2-sink.test.invalid"
-SINK="c2-sink.test.invalid"
-for c2 in \
-    "159.148.186.228" \
-    "citationsherbe.at" \
-    "194.76.225.46" \
-    "185.158.250.216" \
-    "45.11.180.153" \
-    "194.76.225.61" \
-    "xmr-eu1.nanopool.org" \
-    "sdd.bdvl"; do
-    # Apply to both preinstall.js and preinstall.sh; .bat is windows-only but rewrite for completeness.
-    for target in "$pkg_dir"/preinstall.js "$pkg_dir"/preinstall.sh "$pkg_dir"/preinstall.bat; do
-        [ -f "$target" ] || continue
-        sed -i '' "s|${c2}|${SINK}|g" "$target"
-    done
-done
-# Verify NO original C2 string survives in the patched files (negative grep gate).
-# --include='preinstall.*' scopes the grep to the rewritten files only — the script's
-# own source contains the pre-rewrite literals and must not self-invalidate.
-for c2 in "159.148.186.228" "citationsherbe.at" "xmr-eu1.nanopool.org"; do
-    if grep -r --include='preinstall.*' -F "$c2" "$pkg_dir"; then
-        echo "FATAL: C2 string '$c2' survived sanitization"; exit 1
-    fi
-done
-
-# Step 7: npm pack.
-echo ">>> Step 7: npm pack -> sanitized tarball"
-output_dir="$tempdir/output"
-mkdir -p "$output_dir"
-(cd "$pkg_dir" && npm pack --pack-destination "$output_dir" >/dev/null)
-sanitized_tgz="$output_dir/ua-parser-js-0.7.29.tgz"
-[ -f "$sanitized_tgz" ] || { echo "FATAL: npm pack did not produce 0.7.29 tarball"; exit 1; }
-
-# Step 8: verify output SHA-256 matches pin.
-actual_output=$(shasum -a 256 "$sanitized_tgz" | awk '{print $1}')
-if [ "$EXPECTED_OUTPUT_SHA256" != "<FILL_ON_FIRST_RUN>" ] && [ "$actual_output" != "$EXPECTED_OUTPUT_SHA256" ]; then
+if [ "$actual_output" != "$EXPECTED_OUTPUT_SHA256" ]; then
     echo "FATAL: output tarball hash mismatch"
     echo "  expected: $EXPECTED_OUTPUT_SHA256"
     echo "  actual:   $actual_output"
     exit 1
 fi
-echo "    output SHA-256: $actual_output"
 
-# Copy into the fixture directory under the canonical filename.
+# ---------------------------------------------------------------------------
+# Step 4: copy verified output into fixture directory.
+# ---------------------------------------------------------------------------
 mkdir -p "$fixture_dir"
-cp "$sanitized_tgz" "$fixture_dir/ua-parser-js-0.7.29-sanitized.tgz"
+cp "$out_tgz" "$fixture_dir/ua-parser-js-0.7.29-sanitized.tgz"
 
 echo ""
 echo "Done. Committed-output path: $fixture_dir/ua-parser-js-0.7.29-sanitized.tgz"
-echo "  source SHA-256: $actual_source"
 echo "  output SHA-256: $actual_output"
-echo ""
-echo "If this is the first run, paste those two hashes into:"
-echo "  EXPECTED_SOURCE_SHA256, EXPECTED_OUTPUT_SHA256 (this script)"
-echo "  README.md (under fixture dir) — Provenance + Pinned Hashes section"

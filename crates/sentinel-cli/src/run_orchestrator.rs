@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use sha2::Digest;
+
 use crate::CliError;
 
 pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, learn_mode: bool) -> Result<i32, CliError> {
@@ -19,6 +21,48 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, learn_mode: bo
     let is_tty = std::io::stdin().is_terminal();
 
     crate::ipc_client::probe_daemon_alive(sock)?;
+
+    // Phase 07 D-24/D-25: first-trust prompt for .sentinel.toml.
+    // Walks up from cwd looking for .sentinel.toml (Phase 2 D-36 boundary).
+    // If found and untrusted: TTY → prompt y/N + trust on yes; non-TTY →
+    // auto-trust + stderr notice. The daemon re-hashes the file at the
+    // TrustPolicy IPC handler (T-02-06a-01).
+    if let Some(toml_path) = sentinel_core::policy_file::find_sentinel_toml(&cwd) {
+        let canonical = toml_path.canonicalize()
+            .map_err(|e| CliError::Other(format!("canonicalize {}: {e}", toml_path.display())))?;
+        let canonical_str = canonical.display().to_string();
+        let bytes = std::fs::read(&canonical)
+            .map_err(|e| CliError::Other(format!("read {}: {e}", canonical.display())))?;
+        let sha = format!("{:x}", sha2::Sha256::digest(&bytes));
+
+        let trusted = crate::ipc_client::is_trusted_request(sock, &canonical_str, &sha)?;
+        if !trusted {
+            if is_tty {
+                // Parse + display + prompt y/N.
+                let toml_text = std::str::from_utf8(&bytes)
+                    .map_err(|e| CliError::Other(format!("not UTF-8: {e}")))?;
+                let parsed = sentinel_core::policy_file::parse(toml_text)
+                    .map_err(|e| CliError::Other(format!("parse: {e}")))?;
+                println!("Reviewing {}:", canonical.display());
+                println!("  version = {}", parsed.version);
+                crate::trust_policy::display_rules(&parsed);
+                if crate::tty::confirm("Trust this file?")? {
+                    crate::ipc_client::trust_policy_request(sock, &canonical_str, &sha)?;
+                    println!("Trusted. (sha256={})", &sha[..12]);
+                } else {
+                    println!("Not trusted; rules will be ignored for this run.");
+                }
+            } else {
+                // D-25: non-TTY auto-trust (file is committed + code-review-gated).
+                crate::ipc_client::trust_policy_request(sock, &canonical_str, &sha)?;
+                eprintln!(
+                    "sentinel: trusted .sentinel.toml at {} (sha256={}; non-TTY auto-trust)",
+                    canonical.display(),
+                    &sha[..12],
+                );
+            }
+        }
+    }
 
     // Phase 4 plan 04-03: spawn a CR-overwrite progress thread on stderr while
     // the daemon does the synchronous feed fetch. The progress thread is

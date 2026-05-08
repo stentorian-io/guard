@@ -148,18 +148,27 @@ impl DeferredResolveTable {
 
     /// Send Deny on every sender whose entry.run_uuid matches; remove those entries.
     /// Called during prompt-channel teardown to prevent parked Resolve handler thread leaks.
-    pub fn drain_for_run(&self, run_uuid: &str) {
+    ///
+    /// WR-03: returns the (host, port) tuples that were drained so the caller
+    /// can also clear PromptDedup entries for the same connections. Without
+    /// this, dedup entries from terminated runs accumulate until daemon
+    /// restart (the only `gc_expired` call site is the prompt_channel
+    /// gc_tick, which stops ticking after this thread exits).
+    pub fn drain_for_run(&self, run_uuid: &str) -> Vec<(String, u16)> {
         let mut g = self.pending.lock().unwrap_or_else(|p| p.into_inner());
         let to_remove: Vec<String> = g
             .iter()
             .filter(|(_, e)| e.run_uuid == run_uuid)
             .map(|(k, _)| k.clone())
             .collect();
+        let mut drained: Vec<(String, u16)> = Vec::with_capacity(to_remove.len());
         for k in to_remove {
             if let Some(entry) = g.remove(&k) {
                 let _ = entry.sender.send(sentinel_core::Verdict::Deny);
+                drained.push((entry.host, entry.port));
             }
         }
+        drained
     }
 }
 

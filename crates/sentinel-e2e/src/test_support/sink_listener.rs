@@ -40,8 +40,15 @@ pub struct HostsRewriter {
 impl HostsRewriter {
     /// Append `127.0.0.1 <host>` lines for every entry in `hosts`. Uses
     /// `sudo tee /etc/hosts` (passwordless on macos-14 GHA per Pitfall 6).
+    ///
+    /// CR-01: fail closed on /etc/hosts read errors. The previous
+    /// `unwrap_or_default()` defaulted to an empty `Vec<u8>` on read error,
+    /// which would later be written back via `sudo tee /etc/hosts` on
+    /// `restore()` / `Drop`, wiping the developer's real hosts file. Callers
+    /// (e.g. `start_or_hosts`) already treat `Err` as "fall back to
+    /// SinkListener", so propagating the error is the correct safe path.
     pub fn new(hosts: &[&str]) -> io::Result<Self> {
-        let original = std::fs::read("/etc/hosts").unwrap_or_default();
+        let original = std::fs::read("/etc/hosts")?;
         let mut new_content = original.clone();
         new_content.push(b'\n');
         for host in hosts {
@@ -53,9 +60,19 @@ impl HostsRewriter {
     }
 
     /// Restore the original /etc/hosts bytes. Idempotent.
+    ///
+    /// CR-01 defense-in-depth: refuse to write a 0-byte buffer to
+    /// /etc/hosts. Even though `new()` now propagates the read error, this
+    /// guard catches future regressions (e.g. someone constructing
+    /// `HostsRewriter` from another path with a different invariant).
     pub fn restore(&self) -> io::Result<()> {
         if self.restored.swap(true, Ordering::SeqCst) {
             return Ok(());
+        }
+        if self.saved.is_empty() {
+            return Err(io::Error::other(
+                "HostsRewriter::restore refusing to write empty saved buffer",
+            ));
         }
         Self::write_via_sudo_tee(&self.saved)
     }

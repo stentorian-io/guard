@@ -6,6 +6,15 @@
 //!
 //! Closes UAT item #1 from .planning/phases/03-cli-surface-ux-forensic-logging/
 //! 03-VERIFICATION.md.
+//!
+//! Phase 07 plan 05 (D-09, D-10): rewritten for the 2-verb hard-cut surface.
+//!   `sentinel install --no-shell-integration` → `sentinel setup daemon`
+//!   `sentinel install`                        → `sentinel setup` (bare)
+//!   `sentinel uninstall --force`              → `sentinel setup --remove -y`
+//! Bare `setup` is the drift-safe idempotent re-apply (D-19); since `setup`
+//! is non-confirming on a clean tempdir HOME, no `y\n` is needed on stdin.
+//! Bare `setup` also includes shell integration when target is omitted, so
+//! it preserves the second test's marker-block invariants.
 
 use std::io::Write as _;
 use std::process::{Command, Stdio};
@@ -28,9 +37,9 @@ fn install_writes_all_artifacts_then_uninstall_removes_them() {
         panic!("sentineld binary not found at {} — run cargo build first", daemon_bin.display());
     }
 
-    // --- INSTALL ---
+    // --- SETUP DAEMON --- (was: install --no-shell-integration)
     let mut child = Command::new(&cli)
-        .arg("install").arg("--no-shell-integration")
+        .arg("setup").arg("daemon")
         .env_clear()
         .env("HOME", home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -38,13 +47,13 @@ fn install_writes_all_artifacts_then_uninstall_removes_them() {
         .env("SENTINEL_STATE_DIR", &state_dir)
         .env("SENTINEL_SKIP_LAUNCHCTL", "1")
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().expect("spawn sentinel install");
+        .spawn().expect("spawn sentinel setup daemon");
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(b"y\n");
     }
-    let install_out = child.wait_with_output().expect("install wait");
+    let install_out = child.wait_with_output().expect("setup daemon wait");
     assert!(install_out.status.success(),
-        "install failed: status={:?} stdout={} stderr={}",
+        "setup daemon failed: status={:?} stdout={} stderr={}",
         install_out.status.code(),
         String::from_utf8_lossy(&install_out.stdout),
         String::from_utf8_lossy(&install_out.stderr));
@@ -70,26 +79,26 @@ fn install_writes_all_artifacts_then_uninstall_removes_them() {
     assert!(kinds.iter().any(|k| k == "log_dir"), "no log_dir row: {kinds:?}");
     drop(stmt); drop(conn);
 
-    // --- UNINSTALL ---
+    // --- SETUP --REMOVE -y --- (was: uninstall --force)
     let uninstall_out = Command::new(&cli)
-        .arg("uninstall").arg("--force")
+        .arg("setup").arg("--remove").arg("-y")
         .env_clear()
         .env("HOME", home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("SENTINEL_STATE_DIR", &state_dir)
         .env("SENTINEL_SKIP_LAUNCHCTL", "1")
-        .output().expect("uninstall wait");
+        .output().expect("setup --remove wait");
     assert!(uninstall_out.status.success(),
-        "uninstall failed: status={:?} stdout={} stderr={}",
+        "setup --remove failed: status={:?} stdout={} stderr={}",
         uninstall_out.status.code(),
         String::from_utf8_lossy(&uninstall_out.stdout),
         String::from_utf8_lossy(&uninstall_out.stderr));
 
-    assert!(!plist.exists(), "plist still present after uninstall");
-    assert!(!init_sh.exists(), "init.sh still present after uninstall");
-    assert!(!state_dir.exists(), "state_dir still present after uninstall");
+    assert!(!plist.exists(), "plist still present after setup --remove");
+    assert!(!init_sh.exists(), "init.sh still present after setup --remove");
+    assert!(!state_dir.exists(), "state_dir still present after setup --remove");
     let log_dir = home.path().join("Library/Logs/Sentinel");
-    assert!(!log_dir.exists(), "log_dir still present after uninstall");
+    assert!(!log_dir.exists(), "log_dir still present after setup --remove");
 }
 
 #[cfg(target_os = "macos")]
@@ -112,7 +121,7 @@ fn install_with_shell_integration_writes_marker_blocks() {
     let daemon_bin = cargo_target_dir().join("sentineld");
 
     let mut child = Command::new(&cli)
-        .arg("install")  // shell integration enabled (default)
+        .arg("setup")  // bare setup → daemon + shell integration (D-19)
         .env_clear()
         .env("HOME", home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -120,13 +129,13 @@ fn install_with_shell_integration_writes_marker_blocks() {
         .env("SENTINEL_STATE_DIR", &state_dir)
         .env("SENTINEL_SKIP_LAUNCHCTL", "1")
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().expect("spawn sentinel install");
+        .spawn().expect("spawn sentinel setup");
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(b"y\n");
     }
-    let install_out = child.wait_with_output().expect("install wait");
+    let install_out = child.wait_with_output().expect("setup wait");
     assert!(install_out.status.success(),
-        "install failed; stderr: {}", String::from_utf8_lossy(&install_out.stderr));
+        "setup failed; stderr: {}", String::from_utf8_lossy(&install_out.stderr));
 
     let zshrc_after = std::fs::read_to_string(&zshrc).unwrap();
     let bashrc_after = std::fs::read_to_string(&bashrc).unwrap();
@@ -144,22 +153,22 @@ fn install_with_shell_integration_writes_marker_blocks() {
     assert_eq!(count, 2, "expected exactly 2 marker_block rows, got {count}");
     drop(conn);
 
-    // Uninstall, assert markers stripped.
+    // setup --remove -y, assert markers stripped.
     let uninstall_out = Command::new(&cli)
-        .arg("uninstall").arg("--force")
+        .arg("setup").arg("--remove").arg("-y")
         .env_clear()
         .env("HOME", home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("SENTINEL_STATE_DIR", &state_dir)
         .env("SENTINEL_SKIP_LAUNCHCTL", "1")
-        .output().expect("uninstall wait");
+        .output().expect("setup --remove wait");
     assert!(uninstall_out.status.success(),
-        "uninstall failed: stderr={}", String::from_utf8_lossy(&uninstall_out.stderr));
+        "setup --remove failed: stderr={}", String::from_utf8_lossy(&uninstall_out.stderr));
 
     let zshrc_final = std::fs::read_to_string(&zshrc).unwrap();
     let bashrc_final = std::fs::read_to_string(&bashrc).unwrap();
     assert!(!zshrc_final.contains("# >>> sentinel >>>"),
-        "zshrc still has marker after uninstall: {zshrc_final}");
+        "zshrc still has marker after setup --remove: {zshrc_final}");
     assert!(!bashrc_final.contains("# >>> sentinel >>>"),
-        "bashrc still has marker after uninstall");
+        "bashrc still has marker after setup --remove");
 }

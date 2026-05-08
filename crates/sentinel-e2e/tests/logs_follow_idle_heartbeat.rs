@@ -18,7 +18,9 @@ fn follow_survives_6s_idle_then_resumes_streaming() {
     // Touch sentinel.log so --follow has something to subscribe to.
     std::fs::write(&log_path, b"").expect("touch log");
 
+    // Phase 07 plan 05 (D-09, D-10): `logs --follow` → `status logs --follow`.
     let mut follow = Command::new(&cli)
+        .arg("status")
         .arg("logs")
         .arg("--follow")
         .env_clear()

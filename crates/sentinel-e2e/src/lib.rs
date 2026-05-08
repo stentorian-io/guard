@@ -440,25 +440,30 @@ impl DaemonHarness {
         // harmless but redundant — and direct field-by-field move is forbidden
         // for types implementing Drop). Use ManuallyDrop + ptr::read.
         //
+        // CR-04: previously this block also performed
+        //   let _ = std::ptr::read(&me.child);
+        //   let _ = std::ptr::read(&me.socket);
+        //   let _ = std::ptr::read(&me.manifest);
+        // to "explicitly drop" the unread fields. That was UB: ptr::read makes
+        // a bitwise copy and the new copy gets dropped at end-of-statement, so
+        // for `Child` (which owns stdin/stdout/stderr pipe `File`s) this dropped
+        // a duplicate of those `File`s, racing FD reuse with the original.
+        // ManuallyDrop already suppresses Drop on `me` itself, so any unread
+        // fields are simply leaked when `me` goes out of scope — that is the
+        // intended behavior for `child` (already waited), `socket` (PathBuf —
+        // a small allocation leak, no resource impact), and `manifest` (same).
+        //
         // SAFETY: `self.child` has already been waited (or killed and waited)
-        // above. `state_dir`, `socket`, and `manifest` are PathBufs (POD-like;
-        // their Drops only release String capacity). After the three reads
-        // below, we never touch `me` again. ManuallyDrop suppresses the
-        // type's destructor, so the unread fields (`child`, `socket`,
-        // `manifest`) are simply leaked-then-deallocated when `me` itself
-        // goes out of scope (no double-drop, no resource leak that matters
-        // because their resources were already cleaned up).
+        // above. After the three reads below, we never touch `me` again.
+        // ManuallyDrop suppresses the type's destructor, so the unread fields
+        // (`child`, `socket`, `manifest`) are leaked when `me` itself goes out
+        // of scope. The leaks are bounded (one Child whose process is already
+        // reaped + two PathBufs) and self-recoverable on harness reuse.
         let me = std::mem::ManuallyDrop::new(self);
         unsafe {
             let state_dir = std::ptr::read(&me.state_dir);
             let home = std::ptr::read(&me.home);
             let _state_tmp = std::ptr::read(&me._state_tmp);
-            // Explicitly drop the unused fields so we don't leak Child handle
-            // memory or PathBuf allocations. `child` was already waited; this
-            // just releases the Child wrapper itself.
-            let _ = std::ptr::read(&me.child);
-            let _ = std::ptr::read(&me.socket);
-            let _ = std::ptr::read(&me.manifest);
             Ok(StoppedHarness {
                 state_dir,
                 home,

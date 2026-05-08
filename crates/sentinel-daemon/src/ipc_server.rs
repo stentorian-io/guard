@@ -809,6 +809,19 @@ fn handle_legacy_register_root(
 /// wire-claimed audit_token names some OTHER user's process. Tracking
 /// per se grants no network-enforcement privilege, but it does corrupt the
 /// gap-detector and process-tree coverage for that pid's descendants.
+///
+/// WR-05 limitation (documented for v1): this check does NOT verify the
+/// wire-claimed `pidversion` (audit_token.val[7]) against the kernel-
+/// reported pidversion. macOS `proc_pidinfo(PROC_PIDTBSDINFO)` returns a
+/// `proc_bsdinfo` struct that lacks pidversion; the version is exposed via
+/// `PROC_PIDT_SHORTBSDINFO` / `proc_bsdshortinfo`, which `libc` 0.2.186
+/// does not currently bind. Consequently a same-uid local attacker can win
+/// a PID-reuse race between the CLI's `task_info(TASK_AUDIT_TOKEN)` call
+/// and this verification, registering a same-uid recycled pid as a tracked
+/// root. The trust boundary is same-uid only (no privilege boundary in v1),
+/// so this is bounded — but tighten in a future revision by either binding
+/// `proc_bsdshortinfo` via custom FFI, or migrating to a Phase 2 ES-based
+/// process supervisor that exposes `responsible_audit_token` directly.
 fn verify_wire_pid_same_uid(wire_pid: libc::pid_t) -> bool {
     // SAFETY: zeroed proc_bsdinfo is a valid initial state for libc; we only
     // read the bytes proc_pidinfo writes back. The buffer is `info`'s memory

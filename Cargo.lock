@@ -3345,6 +3345,7 @@ dependencies = [
  "sentinel-daemon",
  "sentinel-ipc",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 

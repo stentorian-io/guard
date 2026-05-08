@@ -91,6 +91,17 @@ impl InstallArtifactStore {
         )
     }
 
+    /// Phase 07 D-15 (WARNING-5 fix): bulk delete by artifact_kind. Used by
+    /// the DeleteInstallArtifacts IPC handler so per-target `setup --remove`
+    /// leaves no rows behind.
+    pub fn delete_by_kind(&self, artifact_kind: &str) -> SqlResult<usize> {
+        let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+        conn.execute(
+            "DELETE FROM install_artifacts WHERE artifact_kind = ?1",
+            params![artifact_kind],
+        )
+    }
+
     pub fn delete_all(&self) -> SqlResult<usize> {
         let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         conn.execute("DELETE FROM install_artifacts", [])

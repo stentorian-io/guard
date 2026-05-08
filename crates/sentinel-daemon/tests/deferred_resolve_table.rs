@@ -63,7 +63,17 @@ fn drain_for_run_signals_deny_and_removes() {
         table.insert(format!("p-B-{i}"), e);
         b_rxs.push(rx);
     }
-    table.drain_for_run("run-A");
+    // WR-03: drain_for_run now returns the (host, port) tuples removed so
+    // callers can forget() the corresponding PromptDedup entries.
+    let drained = table.drain_for_run("run-A");
+    assert_eq!(drained.len(), 5);
+    let mut sorted = drained.clone();
+    sorted.sort();
+    let mut expected: Vec<(String, u16)> = (0..5u16)
+        .map(|i| ("example.com".to_string(), 443 + i))
+        .collect();
+    expected.sort();
+    assert_eq!(sorted, expected);
     // All A receivers got Deny.
     for rx in &a_rxs {
         assert!(matches!(

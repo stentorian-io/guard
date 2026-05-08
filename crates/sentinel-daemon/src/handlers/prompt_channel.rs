@@ -150,7 +150,15 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
 
     // Cleanup on exit — drain any prompts parked for this run as Deny so the parked
     // Resolve handler threads don't leak.
-    state.deferred_resolve.drain_for_run(&run_uuid);
+    //
+    // WR-03: also forget the dedup entries for the drained tuples. Without
+    // this, dedup state for terminated runs accumulates until daemon
+    // restart — gc_expired is only called from this thread's gc_tick arm,
+    // which stops ticking after the loop exits.
+    let drained = state.deferred_resolve.drain_for_run(&run_uuid);
+    for (host, port) in drained {
+        state.prompt_dedup.forget(&run_uuid, &host, port);
+    }
     state.process_tree.take_prompt_channel(&run_uuid);
     let _ = state.baseline_staging.take(&run_uuid);
     tracing::debug!(run_uuid = %run_uuid, "prompt_channel thread exit");

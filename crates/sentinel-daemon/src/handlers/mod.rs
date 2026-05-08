@@ -7,7 +7,11 @@
 //! independent unit tests, so they live as separate modules.
 
 pub mod baseline_commit;
+pub mod delete_install_artifacts;
 pub mod insert_user_rule;
+pub mod is_trusted;
+pub mod list_rules;
+pub mod list_trust;
 pub mod prepare_snapshot;
 pub mod prompt_channel;
 pub mod read_install_artifacts;

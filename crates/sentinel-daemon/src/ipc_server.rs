@@ -1065,6 +1065,32 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     // extract_pm_env applies the prefix allowlist + R-08 secret denylist + wire-size cap.
     // V2 messages decode with pm_env=[] (via #[serde(default)]) → captured is empty → no-op.
     let captured = crate::env_capture::extract_pm_env(&ev.pm_env);
+    // quick-260508-et9 (BLOCKER #1): emit a forensic tracing line so e2e
+    // tests can drain_stderr() and HARD-assert that pm_env capture
+    // landed without depending on JSONL log timing. Privacy-safe:
+    // we log the COUNT of captured pairs and the COUNT of pairs the
+    // dylib sent (some of which the daemon's denylist may have
+    // additionally dropped), NEVER values. Emitted at info-level so
+    // the default RUST_LOG=info captures it in the e2e harness.
+    //
+    // Uses the module-default target (`sentinel_daemon::ipc_server`) NOT a
+    // custom target — RUST_LOG=info matches by module-prefix, and a custom
+    // target like `sentinel.exec.pm_env` would NOT match
+    // `sentinel_daemon=info` (RUST_LOG matches against the event's target,
+    // which defaults to the module path). Discovered the hard way during
+    // the BLOCKER #1 e2e wiring — see git log on this file.
+    //
+    // Emitted unconditionally (even when captured.is_empty()) so the test
+    // can distinguish "ExecEvent never reached the handler" (no log line
+    // at all) from "ExecEvent reached the handler but pm_env was empty"
+    // (log line with captured=0, wire_pairs=0).
+    info!(
+        peer_pid = peer_token.val[5],
+        captured = captured.len(),
+        wire_pairs = ev.pm_env.len(),
+        schema_version = ev.schema_version,
+        "pm_env_captured"
+    );
     if !captured.is_empty() {
         state.process_tree.set_pm_env_snapshot(&peer_token, captured);
     }

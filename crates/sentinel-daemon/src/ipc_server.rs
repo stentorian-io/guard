@@ -56,6 +56,10 @@ pub struct DeferredEntry {
     pub host: String,
     pub port: u16,
     pub sender: crossbeam_channel::Sender<sentinel_core::Verdict>,
+    /// Phase 5 plan 05-03: package context resolved at prompt-build time, replayed
+    /// when emit_decision_row fires from the response handler. None if the peer
+    /// process tree has no PM ancestor (no npm_/CARGO_/PIP_ env signal).
+    pub package_context: Option<sentinel_ipc::PackageContext>,
 }
 
 /// Maps prompt_id → DeferredEntry. The Resolve handler inserts when parking;
@@ -1210,6 +1214,24 @@ fn handle_resolve_frame(
             crate::prompt::CoalesceOutcome::Fresh => prompt_id.clone(),
             crate::prompt::CoalesceOutcome::Existing(other_id) => other_id,
         };
+        // Phase 5 plan 05-03: resolve package_context at prompt-build time so the
+        // user's TTY prompt UI can display it AND the JSONL Decision row emitted
+        // from the response handler carries it (CONTEXT C-01). The dylib never
+        // sends package_context over the wire (T-05-12 mitigation) — it is
+        // daemon-resolved here from the kernel-sourced peer_token (ENF-08).
+        //
+        // root_command best-effort: infer_package_context only uses this input
+        // to populate PackageContext.root_command. The CRITICAL field for
+        // VAL-01/VAL-02 is `package`, not `root_command`, so passing an empty
+        // string here is acceptable. ProcessTree does not currently expose a
+        // per-run root-command helper.
+        let root_command_for_pkg = String::new();
+        let resolved_package_context: Option<sentinel_ipc::PackageContext> =
+            crate::log_writer::infer_package_context(
+                &state.process_tree,
+                &peer_token,
+                &root_command_for_pkg,
+            );
         let (tx, rx) = crossbeam_channel::bounded::<sentinel_core::Verdict>(1);
         state.deferred_resolve.insert(
             effective_id.clone(),
@@ -1218,6 +1240,7 @@ fn handle_resolve_frame(
                 host: req.host.clone(),
                 port: req.port,
                 sender: tx,
+                package_context: resolved_package_context.clone(),
             },
         );
         // Build PromptRequest.
@@ -1240,7 +1263,7 @@ fn handle_resolve_frame(
             dest_ip: None,
             source_kind: "resolve".to_string(),
             source_locator: None,
-            package_context: None,
+            package_context: resolved_package_context.clone(),
             process: process_ctx,
             intel: None,
             suggested_rules: suggested,

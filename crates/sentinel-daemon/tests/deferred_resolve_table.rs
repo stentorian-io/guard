@@ -18,6 +18,7 @@ fn entry(
             host: host.into(),
             port,
             sender: tx,
+            package_context: None,
         },
         rx,
     )

@@ -1,7 +1,6 @@
 //! Sentinel CLI library — exposes spawn / locate / audit_token / ipc_client /
 //! trust_policy for use by integration tests AND main.rs.
 
-pub mod approve;
 pub mod audit_token;
 pub mod baseline;
 pub mod cli;

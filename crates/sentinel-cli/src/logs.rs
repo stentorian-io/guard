@@ -7,7 +7,10 @@ use std::io::Write;
 use crate::install::launchagent::logs_dir;
 use crate::CliError;
 
-pub fn run_logs(follow: bool) -> Result<i32, CliError> {
+/// `json`: future-facing flag; the JSONL forensic log is already JSON
+/// natively, so for now this flag is a no-op (kept for D-23 parity with
+/// other status reads — re-investigate if a different formatter is added).
+pub fn run_logs(follow: bool, _json: bool) -> Result<i32, CliError> {
     let active = logs_dir().join("sentinel.log");
     if follow {
         crate::logs_follow::tail(&active).map(|()| 0)

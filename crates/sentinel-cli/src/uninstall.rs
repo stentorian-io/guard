@@ -25,15 +25,10 @@ use std::path::Path;
 
 use crate::CliError;
 
-/// Phase 07 — per-target dispatch for `setup [target] --remove` / `setup
-/// [target]`. Plan 04 will move this enum to `cli.rs` (so clap can derive on
-/// it directly) and re-export it from this module; until then it lives here
-/// so the file compiles standalone.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SetupTarget {
-    Daemon,
-    Shell,
-}
+/// Phase 07 plan 04: `SetupTarget` lives in `cli.rs` (clap-derived). This
+/// re-export preserves the call-site path `crate::uninstall::SetupTarget`
+/// for the existing consumers in `setup.rs` and within this file.
+pub use crate::cli::SetupTarget;
 
 /// Phase 07 D-15: per-target + global remove. `target=None` is the global
 /// path (today's full uninstall body); `Some(Daemon)` strips daemon

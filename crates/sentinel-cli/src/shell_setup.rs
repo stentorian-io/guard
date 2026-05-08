@@ -1,14 +1,19 @@
 //! crates/sentinel-cli/src/shell_setup.rs
 
+use std::path::Path;
+
 use crate::install::{artifacts, marker_block};
 use crate::CliError;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub fn run_shell_setup() -> Result<i32, CliError> {
-    // We need the state-dir to record into install_artifacts.
-    // Use the same default_state_dir helper as main.rs.
-    let state_dir = sentinel_daemon::state_dir::default_state_dir();
+/// Phase 07 plan 05 (Rule 1 fix): take `state_dir` as a parameter rather
+/// than recomputing it via `default_state_dir()` (which ignores the
+/// `SENTINEL_STATE_DIR` env override). Bare `setup` writes `state_dir/sentinel.db`
+/// via `apply_daemon` and then calls `apply_shell`/`run_shell_setup`; the
+/// hardcoded HOME-based default broke that hand-off in tempdir test harnesses
+/// where `SENTINEL_STATE_DIR` is the source of truth.
+pub fn run_shell_setup(state_dir: &Path) -> Result<i32, CliError> {
     let db_path = state_dir.join("sentinel.db");
     if !db_path.exists() {
         return Err(CliError::Other(

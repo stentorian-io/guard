@@ -579,24 +579,56 @@ fn handle_prompt_channel_init_frame(mut stream: UnixStream, state: &Arc<DaemonSt
         );
         return;
     }
-    // OK ack.
-    if let Err(e) = write_tagged(&mut stream, MessageTag::PromptChannelInit, &PromptChannelInitAck::ok()) {
-        error!(error = %e, "failed to send PromptChannelInit Ok Ack");
-        return;
-    }
+    // CR-03: spawn FIRST, ack only on spawn success. Previously the OK ack
+    // was written before `std::thread::Builder::new().spawn(...)`. If the
+    // spawn failed (resource exhaustion, FD pressure, pthread_create error)
+    // the client received a green ack but no thread would ever consume the
+    // stream — the run's prompt UI loop would block on the next read forever.
+    //
     // Pitfall 4: spawn-and-detach — dedicated thread, NOT a worker pool slot.
+    // The thread takes ownership of `stream` on success; on spawn failure we
+    // need our own writeable handle for the err-Ack, so clone the stream
+    // up-front and use the clone for the ack path.
+    let ack_stream = match stream.try_clone() {
+        Ok(s) => s,
+        Err(e) => {
+            // Best-effort err-Ack on the original stream before giving up.
+            let _ = write_tagged(
+                &mut stream,
+                MessageTag::PromptChannelInit,
+                &PromptChannelInitAck::err(format!("try_clone: {e}")),
+            );
+            return;
+        }
+    };
     let state_clone = state.clone();
     let run_uuid = init.run_uuid.clone();
-    if let Err(e) = std::thread::Builder::new()
+    let spawn_result = std::thread::Builder::new()
         .name(format!(
             "sentineld-prompt-{}",
             &run_uuid[..8.min(run_uuid.len())]
         ))
-        .spawn(move || {
-            crate::handlers::prompt_channel::run(stream, state_clone, run_uuid)
-        })
-    {
-        error!(error = %e, "failed to spawn prompt_channel thread");
+        .spawn(move || crate::handlers::prompt_channel::run(stream, state_clone, run_uuid));
+
+    let mut ack_stream = ack_stream;
+    match spawn_result {
+        Ok(_) => {
+            if let Err(e) = write_tagged(
+                &mut ack_stream,
+                MessageTag::PromptChannelInit,
+                &PromptChannelInitAck::ok(),
+            ) {
+                error!(error = %e, "failed to send PromptChannelInit Ok Ack");
+            }
+        }
+        Err(e) => {
+            error!(error = %e, "failed to spawn prompt_channel thread");
+            let _ = write_tagged(
+                &mut ack_stream,
+                MessageTag::PromptChannelInit,
+                &PromptChannelInitAck::err(format!("spawn failed: {e}")),
+            );
+        }
     }
 }
 

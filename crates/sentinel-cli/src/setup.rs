@@ -98,7 +98,7 @@ fn run_apply(
         apply_daemon(sock, state_dir)?;
     }
     if do_shell {
-        apply_shell()?;
+        apply_shell(state_dir)?;
     }
     Ok(0)
 }
@@ -142,7 +142,7 @@ fn apply_daemon(sock: &Path, state_dir: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-fn apply_shell() -> Result<(), CliError> {
+fn apply_shell(state_dir: &Path) -> Result<(), CliError> {
     let states = drift::detect_marker_blocks();
     let init_state = drift::detect_init_script();
 
@@ -158,7 +158,7 @@ fn apply_shell() -> Result<(), CliError> {
     // Otherwise re-apply via shell_setup (idempotent: it skips rc files
     // that already contain the canonical block, and overwrites those that
     // don't via marker_block::install).
-    shell_setup::run_shell_setup()?;
+    shell_setup::run_shell_setup(state_dir)?;
     for (rc, st) in &states {
         match st {
             drift::ComponentState::Converged => {}

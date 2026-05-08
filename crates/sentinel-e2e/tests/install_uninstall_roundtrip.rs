@@ -38,11 +38,11 @@ fn install_then_uninstall_no_artifacts_remain() {
         return;
     }
 
-    // Run `sentinel install --no-shell-integration`.
-    // Non-TTY: confirm prompt reads from piped stdin (D-61 fallback path).
+    // Run `sentinel setup daemon` (was: `install --no-shell-integration`).
+    // Phase 07 plan 05 (D-09, D-10): `install --no-shell-integration` → `setup daemon`.
     let mut child = Command::new(&cli)
-        .arg("install")
-        .arg("--no-shell-integration")
+        .arg("setup")
+        .arg("daemon")
         .env_clear()
         .env("HOME", home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -52,53 +52,54 @@ fn install_then_uninstall_no_artifacts_remain() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn sentinel install");
+        .expect("spawn sentinel setup daemon");
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(b"y\n");
     }
-    let install_out = child.wait_with_output().expect("install wait");
+    let install_out = child.wait_with_output().expect("setup daemon wait");
     if !install_out.status.success() {
         eprintln!("stdout: {}", String::from_utf8_lossy(&install_out.stdout));
         eprintln!("stderr: {}", String::from_utf8_lossy(&install_out.stderr));
-        panic!("sentinel install failed with status {:?}", install_out.status.code());
+        panic!("sentinel setup daemon failed with status {:?}", install_out.status.code());
     }
 
     // Allow launchd bootstrap and daemon startup.
     std::thread::sleep(Duration::from_millis(500));
 
-    // Assert: plist, init.sh, and sentinel.db exist after install.
+    // Assert: plist, init.sh, and sentinel.db exist after setup daemon.
     let plist = home.path().join("Library/LaunchAgents/com.sentinel.daemon.plist");
     let init_sh = home.path().join(".config/sentinel/init.sh");
     let db = state_dir.join("sentinel.db");
-    assert!(plist.exists(), "launchagent plist missing after install: {}", plist.display());
-    assert!(init_sh.exists(), "init.sh missing after install: {}", init_sh.display());
-    assert!(db.exists(), "sentinel.db missing after install: {}", db.display());
+    assert!(plist.exists(), "launchagent plist missing after setup daemon: {}", plist.display());
+    assert!(init_sh.exists(), "init.sh missing after setup daemon: {}", init_sh.display());
+    assert!(db.exists(), "sentinel.db missing after setup daemon: {}", db.display());
 
-    // Run `sentinel uninstall --force`.
+    // Run `sentinel setup --remove -y` (was: `uninstall --force`).
     let uninstall_out = Command::new(&cli)
-        .arg("uninstall")
-        .arg("--force")
+        .arg("setup")
+        .arg("--remove")
+        .arg("-y")
         .env_clear()
         .env("HOME", home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("SENTINEL_STATE_DIR", &state_dir)
         .output()
-        .expect("sentinel uninstall");
+        .expect("sentinel setup --remove");
     if !uninstall_out.status.success() {
         eprintln!("stdout: {}", String::from_utf8_lossy(&uninstall_out.stdout));
         eprintln!("stderr: {}", String::from_utf8_lossy(&uninstall_out.stderr));
-        panic!("sentinel uninstall failed with status {:?}", uninstall_out.status.code());
+        panic!("sentinel setup --remove failed with status {:?}", uninstall_out.status.code());
     }
     // Allow launchd bootout to propagate.
     std::thread::sleep(Duration::from_millis(500));
 
     // Assert: all artifacts gone (AC-INST-06).
-    assert!(!plist.exists(), "plist still present after uninstall: {}", plist.display());
-    assert!(!init_sh.exists(), "init.sh still present after uninstall: {}", init_sh.display());
-    assert!(!state_dir.exists(), "state_dir still present after uninstall: {}", state_dir.display());
+    assert!(!plist.exists(), "plist still present after setup --remove: {}", plist.display());
+    assert!(!init_sh.exists(), "init.sh still present after setup --remove: {}", init_sh.display());
+    assert!(!state_dir.exists(), "state_dir still present after setup --remove: {}", state_dir.display());
     assert!(
         !home.path().join("Library/Logs/Sentinel").exists(),
-        "log_dir still present after uninstall: {}",
+        "log_dir still present after setup --remove: {}",
         home.path().join("Library/Logs/Sentinel").display()
     );
 }

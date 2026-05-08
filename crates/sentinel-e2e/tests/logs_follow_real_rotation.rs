@@ -84,11 +84,13 @@ fn real_rotation_produces_gz_archive_and_follow_continues() {
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    // Spawn `sentinel logs --follow`.
+    // Spawn `sentinel status logs --follow` (was: `sentinel logs --follow`).
+    // Phase 07 plan 05 (D-09, D-10): `logs --follow` → `status logs --follow`.
     // Note: --follow seeks to EOF at startup, so it will not stream pre-seed
     // rows. It will stream rows written AFTER it subscribes.
     let cli = resolve_cli();
     let mut follow = Command::new(&cli)
+        .arg("status")
         .arg("logs")
         .arg("--follow")
         .env_clear()

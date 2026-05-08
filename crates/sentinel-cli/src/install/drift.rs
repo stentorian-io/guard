@@ -10,9 +10,14 @@
 //!   - The plan referenced `launchagent::SERVICE_LABEL` and
 //!     `launchagent::build_plist_bytes()`. Actual symbols are
 //!     `launchagent::LABEL` and `launchagent::build_plist`. The latter
-//!     returns `plist::Value`; we compare via `PartialEq` on the
-//!     parsed Value (more robust than byte-equality, which would be
-//!     fragile across plist serializer whitespace differences).
+//!     returns `plist::Value`; we compare key-by-key via `plist_drifted`
+//!     on the keys `build_plist` owns (Label, ProgramArguments, etc.).
+//!     `plist::Value::PartialEq` itself is fragile across serializer
+//!     versions — Dictionary entry order is allowed to vary by the Apple
+//!     plist spec, and `Integer::from(0_u64)` ≠ `Integer::from(0_i64)`
+//!     even for the same numeric value — so a direct equality check
+//!     produced false-positive "drifted" results that triggered
+//!     unnecessary launchd re-bootstraps.
 //!   - The plan's `detect_launchagent()` had no parameters; the actual
 //!     content check needs `(daemon_binary, state_dir)` to reconstruct
 //!     the canonical plist (which embeds both paths). We thread them
@@ -59,10 +64,17 @@ pub fn detect_launchagent(daemon_binary: &Path, state_dir: &Path) -> ComponentSt
         }
     };
     let canonical = launchagent::build_plist(daemon_binary, state_dir);
-    if on_disk != canonical {
-        return ComponentState::Drifted {
-            reason: "plist content differs from canonical".into(),
-        };
+    // WR-02: key-by-key compare on the documented invariants of
+    // launchagent::build_plist. plist::Value's PartialEq is fragile across
+    // serializer versions (Dictionary entry order, Integer signedness for
+    // small values like <integer>0</integer>) and triggered false-positive
+    // "drift detected — repairing" cycles that re-bootstrapped launchd on
+    // every `setup`. Comparing only the keys we own avoids that without
+    // weakening the check — extra keys (added by future macOS plist tooling
+    // that round-trips the file) are ignored, and any key we manage drifting
+    // from canonical is still flagged.
+    if let Some(reason) = plist_drifted(&on_disk, &canonical) {
+        return ComponentState::Drifted { reason };
     }
     // Optional launchctl-loaded check (skipped under SENTINEL_SKIP_LAUNCHCTL).
     if std::env::var_os("SENTINEL_SKIP_LAUNCHCTL").is_some() {
@@ -85,6 +97,33 @@ pub fn detect_launchagent(daemon_binary: &Path, state_dir: &Path) -> ComponentSt
             reason: format!("launchctl spawn: {e}"),
         },
     }
+}
+
+/// Compare on-disk plist against canonical on the keys that build_plist owns.
+/// Returns `Some(reason)` if any owned key differs; `None` if all match.
+/// Extra keys on either side are tolerated — only the keys we manage are
+/// load-bearing for the launchctl-bootstrap contract.
+fn plist_drifted(on_disk: &plist::Value, canonical: &plist::Value) -> Option<String> {
+    let d = on_disk.as_dictionary()?;
+    let c = canonical.as_dictionary()?;
+    // The keys here MUST match the set written by `launchagent::build_plist`.
+    // If build_plist gains a new key, add it here too — otherwise the new key
+    // will be silently un-checked.
+    const OWNED_KEYS: &[&str] = &[
+        "Label",
+        "ProgramArguments",
+        "RunAtLoad",
+        "KeepAlive",
+        "StandardOutPath",
+        "StandardErrorPath",
+        "EnvironmentVariables",
+    ];
+    for key in OWNED_KEYS {
+        if d.get(key) != c.get(key) {
+            return Some(format!("plist key {key} differs"));
+        }
+    }
+    None
 }
 
 /// One ComponentState per rc file Sentinel manages. `Missing` if the rc has

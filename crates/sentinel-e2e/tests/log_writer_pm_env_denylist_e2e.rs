@@ -46,8 +46,6 @@ fn cargo_registry_token_never_leaks_to_log() {
     let mut harness = DaemonHarness::start().expect("start daemon harness");
 
     let output = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg(&harness_bin)
         .env_clear()
         .env("HOME", harness.home.path())

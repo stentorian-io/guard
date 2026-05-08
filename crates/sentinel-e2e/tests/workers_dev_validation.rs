@@ -72,8 +72,6 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
         .expect("openpty");
 
     let mut cmd = CommandBuilder::new(&cli);
-    cmd.arg("run");
-    cmd.arg("--");
     cmd.arg(&node);
     cmd.arg(&script);
     cmd.env("HOME", harness.home.path().to_str().unwrap());

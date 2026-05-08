@@ -25,8 +25,6 @@ fn non_tty_run_blocks_and_logs() {
     // curl with --max-time 3 will fail immediately when Sentinel denies at the
     // connect() layer (sub-ms) rather than waiting for TCP timeout (75s+).
     let out = std::process::Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg("/usr/bin/curl")
         .arg("--max-time")
         .arg("3")

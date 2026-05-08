@@ -37,9 +37,7 @@ fn double_fork_setsid_wrapped_command_completes() {
     // strips on hardened binaries — the wrapping sh itself may not be hooked,
     // but the test still verifies the CLI's spawn path doesn't fail-closed.
     let mut cmd = Command::new(&cli);
-    cmd.arg("run")
-        .arg("--")
-        .arg("/bin/sh")
+    cmd.arg("/bin/sh")
         .arg(&script)
         .env_clear()
         .env("HOME", harness.home.path())

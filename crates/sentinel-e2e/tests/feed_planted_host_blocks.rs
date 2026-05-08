@@ -37,8 +37,6 @@ fn planted_host_ioc_blocks_with_intel_attribution() {
     // and merges FeedDeny entries into the per-run snapshot. /usr/bin/true
     // exits 0; we only need PrepareSnapshot to fire.
     let primer = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg("/usr/bin/true")
         .env_clear()
         .env("HOME", harness.home.path())
@@ -127,8 +125,6 @@ fn planted_host_ioc_blocks_with_intel_attribution() {
                   s.on('connect', () => { console.log('UNEXPECTED ALLOW'); process.exit(2); }); \
                   setTimeout(() => process.exit(3), 5000);";
     let connect_out = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg(&node)
         .arg("-e")
         .arg(script)

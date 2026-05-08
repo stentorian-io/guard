@@ -30,8 +30,6 @@ fn sigint_during_prompt_sends_cancel_and_propagates_to_child() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
-    cmd.arg("run");
-    cmd.arg("--");
     cmd.arg("/usr/bin/curl");
     cmd.arg("--max-time");
     cmd.arg("30"); // long timeout so curl is alive when SIGINT fires

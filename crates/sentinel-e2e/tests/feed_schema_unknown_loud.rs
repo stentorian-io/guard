@@ -21,8 +21,6 @@ fn schema_unknown_2_0_0_raises_degraded_and_emits_feed_error() {
     // fail the run (last-good-cache fallback) — /usr/bin/true succeeds.
     // The signal lives in feed_metadata + daemon_state + tracing events.
     let run_out = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg("/usr/bin/true")
         .env_clear()
         .env("HOME", harness.home.path())

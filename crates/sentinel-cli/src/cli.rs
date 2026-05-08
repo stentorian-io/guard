@@ -1,8 +1,7 @@
-//! clap derive structs for the `sentinel` CLI (Phase 06 redesign — D-03 root-default-wrap, D-04 --learn).
+//! clap derive structs for the `sentinel` CLI (Phase 07 redesign — D-09 hard-cut, 2-verb shape).
 
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
-use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -17,7 +16,10 @@ USAGE:
   sentinel --learn <cmd> [args...]    Record unknown destinations to .sentinel.toml
                                       (TTY required; fails clear in non-TTY)
 
-  sentinel install | uninstall | status | logs | approve | trust-policy | shell-setup
+  sentinel setup [daemon|shell] [--remove|--reinstall] [-y]
+                                      Install / repair / remove components
+  sentinel status [logs|rules|trust|denials|review] [--follow|--all|--project|--json]
+                                      Inspect daemon health, rules, trust, denials
 
 To wrap a binary whose name collides with a Sentinel verb, pass its full path:
   sentinel /usr/local/bin/status
@@ -35,72 +37,77 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
-    /// Trust a project-local `.sentinel.toml` so its rules apply to subsequent
-    /// `sentinel run` invocations from that working tree (D-38).
-    ///
-    /// Reads + displays the file, prompts for y/n at the terminal, computes
-    /// SHA-256, and sends a `TrustPolicy` IPC to the daemon. The daemon
-    /// re-hashes the file as defense-in-depth (T-02-06a-01).
-    TrustPolicy {
-        /// Path to the .sentinel.toml to trust (absolute or relative).
-        #[arg(value_name = "PATH")]
-        path: PathBuf,
-    },
-
-    /// Install the user-level daemon, LaunchAgent, and shell integration.
-    Install {
-        /// Skip dotfile mutation; install daemon + plist + state/log dirs only (D-68).
-        #[arg(long)]
-        no_shell_integration: bool,
-        /// Force-clean reinstall: wipe install_artifacts and re-derive (D-63).
-        #[arg(long)]
+    /// Install / repair / remove daemon and shell components (CLI-11..CLI-13).
+    Setup {
+        #[command(subcommand)]
+        target: Option<SetupTarget>,
+        /// Remove the targeted component(s) instead of installing.
+        #[arg(long, conflicts_with = "reinstall")]
+        remove: bool,
+        /// Force-clean reinstall: wipe + re-derive (D-16/D-17).
+        #[arg(long, conflicts_with = "remove")]
         reinstall: bool,
+        /// Skip TTY confirmation prompts (D-18). `--force` is NOT a synonym.
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
 
-    /// Reverse `sentinel install` — remove daemon, LaunchAgent, marker blocks, state, logs.
-    Uninstall {
-        /// Skip confirmation prompt.
-        #[arg(long)]
-        force: bool,
-    },
-
-    /// Add marker blocks to rc files without touching the daemon (post-install).
-    ShellSetup,
-
-    /// Show daemon health, tracked roots, recent gaps, and remediation hints.
+    /// Inspect daemon health, rules, trust, denials (CLI-14..CLI-19).
     Status {
+        #[command(subcommand)]
+        sub: Option<StatusSub>,
+        /// Bare-status flag: verbose render. Only valid when `sub` is None.
         #[arg(long)]
         verbose: bool,
+        /// Bare-status flag: JSON output. Only valid when `sub` is None.
         #[arg(long)]
         json: bool,
-    },
-
-    /// Stream the JSONL forensic log (--follow tails with rotation detection).
-    Logs {
-        #[arg(long)]
-        follow: bool,
-    },
-
-    /// Add a user rule to the SQLite rule store (or .sentinel.toml with --project).
-    Approve {
-        /// Hostname (exact match by default, suffix match with --suffix).
-        pattern: Option<String>,
-        /// Treat the pattern as a suffix rather than an exact host.
-        #[arg(long)]
-        suffix: bool,
-        /// Write to closest .sentinel.toml + auto-trust instead of SQLite.
-        #[arg(long)]
-        project: bool,
-        /// Batch-approve all denied destinations from a previous run_uuid.
-        #[arg(long, value_name = "RUN_UUID")]
-        from_log: Option<String>,
-        /// Skip confirmation prompt.
-        #[arg(long, short)]
-        yes: bool,
     },
 
     /// (Default) Wrap a command under enforcement.
     /// `argv[0]` is the binary name; subsequent elements are passed verbatim.
     #[command(external_subcommand)]
     External(Vec<OsString>),
+}
+
+/// Per-target setup dispatch (D-15).
+#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupTarget {
+    /// Daemon LaunchAgent + plist + state/log dirs only (no shell aliases).
+    Daemon,
+    /// Shell marker blocks only (no daemon touches).
+    Shell,
+}
+
+/// Status read sub-verbs (CLI-15..CLI-19). `--json` available everywhere
+/// EXCEPT `Review` per D-23 (review is interactive, not machine-readable).
+#[derive(Subcommand, Debug)]
+pub enum StatusSub {
+    /// Stream the JSONL forensic log (CLI-15).
+    Logs {
+        #[arg(long)] follow: bool,
+        #[arg(long)] json: bool,
+    },
+    /// List active rules (CLI-16).
+    Rules {
+        /// Include built-in registry-allowlist rules.
+        #[arg(long)] all: bool,
+        /// Filter to rules from the closest .sentinel.toml above cwd.
+        #[arg(long)] project: bool,
+        #[arg(long)] json: bool,
+    },
+    /// List trusted .sentinel.toml files (CLI-17).
+    Trust {
+        #[arg(long)] json: bool,
+    },
+    /// View denials from a specific run_uuid (CLI-18).
+    Denials {
+        run_uuid: String,
+        #[arg(long)] json: bool,
+    },
+    /// Interactively walk a previous run's denials (CLI-19). TTY-required.
+    /// No `--json` flag (D-23: review is interactive only).
+    Review {
+        run_uuid: Option<String>,
+    },
 }

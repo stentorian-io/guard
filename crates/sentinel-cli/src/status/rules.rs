@@ -46,6 +46,17 @@ pub fn run(sock: &Path, all: bool, project: bool, json: bool) -> Result<i32, Cli
 
     let rules = ipc_client::list_rules_request(sock, all, project_filter)?;
 
+    // WR-01: --project must narrow the listing to project rules only. The
+    // daemon's all_rules_with_source applies project_filter only to
+    // trusted_toml rows (user rows are global). Drop user rows here so the
+    // CLI surface matches the help-text contract: "Filter to rules from the
+    // closest .sentinel.toml above cwd."
+    let rules = if project {
+        rules.into_iter().filter(|r| r.source == "trusted_toml").collect()
+    } else {
+        rules
+    };
+
     if json {
         let s = serde_json::to_string(&rules)
             .map_err(|e| CliError::Other(format!("json: {e}")))?;

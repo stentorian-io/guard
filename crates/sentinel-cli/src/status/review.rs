@@ -77,8 +77,25 @@ pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
             );
             std::io::Write::flush(&mut std::io::stdout()).ok();
             let mut line = String::new();
-            std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut line)
+            let bytes_read = std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut line)
                 .map_err(|e| CliError::Other(format!("stdin: {e}")))?;
+            // BL-01: detect zero-byte reads as EOF (stdin closed mid-session,
+            // e.g. TTY redirected to /dev/null after the initial gate). Without
+            // this guard, the inner `loop` reprints the prompt at full CPU
+            // speed for each remaining host because read_line returns Ok(0)
+            // every iteration and the unwrap_or('s') default lets us "break"
+            // with skipped+=1, only for the outer for-loop to enter the next
+            // host's inner loop with the same EOF state. Treat as user
+            // cancellation; report partial tally and exit cleanly.
+            // D-27 contract: bare Enter (single '\n') reads 1 byte (the
+            // newline), so the existing "Enter = skip" UX is unaffected.
+            if bytes_read == 0 {
+                println!(
+                    "Reviewed {allowed} allow, {denied} deny, \
+                     {skipped} skipped (stdin closed)."
+                );
+                return Ok(0);
+            }
             // D-27: bare Enter defaults to 's' (skip).
             let c = line.trim().to_lowercase().chars().next().unwrap_or('s');
             match c {

@@ -1,6 +1,9 @@
 //! Phase 3 plan 03-11 — sentinel approve --from-log filter unit test.
 
-use sentinel_cli::approve::{filter_block_destinations, BlockEntry};
+// Phase 07 plan 02 (D-22): the parser moved from `approve` to `denial_log`.
+// Test file rename to `denial_log_filter.rs` is deferred to Plan 05; here
+// we only update the import path.
+use sentinel_cli::denial_log::{filter_block_destinations, BlockEntry};
 
 #[test]
 fn filter_keeps_only_matching_run_uuid_block_events() {

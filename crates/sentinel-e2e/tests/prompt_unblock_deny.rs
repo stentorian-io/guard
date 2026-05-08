@@ -26,8 +26,6 @@ fn deny_blocks_connection_and_logs_prompt_deny() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
-    cmd.arg("run");
-    cmd.arg("--");
     cmd.arg("/usr/bin/curl");
     cmd.arg("--max-time");
     cmd.arg("5");

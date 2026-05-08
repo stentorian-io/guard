@@ -44,8 +44,6 @@ fn pip_install_real_registry_succeeds_under_sentinel_run() {
     let harness = DaemonHarness::start().expect("start daemon harness");
 
     let output = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg("pip3")
         .args(["install", "--dry-run", "--no-deps", "requests"])
         .env_clear()
@@ -87,8 +85,6 @@ fn curl_get_real_registry_succeeds_under_sentinel_run() {
     let harness = DaemonHarness::start().expect("start daemon harness");
 
     let output = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg("/usr/bin/curl")
         .args([
             "--max-time",

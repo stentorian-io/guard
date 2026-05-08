@@ -36,8 +36,6 @@ fn registry_npmjs_org_allowed_despite_planted_feed_deny() {
     // because /usr/bin/true does no networking; we exercise PrepareSnapshot
     // (which does the fetch + snapshot build) via this trivial process.
     let output = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg("/usr/bin/true")
         .env_clear()
         .env("HOME", harness.home.path())

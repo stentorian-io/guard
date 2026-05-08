@@ -23,8 +23,6 @@ fn deny_choice_results_in_nonzero_exit_code() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
-    cmd.arg("run");
-    cmd.arg("--");
     cmd.arg("/usr/bin/curl");
     cmd.arg("--max-time");
     cmd.arg("5");

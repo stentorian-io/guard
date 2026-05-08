@@ -32,9 +32,7 @@ fn run_under_sentinel(harness: &DaemonHarness) -> std::process::Output {
     );
 
     let mut cmd = Command::new(&cli);
-    cmd.arg("run")
-        .arg("--")
-        .arg(&harness_bin)
+    cmd.arg(&harness_bin)
         .env_clear()
         .env("HOME", harness.home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())

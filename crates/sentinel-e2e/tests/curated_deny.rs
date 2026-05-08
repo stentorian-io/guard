@@ -43,8 +43,6 @@ fn curated_yaml_workers_dev_deny_is_enforced() {
     );
 
     let output = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg(&node)
         .arg(&script)
         .env_clear()

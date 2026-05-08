@@ -11,7 +11,8 @@ use crate::CliError;
 use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
-    BaselineCommit, BaselineCommitReply, FeedWarning, InsertUserRule, InsertUserRuleReply,
+    BaselineCommit, BaselineCommitReply, DeleteInstallArtifacts, DeleteInstallArtifactsReply,
+    FeedWarning, InsertUserRule, InsertUserRuleReply,
     PrepareSnapshot, ReadInstallArtifacts, ReadInstallArtifactsReply,
     RegisterRoot, Reply, SnapshotReply, TrustPolicy, TrustPolicyReply,
     InstallArtifact,
@@ -31,6 +32,8 @@ pub(crate) const TAG_PROMPT_CHANNEL_INIT: u8 = 0x0A;
 const TAG_INSERT_USER_RULE: u8 = 0x0B;
 const TAG_READ_INSTALL_ARTIFACTS: u8 = 0x0C;
 const TAG_BASELINE_COMMIT: u8 = 0x0D;
+// Phase 07 plan 02 (D-15 WARNING-5): per-target install_artifacts cleanup.
+const TAG_DELETE_INSTALL_ARTIFACTS: u8 = 0x11;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
@@ -321,5 +324,29 @@ pub fn trust_policy_request(sock: &Path, path: &str, sha256: &str) -> Result<(),
         TrustPolicyReply::Err { message, .. } => {
             Err(CliError::Other(format!("TrustPolicy: {message}")))
         }
+    }
+}
+
+/// Phase 07 plan 02 D-15 WARNING-5: clear install_artifacts rows for the given
+/// kinds. Invoked by `uninstall::components::remove_*` helpers after their
+/// on-disk teardown so the daemon's view of installed artifacts matches
+/// reality. Errors are surfaced as `CliError::Other`; callers typically
+/// ignore them (best-effort cleanup — the daemon may be shutting down
+/// concurrently with the global-remove path).
+///
+/// Returns the row count removed by the daemon (sum of per-kind delete
+/// results).
+pub fn delete_install_artifacts_request(
+    sock: &Path,
+    kinds: Vec<String>,
+) -> Result<u64, CliError> {
+    let req = DeleteInstallArtifacts::new(kinds);
+    let reply: DeleteInstallArtifactsReply =
+        send_tagged_request(sock, TAG_DELETE_INSTALL_ARTIFACTS, &req)?;
+    match reply {
+        DeleteInstallArtifactsReply::Ok { removed, .. } => Ok(removed),
+        DeleteInstallArtifactsReply::Err { message, .. } => Err(CliError::Other(format!(
+            "DeleteInstallArtifacts: {message}"
+        ))),
     }
 }

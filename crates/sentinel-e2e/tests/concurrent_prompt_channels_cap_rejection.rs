@@ -75,8 +75,6 @@ fn start_background_tracked_run(
     let cli = sentinel_e2e::resolve_cli();
     let dylib = sentinel_e2e::resolve_dylib();
     let child = std::process::Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg("/bin/sleep")
         .arg("600")
         .env_clear()

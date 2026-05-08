@@ -30,8 +30,6 @@ fn allow_once_unblocks_connection_in_live_run() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
-    cmd.arg("run");
-    cmd.arg("--");
     cmd.arg("/usr/bin/curl");
     cmd.arg("--max-time");
     cmd.arg("5");

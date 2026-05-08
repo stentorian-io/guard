@@ -106,8 +106,6 @@ fn real_rotation_produces_gz_archive_and_follow_continues() {
     // stdin=null → non-TTY → daemon denies-with-log, no prompt (CLI-07).
     let dylib = sentinel_e2e::resolve_dylib();
     let run_out = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg("/usr/bin/curl")
         .arg("--max-time")
         .arg("3")

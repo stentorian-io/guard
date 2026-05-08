@@ -44,8 +44,6 @@ fn block_decisions_do_not_trigger_per_query_online_lookups() {
     // instead. Total fetch_start count: 2 to 4 depending on TTL boundary.
     for i in 0..2 {
         let output = Command::new(&cli)
-            .arg("run")
-            .arg("--")
             .arg("/usr/bin/true")
             .env_clear()
             .env("HOME", harness.home.path())

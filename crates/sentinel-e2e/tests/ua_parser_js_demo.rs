@@ -94,10 +94,8 @@ fn ua_parser_js_postinstall_blocked_with_package_context() {
         })
         .expect("openpty");
 
-    // Build CommandBuilder for `sentinel run -- npm install file:./fixture.tgz`.
+    // Build CommandBuilder for `sentinel npm install file:./fixture.tgz`.
     let mut cmd = CommandBuilder::new(&cli);
-    cmd.arg("run");
-    cmd.arg("--");
     cmd.arg(&npm);
     cmd.arg("install");
     // npm honors local-path tarball install via the file: spec

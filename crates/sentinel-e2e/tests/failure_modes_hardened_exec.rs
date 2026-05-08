@@ -38,8 +38,6 @@ fn hardened_runtime_exec_surfaces_coverage_gap() {
     };
 
     let out = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg(&target)
         .args(target_args)
         .env_clear()

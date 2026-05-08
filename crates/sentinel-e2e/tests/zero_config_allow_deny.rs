@@ -124,8 +124,6 @@ fn e2e_zero_config_allow_deny() {
     //     to TEST-NET-1 would consume the full 500ms timeout per addr.
     let start = Instant::now();
     let out = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg(&probe)
         .arg(&addr_a)
         .arg(&addr_b)

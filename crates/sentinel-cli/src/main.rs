@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use sentinel_cli::cli::{Cli, Cmd};
-use sentinel_cli::{approve, install, ipc_client, run_orchestrator, shell_setup, trust_policy, uninstall, CliError};
+use sentinel_cli::{run_orchestrator, CliError};
 use sentinel_daemon::state_dir::{default_state_dir, socket_path};
 use std::path::PathBuf;
 
@@ -30,10 +30,10 @@ fn real_main() -> Result<i32, CliError> {
     let sock = socket_path(&state);
 
     // CLI-10 / CR-01: --learn is only meaningful on the wrap path (Cmd::External).
-    // Reject it on every named verb so the flag cannot be silently dropped — the
-    // top-level placement makes clap accept it on any subcommand, but only the
-    // wrap path consults it. Without this guard, `sentinel --learn install`
-    // would bypass the non-TTY gate that CLI-10 fail-clear behavior depends on.
+    // Reject it on any named verb (Setup / Status). Verb collisions with old v0.1
+    // names (install, uninstall, status, logs, approve, trust-policy, shell-setup)
+    // route to Cmd::External per D-11 silent fall-through; --learn there would
+    // try to learn while spawning /usr/bin/install or similar, which is wrong.
     if cli.learn && !matches!(cli.cmd, Cmd::External(_)) {
         eprintln!(
             "sentinel: --learn is only valid when wrapping a command \
@@ -46,8 +46,6 @@ fn real_main() -> Result<i32, CliError> {
     match cli.cmd {
         Cmd::External(argv) => {
             if argv.is_empty() {
-                // Defensive — clap won't reach this with an empty external,
-                // but Vec<OsString> is structurally non-empty by clap's contract.
                 eprintln!("sentinel: missing command to wrap");
                 return Ok(64); // EX_USAGE
             }
@@ -60,30 +58,26 @@ fn real_main() -> Result<i32, CliError> {
             }
             run_orchestrator::run(&sock, &state, argv, cli.learn)
         }
-        Cmd::TrustPolicy { path } => {
-            // Probe the daemon first so the user gets a clean DaemonUnreachable
-            // error instead of a hang on the tagged frame's connect.
-            ipc_client::probe_daemon_alive(&sock)?;
-            trust_policy::run_trust_policy(&sock, &path)?;
-            Ok(0)
+        Cmd::Setup { target, remove, reinstall, yes } => {
+            sentinel_cli::setup::run_setup(&sock, &state, target, remove, reinstall, yes)
         }
-        Cmd::Install { no_shell_integration, reinstall } => {
-            install::run_install(&sock, &state, no_shell_integration, reinstall)
-        }
-        Cmd::Uninstall { force } => {
-            uninstall::run_uninstall(&sock, &state, force)
-        }
-        Cmd::ShellSetup => {
-            shell_setup::run_shell_setup()
-        }
-        Cmd::Status { verbose, json } => {
-            sentinel_cli::status::run_status(&sock, &state, verbose, json)
-        }
-        Cmd::Logs { follow } => sentinel_cli::logs::run_logs(follow),
-        Cmd::Approve { pattern, suffix, project, from_log, yes } => {
-            approve::run_approve(&sock, approve::ApproveArgs {
-                pattern, suffix, project, from_log, yes,
-            })
-        }
+        Cmd::Status { sub, verbose, json } => match sub {
+            None => sentinel_cli::status::run_status(&sock, &state, verbose, json),
+            Some(sentinel_cli::cli::StatusSub::Logs { follow, json }) => {
+                sentinel_cli::logs::run_logs(follow, json)
+            }
+            Some(sentinel_cli::cli::StatusSub::Rules { all, project, json }) => {
+                sentinel_cli::status::rules::run(&sock, all, project, json)
+            }
+            Some(sentinel_cli::cli::StatusSub::Trust { json }) => {
+                sentinel_cli::status::trust::run(&sock, json)
+            }
+            Some(sentinel_cli::cli::StatusSub::Denials { run_uuid, json }) => {
+                sentinel_cli::status::denials::run(&run_uuid, json)
+            }
+            Some(sentinel_cli::cli::StatusSub::Review { run_uuid }) => {
+                sentinel_cli::status::review::run(&sock, run_uuid)
+            }
+        },
     }
 }

@@ -1,5 +1,5 @@
-use sentinel_cli::cli::{Cli, Cmd};
 use clap::Parser;
+use sentinel_cli::cli::{Cli, Cmd, SetupTarget, StatusSub};
 use std::ffi::OsString;
 
 // ---- CLI-08: root-default-wrap parser shape (D-03) ------------------------
@@ -86,15 +86,7 @@ fn learn_after_wrapped_command_is_a_child_arg() {
     }
 }
 
-// ---- D-05: verb-vs-binary collision policy ---------------------------------
-
-#[test]
-fn named_verb_wins_over_external() {
-    // D-05: `sentinel install` dispatches to the Install verb, even though
-    // a binary named `install` could exist on $PATH.
-    let cli = Cli::try_parse_from(["sentinel", "install"]).expect("parse");
-    assert!(matches!(cli.cmd, Cmd::Install { .. }));
-}
+// ---- D-05 escape: full-path wrap bypasses verb match -----------------------
 
 #[test]
 fn full_path_bypasses_verb_match() {
@@ -129,12 +121,8 @@ fn baseline_flag_is_no_longer_accepted() {
 
 /// Binary-invocation check: `sentinel --learn echo hi` with stdin redirected
 /// from /dev/null (non-TTY) must exit 64 (EX_USAGE) with stderr mentioning
-/// "interactive terminal". This exercises the dispatch-arm gate added by
-/// Plan 01 main.rs::real_main().
-///
-/// Pattern: the test follows the same approach as
-/// `crates/sentinel-e2e/tests/non_tty_deny_with_log.rs` — build the binary,
-/// run it, and inspect output.
+/// "interactive terminal". This exercises the dispatch-arm gate in
+/// main.rs::real_main().
 #[test]
 fn non_tty_learn_returns_exit_64() {
     use std::process::{Command, Stdio};
@@ -170,42 +158,151 @@ fn non_tty_learn_returns_exit_64() {
     );
 }
 
-/// CR-01 regression: `sentinel --learn <named-verb>` MUST exit 64 with a clear
-/// error before dispatching, even on a TTY. --learn is only meaningful on the
-/// wrap path; without this gate it would be silently dropped on every named
-/// verb arm and the CLI-10 non-TTY guard would only fire for External.
+// ---- Phase 07 plan 04: new parser shape tests -----------------------------
+
 #[test]
-fn learn_flag_rejected_with_named_verb() {
-    use std::process::{Command, Stdio};
+fn setup_bare_no_target_no_flags() {
+    let cli = Cli::try_parse_from(["sentinel", "setup"]).expect("parse");
+    match cli.cmd {
+        Cmd::Setup { target, remove, reinstall, yes } => {
+            assert!(target.is_none());
+            assert!(!remove); assert!(!reinstall); assert!(!yes);
+        }
+        other => panic!("expected Setup, got {other:?}"),
+    }
+}
 
-    let sentinel = env!("CARGO_BIN_EXE_sentinel");
+#[test]
+fn setup_daemon_no_flags() {
+    let cli = Cli::try_parse_from(["sentinel", "setup", "daemon"]).expect("parse");
+    match cli.cmd {
+        Cmd::Setup { target: Some(SetupTarget::Daemon), remove, reinstall, yes } => {
+            assert!(!remove); assert!(!reinstall); assert!(!yes);
+        }
+        other => panic!("expected Setup{{Daemon}}, got {other:?}"),
+    }
+}
 
-    // `install` is a named verb; combining --learn with it must be a parse-time
-    // dispatch error, not a silent flag-drop.
-    let output = Command::new(sentinel)
-        .arg("--learn")
-        .arg("install")
-        .arg("--no-shell-integration")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env_remove("SENTINEL_HOOK_DYLIB")
-        .output()
-        .expect("spawn sentinel");
+#[test]
+fn setup_shell_no_flags() {
+    // CLI-11 + D-15 per-target: `setup shell` is the symmetric of `setup daemon`.
+    // Without this test, only the Daemon variant of SetupTarget is exercised
+    // at the parser layer — Shell could regress silently.
+    let cli = Cli::try_parse_from(["sentinel", "setup", "shell"]).expect("parse");
+    match cli.cmd {
+        Cmd::Setup { target: Some(SetupTarget::Shell), remove, reinstall, yes } => {
+            assert!(!remove); assert!(!reinstall); assert!(!yes);
+        }
+        other => panic!("expected Setup{{Shell}}, got {other:?}"),
+    }
+}
 
-    assert_eq!(
-        output.status.code(),
-        Some(64),
-        "expected exit 64 (EX_USAGE) for `--learn install`, got {:?}; stderr={}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stderr),
-    );
+#[test]
+fn setup_daemon_remove_yes() {
+    let cli = Cli::try_parse_from(["sentinel", "setup", "daemon", "--remove", "-y"]).expect("parse");
+    match cli.cmd {
+        Cmd::Setup { target: Some(SetupTarget::Daemon), remove: true, yes: true, .. } => {}
+        other => panic!("expected Setup{{Daemon,remove,yes}}, got {other:?}"),
+    }
+}
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("--learn is only valid when wrapping"),
-        "expected --learn-with-named-verb error in stderr; got: {stderr:?}",
-    );
+#[test]
+fn setup_force_is_not_a_synonym_for_yes() {
+    // D-18: --force must NOT be accepted; only -y / --yes.
+    let r = Cli::try_parse_from(["sentinel", "setup", "--remove", "--force"]);
+    assert!(r.is_err(), "--force must be rejected (D-18); got {:?}", r);
+}
+
+#[test]
+fn setup_remove_reinstall_conflict() {
+    // RESEARCH.md Open Question #1 option a: clap conflicts_with.
+    let r = Cli::try_parse_from(["sentinel", "setup", "--remove", "--reinstall"]);
+    assert!(r.is_err(), "--remove + --reinstall must conflict; got {:?}", r);
+}
+
+#[test]
+fn status_bare_no_sub() {
+    let cli = Cli::try_parse_from(["sentinel", "status"]).expect("parse");
+    match cli.cmd {
+        Cmd::Status { sub: None, verbose: false, json: false } => {}
+        other => panic!("expected Status{{None}}, got {other:?}"),
+    }
+}
+
+#[test]
+fn status_review_no_uuid_parses() {
+    // D-26: bare `status review` is the common ergonomic case.
+    let cli = Cli::try_parse_from(["sentinel", "status", "review"]).expect("parse");
+    match cli.cmd {
+        Cmd::Status { sub: Some(StatusSub::Review { run_uuid: None }), .. } => {}
+        other => panic!("expected Status{{Review,None}}, got {other:?}"),
+    }
+}
+
+#[test]
+fn status_review_with_uuid_parses() {
+    let cli = Cli::try_parse_from(["sentinel", "status", "review", "abc-123"]).expect("parse");
+    match cli.cmd {
+        Cmd::Status { sub: Some(StatusSub::Review { run_uuid: Some(u) }), .. } => {
+            assert_eq!(u, "abc-123");
+        }
+        other => panic!("expected Status{{Review,abc-123}}, got {other:?}"),
+    }
+}
+
+#[test]
+fn status_review_rejects_json_flag() {
+    // D-23: --json on every read EXCEPT review.
+    let r = Cli::try_parse_from(["sentinel", "status", "review", "--json"]);
+    assert!(r.is_err(), "--json on review must be rejected (D-23); got {:?}", r);
+}
+
+#[test]
+fn status_logs_follow_parses() {
+    let cli = Cli::try_parse_from(["sentinel", "status", "logs", "--follow"]).expect("parse");
+    match cli.cmd {
+        Cmd::Status { sub: Some(StatusSub::Logs { follow: true, json: false }), .. } => {}
+        other => panic!("expected Status{{Logs,follow}}, got {other:?}"),
+    }
+}
+
+#[test]
+fn install_falls_through_to_external() {
+    // D-11: old verb tokens fall through to wrap path. No Cmd::Install variant.
+    let cli = Cli::try_parse_from(["sentinel", "install"]).expect("parse");
+    match cli.cmd {
+        Cmd::External(argv) => {
+            assert_eq!(argv.len(), 1);
+            assert_eq!(argv[0].to_str().unwrap(), "install");
+        }
+        other => panic!("expected External([install]), got {other:?}"),
+    }
+}
+
+#[test]
+fn approve_falls_through_to_external() {
+    // D-12: `sentinel approve <pattern>` is deleted; falls through.
+    let cli = Cli::try_parse_from(["sentinel", "approve", "api.example.com"]).expect("parse");
+    match cli.cmd {
+        Cmd::External(argv) => {
+            assert_eq!(argv.len(), 2);
+            assert_eq!(argv[0].to_str().unwrap(), "approve");
+        }
+        other => panic!("expected External([approve, api.example.com]), got {other:?}"),
+    }
+}
+
+#[test]
+fn trust_policy_falls_through_to_external() {
+    // D-13: `sentinel trust-policy <path>` is deleted; falls through.
+    let cli = Cli::try_parse_from(["sentinel", "trust-policy", "/path/to/file"]).expect("parse");
+    match cli.cmd {
+        Cmd::External(argv) => {
+            assert_eq!(argv.len(), 2);
+            assert_eq!(argv[0].to_str().unwrap(), "trust-policy");
+        }
+        other => panic!("expected External([trust-policy, ...]), got {other:?}"),
+    }
 }
 
 // ---- Existing non-parser tests preserved verbatim from v0.1 ---------------

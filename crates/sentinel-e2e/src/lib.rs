@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+pub mod test_support;
+
 pub struct DaemonHarness {
     pub state_dir: PathBuf,
     pub socket: PathBuf,

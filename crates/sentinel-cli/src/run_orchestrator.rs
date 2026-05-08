@@ -76,6 +76,29 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, baseline_mode:
     let (mut child, pgid) =
         crate::spawn::spawn_wrapped_with_pgid(&command, sock, &manifest_path, &run_uuid)?;
 
+    // quick-260508-et9 (Rule 3 fix to a blocking pre-existing regression):
+    // Restore the RegisterRoot delegation that was lost in the Phase 03-13
+    // refactor (commit d020752 — extracted run_orchestrator from main.rs and
+    // dropped the audit_token + register_root_with_daemon call sites).
+    //
+    // Without this, the daemon's `is_tracked(peer_token)` returns false for
+    // every IPC the wrapped child sends (DylibLoaded, ForkEvent, ExecEvent,
+    // EnvNotPropagatedGap). The TREE-06 e2e tests, the BLOCKER #1 pm_env
+    // capture e2e tests, and any other test that depends on
+    // tree-tracked-peer state ALL silently fail when this call is missing —
+    // the dylib's IPC succeeds at the wire layer but is rejected at the
+    // handler-level untracked-peer gate.
+    //
+    // We obtain the wrapped child's audit token via task_info(TASK_AUDIT_TOKEN)
+    // (kernel-sourced; same-uid only). REGISTER-01 delegation: peer_token
+    // is the CLI's own kernel-sourced token, wire-claimed token is the
+    // child's — daemon trusts the wire token after verify_wire_pid_same_uid
+    // (WR-08). See ipc_server.rs handle_legacy_register comment block.
+    let child_pid = child.id() as libc::pid_t;
+    let token = crate::audit_token::audit_token_for_pid(child_pid)
+        .map_err(|e| CliError::DaemonUnreachable(format!("audit_token: {e}")))?;
+    crate::ipc_client::register_root_with_daemon(sock, token)?;
+
     // BLOCKER #1 / CR-01: ALWAYS install the SIGINT handler so Ctrl-C reliably
     // propagates to the wrapped child's process group, even when the prompt
     // channel is unavailable (non-TTY, baseline mode, R-05 cap, schema skew,

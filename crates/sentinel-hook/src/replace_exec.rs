@@ -64,11 +64,15 @@ fn current_audit_token_wire() -> AuditTokenWire {
 
 /// Send an ExecEvent IPC for `path`. Best-effort: errors are silently dropped
 /// (the exec proceeds regardless — exec is not D-33's failure boundary).
-fn report_exec(path: *const c_char) {
+///
+/// `pm_env` is captured by the caller from envp (or `**environ`) before the
+/// real exec replaces the process image. Wired in by Task 3 of
+/// quick-260508-et9 (BLOCKER #1).
+fn report_exec(path: *const c_char, pm_env: Vec<(String, String)>) {
     let mut path_buf = [0u8; 1024];
     let n = copy_cstr_to_buf(path, &mut path_buf);
     let token = current_audit_token_wire();
-    let _ = send_exec_event_sync(token, &path_buf[..n], n, IPC_TIMEOUT_MS);
+    let _ = send_exec_event_sync(token, &path_buf[..n], n, pm_env, IPC_TIMEOUT_MS);
 }
 
 #[unsafe(no_mangle)]
@@ -86,7 +90,14 @@ pub unsafe extern "C" fn sentinel_execve(
             return unsafe { libc::syscall(SYS_EXECVE, path, argv, envp) as c_int };
         }
     };
-    report_exec(path);
+    // Walk the explicit envp BEFORE the real syscall — the exec replaces
+    // the process image so we must capture pm_env in this address space.
+    // Defense-in-depth: filter applied here mirrors daemon-side; daemon
+    // re-filters on receipt regardless. SAFETY: caller-supplied envp must
+    // be null OR null-terminated array of NUL-terminated C strings (POSIX
+    // execve(2) contract).
+    let pm_env = unsafe { crate::pm_env_filter::extract_pm_env_from_envp(envp) };
+    report_exec(path, pm_env);
     unsafe { libc::syscall(SYS_EXECVE, path, argv, envp) as c_int }
 }
 
@@ -99,7 +110,10 @@ pub unsafe extern "C" fn sentinel_execvp(
         Some(g) => g,
         None => return unsafe { libc::execvp(path, argv) },
     };
-    report_exec(path);
+    // execvp inherits the parent's environment via libc's `**environ`; the
+    // child's exec'd image will see the same env variables. Walk environ now.
+    let pm_env = crate::pm_env_filter::extract_pm_env_from_environ();
+    report_exec(path, pm_env);
     unsafe { libc::execvp(path, argv) }
 }
 
@@ -109,7 +123,10 @@ pub unsafe extern "C" fn sentinel_execv(path: *const c_char, argv: *const *const
         Some(g) => g,
         None => return unsafe { libc::execv(path, argv) },
     };
-    report_exec(path);
+    // execv inherits the parent's environment via libc's `**environ` (same
+    // as execvp).
+    let pm_env = crate::pm_env_filter::extract_pm_env_from_environ();
+    report_exec(path, pm_env);
     unsafe { libc::execv(path, argv) }
 }
 

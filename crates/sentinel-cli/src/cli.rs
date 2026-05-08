@@ -1,6 +1,6 @@
 //! clap derive structs for the `sentinel` CLI (Phase 07 redesign — D-09 hard-cut, 2-verb shape).
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 
 #[derive(Parser, Debug)]
@@ -39,7 +39,9 @@ pub struct Cli {
 pub enum Cmd {
     /// Install / repair / remove daemon and shell components (CLI-11..CLI-13).
     Setup {
-        #[command(subcommand)]
+        /// Optional component target: `daemon` (LaunchAgent + plist + state)
+        /// or `shell` (marker blocks). Bare `setup` targets all components.
+        #[arg(value_enum)]
         target: Option<SetupTarget>,
         /// Remove the targeted component(s) instead of installing.
         #[arg(long, conflicts_with = "reinstall")]
@@ -71,7 +73,7 @@ pub enum Cmd {
 }
 
 /// Per-target setup dispatch (D-15).
-#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetupTarget {
     /// Daemon LaunchAgent + plist + state/log dirs only (no shell aliases).
     Daemon,

@@ -1,6 +1,6 @@
 //! crates/sentinel-cli/src/run_orchestrator.rs
 //!
-//! Phase 3 plan 03-13 — `sentinel run` end-to-end orchestrator:
+//! Phase 3 plan 03-13 (Phase 06 rename) — wrap-mode end-to-end orchestrator:
 //! V3 PrepareSnapshot + prompt channel + spawn + wait + (optional) baseline-commit.
 //! BLOCKER #1 SIGINT handler is registered here.
 
@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use crate::CliError;
 
-pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, baseline_mode: bool) -> Result<i32, CliError> {
+pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, learn_mode: bool) -> Result<i32, CliError> {
     let _ = state_dir; // currently unused; baseline IPC routes via sock
     let cwd = std::env::current_dir().map_err(|e| CliError::Other(format!("cwd: {e}")))?;
     let is_tty = std::io::stdin().is_terminal();
@@ -28,7 +28,7 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, baseline_mode:
     let progress_stop = Arc::new(AtomicBool::new(false));
     let progress_handle = spawn_feed_progress_thread(Arc::clone(&progress_stop));
 
-    let outcome = crate::ipc_client::prepare_snapshot_v3(sock, &cwd, is_tty, baseline_mode);
+    let outcome = crate::ipc_client::prepare_snapshot_v3(sock, &cwd, is_tty, learn_mode);
 
     progress_stop.store(true, Ordering::SeqCst);
     let _ = progress_handle.join();
@@ -55,7 +55,7 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, baseline_mode:
     // even while the render thread is parked in `next_prompt`.
     let shared_channel: crate::sigint_handler::SharedChannel = Arc::new(Mutex::new(None));
     let mut prompt_reader: Option<crate::prompt_channel::PromptReader> = None;
-    let inflight_handle: Option<crate::prompt_channel::InflightPrompts> = if is_tty && !baseline_mode {
+    let inflight_handle: Option<crate::prompt_channel::InflightPrompts> = if is_tty && !learn_mode {
         match crate::prompt_channel::PromptChannel::open(sock, &run_uuid) {
             Ok(mut channel) => {
                 let inflight = channel.inflight_handle();
@@ -139,7 +139,7 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, baseline_mode:
     let exit_code = exit_status.code().unwrap_or(1);
 
     // Baseline commit flow.
-    if baseline_mode {
+    if learn_mode {
         if let Err(e) = crate::baseline::run_baseline_commit(sock, &run_uuid) {
             eprintln!("baseline commit error: {e}");
         }

@@ -18,7 +18,7 @@ pub const MAX_UNIQUE_BLOCK_HOSTS: usize = 10_000;
 /// WR-05: cap the per-host hostname length we accept.
 pub const MAX_HOST_LENGTH: usize = 256;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockEntry {
     pub host: String,
     pub port: u16,

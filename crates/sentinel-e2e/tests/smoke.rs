@@ -36,7 +36,6 @@ fn sentinel_run_echo_hello_registers_with_daemon_and_exits_zero() {
 
     // Run sentinel run echo hello with a clean env + our tempdir HOME.
     let output = Command::new(&cli)
-        .arg("run")
         .arg("echo")
         .arg("hello")
         .env_clear()
@@ -77,9 +76,8 @@ fn sentinel_run_propagates_child_exit_code() {
     let dylib = resolve_dylib();
     let harness = DaemonHarness::start().expect("start daemon");
 
-    // /usr/bin/false exits 1; sentinel run should propagate.
+    // /usr/bin/false exits 1; sentinel-wrapped exit code should propagate.
     let output = Command::new(&cli)
-        .arg("run")
         .arg("false")
         .env_clear()
         .env("HOME", harness.home.path())
@@ -173,8 +171,6 @@ fn smoke_dylib_loaded() {
     );
 
     let output = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg(&node)
         .arg(&script)
         .env_clear()

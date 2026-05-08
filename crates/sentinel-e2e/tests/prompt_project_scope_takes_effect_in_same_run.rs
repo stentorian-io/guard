@@ -32,8 +32,6 @@ fn project_scope_rule_applies_to_second_connection_no_prompt() {
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
     cmd.cwd(project.path());
-    cmd.arg("run");
-    cmd.arg("--");
     cmd.arg("/bin/sh");
     cmd.arg("-c");
     cmd.arg(

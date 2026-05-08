@@ -26,8 +26,6 @@ fn second_attempt_within_5s_does_not_reprompt() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
-    cmd.arg("run");
-    cmd.arg("--");
     cmd.arg("/bin/sh");
     cmd.arg("-c");
     cmd.arg(

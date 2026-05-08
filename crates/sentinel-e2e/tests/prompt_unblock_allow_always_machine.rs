@@ -30,8 +30,6 @@ fn allow_always_machine_persists_rule_and_allows_next_run() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
-    cmd.arg("run");
-    cmd.arg("--");
     cmd.arg("/usr/bin/curl");
     cmd.arg("--max-time");
     cmd.arg("5");
@@ -104,8 +102,6 @@ fn allow_always_machine_persists_rule_and_allows_next_run() {
     // would manifest as the process hanging waiting for terminal input on a non-TTY).
     // Timeout of 5s: if it hangs longer than that, the non-TTY guard failed.
     let second_run = std::process::Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg("/usr/bin/curl")
         .arg("--max-time")
         .arg("3")

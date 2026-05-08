@@ -98,8 +98,6 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
     "#;
 
     let mut wrapped = Command::new(&cli)
-        .arg("run")
-        .arg("--")
         .arg(&node)
         .arg("-e")
         .arg(script)

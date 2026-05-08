@@ -21,8 +21,6 @@ fn thirty_two_concurrent_sentinel_runs_succeed() {
     let mut children: Vec<std::process::Child> = Vec::with_capacity(32);
     for i in 0..32usize {
         let child = std::process::Command::new(&cli)
-            .arg("run")
-            .arg("--")
             .arg("/bin/sleep")
             .arg("3")
             .env_clear()

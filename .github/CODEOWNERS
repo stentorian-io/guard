@@ -1,0 +1,20 @@
+# Sentinel CODEOWNERS — review-required paths
+#
+# Validation fixtures and the synthetic-fixture builder are security-sensitive.
+# Any change here must go through maintainer review to prevent drive-by
+# mutation of the committed payload (per RESEARCH §Security Domain V14).
+#
+# NOTE on the maintainer handle: `@daniel-vd` is a project-owner placeholder.
+# Replace with the actual github handle once branch protection is enabled
+# server-side. CODEOWNERS rules are inert until branch protection is
+# configured. See Plan 05-01 SUMMARY for follow-up.
+
+# Synthetic ua-parser-js@0.7.29 fixture — VAL-01 e2e validation surface.
+/crates/sentinel-e2e/fixtures/ua-parser-js-0.7.29-sanitized/    @daniel-vd
+
+# Vendoring script — deterministic builder of the fixture above.
+/tools/vendor-ua-parser-js.sh                                   @daniel-vd
+
+# Validation workflow — drift here changes what we gate on every PR.
+# (File created in Plan 05-07; rule is inert until then.)
+/.github/workflows/validation.yml                               @daniel-vd

@@ -99,10 +99,21 @@ pub mod components {
     use crate::CliError;
 
     /// Daemon-only removal: launchctl bootout + 250ms sleep + plist file
-    /// delete + install_artifacts cleanup for `["launchagent", "binary"]`.
-    /// Reads install_artifacts and processes only `artifact_kind ==
-    /// "launchagent"` (and `"binary"` which is informational/skipped per
-    /// D-65 since brew owns the binary lifecycle).
+    /// delete + init_script file delete + install_artifacts cleanup for
+    /// `["launchagent", "binary", "init_script"]`. Reads install_artifacts
+    /// and processes `artifact_kind == "launchagent"` (and `"binary"` which
+    /// is informational/skipped per D-65 since brew owns the binary
+    /// lifecycle, and `"init_script"`).
+    ///
+    /// WR-03: init_script is included here because `apply_install_steps`
+    /// writes `~/.config/sentinel/init.sh` unconditionally — even when
+    /// `setup daemon` is run with `no_shell_integration=true`. Without
+    /// cleaning it here, `setup --remove daemon` would leave orphan rows
+    /// in install_artifacts pointing at files that nothing else cleans
+    /// (`remove_shell` only runs on the global path or `--remove shell`).
+    /// Including init_script in the daemon-only remove path is the smaller
+    /// fix vs. gating the init.sh write, which would break existing
+    /// `setup daemon`-then-asserts-init.sh-exists e2e contracts.
     pub fn remove_daemon(sock: &Path, state_dir: &Path) -> Result<(), CliError> {
         let db_path = state_dir.join("sentinel.db");
         let arts = artifacts::read_artifacts(sock, &db_path).unwrap_or_default();
@@ -116,22 +127,30 @@ pub mod components {
         //    down (closing its WAL) before later steps delete the DB.
         std::thread::sleep(std::time::Duration::from_millis(250));
 
-        // 3. Delete plist file(s) listed in artifacts as `launchagent` kind.
+        // 3. Delete plist file(s) + init.sh file(s) listed in artifacts.
         for art in &arts {
-            if art.artifact_kind == "launchagent" {
-                let _ = std::fs::remove_file(&art.target_path);
+            match art.artifact_kind.as_str() {
+                "launchagent" => {
+                    let _ = std::fs::remove_file(&art.target_path);
+                }
+                "init_script" => {
+                    let _ = init_script::strip(Path::new(&art.target_path));
+                }
+                // "binary" rows are informational (D-65; brew owns the
+                // binary). Skip — the row is still cleared by the IPC below.
+                _ => {}
             }
-            // "binary" rows are informational (D-65; brew owns the binary).
-            // Skip — but we still clear the row below in the IPC call.
         }
 
         // 4. D-15 WARNING-5: clear install_artifacts rows for the kinds we
         //    just removed. Best-effort — the daemon may already be shutting
         //    down (still alive in per-target path; possibly down by the
-        //    global-remove sequence's later steps).
+        //    global-remove sequence's later steps). On the global-remove
+        //    path remove_shell already strips init_script first; clearing
+        //    again here is idempotent (rows are already gone).
         let _ = crate::ipc_client::delete_install_artifacts_request(
             sock,
-            vec!["launchagent".into(), "binary".into()],
+            vec!["launchagent".into(), "binary".into(), "init_script".into()],
         );
         Ok(())
     }

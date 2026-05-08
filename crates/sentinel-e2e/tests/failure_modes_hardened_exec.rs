@@ -108,9 +108,23 @@ fn hardened_runtime_exec_surfaces_coverage_gap() {
         .expect("run sentinel status --verbose");
     let status_stdout = String::from_utf8_lossy(&status_out.stdout);
     let status_lc = status_stdout.to_ascii_lowercase();
+    // WR-08: tighten ASSERTION 3. The previous predicate ('hardened' OR
+    // 'gap') was too lenient — 'gap' is a broad word that could match any
+    // unrelated text in verbose status output (e.g. 'language gap',
+    // 'release gap', help-text mentioning gaps). Match the exact markers
+    // that sentinel-cli/src/status.rs:188-197 emits:
+    //   - 'Recent gaps (N):' header
+    //   - 'hardened-runtime' (the literal gap_kind printed in column 1)
+    // We require BOTH the section header AND the specific gap_kind, so a
+    // pristine verbose status with no gaps does NOT pass.
+    let has_recent_gaps_header = status_lc.contains("recent gaps");
+    let has_hardened_runtime_kind = status_lc.contains("hardened-runtime");
     assert!(
-        status_lc.contains("hardened") || status_lc.contains("gap"),
-        "sentinel status --verbose did not surface the gap;\n\
+        has_recent_gaps_header && has_hardened_runtime_kind,
+        "sentinel status --verbose did not surface the hardened-runtime gap;\n\
+         expected: 'Recent gaps (' header AND 'hardened-runtime' gap_kind\n\
+         has_recent_gaps_header={has_recent_gaps_header} \
+         has_hardened_runtime_kind={has_hardened_runtime_kind}\n\
          status stdout:\n{status_stdout}\n\
          daemon stderr:\n{stderr}",
     );

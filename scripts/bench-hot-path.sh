@@ -19,6 +19,43 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
+# --dry-run mode: validate percentile-extraction greps against synthetic
+# samples WITHOUT running cargo bench / cargo test. Use this on any dev
+# machine to confirm the runner is wired correctly before committing time
+# on the reference Apple Silicon machine. Prints `dry-run: ok` on success;
+# exits non-zero if any grep regression is detected.
+# ---------------------------------------------------------------------------
+if [[ "${1:-}" == "--dry-run" ]]; then
+    # Synthetic samples copied from the actual bench output shapes (verified
+    # 2026-05-09 — see 08-VERIFICATION.md behavioral spot-checks).
+    SAMPLE_CACHE_HIT='cache_hit/decide_for_sockaddr p50=541ns p95=541ns p99=541ns p99.9=541ns max=541ns'
+    SAMPLE_LIVE_WRAP='LIVE_WRAP_NS p50=12345 p95=23456 p99=34567 p999=45678 max=56789'
+
+    DRY_CACHE_HIT_P99="$(printf '%s\n' "$SAMPLE_CACHE_HIT" | grep -oE 'p99=[0-9]+ns' | head -1 | sed 's/^p99=//')"
+    DRY_LIVE_WRAP_P99="$(printf '%s\n' "$SAMPLE_LIVE_WRAP" | grep -oE 'p99=[0-9]+' | head -1 | sed 's/^p99=//')"
+
+    if [[ -z "$DRY_CACHE_HIT_P99" ]]; then
+        echo "dry-run FAIL: cache-hit grep ('p99=[0-9]+ns') did not match the synthetic sample." >&2
+        echo "  sample: $SAMPLE_CACHE_HIT" >&2
+        echo "  fix: update the grep regex in this script OR the eprintln! in crates/sentinel-hook/benches/cache_hit_hot_path.rs so they agree." >&2
+        exit 1
+    fi
+    if [[ -z "$DRY_LIVE_WRAP_P99" ]]; then
+        echo "dry-run FAIL: live-wrap grep ('p99=[0-9]+') did not match the synthetic sample." >&2
+        echo "  sample: $SAMPLE_LIVE_WRAP" >&2
+        echo "  fix: update the grep regex in this script OR the console.log in crates/sentinel-e2e/tests/bench_hot_path_e2e.rs so they agree." >&2
+        exit 1
+    fi
+
+    echo "dry-run: ok"
+    echo "  cache-hit p99 extracted from synthetic sample: $DRY_CACHE_HIT_P99"
+    echo "  live-wrap p99 extracted from synthetic sample: $DRY_LIVE_WRAP_P99"
+    echo "  the runner is wired correctly; capture the real numbers via:"
+    echo "    ./scripts/bench-hot-path.sh    (no flags) on the reference Apple Silicon machine"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
 # Reference-machine identity block (printed in the markdown header).
 # ---------------------------------------------------------------------------
 GIT_SHA="$(git rev-parse --short HEAD)"

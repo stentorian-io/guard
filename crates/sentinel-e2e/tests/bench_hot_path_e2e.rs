@@ -134,8 +134,19 @@ fn live_wrap_npmjs_loop_p99_context() {
             // Echo the summary to stderr in the structured shape the runner script greps.
             // (--nocapture forwards this to the user.)
             eprintln!("[VAL-03 live-wrap] {line}");
+            // Truncate at a UTF-8 char boundary — `&all_stdout[..4096]` would
+            // panic ("byte index N is not a char boundary") if byte 4096 lands
+            // inside a multi-byte codepoint. The injected node script emits
+            // ASCII today, but a node panic stack trace, a non-ASCII path
+            // component, or future emoji in diagnostic output would otherwise
+            // hide the real failure behind a slicing panic.
+            let dump_end = std::cmp::min(4096, all_stdout.len());
+            let dump_end = (0..=dump_end)
+                .rev()
+                .find(|&i| all_stdout.is_char_boundary(i))
+                .unwrap_or(0);
             eprintln!("[VAL-03 live-wrap] full stdout dump (first 4 KiB):\n{}",
-                      &all_stdout[..all_stdout.len().min(4096)]);
+                      &all_stdout[..dump_end]);
         }
         None => {
             eprintln!("[VAL-03 live-wrap] no LIVE_WRAP_NS summary observed before deadline");

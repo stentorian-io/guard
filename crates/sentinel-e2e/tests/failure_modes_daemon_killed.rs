@@ -30,6 +30,24 @@
 //! Catastrophic regression: PHASE2_LEAKED (the connect succeeded), which
 //! would prove the dylib silently allowed an unknown host through after the
 //! daemon died.
+//!
+//! EMPIRICAL CORRECTION (2026-05-09 verification re-run): the v0.2 first
+//! attempt of this test used `unknown-host.test.invalid` (RFC 6761 reserved
+//! `.invalid` TLD) on the assumption that node would call connect() with the
+//! resolved-failure path going through sentinel_connect. The verifier showed
+//! this is wrong: `getaddrinfo` returns `ENOTFOUND` for any `.invalid`
+//! hostname, node short-circuits before connect() is called, and
+//! sentinel_connect never fires (the dylib's getaddrinfo interceptor was
+//! deleted per BL-05; see crates/sentinel-hook/src/replace_libc.rs:268-275).
+//! The PHASE2 target is now `192.0.2.1` — RFC 5737 TEST-NET-1, an IPv4
+//! literal that bypasses DNS entirely and forces node to call connect() with
+//! a real sockaddr_in. This matches the pattern established at
+//! crates/sentinel-e2e/tests/zero_config_allow_deny.rs:97 (`addr_b =
+//! "192.0.2.1:80"`) and exercises the same raw-IP cache-miss-deny path
+//! (Tier 0c) that produces `Verdict::Deny` → `errno = EHOSTUNREACH` →
+//! `PHASE2_DENIED:EHOSTUNREACH`. See
+//! .planning/phases/08-perf-reliability-hardening/08-VERIFICATION.md gap #1
+//! for the full empirical trace.
 
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
@@ -53,15 +71,18 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
 
     // Two-phase node script (RESEARCH §Code Examples §A lines 441-454).
     // Phase 1 connect must be ALLOWED (registry.npmjs.org is on the curated
-    // allowlist via Phase 2 plan 02-02 yaml). Phase 2 connect must be
+    // allowlist via Phase 2 plan 02-02 yaml). Phase 2 connect MUST be
     // PHASE2_DENIED with the `:EHOSTUNREACH` suffix (Phase 08 D-39
-    // disposition #3 — denied-only, dylib-fired). The internal 4s
-    // setTimeout fallback that emits PHASE2_TIMEOUT is preserved purely as
-    // a debugging surface: under D-38 verification it must not fire on a
-    // healthy SIGKILL'd-daemon test environment, but if it does, the outer
-    // assertion will fail with `observed: Some("timeout")` and the script
-    // exits cleanly rather than hanging the harness. PHASE2_LEAKED remains
-    // the catastrophic regression.
+    // disposition #3 — denied-only, dylib-fired). PHASE2 targets the IPv4
+    // literal `192.0.2.1` (RFC 5737 TEST-NET-1) so node skips getaddrinfo
+    // and sentinel_connect interposes the connect() call directly; the
+    // raw-IP cache-miss-deny path at replace_libc.rs:194 sets
+    // errno=EHOSTUNREACH. The internal 4s setTimeout fallback that emits
+    // PHASE2_TIMEOUT is preserved purely as a debugging surface: under D-38
+    // verification it must not fire on a healthy SIGKILL'd-daemon test
+    // environment, but if it does, the outer assertion will fail with
+    // `observed: Some("timeout")` and the script exits cleanly rather than
+    // hanging the harness. PHASE2_LEAKED remains the catastrophic regression.
     let script = r#"
         const net = require('net');
         const phase1 = net.connect(443, 'registry.npmjs.org');
@@ -71,7 +92,7 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
             // 2.5s gives the test harness ample time to read PHASE1_CONNECTED
             // (race-free; RESEARCH §Pitfall 5) and send SIGKILL.
             setTimeout(() => {
-                const phase2 = net.connect(443, 'unknown-host.test.invalid');
+                const phase2 = net.connect(443, '192.0.2.1');
                 let resolved = false;
                 phase2.on('error', e => {
                     if (resolved) return;
@@ -153,13 +174,16 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
     );
 
     // The HARD KILL — daemon goes down here. After this, the dylib still has
-    // the snapshot mmap'd; for known hosts it keeps enforcing; for unknown
-    // hosts the Resolve-IPC fast-shape fires `Err(IpcClientError::Io(
-    // ConnectionRefused))` in <1ms (Phase 08 D-38 verification), the dylib
-    // falls through to cache-miss-deny, and `connect()` returns -1 with
-    // `errno = EHOSTUNREACH` — node prints `PHASE2_DENIED:EHOSTUNREACH`
-    // and exits 1. The PHASE2_TIMEOUT path is no longer accepted (v0.2
-    // tightening per D-39 disposition #3).
+    // the snapshot mmap'd; for known hosts it keeps enforcing; for the
+    // unknown-IP target (192.0.2.1, RFC 5737), the connect path runs:
+    //   sentinel_connect → decide_for_sockaddr → cache miss →
+    //   Resolve-IPC walk fires `Err(IpcClientError::Io(ConnectionRefused))`
+    //   in <1ms (Phase 08 D-38 verification) for each entry → falls through
+    //   to evaluate_in_hook with empty host → Tier 0c raw-IP cache-miss-deny
+    //   → Verdict::Deny → errno = EHOSTUNREACH; return -1.
+    // Node then prints `PHASE2_DENIED:EHOSTUNREACH` and exits 1. The
+    // PHASE2_TIMEOUT path is no longer accepted (v0.2 tightening per D-39
+    // disposition #3).
     let daemon_pid = harness.child.id() as libc::pid_t;
     unsafe {
         libc::kill(daemon_pid, libc::SIGKILL);

@@ -31,7 +31,12 @@ sha2 = "0.10"
 tempfile = { workspace = true }
 sentinel-daemon = { path = "../sentinel-daemon" }
 criterion = { workspace = true }
+hdrhistogram = "7.5.4"
 
 [[bench]]
 name = "hot_path"
+harness = false
+
+[[bench]]
+name = "cache_hit_hot_path"
 harness = false

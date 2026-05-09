@@ -22,8 +22,12 @@ use sentinel_hook::ipc_client::{
 use std::os::unix::net::UnixListener;
 use std::time::Instant;
 
-// Serialize with sibling resolve_client_tests.rs that also mutates the global
-// _set_daemon_socket_for_test target.
+// Serialize the two #[test] fns in THIS binary — they both mutate the
+// process-global TEST_SOCKET_OVERRIDE via _set_daemon_socket_for_test
+// and would race under cargo test's default thread parallelism.
+// Cross-binary serialization is not required: each tests/*.rs is a
+// separate integration-test binary in its own process, so they each
+// see their own copy of TEST_SOCKET_OVERRIDE.
 static SOCKET_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg_attr(not(target_os = "macos"), ignore)]

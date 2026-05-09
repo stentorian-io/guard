@@ -1,21 +1,18 @@
-//! Misleading microbench — MATCHER-ONLY, NOT load-bearing for the D-03
-//! < 100µs hot-path budget.
+//! MATCHER-ONLY microbench against `sentinel_core::evaluate_rule`.
 //!
-//! WARNING-01 (Phase 2 review): the previous header for this file was
-//! "ENF-06 microbench" which a casual reader could interpret as a measurement
-//! of the full < 100µs hot path. It is NOT. This bench exercises
-//! `sentinel_core::evaluate_rule` (single-entry matcher) inside a hand-rolled
-//! `walk()` helper — neither of which is on the actual hot path. The real
-//! libc hook hot path goes through `replace_libc.rs::decide_for_sockaddr` →
-//! `with_cache(...)` (process-global Mutex<Cache>) →
-//! `sentinel_core::policy::evaluate_policy` (tier-walk).
+//! NOT load-bearing for the D-03 / VAL-03 < 100µs hot-path budget — this file
+//! exercises only the rule-matching tier of the hot path (CuratedAllow Exact /
+//! Suffix / Ip walks via `evaluate_rule`). It does NOT exercise:
+//!  * `with_cache(...)` mutex acquisition (the actual per-call locking cost),
+//!  * `decide_for_sockaddr` sockaddr-decode + cache-lookup,
+//!  * the full tier-walking `evaluate_policy` traversal.
 //!
-//! Naming the bench more honestly + flagging the criterion group as
-//! `misleading_micro_bench` keeps it useful as a matcher regression
-//! detector while preventing future readers from concluding that the
-//! D-03 budget has been verified by criterion. The formal under-load
-//! benchmark on real hardware lands in Phase 5 (VAL-03) and is the
-//! binding number for the < 100µs constraint.
+//! The LOAD-BEARING measurement for VAL-03 lives at
+//! `crates/sentinel-hook/benches/cache_hit_hot_path.rs` and uses
+//! criterion's `iter_custom` + an `hdrhistogram` to surface a real p99 line.
+//!
+//! Both benches run together via `cargo bench -p sentinel-hook`. This file is
+//! preserved per Phase 08 D-37 as a regression tripwire for `evaluate_rule`.
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use sentinel_core::{evaluate_rule, AllowlistEntry, MatchType, RuleKind, RuleTier, Verdict};

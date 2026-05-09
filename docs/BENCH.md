@@ -23,6 +23,68 @@ The reference numbers below were measured on:
 > below from your own machine. The first time the project measures on a new
 > SKU, append a new row to the table rather than overwriting — Phase 08 D-35.
 
+## Capture Procedure
+
+The Numbers table and the Reference Machine block both ship with `TBD`
+placeholders. The binding p99 number is intentionally human-curated by
+the project author on a specific Apple Silicon machine (see CONTEXT D-33
++ D-35); it is not a CI artifact. Anyone reproducing on their own M-series
+Mac follows the same procedure to land an appendix row.
+
+**Pre-flight (any dev machine, ~1 second):**
+
+```sh
+./scripts/bench-hot-path.sh --dry-run
+```
+
+This confirms the percentile-extraction greps still match the bench tool's
+output shape. If `dry-run: ok` does not print, fix the runner script BEFORE
+moving to the reference machine — the actual bench takes 30-60 seconds and
+silently-broken extraction is the most common waste of that time.
+
+**Capture (on the reference machine, ~60 seconds):**
+
+```sh
+./scripts/bench-hot-path.sh
+```
+
+The script (a) builds the workspace `--release`, (b) runs `cargo bench -p
+sentinel-hook --bench cache_hit_hot_path` for the binding cache-hit p99,
+(c) runs the `#[ignore]`-gated `cargo test -p sentinel-e2e --release --test
+bench_hot_path_e2e -- --ignored --nocapture` for the context live-wrap p99,
+and (d) prints a markdown summary block on stdout shaped like:
+
+```
+## Bench Summary
+
+Paste the row below into docs/BENCH.md under the numbers table.
+
+| machine | RAM | macOS | rustc | git SHA | date (UTC) | cache-hit p99 | live-wrap p99 |
+|---------|-----|-------|-------|---------|------------|----------------|----------------|
+| <hw.model> | <GB> | <productVersion> | <rustc -V> | <SHA> | <ISO> | <p99>ns | <p99>ns |
+```
+
+**Update (mechanical, ~30 seconds in the editor):**
+
+1. Replace the `TBD` row in the `## Numbers` table with the row the runner
+   printed.
+2. Replace each `TBD-*` placeholder in `## Reference Machine` with the
+   matching value (e.g., `TBD-MAC-MODEL` → `Mac15,3` from the printed
+   `<hw.model>`).
+3. Optionally delete this `## Capture Procedure` section once the binding
+   number lands. (Keeping it is also fine — the procedure stays useful for
+   re-runs on different SKUs.)
+4. Commit with a message like:
+   ```
+   docs(bench): capture cache-hit p99 on <machine> reference run
+   ```
+
+**Cross-check:** the cache-hit p99 must be < 100,000 ns (i.e., < 100 µs)
+for the v0.1 / v0.2 hot-path budget claim to hold. If the captured number
+exceeds 100,000 ns, do NOT update the Numbers table; instead, surface the
+regression as a phase-level concern — the methodology shipped in v0.2 is
+sound, but the architectural claim would need re-evaluation.
+
 ## Numbers
 
 | machine | RAM | macOS | rustc | git SHA | date (UTC) | cache-hit p99 | live-wrap p99 |

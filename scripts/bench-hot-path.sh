@@ -31,11 +31,13 @@ if [[ "${1:-}" == "--dry-run" ]]; then
     SAMPLE_CACHE_HIT='cache_hit/decide_for_sockaddr p50=541ns p95=541ns p99=541ns p99.9=541ns max=541ns'
     SAMPLE_LIVE_WRAP='LIVE_WRAP_NS p50=12345 p95=23456 p99=34567 p999=45678 max=56789'
 
-    DRY_CACHE_HIT_P99="$(printf '%s\n' "$SAMPLE_CACHE_HIT" | grep -oE 'p99=[0-9]+ns' | head -1 | sed 's/^p99=//')"
+    # Matches the production extraction below: both columns capture the bare
+    # numeric value (no `ns` suffix) so the "unknown" fallback renders cleanly.
+    DRY_CACHE_HIT_P99="$(printf '%s\n' "$SAMPLE_CACHE_HIT" | grep -oE 'p99=[0-9]+' | head -1 | sed 's/^p99=//')"
     DRY_LIVE_WRAP_P99="$(printf '%s\n' "$SAMPLE_LIVE_WRAP" | grep -oE 'p99=[0-9]+' | head -1 | sed 's/^p99=//')"
 
     if [[ -z "$DRY_CACHE_HIT_P99" ]]; then
-        echo "dry-run FAIL: cache-hit grep ('p99=[0-9]+ns') did not match the synthetic sample." >&2
+        echo "dry-run FAIL: cache-hit grep ('p99=[0-9]+') did not match the synthetic sample." >&2
         echo "  sample: $SAMPLE_CACHE_HIT" >&2
         echo "  fix: update the grep regex in this script OR the eprintln! in crates/sentinel-hook/benches/cache_hit_hot_path.rs so they agree." >&2
         exit 1
@@ -101,14 +103,31 @@ cargo test -p sentinel-e2e --release --test bench_hot_path_e2e -- \
     | tee "$SCRATCH/bench-live-wrap.out"
 
 # ---------------------------------------------------------------------------
-# Extract percentile values from each bench's output.
+# Extract percentile values from each bench's output. Both extractions
+# capture the bare numeric value (no `ns` suffix) so the fallback to
+# "unknown" renders cleanly — previously cache-hit captured `12345ns`
+# while live-wrap captured `12345`, and on the unknown-fallback path the
+# live-wrap column rendered as `unknownns`. Adding the suffix uniformly
+# in fmt_ns() below keeps the two columns parallel on both happy and
+# fallback paths.
+# Defense-in-depth || echo unknown: bash's `set -e` does NOT propagate
+# errexit into command substitutions without `inherit_errexit`, so a
+# failing pipeline yields an empty string and the `:=` fallback fires —
+# but versions and shopt-state vary, so the explicit `|| echo unknown`
+# is the belt-and-suspenders.
 # ---------------------------------------------------------------------------
-CACHE_HIT_P99="$(grep -oE 'p99=[0-9]+ns' "$SCRATCH/bench-cache-hit.out" | head -1 | sed 's/^p99=//')"
-LIVE_WRAP_P99="$(grep -oE 'p99=[0-9]+' "$SCRATCH/bench-live-wrap.out" | head -1 | sed 's/^p99=//')"
+CACHE_HIT_P99="$(grep -oE 'p99=[0-9]+' "$SCRATCH/bench-cache-hit.out" | head -1 | sed 's/^p99=//' || echo unknown)"
+LIVE_WRAP_P99="$(grep -oE 'p99=[0-9]+' "$SCRATCH/bench-live-wrap.out" | head -1 | sed 's/^p99=//' || echo unknown)"
 
 # Fall back to "unknown" if either grep returned empty.
 : "${CACHE_HIT_P99:=unknown}"
 : "${LIVE_WRAP_P99:=unknown}"
+
+# Render with conditional `ns` suffix so the "unknown" fallback doesn't
+# end up as "unknownns". Used in the markdown row below.
+fmt_ns() { [ "$1" = "unknown" ] && echo "$1" || echo "${1}ns"; }
+CACHE_HIT_P99_FMT="$(fmt_ns "$CACHE_HIT_P99")"
+LIVE_WRAP_P99_FMT="$(fmt_ns "$LIVE_WRAP_P99")"
 
 # ---------------------------------------------------------------------------
 # Markdown summary table — paste into docs/BENCH.md.
@@ -121,7 +140,7 @@ Paste the row below into docs/BENCH.md under the numbers table.
 
 | machine | RAM | macOS | rustc | git SHA | date (UTC) | cache-hit p99 | live-wrap p99 |
 |---------|-----|-------|-------|---------|------------|----------------|----------------|
-| ${MAC_MODEL} | ${MEM_GB} GB | ${MACOS_VER} | ${RUSTC_VER} | ${GIT_SHA} | ${ISO_DATE} | ${CACHE_HIT_P99} | ${LIVE_WRAP_P99}ns |
+| ${MAC_MODEL} | ${MEM_GB} GB | ${MACOS_VER} | ${RUSTC_VER} | ${GIT_SHA} | ${ISO_DATE} | ${CACHE_HIT_P99_FMT} | ${LIVE_WRAP_P99_FMT} |
 
 Methodology: criterion 0.8.2, hdrhistogram 7.5.4. Sample size and warm-up are
 criterion defaults (100 samples, 3s warm-up, 5s measurement_time, 95% CI on the

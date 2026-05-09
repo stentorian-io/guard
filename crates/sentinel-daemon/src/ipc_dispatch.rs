@@ -105,7 +105,7 @@ pub enum FrameKind {
 /// Peek the first byte to decide framing kind. Reads exactly 1 byte from the
 /// stream — caller must continue with the appropriate read path.
 ///
-/// WARNING-06: only 0x00 (legacy length-prefix high byte) and 0x02..=0x0D
+/// WARNING-06: only 0x00 (legacy length-prefix high byte) and 0x02..=0x11
 /// (Phase 2/3 tags) are valid first bytes. Anything else is a protocol
 /// violation (invalid length prefix or unknown tag). Rejecting at this
 /// stage prevents the legacy handler from spending three more

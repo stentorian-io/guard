@@ -67,6 +67,17 @@ MACOS_VER="$(sw_vers -productVersion 2>/dev/null || echo unknown)"
 RUSTC_VER="$(rustc --version 2>/dev/null || echo unknown)"
 
 # ---------------------------------------------------------------------------
+# Per-run scratch dir under $TMPDIR (per-user `/var/folders/...` on macOS,
+# mode 0700) instead of fixed paths under /tmp. /tmp is /private/tmp mode
+# 1777 on macOS — a pre-placed symlink at /tmp/bench-cache-hit.out would
+# let `tee` clobber a target chosen by another local user. mktemp -d is
+# symlink-pivot-safe by construction; the trap cleans up on every exit
+# (including SIGINT / SIGTERM / SIGHUP) so we don't litter $TMPDIR.
+# ---------------------------------------------------------------------------
+SCRATCH="$(mktemp -d -t bench-hot-path)"
+trap 'rm -rf "$SCRATCH"' EXIT INT TERM HUP
+
+# ---------------------------------------------------------------------------
 # Build first so the live-wrap bench's --release invocation is fast.
 # ---------------------------------------------------------------------------
 echo "## bench-hot-path: building workspace --release ..." >&2
@@ -78,7 +89,7 @@ cargo build --workspace --release
 # ---------------------------------------------------------------------------
 echo "## bench-hot-path: cache-hit (binding number) ..." >&2
 cargo bench -p sentinel-hook --bench cache_hit_hot_path 2>&1 \
-    | tee /tmp/bench-cache-hit.out
+    | tee "$SCRATCH/bench-cache-hit.out"
 
 # ---------------------------------------------------------------------------
 # Live-wrap E2E bench — the CONTEXT number for VAL-03 (no fixed budget).
@@ -87,13 +98,13 @@ cargo bench -p sentinel-hook --bench cache_hit_hot_path 2>&1 \
 echo "## bench-hot-path: live-wrap (context number) ..." >&2
 cargo test -p sentinel-e2e --release --test bench_hot_path_e2e -- \
     --ignored --nocapture 2>&1 \
-    | tee /tmp/bench-live-wrap.out
+    | tee "$SCRATCH/bench-live-wrap.out"
 
 # ---------------------------------------------------------------------------
 # Extract percentile values from each bench's output.
 # ---------------------------------------------------------------------------
-CACHE_HIT_P99="$(grep -oE 'p99=[0-9]+ns' /tmp/bench-cache-hit.out | head -1 | sed 's/^p99=//')"
-LIVE_WRAP_P99="$(grep -oE 'p99=[0-9]+' /tmp/bench-live-wrap.out | head -1 | sed 's/^p99=//')"
+CACHE_HIT_P99="$(grep -oE 'p99=[0-9]+ns' "$SCRATCH/bench-cache-hit.out" | head -1 | sed 's/^p99=//')"
+LIVE_WRAP_P99="$(grep -oE 'p99=[0-9]+' "$SCRATCH/bench-live-wrap.out" | head -1 | sed 's/^p99=//')"
 
 # Fall back to "unknown" if either grep returned empty.
 : "${CACHE_HIT_P99:=unknown}"

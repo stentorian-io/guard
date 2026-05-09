@@ -41,12 +41,25 @@
 //!   * `.planning/phases/08-perf-reliability-hardening/08-PATTERNS.md` §NEW cache_hit_hot_path.rs
 
 use criterion::{criterion_group, criterion_main, Criterion};
+
+// Everything below is macOS-only because it constructs `libc::sockaddr_in`
+// literals whose `sin_zero` field is `[c_char; 8]`. `c_char` is `i8` on macOS
+// (what we use here) but `u8` on Linux, so `[0i8; 8]` would fail to compile
+// under `cargo check --workspace` on a Linux dev box. Sentinel is macOS-only
+// by charter (see CLAUDE.md); on non-macOS targets the bench group below is
+// an empty stub so `criterion_main!` still produces a runnable binary.
+#[cfg(target_os = "macos")]
 use hdrhistogram::Histogram;
+#[cfg(target_os = "macos")]
 use sentinel_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
+#[cfg(target_os = "macos")]
 use sentinel_hook::_test_decide_for_sockaddr;
+#[cfg(target_os = "macos")]
 use std::hint::black_box;
+#[cfg(target_os = "macos")]
 use std::time::Instant;
 
+#[cfg(target_os = "macos")]
 /// Build a realistic per-run snapshot's entry mix — CuratedAllow + ProjectAllow,
 /// Exact + Suffix + Ip match types. Mirrors what `prepare_snapshot` produces for
 /// a typical npm-install run. The fixed entries match RESEARCH §Pattern 1
@@ -80,6 +93,7 @@ fn realistic_entries() -> Vec<AllowlistEntry> {
     ]
 }
 
+#[cfg(target_os = "macos")]
 /// AF_INET sockaddr literal for `104.16.16.35:443` — one of registry.npmjs.org's
 /// Cloudflare IPs. Fixed value so the bench is deterministic across runs.
 /// Layout matches `crates/sentinel-hook/tests/resolve_client_tests.rs:217-224`.
@@ -97,6 +111,7 @@ fn sockaddr_for_npmjs_443() -> (libc::sockaddr_in, libc::socklen_t) {
     (sa, addrlen)
 }
 
+#[cfg(target_os = "macos")]
 fn cache_hit_bench(c: &mut Criterion) {
     // Build the entries Vec ONCE — never cloned inside the measurement loop.
     let entries = realistic_entries();
@@ -152,6 +167,12 @@ fn cache_hit_bench(c: &mut Criterion) {
         hist.max()
     );
 }
+
+// Non-macOS stub: keeps `criterion_main!` linkable on Linux/Windows so
+// `cargo check --workspace` doesn't fail with "no `main` symbol". The bench
+// group is intentionally empty — Sentinel is macOS-only by charter.
+#[cfg(not(target_os = "macos"))]
+fn cache_hit_bench(_c: &mut Criterion) {}
 
 criterion_group!(benches, cache_hit_bench);
 criterion_main!(benches);

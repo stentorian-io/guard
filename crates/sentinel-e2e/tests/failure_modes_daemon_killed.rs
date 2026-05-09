@@ -1,35 +1,35 @@
-//! Phase 5 plan 05-05 — VAL-04 D-09: daemon-killed mid-run failure mode.
+//! Daemon-killed failure-mode e2e — Phase 08 / VAL-05 D-39 + D-38.
 //!
-//! Verifies the dylib's "fail-closed for unknown destinations once the daemon
-//! is gone" contract:
-//!   1. Start daemon + sentinel run a node script.
-//!   2. Phase 1: node connects to registry.npmjs.org (allowlisted) — proves
-//!      the dylib has loaded the per-run snapshot and the curated allowlist
-//!      entry resolves.
-//!   3. Read PHASE1_CONNECTED from the wrapped child's stdout — race-safe
-//!      synchronization point (RESEARCH §Pitfall 5: do NOT use a fixed sleep).
-//!   4. Test sends SIGKILL to the daemon.
-//!   5. Phase 2: node attempts to connect to an unknown host. Without the
-//!      daemon to defer-resolve via Resolve IPC, one of two things happens
-//!      (per WARNING-5 — send_resolve_sync timeout semantics on a dead Unix
-//!      socket are not plan-time verified):
-//!        (a) the dylib's send_resolve_sync errors → falls through to
-//!            evaluate_policy with no host resolution → cache-miss-deny path
-//!            fires → connect() returns -1 with EHOSTUNREACH and node prints
-//!            PHASE2_DENIED; OR
-//!        (b) the dylib's send_resolve_sync hangs (no explicit timeout against
-//!            a dead socket today) → node hits its 4-second internal timeout,
-//!            prints PHASE2_TIMEOUT, exits non-zero — also a fail-closed shape
-//!            because the connect never succeeded.
-//!      Either outcome is acceptable. The ONLY catastrophic regression is
-//!      observing PHASE2_LEAKED (the connect succeeded), which would prove the
-//!      dylib silently allowed an unknown host through after the daemon died.
-//!   6. Test asserts node printed PHASE2_DENIED OR PHASE2_TIMEOUT (both pass);
-//!      a PHASE2_LEAKED observation fails the test loudly.
+//! Asserts that when the daemon is SIGKILL'd mid-run:
+//!   1. (HARD) Phase 2 connect to an unknown host produces PHASE2_DENIED on
+//!      stdout — NOT `OR timeout`. The dylib's existing
+//!      `RESOLVE_TIMEOUT_MS=100` + `connect_with_timeout` shape is verified
+//!      deterministic against a SIGKILL'd daemon (Phase 08 D-38; verification
+//!      spike landed at
+//!      crates/sentinel-hook/tests/daemon_dead_socket_returns_io_error.rs and
+//!      annotated in
+//!      .planning/phases/08-perf-reliability-hardening/08-CONTEXT.md near D-40
+//!      — "D-38 verified: existing shape returns ECONNREFUSED in <1ms").
+//!   2. (HARD) The reported error code is EHOSTUNREACH — the dylib-fired
+//!      marker. Node's deadline-timeout path produces a different shape
+//!      (PHASE2_TIMEOUT without :EHOSTUNREACH); this disambiguates "dylib
+//!      denied" from "node gave up" without needing a JSONL block-event row.
 //!
-//! Future hardening (post-v1, NOT in scope here): if Phase 3 adds an explicit
-//! timeout to send_resolve_sync against a dead socket, narrow this assertion
-//! to require explicit PHASE2_DENIED. Today both shapes are accepted.
+//! disposition #3 — defer JSONL: the JSONL block-event assertion is DEFERRED
+//! to v0.3 per Phase 08 D-39 disposition #3. The libc-deny path in
+//! `crates/sentinel-hook/src/replace_libc.rs:181-201` writes only to the
+//! in-process LOG_RING (line 195) and does NOT route to `log_writer.send`;
+//! the libc-allow path (line 199) is symmetrically silent. The only
+//! production producer of `LogRow::Allow` / `LogRow::Block` is
+//! `crates/sentinel-daemon/src/handlers/prompt_channel.rs:405,407`,
+//! reachable only via the interactive-TUI prompt path. Audit trail:
+//! .planning/phases/08-perf-reliability-hardening/08-AUDIT-libc-allow-jsonl.md.
+//! Closing the libc → JSONL gap is a v0.3+ work item; v0.2 ships denied-only
+//! stdout + EHOSTUNREACH-marker assertion as the dylib-fired evidence.
+//!
+//! Catastrophic regression: PHASE2_LEAKED (the connect succeeded), which
+//! would prove the dylib silently allowed an unknown host through after the
+//! daemon died.
 
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
@@ -53,10 +53,15 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
 
     // Two-phase node script (RESEARCH §Code Examples §A lines 441-454).
     // Phase 1 connect must be ALLOWED (registry.npmjs.org is on the curated
-    // allowlist via Phase 2 plan 02-02 yaml). Phase 2 connect must be DENIED
-    // OR hit the per-connect 4s deadline-timeout (both acceptable per
-    // WARNING-5 — see assertion comment below). Only PHASE2_LEAKED is a
-    // catastrophic regression.
+    // allowlist via Phase 2 plan 02-02 yaml). Phase 2 connect must be
+    // PHASE2_DENIED with the `:EHOSTUNREACH` suffix (Phase 08 D-39
+    // disposition #3 — denied-only, dylib-fired). The internal 4s
+    // setTimeout fallback that emits PHASE2_TIMEOUT is preserved purely as
+    // a debugging surface: under D-38 verification it must not fire on a
+    // healthy SIGKILL'd-daemon test environment, but if it does, the outer
+    // assertion will fail with `observed: Some("timeout")` and the script
+    // exits cleanly rather than hanging the harness. PHASE2_LEAKED remains
+    // the catastrophic regression.
     let script = r#"
         const net = require('net');
         const phase1 = net.connect(443, 'registry.npmjs.org');
@@ -71,7 +76,12 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
                 phase2.on('error', e => {
                     if (resolved) return;
                     resolved = true;
-                    console.log('PHASE2_DENIED:', e.code);
+                    // Concatenated form (no space) so the test can match
+                    // `PHASE2_DENIED:EHOSTUNREACH` as a single token. Phase 08
+                    // D-39 disposition #3: the EHOSTUNREACH suffix is the
+                    // dylib-fired marker that disambiguates dylib denial from
+                    // node's deadline-timeout exit.
+                    console.log('PHASE2_DENIED:' + e.code);
                     process.exit(1);
                 });
                 phase2.on('connect', () => {
@@ -144,9 +154,12 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
 
     // The HARD KILL — daemon goes down here. After this, the dylib still has
     // the snapshot mmap'd; for known hosts it keeps enforcing; for unknown
-    // hosts the Resolve-IPC fallback errors (PHASE2_DENIED) or hangs and the
-    // wrapped node hits its internal 4s deadline (PHASE2_TIMEOUT) — both
-    // are acceptable fail-closed shapes per WARNING-5.
+    // hosts the Resolve-IPC fast-shape fires `Err(IpcClientError::Io(
+    // ConnectionRefused))` in <1ms (Phase 08 D-38 verification), the dylib
+    // falls through to cache-miss-deny, and `connect()` returns -1 with
+    // `errno = EHOSTUNREACH` — node prints `PHASE2_DENIED:EHOSTUNREACH`
+    // and exits 1. The PHASE2_TIMEOUT path is no longer accepted (v0.2
+    // tightening per D-39 disposition #3).
     let daemon_pid = harness.child.id() as libc::pid_t;
     unsafe {
         libc::kill(daemon_pid, libc::SIGKILL);
@@ -159,14 +172,29 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
     // has 2.5s setTimeout + up to 4s connect deadline).
     let phase2_deadline = Instant::now() + Duration::from_secs(15);
     let mut phase2_outcome: Option<&'static str> = None;
+    // VAL-05 D-39 disposition #3: extract the `e.code` suffix from the node
+    // script's `PHASE2_DENIED:<code>` line. EHOSTUNREACH is the dylib-fired
+    // marker; any other code (or absence of a code) indicates the deny did
+    // not come from the dylib's interceptor.
+    let mut phase2_error_code: Option<String> = None;
     while Instant::now() < phase2_deadline {
         let mut line = String::new();
         match br.read_line(&mut line) {
             Ok(0) => break,
             Ok(_) => {
                 all_stdout.push_str(&line);
-                if line.contains("PHASE2_DENIED") {
+                if let Some(rest) = line.find("PHASE2_DENIED:") {
                     phase2_outcome = Some("denied");
+                    // Extract the `<code>` suffix after `PHASE2_DENIED:`.
+                    // The node script emits `PHASE2_DENIED:` + e.code with
+                    // no separator; e.code can be undefined (rendered as
+                    // "undefined") or a real errno string like
+                    // "EHOSTUNREACH".
+                    let after = &line[rest + "PHASE2_DENIED:".len()..];
+                    let code = after.trim().trim_end_matches(',').to_string();
+                    if !code.is_empty() {
+                        phase2_error_code = Some(code);
+                    }
                     break;
                 }
                 if line.contains("PHASE2_TIMEOUT") {
@@ -186,48 +214,49 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
     let _ = wrapped.kill();
     let _ = wrapped.wait();
 
-    // Assertion (per WARNING-5 + WR-07): split strict and lenient passes so
-    // the test stays green today but the timeout-shape regression risk is
-    // visible.
-    //
-    // Pass shapes:
-    //   - 'denied'  — explicit cache-miss-deny from the dylib's libc::connect
-    //                 interceptor. PROVES fail-closed.
-    //   - 'timeout' — node's internal 4s deadline fired without daemon
-    //                 involvement. AMBIGUOUS — does not, on its own, prove
-    //                 the dylib refused; only proves node gave up. Accepted
-    //                 today per WARNING-5 because send_resolve_sync against
-    //                 a dead socket has no explicit timeout in v1; tighten
-    //                 to require 'denied' once the post-v1 hardening pass
-    //                 closes that gap.
+    // VAL-05 D-39 disposition #3 — defer JSONL: tightened from v0.1's lenient
+    // `denied OR timeout` shape to denied-only. The dylib's existing
+    // RESOLVE_TIMEOUT_MS=100 + connect_with_timeout shape is verified
+    // deterministic against a SIGKILL'd daemon (Phase 08 D-38; sub-1ms
+    // ECONNREFUSED → cache-miss-deny path). Pass shapes:
+    //   - 'denied' with phase2_error_code == Some("EHOSTUNREACH") — explicit
+    //     cache-miss-deny from the dylib's libc::connect interceptor (sets
+    //     `*libc::__error() = libc::EHOSTUNREACH` at replace_libc.rs:194).
+    //     PROVES fail-closed and PROVES the dylib (not node's deadline) is
+    //     the entity refusing the connection.
     // Fail shapes:
+    //   - 'timeout' — node's internal 4s deadline. NO LONGER ACCEPTED.
     //   - 'leaked'  — connect succeeded; catastrophic.
-    //   - None      — no phase-2 marker before deadline; treat as fail
-    //                 (test could not observe the outcome).
-    let pass_lenient = matches!(phase2_outcome, Some("denied") | Some("timeout"));
+    //   - None      — no phase-2 marker before deadline; test could not
+    //                 observe the outcome.
+    //
+    // VAL-05 D-39 HARD assertion 1: PHASE2 must be denied (no longer
+    // accepting timeout).
     let pass_strict = matches!(phase2_outcome, Some("denied"));
     assert!(
-        pass_lenient,
-        "VAL-04 D-09 HARD assertion failed: PHASE2 did not fail closed.\n\
-         Acceptable outcomes: 'denied' (explicit deny from cache-miss) OR \
-         'timeout' (dylib hung against dead daemon socket → node 4s deadline).\n\
-         Catastrophic regression: 'leaked' (connect succeeded — dylib silently \
-         allowed unknown host after daemon death).\n\
-         observed outcome: {:?}\n\
-         stdout:\n{all_stdout}\n\
-         daemon stderr (best-effort post-kill):\n{}",
+        pass_strict,
+        "VAL-05 D-39 HARD: PHASE2 must be denied (no longer accepting timeout).\n\
+         observed: {:?}\nstdout:\n{all_stdout}\ndaemon stderr:\n{}",
         phase2_outcome,
         harness.drain_stderr()
     );
-    if !pass_strict {
-        eprintln!(
-            "[VAL-04 D-09 SOFT WR-07] PHASE2_TIMEOUT observed — fail-closed shape \
-             ambiguous (node gave up rather than dylib explicitly denying). \
-             Accepting per WARNING-5 but flagging for post-v1 tightening: when \
-             send_resolve_sync grows an explicit timeout against a dead socket, \
-             this test should require 'denied' specifically."
-        );
-    }
+
+    // VAL-05 D-39 disposition #3 HARD assertion 2: error code is EHOSTUNREACH,
+    // the dylib-fired marker. Disambiguates "dylib denied" from "node gave up".
+    // PHASE2_DENIED is paired with `:EHOSTUNREACH` in the node script's
+    // `e.code` print; the v0.1 `PHASE2_TIMEOUT` shape (which we no longer
+    // accept) does not include `e.code`.
+    assert!(
+        all_stdout.contains("PHASE2_DENIED:EHOSTUNREACH")
+            || phase2_error_code.as_deref() == Some("EHOSTUNREACH"),
+        "VAL-05 D-39 disposition #3: expected PHASE2_DENIED:EHOSTUNREACH \
+         (dylib-fired); observed_outcome={:?}, observed_code={:?}\n\
+         stdout:\n{all_stdout}\n\
+         daemon stderr:\n{}",
+        phase2_outcome,
+        phase2_error_code,
+        harness.drain_stderr()
+    );
 
     // Drop harness — its Drop sends SIGTERM/SIGKILL to harness.child but harness.child
     // is already dead from the SIGKILL above. lib.rs:140-164 handles try_wait → SIGKILL

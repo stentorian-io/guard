@@ -178,6 +178,15 @@ static SENTINEL_INTERPOSE_EXECV: [SyncPtr2; 2] = [
     SyncPtr2(libc::execv as *const c_void),
 ];
 
+// M004-S04: getenv interposition for anti-detection hardening.
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_GETENV: [SyncPtr2; 2] = [
+    SyncPtr2(crate::env_scrub::sentinel_getenv as *const c_void),
+    SyncPtr2(libc::getenv as *const c_void),
+];
+
 /// ISS-12 remediation: confirm OUR `__DATA,__interpose` record on `connect`
 /// actually took effect for this process. Resolution rule for two competing
 /// interpose records on the same symbol is implementation-defined; this probe

@@ -66,6 +66,18 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Verify and repair installation integrity (M004-S05).
+    /// Re-derives HMAC key (if missing), hook hash, and re-bootstraps agents.
+    Repair,
+
+    /// Emergency escape hatch: bootout daemon + watchdog, clear tracked roots,
+    /// so all wrapped processes lose enforcement immediately (M004-S05).
+    UnwrapAll {
+        /// Skip TTY confirmation prompt.
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+
     /// (Default) Wrap a command under enforcement.
     /// `argv[0]` is the binary name; subsequent elements are passed verbatim.
     #[command(external_subcommand)]

@@ -13,6 +13,7 @@ pub mod logs;
 pub mod logs_follow;
 pub mod prompt_channel;
 pub mod prompt_render;
+pub mod repair;
 pub mod run_orchestrator;
 pub mod setup;
 pub mod shell_setup;
@@ -22,6 +23,7 @@ pub mod status;
 pub mod trust_policy;
 pub mod tty;
 pub mod uninstall;
+pub mod unwrap_all;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {

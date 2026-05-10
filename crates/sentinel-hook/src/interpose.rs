@@ -9,6 +9,10 @@ pub static REAL_GETADDRINFO_ASYNC: AtomicPtr<c_void> = AtomicPtr::new(core::ptr:
 pub static REAL_GETADDRINFO_ASYNC_CALL: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
 pub static REAL_SENDTO: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
 pub static REAL_SENDMSG: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
+pub static REAL_SEND: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
+pub static REAL_WRITE: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
+pub static REAL_WRITEV: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
+pub static REAL_SYSCALL: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
 
 /// Capture original libc symbol pointers.
 ///
@@ -69,6 +73,10 @@ pub unsafe fn capture_originals() {
     );
     REAL_SENDTO.store(real_sym!(libsystem, c"sendto"), Ordering::Relaxed);
     REAL_SENDMSG.store(real_sym!(libsystem, c"sendmsg"), Ordering::Relaxed);
+    REAL_SEND.store(real_sym!(libsystem, c"send"), Ordering::Relaxed);
+    REAL_WRITE.store(real_sym!(libsystem, c"write"), Ordering::Relaxed);
+    REAL_WRITEV.store(real_sym!(libsystem, c"writev"), Ordering::Relaxed);
+    REAL_SYSCALL.store(real_sym!(libsystem, c"syscall"), Ordering::Relaxed);
 
     crate::log_buffer::LOG_RING
         .append(b"[sentinel-hook] capture_originals: raw-syscall mode (Phase 1)");
@@ -184,23 +192,40 @@ pub fn probe_self_test() {
     use core::ffi::c_void;
     use core::sync::atomic::Ordering;
     unsafe extern "C" {
-        // Reference to our own replacement function in replace_libc.rs.
         fn sentinel_connect(
             s: libc::c_int,
             addr: *const libc::sockaddr,
             addrlen: libc::socklen_t,
         ) -> libc::c_int;
+        fn sentinel_write(
+            fd: libc::c_int,
+            buf: *const c_void,
+            count: libc::size_t,
+        ) -> libc::ssize_t;
     }
     unsafe {
-        let active = libc::dlsym(libc::RTLD_DEFAULT, c"connect".as_ptr());
-        let ours = sentinel_connect as *mut c_void;
-        if active != ours {
+        let active_connect = libc::dlsym(libc::RTLD_DEFAULT, c"connect".as_ptr());
+        let ours_connect = sentinel_connect as *mut c_void;
+        if active_connect != ours_connect {
             crate::snapshot::FAIL_CLOSED.store(true, Ordering::Release);
-            let line = b"[sentinel-hook] interpose-not-effective: dlsym(RTLD_DEFAULT,\"connect\") != &sentinel_connect \xe2\x80\x94 entering FAIL_CLOSED (ISS-12 / T-01-08-01)";
-            crate::log_buffer::LOG_RING.append(line);
-        } else {
-            let line = b"[sentinel-hook] interpose self-test passed (sentinel_connect is the active connect symbol)";
-            crate::log_buffer::LOG_RING.append(line);
+            crate::log_buffer::LOG_RING.append(
+                b"[sentinel-hook] interpose-not-effective: dlsym(RTLD_DEFAULT,\"connect\") != &sentinel_connect \xe2\x80\x94 entering FAIL_CLOSED (ISS-12 / T-01-08-01)",
+            );
+            return;
         }
+
+        let active_write = libc::dlsym(libc::RTLD_DEFAULT, c"write".as_ptr());
+        let ours_write = sentinel_write as *mut c_void;
+        if active_write != ours_write {
+            crate::snapshot::FAIL_CLOSED.store(true, Ordering::Release);
+            crate::log_buffer::LOG_RING.append(
+                b"[sentinel-hook] interpose-not-effective: dlsym(RTLD_DEFAULT,\"write\") != &sentinel_write \xe2\x80\x94 entering FAIL_CLOSED",
+            );
+            return;
+        }
+
+        crate::log_buffer::LOG_RING.append(
+            b"[sentinel-hook] interpose self-test passed (sentinel_connect + sentinel_write active)",
+        );
     }
 }

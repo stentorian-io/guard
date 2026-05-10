@@ -89,30 +89,13 @@ impl Drop for InHookGuard {
     }
 }
 
-// macOS syscall numbers for the four interposed symbols.
-// Using direct syscalls bypasses the __DATA,__interpose mechanism entirely,
-// which is essential: when our dylib is injected via DYLD_INSERT_LIBRARIES,
-// dyld patches ALL symbol lookups (including dlsym on the original image) to
-// return our replacement functions. The only escape from the interpose chain
-// is a raw syscall (the kernel entry point is never interposed).
-//
-// Verified from macOS 15.4 SDK /usr/include/sys/syscall.h:
-//   SYS_sendmsg=28, SYS_connect=98, SYS_sendto=133, SYS_connectx=447
-// These numbers are stable across macOS versions (BSD socket ABI).
-const SYS_CONNECT: libc::c_int = 98;
-const SYS_CONNECTX: libc::c_int = 447;
-const SYS_SENDTO: libc::c_int = 133;
-const SYS_SENDMSG: libc::c_int = 28;
+use crate::raw_syscall;
 
-/// Call the real kernel connect(2) by bypassing the libc stub entirely.
-/// This avoids the infinite recursion caused by DYLD_INSERT_LIBRARIES
-/// patching all symbol lookups to return sentinel_connect instead of libSystem's connect.
 #[inline(always)]
 unsafe fn raw_connect(s: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
-    unsafe { libc::syscall(SYS_CONNECT, s, addr, addrlen) as c_int }
+    unsafe { raw_syscall::raw_connect(s, addr, addrlen) }
 }
 
-/// Call the real kernel sendto(2) via raw syscall.
 #[inline(always)]
 unsafe fn raw_sendto(
     s: c_int,
@@ -122,13 +105,12 @@ unsafe fn raw_sendto(
     to: *const sockaddr,
     tolen: socklen_t,
 ) -> ssize_t {
-    unsafe { libc::syscall(SYS_SENDTO, s, buf, len, flags, to, tolen) as ssize_t }
+    unsafe { raw_syscall::raw_sendto(s, buf, len, flags, to, tolen) }
 }
 
-/// Call the real kernel sendmsg(2) via raw syscall.
 #[inline(always)]
 unsafe fn raw_sendmsg(s: c_int, msg: *const msghdr, flags: c_int) -> ssize_t {
-    unsafe { libc::syscall(SYS_SENDMSG, s, msg, flags) as ssize_t }
+    unsafe { raw_syscall::raw_sendmsg(s, msg, flags) }
 }
 
 // ISS-06 disposition: ENF-06 verification scope is documented as MATCHER-ONLY
@@ -217,12 +199,12 @@ pub unsafe extern "C" fn sentinel_connect(
 //     } sa_endpoints_t;
 
 #[repr(C)]
-struct SaEndpoints {
-    sae_srcif: u32,
-    sae_srcaddr: *const sockaddr,
-    sae_srcaddrlen: socklen_t,
-    sae_dstaddr: *const sockaddr,
-    sae_dstaddrlen: socklen_t,
+pub struct SaEndpoints {
+    pub sae_srcif: u32,
+    pub sae_srcaddr: *const sockaddr,
+    pub sae_srcaddrlen: socklen_t,
+    pub sae_dstaddr: *const sockaddr,
+    pub sae_dstaddrlen: socklen_t,
 }
 
 #[unsafe(no_mangle)]
@@ -240,7 +222,7 @@ unsafe extern "C" fn sentinel_connectx(
     let _guard = match InHookGuard::enter() {
         Some(g) => g,
         None => return unsafe {
-            libc::syscall(SYS_CONNECTX, s, endpoints, associd, flags, iov, iovcnt, len, connid) as c_int
+            raw_syscall::raw_connectx(s, endpoints, associd, flags, iov, iovcnt, len, connid)
         },
     };
 
@@ -261,7 +243,7 @@ unsafe extern "C" fn sentinel_connectx(
         return -1;
     }
     unsafe {
-        libc::syscall(SYS_CONNECTX, s, endpoints, associd, flags, iov, iovcnt, len, connid) as c_int
+        raw_syscall::raw_connectx(s, endpoints, associd, flags, iov, iovcnt, len, connid)
     }
     // _guard drops here: IN_HOOK cleared after real syscall returns
 }
@@ -649,6 +631,57 @@ unsafe fn ip_to_str<'a>(
     None
 }
 
+// ---- write ----
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sentinel_write(
+    fd: c_int,
+    buf: *const c_void,
+    count: size_t,
+) -> ssize_t {
+    // Fast path: non-socket fds pass through with ~1 bitmap lookup overhead.
+    if !crate::fd_class::is_connected_socket(fd) {
+        return unsafe { raw_syscall::raw_write(fd, buf, count) };
+    }
+    // Socket fd — the destination was already permitted at connect() time
+    // for connected sockets. Pass through.
+    unsafe { raw_syscall::raw_write(fd, buf, count) }
+}
+
+// ---- writev ----
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sentinel_writev(
+    fd: c_int,
+    iov: *const libc::iovec,
+    iovcnt: c_int,
+) -> ssize_t {
+    if !crate::fd_class::is_connected_socket(fd) {
+        return unsafe { raw_syscall::raw_writev(fd, iov, iovcnt) };
+    }
+    unsafe { raw_syscall::raw_writev(fd, iov, iovcnt) }
+}
+
+// ---- send ----
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sentinel_send(
+    s: c_int,
+    buf: *const c_void,
+    len: size_t,
+    flags: c_int,
+) -> ssize_t {
+    // BL-04: RAII guard — see reentrancy.rs for the canonical rationale.
+    let _guard = match InHookGuard::enter() {
+        Some(g) => g,
+        None => return unsafe { raw_syscall::raw_send(s, buf, len, flags) },
+    };
+    // send() operates on a connected socket — the destination was already
+    // permitted at connect() time. Pass through unconditionally.
+    unsafe { raw_syscall::raw_send(s, buf, len, flags) }
+    // _guard drops here: IN_HOOK cleared after real syscall returns
+}
+
 // ---- THE INTERPOSE RECORDS ----
 // These MUST live in the SAME translation unit as the function bodies (or be
 // referenced from one); we emit them here.
@@ -682,6 +715,12 @@ unsafe extern "C" {
         len: *mut size_t,
         connid: *mut c_int,
     ) -> c_int;
+    fn send(
+        s: c_int,
+        buf: *const c_void,
+        len: size_t,
+        flags: c_int,
+    ) -> ssize_t;
 }
 
 // Phase 1 interpose records: connect, connectx, sendto, sendmsg.
@@ -740,3 +779,39 @@ static SENTINEL_INTERPOSE_SENDMSG: [SyncPtr; 2] = [
     SyncPtr(sentinel_sendmsg as *const c_void),
     SyncPtr(libc::sendmsg as *const c_void),
 ];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_SEND: [SyncPtr; 2] = [
+    SyncPtr(sentinel_send as *const c_void),
+    SyncPtr(send as *const c_void),
+];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_WRITE: [SyncPtr; 2] = [
+    SyncPtr(sentinel_write as *const c_void),
+    SyncPtr(libc::write as *const c_void),
+];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_WRITEV: [SyncPtr; 2] = [
+    SyncPtr(sentinel_writev as *const c_void),
+    SyncPtr(libc::writev as *const c_void),
+];
+
+// syscall() interpose: DEFERRED.
+//
+// libc's syscall(int, ...) uses C variadic calling convention. On aarch64
+// macOS, variadic args are passed on the stack (not in registers), so a
+// non-variadic Rust function cannot correctly extract the args. Rust's
+// c_variadic feature is unstable. Until it stabilizes, the syscall()
+// interpose is not viable.
+//
+// Impact: malicious code that calls syscall(SYS_CONNECT, ...) directly
+// bypasses sentinel_connect. This is a known gap — realistic supply-chain
+// attacks use connect() or higher-level APIs, not raw syscall().

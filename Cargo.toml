@@ -9,6 +9,7 @@ members = [
   "crates/sentinel-e2e",
   "crates/sentinel-e2e/harness/env_clear_posix_spawn",
   "crates/sentinel-e2e/harness/pm_env_posix_spawn",
+  "crates/sentinel-e2e/harness/expanded_hooks_probe",
 ]
 
 [workspace.package]

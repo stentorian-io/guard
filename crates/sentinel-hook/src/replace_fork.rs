@@ -38,9 +38,7 @@ fn is_untracked_peer(err: &IpcClientError) -> bool {
     matches!(err, IpcClientError::DaemonRejected(m) if m.contains("untracked peer"))
 }
 
-// Verified from macOS 15.4 SDK /usr/include/sys/syscall.h:
-const SYS_FORK: libc::c_int = 2;
-const SYS_VFORK: libc::c_int = 66;
+use crate::raw_syscall;
 
 /// RAII guard — same shape as Phase 1 InHookGuard in replace_libc.rs. Holds
 /// IN_HOOK=true for the entire shadow scope; releases on drop.
@@ -66,16 +64,12 @@ impl Drop for InHookGuard {
 
 #[inline(always)]
 unsafe fn raw_fork() -> libc::pid_t {
-    // SAFETY: SYS_FORK takes no arguments. The kernel returns child pid in
-    // parent / 0 in child / -1 on error.
-    unsafe { libc::syscall(SYS_FORK) as libc::pid_t }
+    unsafe { raw_syscall::raw_fork() }
 }
 
 #[inline(always)]
 unsafe fn raw_vfork() -> libc::pid_t {
-    // SAFETY: SYS_VFORK takes no arguments. Vfork-stack-safety: caller MUST
-    // not modify parent stack between vfork-return-in-child and exec/_exit.
-    unsafe { libc::syscall(SYS_VFORK) as libc::pid_t }
+    unsafe { raw_syscall::raw_vfork() }
 }
 
 /// Read the child's pidversion via task_info(TASK_AUDIT_TOKEN).

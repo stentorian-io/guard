@@ -61,6 +61,12 @@ fn real_main() -> Result<i32, CliError> {
         Cmd::Setup { target, remove, reinstall, yes } => {
             sentinel_cli::setup::run_setup(&sock, &state, target, remove, reinstall, yes)
         }
+        Cmd::Repair => {
+            sentinel_cli::repair::run(&sock, &state)
+        }
+        Cmd::UnwrapAll { yes } => {
+            sentinel_cli::unwrap_all::run(&sock, &state, yes)
+        }
         Cmd::Status { sub, verbose, json } => {
             // WR-06: outer --verbose / --json are documented as "Only valid
             // when `sub` is None" but clap still parses them when a sub-verb

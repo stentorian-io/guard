@@ -29,6 +29,7 @@ pub const SYS_CONNECTX: i64 = 447;
 // SYS_SEND does not exist on macOS/XNU — send() is implemented as
 // sendto() with a NULL destination address in libc. We use SYS_SENDTO
 // with to=NULL, tolen=0 as the raw equivalent.
+pub const SYS_READ: i64 = 3;
 pub const SYS_GETSOCKOPT: i64 = 118;
 
 /// Raw kernel syscall with 3 arguments.
@@ -331,6 +332,11 @@ pub unsafe fn raw_send(s: c_int, buf: *const c_void, len: size_t, flags: c_int) 
             0,
         )
     }
+}
+
+#[inline(always)]
+pub unsafe fn raw_read(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t {
+    unsafe { syscall3(SYS_READ, fd as u64, buf as u64, count as u64) as ssize_t }
 }
 
 #[inline(always)]

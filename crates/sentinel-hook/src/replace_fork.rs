@@ -14,9 +14,10 @@
 //! do anything that mutates parent stack frames. The vfork child path here
 //! resets IN_HOOK and returns 0 — the IPC is sent from the parent's path.
 
+use crate::exec_policy::{self, ExecDecision};
 use crate::ipc_client::{
-    copy_cstr_to_buf, send_env_not_propagated_gap_sync, send_exec_event_sync, send_fork_event_sync,
-    IpcClientError,
+    copy_cstr_to_buf, send_env_not_propagated_gap_sync, send_exec_blocked, send_exec_event_sync,
+    send_fork_event_sync, IpcClientError,
 };
 use crate::reentrancy::IN_HOOK;
 use sentinel_ipc::AuditTokenWire;
@@ -266,6 +267,14 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
             return unsafe { libc::posix_spawn(pid_out, path, file_actions, attrp, argv, envp) };
         }
     };
+    if let ExecDecision::BlockHardened = exec_policy::check_exec_target(path) {
+        let mut path_buf = [0u8; 1024];
+        let n = copy_cstr_to_buf(path, &mut path_buf);
+        let token = current_audit_token_wire();
+        send_exec_blocked(token, &path_buf[..n], "hardened-runtime");
+        return libc::EACCES;
+    }
+
     // TREE-06 (gap-closure 02-09): inspect envp pre-spawn for missing Sentinel
     // env vars. If any are absent, emit a best-effort EnvNotPropagatedGap IPC
     // BEFORE the real posix_spawn fires (so the gap is recorded even if the
@@ -394,6 +403,14 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
             return unsafe { libc::posix_spawnp(pid_out, path, file_actions, attrp, argv, envp) };
         }
     };
+    if let ExecDecision::BlockHardened = exec_policy::check_exec_target(path) {
+        let mut path_buf = [0u8; 1024];
+        let n = copy_cstr_to_buf(path, &mut path_buf);
+        let token = current_audit_token_wire();
+        send_exec_blocked(token, &path_buf[..n], "hardened-runtime");
+        return libc::EACCES;
+    }
+
     // TREE-06 (gap-closure 02-09): same pre-spawn envp inspection as
     // sentinel_posix_spawn. Best-effort — see that function's comment.
     if unsafe { crate::envp::should_emit_env_not_propagated_gap(envp) } {
@@ -409,7 +426,6 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
             detected_at_ms,
             IPC_TIMEOUT_MS,
         );
-        // Continue regardless — best-effort.
     }
 
     // BLOCKER-05: see `sentinel_posix_spawn` for the IN_HOOK-thread-local

@@ -1227,3 +1227,60 @@ impl DenyNotifyAck {
         }
     }
 }
+
+// ============================================================
+// v0.4 — ExecBlocked (tag 0x13; M003-S02 hardened-runtime exec blocking)
+// ============================================================
+
+/// Dylib → daemon: a hardened-runtime exec was blocked. Fire-and-forget.
+/// The exec has already been denied (errno = EACCES); this message provides
+/// forensic logging so the denial appears in the JSONL log and status output.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExecBlocked {
+    pub schema_version: u16,
+    pub audit_token: AuditTokenWire,
+    #[serde(with = "serde_bytes")]
+    pub target_path: Vec<u8>,
+    pub reason: String,
+    pub blocked_at_ms: u64,
+}
+
+impl ExecBlocked {
+    pub const MAX_TARGET_PATH: usize = 1024;
+
+    pub fn new(
+        audit_token: AuditTokenWire,
+        target_path: &[u8],
+        reason: impl Into<String>,
+        blocked_at_ms: u64,
+    ) -> Self {
+        let len = target_path.len().min(Self::MAX_TARGET_PATH);
+        Self {
+            schema_version: IPC_SCHEMA_V4,
+            audit_token,
+            target_path: target_path[..len].to_vec(),
+            reason: reason.into(),
+            blocked_at_ms,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ExecBlockedAck {
+    Ok { schema_version: u16 },
+    Err { schema_version: u16, message: String },
+}
+
+impl ExecBlockedAck {
+    pub fn ok() -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V4,
+        }
+    }
+    pub fn err(m: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V4,
+            message: m.into(),
+        }
+    }
+}

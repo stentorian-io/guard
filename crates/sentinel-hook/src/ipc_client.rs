@@ -15,9 +15,9 @@
 use core::ffi::{c_char, CStr};
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
-    AuditTokenWire, DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, ExecAck, ExecEvent,
-    ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4, Resolve, ResolveReply,
-    SOCKADDR_WIRE_LEN,
+    AuditTokenWire, DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, ExecAck, ExecBlocked,
+    ExecBlockedAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4,
+    Resolve, ResolveReply, SOCKADDR_WIRE_LEN,
 };
 use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
@@ -33,6 +33,7 @@ pub(crate) const TAG_DYLIB_LOADED: u8 = 0x05;
 pub(crate) const TAG_RESOLVE: u8 = 0x06;
 pub(crate) const TAG_ENV_NOT_PROPAGATED: u8 = 0x08;
 pub(crate) const TAG_DENY_NOTIFY: u8 = 0x12;
+pub(crate) const TAG_EXEC_BLOCKED: u8 = 0x13;
 
 static DAEMON_SOCKET_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
@@ -364,6 +365,20 @@ pub fn send_deny_notify(
         denied_at_ms: now_ms,
     };
     let _ = send_tagged_and_recv_ack::<DenyNotify, DenyNotifyAck>(TAG_DENY_NOTIFY, &ev, 50);
+}
+
+/// Fire-and-forget: tell the daemon a hardened-runtime exec was blocked.
+pub fn send_exec_blocked(
+    audit_token: AuditTokenWire,
+    target_path: &[u8],
+    reason: &str,
+) {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let ev = ExecBlocked::new(audit_token, target_path, reason, now_ms);
+    let _ = send_tagged_and_recv_ack::<ExecBlocked, ExecBlockedAck>(TAG_EXEC_BLOCKED, &ev, 50);
 }
 
 // ---------------------------------------------------------------------------

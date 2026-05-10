@@ -24,7 +24,7 @@
 use rusqlite::{params, Connection, OpenFlags, Result as SqlResult};
 use rusqlite_migration::{Migrations, M};
 use sentinel_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 use tracing::warn;
 
@@ -63,10 +63,14 @@ const SQL_003_FEED_IOCS_AND_WAL: &str = include_str!("../migrations/003_feed_ioc
 
 pub struct RuleStore {
     /// Long-lived connection used for migrations + the write path
-    /// (`insert_trusted`). Reads open a fresh connection per call so they
-    /// do NOT contend on this mutex. See WARNING-08.
+    /// (`insert_trusted`). Serializes all writes.
     conn: Mutex<Connection>,
-    db_path: PathBuf,
+    /// WR-05 fix: shared long-lived read-only connection. Replaces the
+    /// per-query `open_reader()` pattern that opened a fresh Connection on
+    /// every read call — unbounded under concurrent CLI invocations.
+    /// WAL mode (enabled at open time) allows this reader and the writer
+    /// to proceed concurrently without blocking each other.
+    reader: Mutex<Connection>,
 }
 
 impl RuleStore {
@@ -108,27 +112,22 @@ impl RuleStore {
             "WAL mode must be active after migration (got {mode})"
         );
 
+        // WR-05 fix: open a long-lived read-only connection so read-path
+        // methods don't open/close a fresh connection per call.
+        let reader = Connection::open_with_flags(
+            db_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(RuleStoreError::Sql)?;
+
         Ok(Self {
             conn: Mutex::new(conn),
-            db_path: db_path.to_path_buf(),
+            reader: Mutex::new(reader),
         })
     }
 
-    /// Open a fresh read-only connection to the same DB file. Used by
-    /// read-path methods so they don't contend on the writer's mutex
-    /// (WARNING-08). On error, the caller surfaces the SQLite error to its
-    /// own caller; the long-lived writer connection is unaffected.
-    fn open_reader(&self) -> SqlResult<Connection> {
-        Connection::open_with_flags(
-            &self.db_path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-    }
-
     pub fn is_trusted(&self, path: &str, sha256: &str) -> SqlResult<bool> {
-        // WARNING-08: fresh per-call read connection — no contention with
-        // concurrent writers or other readers.
-        let conn = self.open_reader()?;
+        let conn = self.reader.lock().expect("rule store reader mutex");
         let count: u32 = conn.query_row(
             "SELECT COUNT(*) FROM trusted_policy_files WHERE path = ?1 AND sha256 = ?2",
             params![path, sha256],
@@ -177,8 +176,7 @@ impl RuleStore {
     /// Count all rows in the rules table (user-approved rules added via `sentinel approve`).
     /// Used by StatusReply handler in plan 03-08.
     pub fn count_user_rules(&self) -> SqlResult<u64> {
-        // WARNING-08: fresh per-call read connection.
-        let conn = self.open_reader()?;
+        let conn = self.reader.lock().expect("rule store reader mutex");
         conn.query_row("SELECT COUNT(*) FROM rules", [], |r| r.get::<_, i64>(0))
             .map(|n| n as u64)
     }
@@ -186,8 +184,7 @@ impl RuleStore {
     /// Count all rows in the trusted_policy_files table.
     /// Used by StatusReply handler in plan 03-08.
     pub fn count_trusted(&self) -> SqlResult<u64> {
-        // WARNING-08: fresh per-call read connection.
-        let conn = self.open_reader()?;
+        let conn = self.reader.lock().expect("rule store reader mutex");
         conn.query_row("SELECT COUNT(*) FROM trusted_policy_files", [], |r| r.get::<_, i64>(0))
             .map(|n| n as u64)
     }
@@ -195,8 +192,7 @@ impl RuleStore {
     /// Read all user rules; map each row to an AllowlistEntry with tier
     /// UserDeny / UserAllow. Used by plan 02-06's PrepareSnapshot handler.
     pub fn all_user_rules(&self) -> SqlResult<Vec<AllowlistEntry>> {
-        // WARNING-08: fresh per-call read connection.
-        let conn = self.open_reader()?;
+        let conn = self.reader.lock().expect("rule store reader mutex");
         let mut stmt = conn.prepare(
             "SELECT kind, match_type, pattern, reason FROM rules ORDER BY id",
         )?;
@@ -265,8 +261,7 @@ impl RuleStore {
         &self,
         project_filter: Option<&str>,
     ) -> SqlResult<Vec<StoredRule>> {
-        // WARNING-08: fresh per-call read connection.
-        let conn = self.open_reader()?;
+        let conn = self.reader.lock().expect("rule store reader mutex");
         let mut out: Vec<StoredRule> = Vec::new();
 
         // 1. User rules from the `rules` table.
@@ -352,8 +347,7 @@ impl RuleStore {
     /// `unix_ms_now()` which returns ms since epoch). Map directly to
     /// `trusted_at_ms` without conversion.
     pub fn all_trusted_files(&self) -> SqlResult<Vec<StoredTrustEntry>> {
-        // WARNING-08: fresh per-call read connection.
-        let conn = self.open_reader()?;
+        let conn = self.reader.lock().expect("rule store reader mutex");
         let mut stmt = conn.prepare(
             "SELECT path, sha256, trusted_at, trusted_via FROM trusted_policy_files ORDER BY trusted_at",
         )?;

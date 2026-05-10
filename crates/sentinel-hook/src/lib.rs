@@ -43,6 +43,7 @@ pub mod replace_libc; // Filled in by task 2
 pub mod replace_open; // M003-S04: open/openat interpose for persistence monitoring
 pub mod replace_nw; // Plan 07: Network.framework dlsym + shadow exports
 pub mod replace_syscall; // M003-S01-T04: libc syscall() interpose to catch bypass attempts
+pub mod self_check; // M004-S03: hook binary self-integrity verification
 pub mod snapshot;
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -124,6 +125,20 @@ unsafe fn sentinel_hook_init() {
             snapshot::FAIL_CLOSED.store(true, Ordering::Release);
             let line = format!(
                 "[sentinel-hook] FAIL_CLOSED — snapshot load failed: {:?}",
+                e
+            );
+            LOG_RING.append(line.as_bytes());
+        }
+    }
+
+    // 2.5. M004-S03: verify hook binary integrity against stored hash.
+    //      Fail-closed if the hash file exists and doesn't match.
+    {
+        let state_dir = crate::snapshot::well_known_state_dir();
+        if let Err(e) = crate::self_check::verify(&state_dir) {
+            snapshot::FAIL_CLOSED.store(true, Ordering::Release);
+            let line = format!(
+                "[sentinel-hook] FAIL_CLOSED — self-check failed: {:?}",
                 e
             );
             LOG_RING.append(line.as_bytes());

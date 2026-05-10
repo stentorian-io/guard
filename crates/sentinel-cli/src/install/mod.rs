@@ -125,6 +125,16 @@ fn apply_install_steps(
     // 5. binary path (informational)
     artifacts::record_artifact(&db_path, "binary", &daemon_binary.display().to_string(), None, VERSION)?;
 
+    // 5b. Hook dylib hash (M004-S03): write SHA-256 of libsentinel_hook.dylib
+    //     to state_dir/hook.sha256 so the hook can self-verify at load time.
+    if let Ok(dylib_path) = crate::locate::find_dylib() {
+        if let Ok(hash) = compute_file_sha256(&dylib_path) {
+            let hash_path = state_dir.join("hook.sha256");
+            let _ = std::fs::write(&hash_path, format!("{hash}\n"));
+            artifacts::record_artifact(&db_path, "hook_hash", &hash_path.display().to_string(), Some(&hash), VERSION)?;
+        }
+    }
+
     // 6. HMAC key (M004-S02): generate if not already present.
     let hmac_key_path = state_dir.join("hmac.key");
     if !hmac_key_path.exists() {
@@ -228,6 +238,12 @@ pub(crate) fn resolve_watchdog_binary() -> Result<PathBuf, CliError> {
         }
     }
     Err(CliError::Other("sentinel-watchdog not found on PATH; set SENTINEL_WATCHDOG_BINARY".into()))
+}
+
+fn compute_file_sha256(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path)?;
+    Ok(format!("{:x}", Sha256::digest(&bytes)))
 }
 
 fn confirm_yn(prompt: &str) -> Result<bool, CliError> {

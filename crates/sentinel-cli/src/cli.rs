@@ -18,7 +18,7 @@ USAGE:
 
   sentinel setup [daemon|shell] [--remove|--reinstall] [-y]
                                       Install / repair / remove components
-  sentinel status [logs|rules|trust|denials|review] [--follow|--all|--project|--json]
+  sentinel status [logs|rules|trust|denials|review|persistence] [--follow|--all|--project|--json]
                                       Inspect daemon health, rules, trust, denials
 
 To wrap a binary whose name collides with a Sentinel verb, pass its full path:
@@ -111,5 +111,11 @@ pub enum StatusSub {
     /// No `--json` flag (D-23: review is interactive only).
     Review {
         run_uuid: Option<String>,
+    },
+    /// List detected persistence-write events (M003-S05).
+    Persistence {
+        /// Filter to a specific run_uuid.
+        run_uuid: Option<String>,
+        #[arg(long)] json: bool,
     },
 }

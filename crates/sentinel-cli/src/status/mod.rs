@@ -11,6 +11,7 @@
 //! arm continues to call `crate::status::run_status` unchanged.
 
 pub mod denials;
+pub mod persistence;
 pub mod review;
 pub mod rules;
 pub mod trust;

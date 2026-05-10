@@ -94,4 +94,7 @@ pub use messages::{
     // v0.4 — ExecBlocked (tag 0x13; M003-S02)
     ExecBlocked,
     ExecBlockedAck,
+    // v0.4 — PersistenceWrite (tag 0x14; M003-S04)
+    PersistenceWrite,
+    PersistenceWriteAck,
 };

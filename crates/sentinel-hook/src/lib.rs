@@ -34,11 +34,13 @@ pub mod ipc_client; // Phase 2 plan 02-05: blocking IPC for ForkEvent / ExecEven
 pub mod log_buffer;
 pub mod macho_flags; // M003-S02: Mach-O code-signing flag parser for hardened-runtime exec blocking
 pub mod pm_env_filter; // quick-260508-et9 (BLOCKER #1): dylib-side pm_env capture
+pub mod persistence_paths; // M003-S04: persistence-path classifier for open/openat monitoring
 pub mod raw_syscall; // M003-S01: direct kernel syscall wrappers (bypass libc::syscall interpose)
 pub mod reentrancy;
 pub mod replace_exec; // Phase 2 plan 02-05: exec-family shadows
 pub mod replace_fork; // Phase 2 plan 02-05: fork/vfork/posix_spawn shadows
 pub mod replace_libc; // Filled in by task 2
+pub mod replace_open; // M003-S04: open/openat interpose for persistence monitoring
 pub mod replace_nw; // Plan 07: Network.framework dlsym + shadow exports
 pub mod replace_syscall; // M003-S01-T04: libc syscall() interpose to catch bypass attempts
 pub mod snapshot;

@@ -22,7 +22,7 @@ use crate::rule_store::RuleStore;
 use crate::snapshot::publish_run;
 use crate::state_dir::run_manifest_path;
 use crate::tracked::{ProcessTree, RunRecord};
-use sentinel_core::{AllowlistEntry, RuleKind, RuleTier, SCHEMA_V2, Snapshot};
+use sentinel_core::{AllowlistEntry, MatchType, RuleKind, RuleTier, SCHEMA_V2, Snapshot};
 use sentinel_ipc::{FeedWarning, SnapshotReply};
 use std::path::Path;
 use std::sync::Arc;
@@ -254,14 +254,52 @@ fn handle_prepare_snapshot_inner(
         None => Vec::new(),
     };
 
+    // 2b. M003-S07: discover lockfile near cwd and extract custom registry
+    //     hostnames. These become ProjectAllow entries so private-registry
+    //     fetches are not blocked. Non-fatal: log and continue if anything fails.
+    let lockfile_entries: Vec<AllowlistEntry> =
+        match sentinel_core::lockfile::discover_lockfile(cwd) {
+            Some(lockfile_path) => {
+                match sentinel_core::lockfile::extract_registries(&lockfile_path) {
+                    Some(lr) => {
+                        debug!(
+                            lockfile = %lr.lockfile_path.display(),
+                            count = lr.registries.len(),
+                            "lockfile registries discovered"
+                        );
+                        lr.registries
+                            .into_iter()
+                            .map(|host| AllowlistEntry {
+                                kind: RuleKind::Allow,
+                                tier: RuleTier::ProjectAllow,
+                                match_type: MatchType::Exact,
+                                pattern: host,
+                                reason: format!(
+                                    "lockfile: {}",
+                                    lr.lockfile_path.file_name().unwrap_or_default().to_string_lossy()
+                                ),
+                            })
+                            .collect()
+                    }
+                    None => Vec::new(),
+                }
+            }
+            None => Vec::new(),
+        };
+
     // 3. Concatenate + sort by tier.
     let mut entries: Vec<AllowlistEntry> = Vec::with_capacity(
-        curated.len() + user_entries.len() + project_entries.len() + feeddeny_entries.len(),
+        curated.len()
+            + user_entries.len()
+            + project_entries.len()
+            + feeddeny_entries.len()
+            + lockfile_entries.len(),
     );
     entries.extend_from_slice(curated);
     entries.extend(project_entries);
     entries.extend(user_entries);
     entries.extend(feeddeny_entries);
+    entries.extend(lockfile_entries);
     entries.sort_by_key(|e| e.tier);
 
     // 4. Build snapshot.

@@ -14,8 +14,9 @@
 //! 0x00..=0x01 ∪ 0x09..=0xff was "legacy length-prefix high byte" — but a
 //! valid legacy frame has only 0x00 in the high byte (0x01 already implies
 //! a 16+ MiB body, far above MAX_FRAME_BYTES). The dispatcher now treats:
-//!   - 0x02..=0x11            → tagged Phase 2/3/07 message
+//!   - 0x02..=0x12            → tagged Phase 2/3/07/v0.3 message
 //!                              (0x0E..=0x11 = ListRules/ListTrust/IsTrusted/DeleteInstallArtifacts, plan 07-01)
+//!                              (0x12 = DenyNotify, v0.3 D-39)
 //!   - 0x00                   → legacy RegisterRoot (Phase 1)
 //!   - everything else        → protocol violation (rejected immediately)
 //!
@@ -48,6 +49,8 @@ pub enum MessageTag {
     ListTrust = 0x0F,
     IsTrusted = 0x10,
     DeleteInstallArtifacts = 0x11,
+    // v0.3 — D-39 deny-notify IPC:
+    DenyNotify = 0x12,
 }
 
 impl MessageTag {
@@ -71,6 +74,8 @@ impl MessageTag {
             0x0F => Some(Self::ListTrust),
             0x10 => Some(Self::IsTrusted),
             0x11 => Some(Self::DeleteInstallArtifacts),
+            // v0.3 — D-39:
+            0x12 => Some(Self::DenyNotify),
             _ => None,
         }
     }
@@ -105,8 +110,8 @@ pub enum FrameKind {
 /// Peek the first byte to decide framing kind. Reads exactly 1 byte from the
 /// stream — caller must continue with the appropriate read path.
 ///
-/// WARNING-06: only 0x00 (legacy length-prefix high byte) and 0x02..=0x11
-/// (Phase 2/3 tags) are valid first bytes. Anything else is a protocol
+/// WARNING-06: only 0x00 (legacy length-prefix high byte) and 0x02..=0x12
+/// (Phase 2/3/v0.3 tags) are valid first bytes. Anything else is a protocol
 /// violation (invalid length prefix or unknown tag). Rejecting at this
 /// stage prevents the legacy handler from spending three more
 /// `read_exact(1)` syscalls on garbage frames before failing.
@@ -154,6 +159,8 @@ mod tests {
             MessageTag::ListTrust,
             MessageTag::IsTrusted,
             MessageTag::DeleteInstallArtifacts,
+            // v0.3 D-39:
+            MessageTag::DenyNotify,
         ] {
             let b = tag.as_byte();
             assert_eq!(MessageTag::from_byte(b), Some(tag));
@@ -166,8 +173,8 @@ mod tests {
         assert!(MessageTag::from_byte(0x00).is_none());
         // 0x01 — was reserved for RegisterRoot in early drafts; legacy path now.
         assert!(MessageTag::from_byte(0x01).is_none());
-        // 0x12+ — unassigned tag space (0x11 = DeleteInstallArtifacts, plan 07-01).
-        assert!(MessageTag::from_byte(0x12).is_none());
+        // 0x13+ — unassigned tag space (0x12 = DenyNotify, v0.3 D-39).
+        assert!(MessageTag::from_byte(0x13).is_none());
         assert!(MessageTag::from_byte(0xff).is_none());
     }
 
@@ -219,7 +226,10 @@ mod tests {
             MessageTag::from_byte(0x11),
             Some(MessageTag::DeleteInstallArtifacts)
         );
-        // 0x12 is unassigned — must return None:
-        assert_eq!(MessageTag::from_byte(0x12), None);
+        // v0.3 D-39:
+        assert_eq!(MessageTag::DenyNotify as u8, 0x12);
+        assert_eq!(MessageTag::from_byte(0x12), Some(MessageTag::DenyNotify));
+        // 0x13 is unassigned — must return None:
+        assert_eq!(MessageTag::from_byte(0x13), None);
     }
 }

@@ -88,4 +88,7 @@ pub use messages::{
     // Phase 07 — DeleteInstallArtifacts (tag 0x11; D-15 WARNING-5 fix)
     DeleteInstallArtifacts,
     DeleteInstallArtifactsReply,
+    // v0.3 — DenyNotify (tag 0x12; D-39)
+    DenyNotify,
+    DenyNotifyAck,
 };

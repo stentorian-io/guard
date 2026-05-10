@@ -26,6 +26,7 @@
 #![allow(clippy::needless_lifetimes, clippy::unnecessary_cast, dead_code)]
 
 pub mod cache;
+pub mod env_scrub; // M004-S04: scrub SENTINEL_*/DYLD_INSERT_LIBRARIES from environ
 pub mod envp; // Plan 02-09: pre-spawn envp inspector (TREE-06)
 pub mod exec_policy; // M003-S02: hardened-runtime exec blocking policy
 pub mod fd_class; // M003-S01-T03: thread-local fd classification bitmap for write/writev hooks
@@ -205,6 +206,12 @@ unsafe fn sentinel_hook_init() {
         // interpose::lock_originals_page();  // disabled: Phase 5 (see above)
         interpose::probe_self_test();
     }
+
+    // 6. M004-S04: activate getenv scrubbing now that all config vars are cached.
+    //    Application code calling getenv("SENTINEL_*") or
+    //    getenv("DYLD_INSERT_LIBRARIES") will get NULL from this point on.
+    //    environ is left intact so child processes inherit hook injection.
+    env_scrub::SCRUB_ACTIVE.store(true, Ordering::Release);
 }
 
 /// Write a marker file to the path given by SENTINEL_TEST_MARKER if the env var is set.

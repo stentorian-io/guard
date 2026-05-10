@@ -10,10 +10,7 @@ pub fn init_script_path() -> PathBuf {
     super::launchagent::home_dir().join(".config").join("sentinel").join("init.sh")
 }
 
-pub const INIT_SCRIPT_BODY: &str = r#"# managed by `sentinel install` — sourced by shell rc-file marker block
-# Phase 3+ shell init logic lives here. v1: empty.
-:
-"#;
+pub const INIT_SCRIPT_BODY: &str = include_str!("init_script_body.sh");
 
 pub fn install(path: &Path) -> std::io::Result<String> {
     if let Some(parent) = path.parent() {

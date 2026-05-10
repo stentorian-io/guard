@@ -126,8 +126,15 @@ pub(crate) fn render_minimal(state: DaemonStateKind, gaps_24h: usize) {
 }
 
 pub(crate) fn render_minimal_to<W: std::io::Write>(w: &mut W, state: DaemonStateKind, gaps_24h: usize) {
+    let ambient = std::env::var_os("SENTINEL_AMBIENT").is_some();
     match state {
-        DaemonStateKind::Operational => { let _ = writeln!(w, "sentinel: operational"); }
+        DaemonStateKind::Operational => {
+            if ambient {
+                let _ = writeln!(w, "sentinel: operational (ambient shell wrapping active)");
+            } else {
+                let _ = writeln!(w, "sentinel: operational");
+            }
+        }
         DaemonStateKind::Degraded => { let _ = writeln!(
             w,
             "sentinel: degraded — {gaps_24h} coverage gap(s) in last 24h. Run `sentinel status --verbose` for detail."
@@ -176,6 +183,9 @@ pub(crate) fn render_verbose_to<W: std::io::Write>(
         DaemonStateKind::NotInstalled => "not-installed",
     };
     let _ = writeln!(w, "State: {state_str}");
+    if std::env::var_os("SENTINEL_AMBIENT").is_some() {
+        let _ = writeln!(w, "Ambient: active (shell wrapping enabled)");
+    }
     if let Some(info) = install_info {
         let _ = writeln!(w, "Version: {} (installed_at_ms {})", info.version, info.installed_at_ms);
         let _ = writeln!(w, "Artifacts:");

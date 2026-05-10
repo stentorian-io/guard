@@ -92,6 +92,43 @@ fn register_root_round_trip_records_kernel_sourced_token() {
     // (The node key is the full 8-field kernel AuditToken from LOCAL_PEERTOKEN.)
 }
 
+/// Query kernel pidversion via Mach task_info(TASK_AUDIT_TOKEN).
+fn kernel_pidversion(pid: u32) -> u32 {
+    type MachPortT = u32;
+    type KernReturnT = i32;
+    const MACH_PORT_NULL: MachPortT = 0;
+    const KERN_SUCCESS: KernReturnT = 0;
+    const TASK_AUDIT_TOKEN: u32 = 15;
+
+    unsafe extern "C" {
+        fn mach_task_self() -> MachPortT;
+        fn task_name_for_pid(
+            target_tport: MachPortT,
+            pid: libc::pid_t,
+            t: *mut MachPortT,
+        ) -> KernReturnT;
+        fn task_info(
+            target_task: MachPortT,
+            flavor: u32,
+            task_info_out: *mut u32,
+            task_info_count: *mut u32,
+        ) -> KernReturnT;
+        fn mach_port_deallocate(task: MachPortT, name: MachPortT) -> KernReturnT;
+    }
+
+    unsafe {
+        let mut task_port: MachPortT = MACH_PORT_NULL;
+        let kr = task_name_for_pid(mach_task_self(), pid as libc::pid_t, &mut task_port);
+        assert_eq!(kr, KERN_SUCCESS, "task_name_for_pid failed for pid {pid}");
+        let mut token_val = [0u32; 8];
+        let mut count: u32 = 8;
+        let kr2 = task_info(task_port, TASK_AUDIT_TOKEN, token_val.as_mut_ptr(), &mut count);
+        mach_port_deallocate(mach_task_self(), task_port);
+        assert_eq!(kr2, KERN_SUCCESS, "task_info failed for pid {pid}");
+        token_val[7]
+    }
+}
+
 /// REGISTER-01 delegation path: wire_pid != kernel_pid.
 ///
 /// When the connecting process (the CLI, with kernel_pid=X) sends RegisterRoot
@@ -133,7 +170,10 @@ fn register_root_delegation_stores_wire_claimed_child_token() {
         child_pid_real, our_pid,
         "test assumption: child pid must differ from our pid"
     );
-    let child_wire = AuditToken::synthetic([0, 0, 0, 0, 0, child_pid_real, 0, 0x42]);
+    // TREE-07: use the child's real kernel pidversion so the daemon's
+    // pidversion cross-check passes.
+    let child_pv = kernel_pidversion(child_pid_real);
+    let child_wire = AuditToken::synthetic([0, 0, 0, 0, 0, child_pid_real, 0, child_pv]);
     let mut stream = UnixStream::connect(&sock).expect("connect");
     write_frame(&mut stream, &RegisterRoot::new(child_wire)).expect("write RegisterRoot");
     let reply: Reply = read_frame(&mut stream).expect("read Reply");
@@ -150,11 +190,63 @@ fn register_root_delegation_stores_wire_claimed_child_token() {
         tree.is_tracked(&child_wire),
         "REGISTER-01 delegation: wire-claimed child token must be tracked"
     );
-    // Our own kernel token (with getpid()) must NOT be stored.
-    // We can't get the exact kernel token here, but we can verify the delegation
-    // token was stored by asserting is_tracked(child_wire) is true (done above).
 
     // Clean up the child process we spawned.
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// TREE-07: delegation with wrong pidversion is rejected.
+///
+/// When the wire-claimed pidversion does not match the child's real kernel
+/// pidversion, the daemon rejects the registration. This closes the PID-reuse
+/// race: if a child dies and its PID is recycled, the recycled process has a
+/// different kernel pidversion.
+#[test]
+fn register_root_delegation_rejects_wrong_pidversion() {
+    let tmp = tempfile::tempdir().unwrap();
+    ensure_state_dir(tmp.path()).unwrap();
+    let sock = socket_path(tmp.path());
+
+    let (tree, state) = build_state(tmp.path());
+    let server = IpcServer::bind(&sock, state).expect("bind");
+
+    let handle = thread::spawn(move || {
+        server.accept_one().expect("accept_one");
+    });
+
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn sleep child");
+    let child_pid_real = child.id();
+    let real_pv = kernel_pidversion(child_pid_real);
+
+    // Send a wire token with a wrong pidversion (real + 1).
+    let bad_pv = real_pv.wrapping_add(1);
+    let child_wire = AuditToken::synthetic([0, 0, 0, 0, 0, child_pid_real, 0, bad_pv]);
+    let mut stream = UnixStream::connect(&sock).expect("connect");
+    write_frame(&mut stream, &RegisterRoot::new(child_wire)).expect("write RegisterRoot");
+    let reply: Reply = read_frame(&mut stream).expect("read Reply");
+
+    match reply {
+        Reply::Err { message, .. } => {
+            assert!(
+                message.contains("WR-08"),
+                "rejection should cite WR-08: {message}"
+            );
+        }
+        other => panic!("expected Err (pidversion mismatch), got {:?}", other),
+    }
+    drop(stream);
+    handle.join().unwrap();
+
+    assert_eq!(
+        tree.nodes_len(),
+        0,
+        "TREE-07: wrong pidversion must not insert a node"
+    );
+
     let _ = child.kill();
     let _ = child.wait();
 }

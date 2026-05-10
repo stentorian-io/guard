@@ -78,29 +78,82 @@ unsafe fn raw_vfork() -> libc::pid_t {
     unsafe { libc::syscall(SYS_VFORK) as libc::pid_t }
 }
 
-/// Read the child's pidversion via proc_pidinfo. PROC_PIDTBSDINFO returns a
-/// proc_bsdinfo struct whose `pbi_pid_version` field is at offset 28 on
-/// macOS arm64/x86_64 (verified against the SDK header).
+/// Read the child's pidversion via task_info(TASK_AUDIT_TOKEN).
 ///
-/// If the syscall fails or the offset reads past the buffer, returns 0. The
-/// daemon's wire-claimed pidversion is overridden by kernel peer-auth on the
-/// next IPC anyway (plan 02-04 handler), so a zero on failure is benign.
+/// TREE-07 fix: the previous implementation read raw offset 28 from
+/// proc_bsdinfo, which is actually `pbi_ruid` (not pidversion — the
+/// proc_bsdinfo struct has no pidversion field). This replacement uses
+/// Mach task_name_for_pid + task_info(TASK_AUDIT_TOKEN) to extract the
+/// real kernel pidversion (audit_token val[7]).
+///
+/// Fallback: if task_name_for_pid fails (e.g. entitlement restrictions
+/// on future macOS), falls back to pbi_start_tvsec ^ pbi_start_tvusec
+/// as a pidversion analog (matching the CLI's fallback in audit_token.rs).
+///
+/// Returns 0 on total failure. The daemon trusts kernel peer-auth
+/// (LOCAL_PEERTOKEN) over wire-claimed values, so zero is benign.
 fn child_pidversion(child_pid: libc::pid_t) -> u32 {
+    type MachPortT = u32;
+    type KernReturnT = i32;
+    const MACH_PORT_NULL: MachPortT = 0;
+    const KERN_SUCCESS: KernReturnT = 0;
+    const TASK_AUDIT_TOKEN: u32 = 15;
+
+    unsafe extern "C" {
+        fn mach_task_self() -> MachPortT;
+        fn task_name_for_pid(
+            target_tport: MachPortT,
+            pid: libc::pid_t,
+            t: *mut MachPortT,
+        ) -> KernReturnT;
+        fn task_info(
+            target_task: MachPortT,
+            flavor: u32,
+            task_info_out: *mut u32,
+            task_info_count: *mut u32,
+        ) -> KernReturnT;
+        fn mach_port_deallocate(task: MachPortT, name: MachPortT) -> KernReturnT;
+    }
+
+    let mut task_port: MachPortT = MACH_PORT_NULL;
+    let kr = unsafe { task_name_for_pid(mach_task_self(), child_pid, &mut task_port) };
+    if kr == KERN_SUCCESS {
+        let mut token_val = [0u32; 8];
+        let mut count: u32 = 8;
+        let kr2 = unsafe {
+            task_info(
+                task_port,
+                TASK_AUDIT_TOKEN,
+                token_val.as_mut_ptr(),
+                &mut count,
+            )
+        };
+        unsafe { mach_port_deallocate(mach_task_self(), task_port) };
+        if kr2 == KERN_SUCCESS {
+            return token_val[7]; // pidversion
+        }
+    }
+
+    // Fallback: use pbi_start_tvsec ^ pbi_start_tvusec as analog.
     const PROC_PIDTBSDINFO: libc::c_int = 3;
-    let mut info = [0u8; 256];
+    const EXPECTED_SIZE: libc::c_int = 136; // sizeof(proc_bsdinfo)
+    let mut info = [0u8; 136];
     let n = unsafe {
         libc::proc_pidinfo(
             child_pid,
             PROC_PIDTBSDINFO,
             0,
             info.as_mut_ptr() as *mut libc::c_void,
-            info.len() as libc::c_int,
+            EXPECTED_SIZE,
         )
     };
-    if n <= 0 || (n as usize) < 32 {
+    if n != EXPECTED_SIZE {
         return 0;
     }
-    u32::from_ne_bytes([info[28], info[29], info[30], info[31]])
+    // pbi_start_tvsec at offset 120 (u64), pbi_start_tvusec at offset 128 (u64).
+    let tvsec = u64::from_ne_bytes(info[120..128].try_into().unwrap_or([0; 8]));
+    let tvusec = u64::from_ne_bytes(info[128..136].try_into().unwrap_or([0; 8]));
+    (tvsec as u32) ^ (tvusec as u32)
 }
 
 /// Best-effort current process audit token for use as `parent_audit_token`.

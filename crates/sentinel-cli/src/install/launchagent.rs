@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use plist::{Dictionary, Value};
 
 pub const LABEL: &str = "com.sentinel.daemon";
+pub const WATCHDOG_LABEL: &str = "com.sentinel.watchdog";
 
 pub fn launchagents_dir() -> PathBuf {
     home_dir().join("Library").join("LaunchAgents")
@@ -18,6 +19,10 @@ pub fn launchagents_dir() -> PathBuf {
 
 pub fn plist_path() -> PathBuf {
     launchagents_dir().join(format!("{LABEL}.plist"))
+}
+
+pub fn watchdog_plist_path() -> PathBuf {
+    launchagents_dir().join(format!("{WATCHDOG_LABEL}.plist"))
 }
 
 pub fn home_dir() -> PathBuf {
@@ -47,6 +52,69 @@ pub fn build_plist(daemon_binary: &Path, state_dir: &Path) -> Value {
     env.insert("RUST_LOG".into(), Value::String("info".into()));
     dict.insert("EnvironmentVariables".into(), Value::Dictionary(env));
     Value::Dictionary(dict)
+}
+
+pub fn build_watchdog_plist(watchdog_binary: &Path, state_dir: &Path) -> Value {
+    let mut dict = Dictionary::new();
+    dict.insert("Label".into(), Value::String(WATCHDOG_LABEL.into()));
+    let prog_args = vec![
+        Value::String(watchdog_binary.to_string_lossy().into()),
+        Value::String("--state-dir".into()),
+        Value::String(state_dir.to_string_lossy().into()),
+    ];
+    dict.insert("ProgramArguments".into(), Value::Array(prog_args));
+    dict.insert("RunAtLoad".into(), Value::Boolean(true));
+    dict.insert("KeepAlive".into(), Value::Boolean(true));
+    let logs = logs_dir();
+    dict.insert(
+        "StandardOutPath".into(),
+        Value::String(logs.join("watchdog.out.log").to_string_lossy().into()),
+    );
+    dict.insert(
+        "StandardErrorPath".into(),
+        Value::String(logs.join("watchdog.err.log").to_string_lossy().into()),
+    );
+    let mut env = Dictionary::new();
+    env.insert("RUST_LOG".into(), Value::String("info".into()));
+    dict.insert("EnvironmentVariables".into(), Value::Dictionary(env));
+    Value::Dictionary(dict)
+}
+
+pub fn launchctl_bootstrap_watchdog(plist_path: &Path) -> std::io::Result<()> {
+    if std::env::var_os("SENTINEL_SKIP_LAUNCHCTL").is_some() {
+        tracing::debug!(
+            plist = %plist_path.display(),
+            "SENTINEL_SKIP_LAUNCHCTL set — skipping watchdog launchctl bootstrap"
+        );
+        return Ok(());
+    }
+    let uid = unsafe { libc::getuid() };
+    let domain = format!("gui/{uid}");
+    let _ = std::process::Command::new("launchctl")
+        .arg("bootout")
+        .arg(format!("{domain}/{WATCHDOG_LABEL}"))
+        .status();
+    let status = std::process::Command::new("launchctl")
+        .arg("bootstrap")
+        .arg(&domain)
+        .arg(plist_path)
+        .status()?;
+    if !status.success() {
+        return Err(std::io::Error::other(format!(
+            "launchctl bootstrap watchdog failed: {status}"
+        )));
+    }
+    Ok(())
+}
+
+pub fn launchctl_bootout_watchdog() -> std::io::Result<()> {
+    let uid = unsafe { libc::getuid() };
+    let domain = format!("gui/{uid}");
+    let _ = std::process::Command::new("launchctl")
+        .arg("bootout")
+        .arg(format!("{domain}/{WATCHDOG_LABEL}"))
+        .status();
+    Ok(())
 }
 
 pub fn write_plist(path: &Path, plist: &Value) -> std::io::Result<()> {

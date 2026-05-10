@@ -129,6 +129,30 @@ fn apply_install_steps(
     //    handled inside this helper for idempotence).
     launchagent::launchctl_bootstrap(&plist).map_err(|e| CliError::Other(format!("bootstrap: {e}")))?;
 
+    // 7. watchdog plist + bootstrap (M004-S01)
+    if let Ok(watchdog_binary) = resolve_watchdog_binary() {
+        let wd_plist_path = launchagent::watchdog_plist_path();
+        let wd_plist_value = launchagent::build_watchdog_plist(&watchdog_binary, state_dir);
+        launchagent::write_plist(&wd_plist_path, &wd_plist_value)
+            .map_err(|e| CliError::Other(format!("watchdog plist write: {e}")))?;
+        artifacts::record_artifact(
+            &db_path,
+            "launchagent_watchdog",
+            &wd_plist_path.display().to_string(),
+            None,
+            VERSION,
+        )?;
+        artifacts::record_artifact(
+            &db_path,
+            "binary_watchdog",
+            &watchdog_binary.display().to_string(),
+            None,
+            VERSION,
+        )?;
+        launchagent::launchctl_bootstrap_watchdog(&wd_plist_path)
+            .map_err(|e| CliError::Other(format!("watchdog bootstrap: {e}")))?;
+    }
+
     Ok(0)
 }
 
@@ -175,6 +199,27 @@ pub(crate) fn resolve_daemon_binary() -> Result<PathBuf, CliError> {
         if cand.is_file() { return Ok(cand); }
     }
     Err(CliError::Other("sentineld not found on PATH; install via brew or set SENTINEL_DAEMON_BINARY".into()))
+}
+
+pub(crate) fn resolve_watchdog_binary() -> Result<PathBuf, CliError> {
+    if let Some(path) = std::env::var_os("SENTINEL_WATCHDOG_BINARY") {
+        return Ok(PathBuf::from(path));
+    }
+    let path_var = std::env::var_os("PATH").ok_or_else(|| CliError::Other("PATH not set".into()))?;
+    for dir in std::env::split_paths(&path_var) {
+        let cand = dir.join("sentinel-watchdog");
+        if cand.is_file() { return Ok(cand); }
+    }
+    // Watchdog is optional — fall back to sibling of daemon binary
+    if let Ok(daemon) = resolve_daemon_binary() {
+        if let Some(dir) = daemon.parent() {
+            let cand = dir.join("sentinel-watchdog");
+            if cand.is_file() {
+                return Ok(cand);
+            }
+        }
+    }
+    Err(CliError::Other("sentinel-watchdog not found on PATH; set SENTINEL_WATCHDOG_BINARY".into()))
 }
 
 fn confirm_yn(prompt: &str) -> Result<bool, CliError> {

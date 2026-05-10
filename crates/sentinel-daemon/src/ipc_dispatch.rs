@@ -14,11 +14,12 @@
 //! 0x00..=0x01 ∪ 0x09..=0xff was "legacy length-prefix high byte" — but a
 //! valid legacy frame has only 0x00 in the high byte (0x01 already implies
 //! a 16+ MiB body, far above MAX_FRAME_BYTES). The dispatcher now treats:
-//!   - 0x02..=0x14            → tagged Phase 2/3/07/v0.3/v0.4 message
+//!   - 0x02..=0x15            → tagged Phase 2/3/07/v0.3/v0.4/v0.5 message
 //!                              (0x0E..=0x11 = ListRules/ListTrust/IsTrusted/DeleteInstallArtifacts, plan 07-01)
 //!                              (0x12 = DenyNotify, v0.3 D-39)
 //!                              (0x13 = ExecBlocked, v0.4 M003-S02)
 //!                              (0x14 = PersistenceWrite, v0.4 M003-S04)
+//!                              (0x15 = Ping, v0.5 M004-S01)
 //!   - 0x00                   → legacy RegisterRoot (Phase 1)
 //!   - everything else        → protocol violation (rejected immediately)
 //!
@@ -57,6 +58,8 @@ pub enum MessageTag {
     ExecBlocked = 0x13,
     // v0.4 — M003-S04 persistence-path monitoring:
     PersistenceWrite = 0x14,
+    // v0.5 — M004-S01 watchdog liveness:
+    Ping = 0x15,
 }
 
 impl MessageTag {
@@ -84,6 +87,7 @@ impl MessageTag {
             0x12 => Some(Self::DenyNotify),
             0x13 => Some(Self::ExecBlocked),
             0x14 => Some(Self::PersistenceWrite),
+            0x15 => Some(Self::Ping),
             _ => None,
         }
     }
@@ -118,8 +122,8 @@ pub enum FrameKind {
 /// Peek the first byte to decide framing kind. Reads exactly 1 byte from the
 /// stream — caller must continue with the appropriate read path.
 ///
-/// WARNING-06: only 0x00 (legacy length-prefix high byte) and 0x02..=0x12
-/// (Phase 2/3/v0.3 tags) are valid first bytes. Anything else is a protocol
+/// WARNING-06: only 0x00 (legacy length-prefix high byte) and 0x02..=0x15
+/// (Phase 2/3/07/v0.3/v0.4/v0.5 tags) are valid first bytes. Anything else is a protocol
 /// violation (invalid length prefix or unknown tag). Rejecting at this
 /// stage prevents the legacy handler from spending three more
 /// `read_exact(1)` syscalls on garbage frames before failing.
@@ -173,6 +177,8 @@ mod tests {
             MessageTag::ExecBlocked,
             // v0.4 M003-S04:
             MessageTag::PersistenceWrite,
+            // v0.5 M004-S01:
+            MessageTag::Ping,
         ] {
             let b = tag.as_byte();
             assert_eq!(MessageTag::from_byte(b), Some(tag));
@@ -185,8 +191,8 @@ mod tests {
         assert!(MessageTag::from_byte(0x00).is_none());
         // 0x01 — was reserved for RegisterRoot in early drafts; legacy path now.
         assert!(MessageTag::from_byte(0x01).is_none());
-        // 0x15+ — unassigned tag space (0x14 = PersistenceWrite, v0.4 M003-S04).
-        assert!(MessageTag::from_byte(0x15).is_none());
+        // 0x16+ — unassigned tag space (0x15 = Ping, v0.5 M004-S01).
+        assert!(MessageTag::from_byte(0x16).is_none());
         assert!(MessageTag::from_byte(0xff).is_none());
     }
 
@@ -247,7 +253,10 @@ mod tests {
         // v0.4 M003-S04:
         assert_eq!(MessageTag::PersistenceWrite as u8, 0x14);
         assert_eq!(MessageTag::from_byte(0x14), Some(MessageTag::PersistenceWrite));
-        // 0x15 is unassigned — must return None:
-        assert_eq!(MessageTag::from_byte(0x15), None);
+        // v0.5 M004-S01:
+        assert_eq!(MessageTag::Ping as u8, 0x15);
+        assert_eq!(MessageTag::from_byte(0x15), Some(MessageTag::Ping));
+        // 0x16 is unassigned — must return None:
+        assert_eq!(MessageTag::from_byte(0x16), None);
     }
 }

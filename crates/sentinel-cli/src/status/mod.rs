@@ -24,6 +24,20 @@ use crate::CliError;
 
 const ONE_DAY_MS: u64 = 24 * 60 * 60 * 1000;
 
+#[derive(Debug, Clone, serde::Deserialize)]
+struct WatchdogHealth {
+    restart_count: u32,
+    last_restart_reason: Option<String>,
+    last_restart_epoch: Option<u64>,
+    last_restart_latency_ms: Option<u64>,
+}
+
+fn read_watchdog_health(state_dir: &Path) -> Option<WatchdogHealth> {
+    let path = state_dir.join("watchdog.state");
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
 pub fn run_status(sock: &Path, state_dir: &Path, verbose: bool, json: bool) -> Result<i32, CliError> {
     let reply = match crate::ipc_client::probe_daemon_alive(sock) {
         Ok(()) => match crate::ipc_client::status_request(sock) {
@@ -78,6 +92,9 @@ pub fn run_status(sock: &Path, state_dir: &Path, verbose: bool, json: bool) -> R
 
             if verbose {
                 render_verbose(daemon_state, &tracked_roots, &recent_gaps, &counters, install_info.as_ref());
+                if let Some(wd) = read_watchdog_health(state_dir) {
+                    render_watchdog_health(&wd);
+                }
             } else {
                 render_minimal(daemon_state, recent_count_24h);
             }
@@ -216,6 +233,24 @@ pub(crate) fn render_verbose_to<W: std::io::Write>(
             g.run_uuid,
             g.binary_path.as_deref().unwrap_or("-")
         );
+    }
+}
+
+fn render_watchdog_health(wd: &WatchdogHealth) {
+    render_watchdog_health_to(&mut std::io::stdout().lock(), wd);
+}
+
+fn render_watchdog_health_to<W: std::io::Write>(w: &mut W, wd: &WatchdogHealth) {
+    let _ = writeln!(w, "\nWatchdog:");
+    let _ = writeln!(w, "  restart_count:        {}", wd.restart_count);
+    if let Some(ref reason) = wd.last_restart_reason {
+        let _ = writeln!(w, "  last_restart_reason:  {reason}");
+    }
+    if let Some(epoch) = wd.last_restart_epoch {
+        let _ = writeln!(w, "  last_restart_epoch:   {epoch}");
+    }
+    if let Some(ms) = wd.last_restart_latency_ms {
+        let _ = writeln!(w, "  last_restart_latency: {ms}ms");
     }
 }
 

@@ -202,6 +202,7 @@ fn build_daemon_state(state_dir: &std::path::Path) -> Arc<DaemonState> {
         feed_store,
         feed_fetch_mutex,
         last_fetch_result,
+        startup_instant: std::time::Instant::now(),
     })
 }
 

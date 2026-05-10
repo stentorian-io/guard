@@ -14,10 +14,11 @@
 //! 0x00..=0x01 ∪ 0x09..=0xff was "legacy length-prefix high byte" — but a
 //! valid legacy frame has only 0x00 in the high byte (0x01 already implies
 //! a 16+ MiB body, far above MAX_FRAME_BYTES). The dispatcher now treats:
-//!   - 0x02..=0x13            → tagged Phase 2/3/07/v0.3/v0.4 message
+//!   - 0x02..=0x14            → tagged Phase 2/3/07/v0.3/v0.4 message
 //!                              (0x0E..=0x11 = ListRules/ListTrust/IsTrusted/DeleteInstallArtifacts, plan 07-01)
 //!                              (0x12 = DenyNotify, v0.3 D-39)
 //!                              (0x13 = ExecBlocked, v0.4 M003-S02)
+//!                              (0x14 = PersistenceWrite, v0.4 M003-S04)
 //!   - 0x00                   → legacy RegisterRoot (Phase 1)
 //!   - everything else        → protocol violation (rejected immediately)
 //!
@@ -54,6 +55,8 @@ pub enum MessageTag {
     DenyNotify = 0x12,
     // v0.4 — M003-S02 hardened-runtime exec blocking:
     ExecBlocked = 0x13,
+    // v0.4 — M003-S04 persistence-path monitoring:
+    PersistenceWrite = 0x14,
 }
 
 impl MessageTag {
@@ -80,6 +83,7 @@ impl MessageTag {
             // v0.3 — D-39:
             0x12 => Some(Self::DenyNotify),
             0x13 => Some(Self::ExecBlocked),
+            0x14 => Some(Self::PersistenceWrite),
             _ => None,
         }
     }
@@ -167,6 +171,8 @@ mod tests {
             MessageTag::DenyNotify,
             // v0.4 M003-S02:
             MessageTag::ExecBlocked,
+            // v0.4 M003-S04:
+            MessageTag::PersistenceWrite,
         ] {
             let b = tag.as_byte();
             assert_eq!(MessageTag::from_byte(b), Some(tag));
@@ -179,8 +185,8 @@ mod tests {
         assert!(MessageTag::from_byte(0x00).is_none());
         // 0x01 — was reserved for RegisterRoot in early drafts; legacy path now.
         assert!(MessageTag::from_byte(0x01).is_none());
-        // 0x14+ — unassigned tag space (0x13 = ExecBlocked, v0.4 M003-S02).
-        assert!(MessageTag::from_byte(0x14).is_none());
+        // 0x15+ — unassigned tag space (0x14 = PersistenceWrite, v0.4 M003-S04).
+        assert!(MessageTag::from_byte(0x15).is_none());
         assert!(MessageTag::from_byte(0xff).is_none());
     }
 
@@ -238,7 +244,10 @@ mod tests {
         // v0.4 M003-S02:
         assert_eq!(MessageTag::ExecBlocked as u8, 0x13);
         assert_eq!(MessageTag::from_byte(0x13), Some(MessageTag::ExecBlocked));
-        // 0x14 is unassigned — must return None:
-        assert_eq!(MessageTag::from_byte(0x14), None);
+        // v0.4 M003-S04:
+        assert_eq!(MessageTag::PersistenceWrite as u8, 0x14);
+        assert_eq!(MessageTag::from_byte(0x14), Some(MessageTag::PersistenceWrite));
+        // 0x15 is unassigned — must return None:
+        assert_eq!(MessageTag::from_byte(0x15), None);
     }
 }

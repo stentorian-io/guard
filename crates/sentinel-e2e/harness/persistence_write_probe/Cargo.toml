@@ -1,0 +1,12 @@
+[package]
+name = "persistence_write_probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "persistence_write_probe"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"

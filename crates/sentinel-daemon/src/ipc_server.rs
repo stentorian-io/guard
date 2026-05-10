@@ -34,6 +34,7 @@ use sentinel_ipc::{
     DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap,
     EnvNotPropagatedGapAck, ExecAck, ExecBlocked, ExecBlockedAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3,
     IPC_SCHEMA_V4, InsertUserRule, InsertUserRuleReply, IpcError, IsTrusted, IsTrustedReply,
+    PersistenceWrite, PersistenceWriteAck,
     ListRules, ListRulesReply, ListTrust, ListTrustReply, PrepareSnapshot, PromptChannelInit,
     PromptChannelInitAck, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply,
     Resolve, ResolveReply, SnapshotReply, Status, StatusReply, TrustPolicy, TrustPolicyReply,
@@ -467,6 +468,9 @@ impl IpcServer {
             }
             FrameKind::Tagged(MessageTag::ExecBlocked) => {
                 handle_exec_blocked_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(MessageTag::PersistenceWrite) => {
+                handle_persistence_write_frame(&mut stream, state);
             }
         }
     }
@@ -938,6 +942,90 @@ fn handle_exec_blocked_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) 
 
     if let Err(e) = write_tagged(stream, MessageTag::ExecBlocked, &ExecBlockedAck::ok()) {
         error!(error = %e, "failed to send ExecBlockedAck");
+    }
+}
+
+// ============================================================================
+// v0.4 M003-S04 — PersistenceWrite frame handler
+// ============================================================================
+
+fn handle_persistence_write_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    use crate::log_writer::jsonl_row::{
+        LogRow, ProcessCtxLog, JSONL_SCHEMA_VERSION, now_rfc3339,
+    };
+
+    let req: PersistenceWrite = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "PersistenceWrite decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::PersistenceWrite,
+                &PersistenceWriteAck::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V4 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::PersistenceWrite,
+            &PersistenceWriteAck::err(format!(
+                "schema_version {} != IPC_SCHEMA_V4",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+
+    let target_path = String::from_utf8_lossy(&req.target_path).to_string();
+    let sender_token: sentinel_core::AuditToken = req.audit_token.into();
+    let node_opt = state.process_tree.get_node(&sender_token);
+
+    let (run_uuid, process_ctx) = match node_opt {
+        Some(ref node) => {
+            let process_ctx = ProcessCtxLog {
+                pid: sender_token.val[5],
+                pidversion: sender_token.val[7],
+                argv: if node.binary_path.is_empty() {
+                    vec![]
+                } else {
+                    vec![node.binary_path.clone()]
+                },
+                cwd: String::new(),
+            };
+            (node.run_uuid.clone(), process_ctx)
+        }
+        None => {
+            let process_ctx = ProcessCtxLog {
+                pid: sender_token.val[5],
+                pidversion: sender_token.val[7],
+                argv: vec![],
+                cwd: String::new(),
+            };
+            (String::new(), process_ctx)
+        }
+    };
+
+    let gap = crate::log_writer::jsonl_row::GapRecord {
+        schema_version: JSONL_SCHEMA_VERSION,
+        ts: now_rfc3339(),
+        run_uuid,
+        gap_kind: "persistence-write",
+        process: process_ctx,
+        binary_path: Some(target_path.clone()),
+    };
+
+    state.log_writer.send(LogRow::Gap(gap));
+
+    info!(
+        target_path = %target_path,
+        category = %req.category,
+        "persistence write detected"
+    );
+
+    if let Err(e) = write_tagged(stream, MessageTag::PersistenceWrite, &PersistenceWriteAck::ok()) {
+        error!(error = %e, "failed to send PersistenceWriteAck");
     }
 }
 

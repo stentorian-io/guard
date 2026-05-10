@@ -17,7 +17,7 @@ use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     AuditTokenWire, DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, ExecAck, ExecBlocked,
     ExecBlockedAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4,
-    Resolve, ResolveReply, SOCKADDR_WIRE_LEN,
+    PersistenceWrite, PersistenceWriteAck, Resolve, ResolveReply, SOCKADDR_WIRE_LEN,
 };
 use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
@@ -34,6 +34,7 @@ pub(crate) const TAG_RESOLVE: u8 = 0x06;
 pub(crate) const TAG_ENV_NOT_PROPAGATED: u8 = 0x08;
 pub(crate) const TAG_DENY_NOTIFY: u8 = 0x12;
 pub(crate) const TAG_EXEC_BLOCKED: u8 = 0x13;
+pub(crate) const TAG_PERSISTENCE_WRITE: u8 = 0x14;
 
 static DAEMON_SOCKET_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
@@ -379,6 +380,19 @@ pub fn send_exec_blocked(
         .unwrap_or(0);
     let ev = ExecBlocked::new(audit_token, target_path, reason, now_ms);
     let _ = send_tagged_and_recv_ack::<ExecBlocked, ExecBlockedAck>(TAG_EXEC_BLOCKED, &ev, 50);
+}
+
+pub fn send_persistence_write(
+    audit_token: AuditTokenWire,
+    target_path: &[u8],
+    category: &str,
+) {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let ev = PersistenceWrite::new(audit_token, target_path, category, now_ms);
+    let _ = send_tagged_and_recv_ack::<PersistenceWrite, PersistenceWriteAck>(TAG_PERSISTENCE_WRITE, &ev, 50);
 }
 
 // ---------------------------------------------------------------------------

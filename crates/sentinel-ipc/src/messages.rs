@@ -1284,3 +1284,57 @@ impl ExecBlockedAck {
         }
     }
 }
+
+// ============================================================================
+// v0.4 M003-S04 — PersistenceWrite (tag 0x14)
+// ============================================================================
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PersistenceWrite {
+    pub schema_version: u16,
+    pub audit_token: AuditTokenWire,
+    #[serde(with = "serde_bytes")]
+    pub target_path: Vec<u8>,
+    pub category: String,
+    pub detected_at_ms: u64,
+}
+
+impl PersistenceWrite {
+    pub const MAX_TARGET_PATH: usize = 1024;
+
+    pub fn new(
+        audit_token: AuditTokenWire,
+        target_path: &[u8],
+        category: impl Into<String>,
+        detected_at_ms: u64,
+    ) -> Self {
+        let len = target_path.len().min(Self::MAX_TARGET_PATH);
+        Self {
+            schema_version: IPC_SCHEMA_V4,
+            audit_token,
+            target_path: target_path[..len].to_vec(),
+            category: category.into(),
+            detected_at_ms,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PersistenceWriteAck {
+    Ok { schema_version: u16 },
+    Err { schema_version: u16, message: String },
+}
+
+impl PersistenceWriteAck {
+    pub fn ok() -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V4,
+        }
+    }
+    pub fn err(m: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V4,
+            message: m.into(),
+        }
+    }
+}

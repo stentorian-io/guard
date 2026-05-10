@@ -30,7 +30,9 @@ pub const SYS_CONNECTX: i64 = 447;
 // sendto() with a NULL destination address in libc. We use SYS_SENDTO
 // with to=NULL, tolen=0 as the raw equivalent.
 pub const SYS_READ: i64 = 3;
+pub const SYS_OPEN: i64 = 5;
 pub const SYS_GETSOCKOPT: i64 = 118;
+pub const SYS_OPENAT: i64 = 463;
 
 /// Raw kernel syscall with 3 arguments.
 #[inline(always)]
@@ -386,6 +388,21 @@ pub unsafe fn raw_execve(
     envp: *const *const core::ffi::c_char,
 ) -> c_int {
     unsafe { syscall3(SYS_EXECVE, path as u64, argv as u64, envp as u64) as c_int }
+}
+
+#[inline(always)]
+pub unsafe fn raw_open(path: *const core::ffi::c_char, oflag: core::ffi::c_int, mode: libc::mode_t) -> core::ffi::c_int {
+    unsafe { syscall3(SYS_OPEN, path as u64, oflag as u64, mode as u64) as core::ffi::c_int }
+}
+
+#[inline(always)]
+pub unsafe fn raw_openat(
+    dirfd: core::ffi::c_int,
+    path: *const core::ffi::c_char,
+    oflag: core::ffi::c_int,
+    mode: libc::mode_t,
+) -> core::ffi::c_int {
+    unsafe { syscall4(SYS_OPENAT, dirfd as u64, path as u64, oflag as u64, mode as u64) as core::ffi::c_int }
 }
 
 /// Passthrough for arbitrary syscall numbers — used by the syscall()

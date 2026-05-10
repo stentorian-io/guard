@@ -11,6 +11,7 @@ members = [
   "crates/sentinel-e2e/harness/pm_env_posix_spawn",
   "crates/sentinel-e2e/harness/expanded_hooks_probe",
   "crates/sentinel-e2e/harness/hardened_exec_probe",
+  "crates/sentinel-e2e/harness/persistence_write_probe",
 ]
 
 [workspace.package]

@@ -56,7 +56,7 @@ impl std::fmt::Debug for LoadedSnapshot {
 /// keep the Unix socket path under macOS's 104-byte SUN_LEN limit) while the
 /// dylib still validates the manifest path correctly. When SENTINEL_STATE_DIR is
 /// not set, fall back to HOME-derivation (the production default).
-fn well_known_state_dir() -> PathBuf {
+pub fn well_known_state_dir() -> PathBuf {
     // Check SENTINEL_STATE_DIR override first (using libc getenv to stay
     // allocation-free on the ctor path).
     let override_val = unsafe { getenv_libc(c"SENTINEL_STATE_DIR") };

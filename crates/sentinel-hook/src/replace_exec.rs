@@ -19,7 +19,8 @@
 //! only to satisfy any caller that tries `dlsym("execl")` after dyld's
 //! interpose patching has rewritten their address.
 
-use crate::ipc_client::{copy_cstr_to_buf, send_exec_event_sync};
+use crate::exec_policy::{self, ExecDecision};
+use crate::ipc_client::{copy_cstr_to_buf, send_exec_blocked, send_exec_event_sync};
 use crate::raw_syscall;
 use crate::reentrancy::IN_HOOK;
 use core::ffi::{c_char, c_int};
@@ -61,6 +62,13 @@ fn current_audit_token_wire() -> AuditTokenWire {
     AuditTokenWire { val }
 }
 
+fn report_exec_blocked(path: *const c_char) {
+    let mut path_buf = [0u8; 1024];
+    let n = copy_cstr_to_buf(path, &mut path_buf);
+    let token = current_audit_token_wire();
+    send_exec_blocked(token, &path_buf[..n], "hardened-runtime");
+}
+
 /// Send an ExecEvent IPC for `path`. Best-effort: errors are silently dropped
 /// (the exec proceeds regardless — exec is not D-33's failure boundary).
 ///
@@ -83,18 +91,14 @@ pub unsafe extern "C" fn sentinel_execve(
     let _guard = match InHookGuard::enter() {
         Some(g) => g,
         None => {
-            // Already in a hook — bypass via raw syscall (avoids the
-            // interpose chain). On success the syscall does not return; on
-            // failure it returns -1 with errno set.
             return unsafe { raw_syscall::raw_execve(path, argv, envp) };
         }
     };
-    // Walk the explicit envp BEFORE the real syscall — the exec replaces
-    // the process image so we must capture pm_env in this address space.
-    // Defense-in-depth: filter applied here mirrors daemon-side; daemon
-    // re-filters on receipt regardless. SAFETY: caller-supplied envp must
-    // be null OR null-terminated array of NUL-terminated C strings (POSIX
-    // execve(2) contract).
+    if let ExecDecision::BlockHardened = exec_policy::check_exec_target(path) {
+        report_exec_blocked(path);
+        unsafe { *libc::__error() = libc::EACCES; }
+        return -1;
+    }
     let pm_env = unsafe { crate::pm_env_filter::extract_pm_env_from_envp(envp) };
     report_exec(path, pm_env);
     unsafe { raw_syscall::raw_execve(path, argv, envp) }
@@ -109,8 +113,11 @@ pub unsafe extern "C" fn sentinel_execvp(
         Some(g) => g,
         None => return unsafe { libc::execvp(path, argv) },
     };
-    // execvp inherits the parent's environment via libc's `**environ`; the
-    // child's exec'd image will see the same env variables. Walk environ now.
+    if let ExecDecision::BlockHardened = exec_policy::check_exec_target(path) {
+        report_exec_blocked(path);
+        unsafe { *libc::__error() = libc::EACCES; }
+        return -1;
+    }
     let pm_env = crate::pm_env_filter::extract_pm_env_from_environ();
     report_exec(path, pm_env);
     unsafe { libc::execvp(path, argv) }
@@ -122,8 +129,11 @@ pub unsafe extern "C" fn sentinel_execv(path: *const c_char, argv: *const *const
         Some(g) => g,
         None => return unsafe { libc::execv(path, argv) },
     };
-    // execv inherits the parent's environment via libc's `**environ` (same
-    // as execvp).
+    if let ExecDecision::BlockHardened = exec_policy::check_exec_target(path) {
+        report_exec_blocked(path);
+        unsafe { *libc::__error() = libc::EACCES; }
+        return -1;
+    }
     let pm_env = crate::pm_env_filter::extract_pm_env_from_environ();
     report_exec(path, pm_env);
     unsafe { libc::execv(path, argv) }

@@ -27,10 +27,12 @@
 
 pub mod cache;
 pub mod envp; // Plan 02-09: pre-spawn envp inspector (TREE-06)
+pub mod exec_policy; // M003-S02: hardened-runtime exec blocking policy
 pub mod fd_class; // M003-S01-T03: thread-local fd classification bitmap for write/writev hooks
 pub mod interpose; // Filled in by task 2; symbol re-export only at this point
 pub mod ipc_client; // Phase 2 plan 02-05: blocking IPC for ForkEvent / ExecEvent / DylibLoaded
 pub mod log_buffer;
+pub mod macho_flags; // M003-S02: Mach-O code-signing flag parser for hardened-runtime exec blocking
 pub mod pm_env_filter; // quick-260508-et9 (BLOCKER #1): dylib-side pm_env capture
 pub mod raw_syscall; // M003-S01: direct kernel syscall wrappers (bypass libc::syscall interpose)
 pub mod reentrancy;

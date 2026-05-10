@@ -91,4 +91,7 @@ pub use messages::{
     // v0.3 — DenyNotify (tag 0x12; D-39)
     DenyNotify,
     DenyNotifyAck,
+    // v0.4 — ExecBlocked (tag 0x13; M003-S02)
+    ExecBlocked,
+    ExecBlockedAck,
 };

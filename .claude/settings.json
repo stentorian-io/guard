@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "mcp__gsd-workflow__gsd_complete_milestone|mcp__gsd-workflow__gsd_milestone_complete",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/milestone-tag.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

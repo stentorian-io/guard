@@ -6,6 +6,7 @@ pub mod baseline;
 pub mod cli;
 pub mod denial_log;
 pub mod install;
+pub mod persistence_log;
 pub mod ipc_client;
 pub mod locate;
 pub mod logs;

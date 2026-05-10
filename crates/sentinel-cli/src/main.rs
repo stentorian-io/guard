@@ -94,6 +94,9 @@ fn real_main() -> Result<i32, CliError> {
                 Some(sentinel_cli::cli::StatusSub::Review { run_uuid }) => {
                     sentinel_cli::status::review::run(&sock, run_uuid)
                 }
+                Some(sentinel_cli::cli::StatusSub::Persistence { run_uuid, json }) => {
+                    sentinel_cli::status::persistence::run(run_uuid.as_deref(), json)
+                }
             }
         },
     }

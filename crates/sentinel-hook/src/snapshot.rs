@@ -4,6 +4,7 @@
 //! On ANY error: fail-closed (returns Err; lib.rs sets FAIL_CLOSED = true).
 
 use core::sync::atomic::AtomicBool;
+use hmac::{Hmac, Mac};
 use memmap2::Mmap;
 use sha2::{Digest, Sha256};
 use std::ffi::CStr;
@@ -11,6 +12,8 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+
+type HmacSha256 = Hmac<Sha256>;
 
 pub static FAIL_CLOSED: AtomicBool = AtomicBool::new(false);
 
@@ -22,6 +25,8 @@ pub enum LoadError {
     NotRegularFile(String),
     ManifestParseFailed,
     DigestMismatch { expected: String, got: String },
+    HmacMissing,
+    HmacMismatch,
     SchemaMismatch { expected: u16, got: u16 },
     Io(std::io::Error),
     Codec(String),
@@ -109,6 +114,14 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
     if manifest_digest.len() != 64 || !manifest_digest.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(LoadError::ManifestParseFailed);
     }
+    let manifest_hmac = lines.next().and_then(|line| {
+        let h = line.strip_prefix("hmac=")?;
+        if h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()) {
+            Some(h.to_string())
+        } else {
+            None
+        }
+    });
 
     // Validate snapshot path also under state_dir.
     let snapshot_path = Path::new(snapshot_path_str)
@@ -153,6 +166,19 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
         });
     }
 
+    // HMAC verification (M004-S02): if the key exists, the manifest MUST
+    // contain a valid HMAC. This prevents an attacker from replacing both
+    // the snapshot and manifest without knowing the key.
+    if let Some(hmac_key) = load_hmac_key(&state_dir) {
+        let expected_hmac = manifest_hmac.ok_or(LoadError::HmacMissing)?;
+        let mut mac = HmacSha256::new_from_slice(&hmac_key).expect("key length valid");
+        mac.update(&bytes);
+        let computed_hmac = hex_lower(&mac.finalize().into_bytes());
+        if computed_hmac != expected_hmac {
+            return Err(LoadError::HmacMismatch);
+        }
+    }
+
     // Decode CBOR; verify schema.
     let snap = sentinel_core::Snapshot::decode(&bytes).map_err(|e| match e {
         sentinel_core::Error::SchemaVersionMismatch { expected, got } => {
@@ -175,4 +201,35 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
         schema_version: snap.schema_version,
         snapshot_path,
     })
+}
+
+const HMAC_KEY_LEN: usize = 32;
+
+fn load_hmac_key(state_dir: &Path) -> Option<[u8; HMAC_KEY_LEN]> {
+    let path = state_dir.join("hmac.key");
+    let mut f = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)
+        .ok()?;
+    let mut buf = [0u8; HMAC_KEY_LEN];
+    let n = f.read(&mut buf).ok()?;
+    if n != HMAC_KEY_LEN {
+        return None;
+    }
+    let mut extra = [0u8; 1];
+    if f.read(&mut extra).ok() != Some(0) {
+        return None;
+    }
+    Some(buf)
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0xf) as usize] as char);
+    }
+    s
 }

@@ -1,5 +1,6 @@
 //! sentineld library — exposes the daemon internals to integration tests.
 pub mod baseline_staging;
+pub mod hmac_key;
 pub mod curated;
 pub mod daemon_state;
 pub mod log_writer;

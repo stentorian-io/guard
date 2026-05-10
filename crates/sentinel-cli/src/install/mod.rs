@@ -125,11 +125,19 @@ fn apply_install_steps(
     // 5. binary path (informational)
     artifacts::record_artifact(&db_path, "binary", &daemon_binary.display().to_string(), None, VERSION)?;
 
-    // 6. launchctl bootstrap (Pitfall 6: bootout-before-bootstrap is
+    // 6. HMAC key (M004-S02): generate if not already present.
+    let hmac_key_path = state_dir.join("hmac.key");
+    if !hmac_key_path.exists() {
+        sentinel_daemon::hmac_key::generate_and_store(state_dir)
+            .map_err(|e| CliError::Other(format!("hmac key: {e}")))?;
+    }
+    artifacts::record_artifact(&db_path, "hmac_key", &hmac_key_path.display().to_string(), None, VERSION)?;
+
+    // 7. launchctl bootstrap (Pitfall 6: bootout-before-bootstrap is
     //    handled inside this helper for idempotence).
     launchagent::launchctl_bootstrap(&plist).map_err(|e| CliError::Other(format!("bootstrap: {e}")))?;
 
-    // 7. watchdog plist + bootstrap (M004-S01)
+    // 8. watchdog plist + bootstrap (M004-S01)
     if let Ok(watchdog_binary) = resolve_watchdog_binary() {
         let wd_plist_path = launchagent::watchdog_plist_path();
         let wd_plist_value = launchagent::build_watchdog_plist(&watchdog_binary, state_dir);

@@ -29,6 +29,7 @@ nix = { workspace = true }
 libc = { workspace = true }
 thiserror = { workspace = true }
 sha2 = { workspace = true }
+hmac = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_yml = { workspace = true }

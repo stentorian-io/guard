@@ -1338,3 +1338,55 @@ impl PersistenceWriteAck {
         }
     }
 }
+
+// ============================================================================
+// v0.5 M004-S01 — Ping (tag 0x15; watchdog liveness check)
+// ============================================================================
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Ping {
+    pub schema_version: u16,
+}
+
+impl Ping {
+    pub fn new() -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V4,
+        }
+    }
+}
+
+impl Default for Ping {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PingReply {
+    Pong {
+        schema_version: u16,
+        pid: u32,
+        uptime_secs: u64,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl PingReply {
+    pub fn pong(pid: u32, uptime_secs: u64) -> Self {
+        Self::Pong {
+            schema_version: IPC_SCHEMA_V4,
+            pid,
+            uptime_secs,
+        }
+    }
+    pub fn err(m: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V4,
+            message: m.into(),
+        }
+    }
+}

@@ -161,6 +161,7 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         feed_store,
         feed_fetch_mutex,
         last_fetch_result,
+        startup_instant: std::time::Instant::now(),
     });
 
     // TODO(03-08): wire gap_detector → log_writer + recent_gaps when the gap fires.

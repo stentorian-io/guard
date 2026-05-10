@@ -34,7 +34,7 @@ use sentinel_ipc::{
     DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap,
     EnvNotPropagatedGapAck, ExecAck, ExecBlocked, ExecBlockedAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3,
     IPC_SCHEMA_V4, InsertUserRule, InsertUserRuleReply, IpcError, IsTrusted, IsTrustedReply,
-    PersistenceWrite, PersistenceWriteAck,
+    Ping, PingReply, PersistenceWrite, PersistenceWriteAck,
     ListRules, ListRulesReply, ListTrust, ListTrustReply, PrepareSnapshot, PromptChannelInit,
     PromptChannelInitAck, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply,
     Resolve, ResolveReply, SnapshotReply, Status, StatusReply, TrustPolicy, TrustPolicyReply,
@@ -215,6 +215,8 @@ pub struct DaemonState {
     pub feed_fetch_mutex: Arc<Mutex<()>>,
     pub last_fetch_result:
         Arc<std::sync::RwLock<Option<crate::feed::concurrency::LastFetchResult>>>,
+    // v0.5 M004-S01: monotonic startup instant for uptime reporting in Ping.
+    pub startup_instant: std::time::Instant,
 }
 
 impl DaemonState {
@@ -260,6 +262,7 @@ impl DaemonState {
             feed_store,
             feed_fetch_mutex,
             last_fetch_result,
+            startup_instant: std::time::Instant::now(),
         }
     }
 
@@ -471,6 +474,9 @@ impl IpcServer {
             }
             FrameKind::Tagged(MessageTag::PersistenceWrite) => {
                 handle_persistence_write_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(MessageTag::Ping) => {
+                handle_ping_frame(&mut stream, state);
             }
         }
     }
@@ -1026,6 +1032,26 @@ fn handle_persistence_write_frame(stream: &mut UnixStream, state: &Arc<DaemonSta
 
     if let Err(e) = write_tagged(stream, MessageTag::PersistenceWrite, &PersistenceWriteAck::ok()) {
         error!(error = %e, "failed to send PersistenceWriteAck");
+    }
+}
+
+// ============================================================================
+// v0.5 M004-S01 — Ping frame handler (watchdog liveness)
+// ============================================================================
+
+fn handle_ping_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let _req: Ping = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "Ping decode failed");
+            let _ = write_tagged(stream, MessageTag::Ping, &PingReply::err(format!("decode: {e}")));
+            return;
+        }
+    };
+    let pid = std::process::id();
+    let uptime_secs = state.startup_instant.elapsed().as_secs();
+    if let Err(e) = write_tagged(stream, MessageTag::Ping, &PingReply::pong(pid, uptime_secs)) {
+        error!(error = %e, "failed to send PingReply");
     }
 }
 

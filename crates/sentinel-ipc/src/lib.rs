@@ -97,4 +97,7 @@ pub use messages::{
     // v0.4 — PersistenceWrite (tag 0x14; M003-S04)
     PersistenceWrite,
     PersistenceWriteAck,
+    // v0.5 — Ping (tag 0x15; M004-S01 watchdog liveness)
+    Ping,
+    PingReply,
 };

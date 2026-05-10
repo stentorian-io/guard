@@ -43,9 +43,19 @@ fn pip_install_real_registry_succeeds_under_sentinel_run() {
     let dylib = resolve_dylib();
     let harness = DaemonHarness::start().expect("start daemon harness");
 
+    // Use `pip download` instead of `pip install --dry-run` because
+    // --dry-run requires pip 22.2+ but Xcode's bundled pip is 21.2.4.
+    // pip download exercises the same libc connect path to pypi.org.
+    let download_dir = tempfile::tempdir().expect("tempdir for pip download");
     let output = Command::new(&cli)
         .arg("pip3")
-        .args(["install", "--dry-run", "--no-deps", "requests"])
+        .args([
+            "download",
+            "--no-deps",
+            "-d",
+            download_dir.path().to_str().unwrap(),
+            "requests",
+        ])
         .env_clear()
         .env("HOME", harness.home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -58,7 +68,7 @@ fn pip_install_real_registry_succeeds_under_sentinel_run() {
 
     assert!(
         output.status.success(),
-        "pip install --dry-run requests must succeed under sentinel run\n\
+        "pip download requests must succeed under sentinel run\n\
          exit: {:?}\n\
          stderr: {}",
         output.status.code(),

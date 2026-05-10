@@ -76,8 +76,25 @@ pub const MAX_DEPTH: usize = 8;
 /// `pub use sentinel_core::policy_file::{find_sentinel_toml, MAX_DEPTH}`
 /// re-export in `sentinel-daemon::policy_file`.
 pub fn find_sentinel_toml(start: &Path) -> Option<PathBuf> {
-    let mut current = start.canonicalize().ok()?;
+    let canonical_start = start.canonicalize().ok()?;
+    let mut current = canonical_start.clone();
+    // WR-04: stop the walk at $HOME to prevent a hostile prepare script from
+    // planting ~/.sentinel.toml (which would be found when the project has no
+    // .git boundary in its parent chain). If the user runs sentinel directly
+    // from $HOME, that directory IS the start and is still checked.
+    let home_boundary = std::env::var_os("HOME")
+        .and_then(|h| PathBuf::from(h).canonicalize().ok());
     for _ in 0..MAX_DEPTH {
+        // WR-04: if we've walked up to $HOME (and it's not the starting
+        // directory), stop — don't find ~/.sentinel.toml planted by a
+        // hostile prepare script running in a subdirectory.
+        if current != canonical_start {
+            if let Some(ref home) = home_boundary {
+                if &current == home {
+                    return None;
+                }
+            }
+        }
         let toml_candidate = current.join(".sentinel.toml");
         if toml_candidate.exists() {
             return toml_candidate.canonicalize().ok();
@@ -123,5 +140,31 @@ mod find_sentinel_toml_tests {
     #[test]
     fn max_depth_is_8() {
         assert_eq!(MAX_DEPTH, 8);
+    }
+
+    /// WR-04: the walk must NOT cross $HOME. A .sentinel.toml planted
+    /// at $HOME by a hostile prepare script is unreachable when the project
+    /// is in a subdirectory.
+    #[test]
+    fn stops_at_home_boundary() {
+        let fake_home = tempdir().unwrap();
+        let project = fake_home.path().join("projects").join("myapp");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            fake_home.path().join(".sentinel.toml"),
+            "version = 1\n",
+        )
+        .unwrap();
+        let saved_home = std::env::var_os("HOME");
+        // SAFETY: test is single-threaded for this env manipulation.
+        unsafe { std::env::set_var("HOME", fake_home.path()) };
+        let result = find_sentinel_toml(&project);
+        if let Some(ref h) = saved_home {
+            unsafe { std::env::set_var("HOME", h) };
+        }
+        assert!(
+            result.is_none(),
+            "WR-04: walk must stop at $HOME and not find .sentinel.toml there"
+        );
     }
 }

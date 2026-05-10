@@ -11,15 +11,19 @@ use crate::state_dir::{
     run_snapshot_tmp_path, snapshot_path, snapshot_tmp_path,
 };
 use sentinel_core::Snapshot;
+use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+type HmacSha256 = Hmac<Sha256>;
+
 pub struct PublishedSnapshot {
     pub path: PathBuf,
     pub digest_hex: String,
+    pub hmac_hex: Option<String>,
 }
 
 /// Write `snap` to `state_dir` with mode 0600 atomically. Returns the absolute
@@ -45,6 +49,7 @@ pub fn publish(state_dir: &Path, snap: &Snapshot, nonce: u64) -> std::io::Result
     Ok(PublishedSnapshot {
         path: final_path,
         digest_hex: hex_lower(&digest),
+        hmac_hex: None,
     })
 }
 
@@ -62,13 +67,26 @@ fn hex_lower(bytes: &[u8]) -> String {
 /// atomically (tmp + fsync + rename). Distinct from Phase 1's `publish` which writes
 /// the daemon-startup snapshot at a different path scheme.
 ///
-/// The manifest format matches Phase 1's: line 1 = absolute snapshot path,
-/// line 2 = "digest=<hex>\n". The dylib's existing snapshot loader consumes
-/// it unchanged.
+/// Manifest format:
+///   line 1 = absolute snapshot path
+///   line 2 = "digest=<hex>"
+///   line 3 = "hmac=<hex>" (present when hmac_key is Some)
+///
+/// The dylib's snapshot loader verifies both digest and HMAC (M004-S02).
 pub fn publish_run(
     state_dir: &Path,
     snap: &Snapshot,
     run_uuid: &str,
+) -> std::io::Result<PublishedSnapshot> {
+    let hmac_key = crate::hmac_key::load(state_dir);
+    publish_run_inner(state_dir, snap, run_uuid, hmac_key.as_ref())
+}
+
+fn publish_run_inner(
+    state_dir: &Path,
+    snap: &Snapshot,
+    run_uuid: &str,
+    hmac_key: Option<&[u8; 32]>,
 ) -> std::io::Result<PublishedSnapshot> {
     ensure_runs_dir(state_dir)?;
     let bytes = snap
@@ -94,7 +112,13 @@ pub fn publish_run(
     let digest = Sha256::digest(&bytes);
     let digest_hex = hex_lower(&digest);
 
-    // Manifest file: tmp + fsync + rename. Same shape as Phase 1 manifest::write.
+    let hmac_hex = hmac_key.map(|key| {
+        let mut mac = HmacSha256::new_from_slice(key).expect("HMAC key length valid");
+        mac.update(&bytes);
+        hex_lower(&mac.finalize().into_bytes())
+    });
+
+    // Manifest file: tmp + fsync + rename.
     let manifest_tmp = run_manifest_tmp_path(state_dir, run_uuid);
     let manifest_final = run_manifest_path(state_dir, run_uuid);
     let _ = std::fs::remove_file(&manifest_tmp);
@@ -104,7 +128,10 @@ pub fn publish_run(
             .create_new(true)
             .mode(0o600)
             .open(&manifest_tmp)?;
-        let body = format!("{}\ndigest={}\n", final_path.display(), digest_hex);
+        let mut body = format!("{}\ndigest={}\n", final_path.display(), digest_hex);
+        if let Some(ref h) = hmac_hex {
+            body.push_str(&format!("hmac={h}\n"));
+        }
         f.write_all(body.as_bytes())?;
         f.sync_all()?;
     }
@@ -113,6 +140,7 @@ pub fn publish_run(
     Ok(PublishedSnapshot {
         path: final_path,
         digest_hex,
+        hmac_hex,
     })
 }
 

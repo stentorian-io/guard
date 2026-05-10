@@ -31,12 +31,12 @@ use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     BaselineCommit, BaselineCommitReply, DeleteInstallArtifacts, DeleteInstallArtifactsReply,
-    DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap, EnvNotPropagatedGapAck, ExecAck, ExecEvent,
-    ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3, InsertUserRule, InsertUserRuleReply,
-    IpcError, IsTrusted, IsTrustedReply, ListRules, ListRulesReply, ListTrust, ListTrustReply,
-    PrepareSnapshot, PromptChannelInit, PromptChannelInitAck, ReadInstallArtifacts,
-    ReadInstallArtifactsReply, RegisterRoot, Reply, Resolve, ResolveReply, SnapshotReply, Status,
-    StatusReply, TrustPolicy, TrustPolicyReply,
+    DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap,
+    EnvNotPropagatedGapAck, ExecAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3,
+    IPC_SCHEMA_V4, InsertUserRule, InsertUserRuleReply, IpcError, IsTrusted, IsTrustedReply,
+    ListRules, ListRulesReply, ListTrust, ListTrustReply, PrepareSnapshot, PromptChannelInit,
+    PromptChannelInitAck, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply,
+    Resolve, ResolveReply, SnapshotReply, Status, StatusReply, TrustPolicy, TrustPolicyReply,
 };
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
@@ -462,6 +462,9 @@ impl IpcServer {
             FrameKind::Tagged(MessageTag::DeleteInstallArtifacts) => {
                 handle_delete_install_artifacts_frame(&mut stream, state);
             }
+            FrameKind::Tagged(MessageTag::DenyNotify) => {
+                handle_deny_notify_frame(&mut stream, state);
+            }
         }
     }
 }
@@ -720,6 +723,138 @@ fn handle_delete_install_artifacts_frame(stream: &mut UnixStream, state: &Arc<Da
 }
 
 // ============================================================================
+// v0.3 D-39 — DenyNotify frame handler
+// ============================================================================
+
+fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    use crate::log_writer::jsonl_row::{
+        Decision, LogRow, ProcessCtxLog, RootCtxLog, JSONL_SCHEMA_VERSION, now_rfc3339,
+    };
+
+    let req: DenyNotify = match read_tagged_body(stream) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "DenyNotify decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::DenyNotify,
+                &DenyNotifyAck::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V4 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::DenyNotify,
+            &DenyNotifyAck::err(format!(
+                "schema_version {} != IPC_SCHEMA_V4",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+
+    let sender_token: sentinel_core::AuditToken = req.audit_token.into();
+    let node_opt = state.process_tree.get_node(&sender_token);
+
+    let (run_uuid, process_ctx, parent_ctx, root_ctx, pkg_ctx) = match node_opt {
+        Some(ref node) => {
+            let process_ctx = ProcessCtxLog {
+                pid: sender_token.val[5],
+                pidversion: sender_token.val[7],
+                argv: if node.binary_path.is_empty() {
+                    vec![]
+                } else {
+                    vec![node.binary_path.clone()]
+                },
+                cwd: String::new(),
+            };
+            let parent_ctx = node
+                .parent_audit_token
+                .as_ref()
+                .and_then(|pt| state.process_tree.get_node(pt))
+                .map(|pn| ProcessCtxLog {
+                    pid: pn.audit_token.val[5],
+                    pidversion: pn.audit_token.val[7],
+                    argv: if pn.binary_path.is_empty() {
+                        vec![]
+                    } else {
+                        vec![pn.binary_path.clone()]
+                    },
+                    cwd: String::new(),
+                })
+                .unwrap_or(ProcessCtxLog {
+                    pid: 0, pidversion: 0, argv: vec![], cwd: String::new(),
+                });
+            let root_node = state.process_tree.get_node(&node.tracked_root);
+            let root_ctx = RootCtxLog {
+                audit_token: node.tracked_root.val,
+                argv: root_node
+                    .map(|rn| if rn.binary_path.is_empty() {
+                        vec![]
+                    } else {
+                        vec![rn.binary_path.clone()]
+                    })
+                    .unwrap_or_default(),
+            };
+            let pkg_ctx = crate::log_writer::package_context::infer_package_context(
+                &state.process_tree,
+                &sender_token,
+                &root_ctx.argv.join(" "),
+            );
+            (node.run_uuid.clone(), process_ctx, parent_ctx, root_ctx, pkg_ctx)
+        }
+        None => {
+            let process_ctx = ProcessCtxLog {
+                pid: sender_token.val[5],
+                pidversion: sender_token.val[7],
+                argv: vec![],
+                cwd: String::new(),
+            };
+            let parent_ctx = ProcessCtxLog {
+                pid: 0, pidversion: 0, argv: vec![], cwd: String::new(),
+            };
+            let root_ctx = RootCtxLog {
+                audit_token: [0; 8],
+                argv: vec![],
+            };
+            (String::new(), process_ctx, parent_ctx, root_ctx, None)
+        }
+    };
+
+    let decision = Decision {
+        schema_version: JSONL_SCHEMA_VERSION,
+        ts: now_rfc3339(),
+        verdict: "Deny",
+        dest_host: req.dest_host.clone().unwrap_or_default(),
+        dest_port: req.dest_port,
+        dest_ip: req.dest_ip.clone(),
+        run_uuid,
+        source_kind: "hook_deny".into(),
+        source_locator: Some(req.source_surface.clone()),
+        process: process_ctx,
+        parent: parent_ctx,
+        root: root_ctx,
+        package_context: pkg_ctx,
+        intel: None,
+    };
+
+    state.log_writer.send(LogRow::Block(decision));
+
+    debug!(
+        dest_host = ?req.dest_host,
+        dest_port = req.dest_port,
+        source_surface = %req.source_surface,
+        "DenyNotify logged"
+    );
+
+    if let Err(e) = write_tagged(stream, MessageTag::DenyNotify, &DenyNotifyAck::ok()) {
+        error!(error = %e, "failed to send DenyNotifyAck");
+    }
+}
+
+// ============================================================================
 // Phase 3 plan 03-12 — PromptChannelInit frame handler (spawn-and-detach)
 // ============================================================================
 
@@ -907,7 +1042,7 @@ fn handle_legacy_register_root(
         // coverage for that pid's children. Sanity-check that the wire pid
         // exists in the OS process table AND has the same uid as the daemon
         // (which itself runs as the user); refuse on mismatch.
-        if !verify_wire_pid_same_uid(wire_pid as libc::pid_t) {
+        if !verify_wire_pid_same_uid(wire_pid as libc::pid_t, msg.audit_token.val[7]) {
             warn!(
                 kernel_pid,
                 wire_pid,
@@ -948,34 +1083,24 @@ fn handle_legacy_register_root(
     }
 }
 
-/// WR-08: defense-in-depth for the REGISTER-01 delegation path. Returns true
-/// iff the wire pid (a) currently exists in the OS process table and (b) is
-/// owned by the same uid as the daemon. The daemon itself runs as the user
-/// (no privilege boundary), so `libc::getuid()` gives the trusted reference
-/// uid for comparison.
+/// WR-08 + TREE-07: defense-in-depth for the REGISTER-01 delegation path.
 ///
-/// Rationale: a same-uid local attacker could send a RegisterRoot whose
-/// wire-claimed audit_token names some OTHER user's process. Tracking
-/// per se grants no network-enforcement privilege, but it does corrupt the
-/// gap-detector and process-tree coverage for that pid's descendants.
+/// Checks:
+///   (a) wire pid exists in the OS process table
+///   (b) owned by the same uid as the daemon
+///   (c) TREE-07: wire-claimed pidversion matches the kernel's pidversion
+///       for that pid (via task_info TASK_AUDIT_TOKEN). This closes the
+///       PID-reuse race: if a child dies and its PID is recycled between
+///       the CLI's task_info call and this verification, the recycled
+///       process has a different kernel pidversion → registration rejected.
 ///
-/// WR-05 limitation (documented for v1): this check does NOT verify the
-/// wire-claimed `pidversion` (audit_token.val[7]) against the kernel-
-/// reported pidversion. macOS `proc_pidinfo(PROC_PIDTBSDINFO)` returns a
-/// `proc_bsdinfo` struct that lacks pidversion; the version is exposed via
-/// `PROC_PIDT_SHORTBSDINFO` / `proc_bsdshortinfo`, which `libc` 0.2.186
-/// does not currently bind. Consequently a same-uid local attacker can win
-/// a PID-reuse race between the CLI's `task_info(TASK_AUDIT_TOKEN)` call
-/// and this verification, registering a same-uid recycled pid as a tracked
-/// root. The trust boundary is same-uid only (no privilege boundary in v1),
-/// so this is bounded — but tighten in a future revision by either binding
-/// `proc_bsdshortinfo` via custom FFI, or migrating to a Phase 2 ES-based
-/// process supervisor that exposes `responsible_audit_token` directly.
-fn verify_wire_pid_same_uid(wire_pid: libc::pid_t) -> bool {
-    // SAFETY: zeroed proc_bsdinfo is a valid initial state for libc; we only
-    // read the bytes proc_pidinfo writes back. The buffer is `info`'s memory
-    // and lives for the duration of the call.
-    unsafe {
+/// The Mach task_info path (c) may fail on future macOS if Apple tightens
+/// task-port access — in that case the function falls back to uid-only
+/// validation (the v0.2 behaviour). The trust boundary remains same-uid
+/// only (no privilege boundary in v1).
+fn verify_wire_pid_same_uid(wire_pid: libc::pid_t, wire_pidversion: u32) -> bool {
+    // Step 1: proc_pidinfo for uid check (fast, always available).
+    let uid_ok = unsafe {
         let mut info: libc::proc_bsdinfo = std::mem::zeroed();
         let info_size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
         let n = libc::proc_pidinfo(
@@ -986,12 +1111,78 @@ fn verify_wire_pid_same_uid(wire_pid: libc::pid_t) -> bool {
             info_size,
         );
         if n != info_size {
-            // pid does not exist, or proc_pidinfo failed for another reason —
-            // refuse to register either way.
             return false;
         }
-        let cli_uid = libc::getuid();
-        info.pbi_uid == cli_uid
+        info.pbi_uid == libc::getuid()
+    };
+    if !uid_ok {
+        return false;
+    }
+
+    // Step 2 (TREE-07): cross-check pidversion via task_info(TASK_AUDIT_TOKEN).
+    // If the Mach call fails (entitlement restrictions, etc.), fall through
+    // and accept uid-only validation — same as v0.2 behaviour.
+    if wire_pidversion != 0 {
+        if let Some(kernel_pidversion) = query_kernel_pidversion(wire_pid) {
+            if kernel_pidversion != wire_pidversion {
+                warn!(
+                    wire_pid,
+                    wire_pidversion,
+                    kernel_pidversion,
+                    "TREE-07: wire pidversion mismatch — possible PID reuse"
+                );
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+/// Query the kernel pidversion for a given pid via Mach task_info(TASK_AUDIT_TOKEN).
+/// Returns None if the Mach call fails (e.g. entitlement restrictions).
+fn query_kernel_pidversion(pid: libc::pid_t) -> Option<u32> {
+    type MachPortT = u32;
+    type KernReturnT = i32;
+    const MACH_PORT_NULL: MachPortT = 0;
+    const KERN_SUCCESS: KernReturnT = 0;
+    const TASK_AUDIT_TOKEN: u32 = 15;
+
+    unsafe extern "C" {
+        fn mach_task_self() -> MachPortT;
+        fn task_name_for_pid(
+            target_tport: MachPortT,
+            pid: libc::pid_t,
+            t: *mut MachPortT,
+        ) -> KernReturnT;
+        fn task_info(
+            target_task: MachPortT,
+            flavor: u32,
+            task_info_out: *mut u32,
+            task_info_count: *mut u32,
+        ) -> KernReturnT;
+        fn mach_port_deallocate(task: MachPortT, name: MachPortT) -> KernReturnT;
+    }
+
+    unsafe {
+        let mut task_port: MachPortT = MACH_PORT_NULL;
+        let kr = task_name_for_pid(mach_task_self(), pid, &mut task_port);
+        if kr != KERN_SUCCESS {
+            return None;
+        }
+        let mut token_val = [0u32; 8];
+        let mut count: u32 = 8;
+        let kr2 = task_info(
+            task_port,
+            TASK_AUDIT_TOKEN,
+            token_val.as_mut_ptr(),
+            &mut count,
+        );
+        mach_port_deallocate(mach_task_self(), task_port);
+        if kr2 != KERN_SUCCESS {
+            return None;
+        }
+        Some(token_val[7])
     }
 }
 

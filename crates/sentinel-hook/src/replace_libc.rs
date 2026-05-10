@@ -4,7 +4,7 @@
 //! cache lookups against fixed-size storage; reentrancy-guard set/clear.
 
 use crate::cache::{Cache, MAX_HOSTNAME, MAX_SOCKADDR_BYTES};
-use crate::ipc_client::{daemon_socket_path, send_resolve_sync};
+use crate::ipc_client::{daemon_socket_path, send_deny_notify, send_resolve_sync};
 use crate::log_buffer::LOG_RING;
 use crate::reentrancy::IN_HOOK;
 use crate::snapshot::FAIL_CLOSED;
@@ -17,7 +17,7 @@ use sentinel_core::{
     policy::{evaluate_policy, is_cloud_metadata_ip, is_loopback_ip},
     AllowlistEntry, Verdict,
 };
-use sentinel_ipc::SOCKADDR_WIRE_LEN;
+use sentinel_ipc::{AuditTokenWire, SOCKADDR_WIRE_LEN};
 
 /// Maximum number of Resolve-IPC round-trips per connect() invocation.
 /// Bounds worst-case latency at MAX_RESOLVE_ATTEMPTS * RESOLVE_TIMEOUT_MS = 400ms.
@@ -193,8 +193,8 @@ pub unsafe extern "C" fn sentinel_connect(
     if matches!(verdict, Verdict::Deny) {
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY connect");
+        unsafe { notify_deny_for_sockaddr(addr, addrlen, "connect") };
         return -1;
-        // _guard drops here: IN_HOOK cleared after deny path
     }
     unsafe { raw_connect(s, addr, addrlen) }
     // _guard drops here: IN_HOOK cleared after real syscall returns
@@ -254,8 +254,11 @@ unsafe extern "C" fn sentinel_connectx(
     if matches!(verdict, Verdict::Deny) {
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY connectx");
+        if !endpoints.is_null() {
+            let ep = unsafe { &*(endpoints as *const SaEndpoints) };
+            unsafe { notify_deny_for_sockaddr(ep.sae_dstaddr, ep.sae_dstaddrlen, "connectx") };
+        }
         return -1;
-        // _guard drops here: IN_HOOK cleared after deny
     }
     unsafe {
         libc::syscall(SYS_CONNECTX, s, endpoints, associd, flags, iov, iovcnt, len, connid) as c_int
@@ -317,8 +320,8 @@ unsafe extern "C" fn sentinel_sendto(
     if matches!(verdict, Verdict::Deny) {
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY sendto");
+        unsafe { notify_deny_for_sockaddr(to, tolen, "sendto") };
         return -1;
-        // _guard drops here: IN_HOOK cleared after deny
     }
     unsafe { raw_sendto(s, buf, len, flags, to, tolen) }
     // _guard drops here: IN_HOOK cleared after real syscall returns
@@ -357,8 +360,19 @@ unsafe extern "C" fn sentinel_sendmsg(
     if matches!(verdict, Verdict::Deny) {
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY sendmsg");
+        if !msg.is_null() {
+            let m = unsafe { &*msg };
+            if !m.msg_name.is_null() && m.msg_namelen > 0 {
+                unsafe {
+                    notify_deny_for_sockaddr(
+                        m.msg_name as *const sockaddr,
+                        m.msg_namelen,
+                        "sendmsg",
+                    );
+                }
+            }
+        }
         return -1;
-        // _guard drops here: IN_HOOK cleared after deny
     }
     unsafe { raw_sendmsg(s, msg, flags) }
     // _guard drops here: IN_HOOK cleared after real syscall returns
@@ -373,6 +387,61 @@ unsafe extern "C" fn sentinel_sendmsg(
 /// Same as `decide_for_sockaddr` — `addr` must be null or point to a valid sockaddr.
 pub unsafe fn _decide_for_sockaddr_pub(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
     decide_for_sockaddr(addr, addrlen)
+}
+
+/// D-39: fire-and-forget deny notification to the daemon for forensic logging.
+/// Extracts dest_host (from getaddrinfo cache), dest_ip, and dest_port from
+/// the sockaddr and sends a DenyNotify IPC with a 50ms timeout.
+///
+/// # Safety
+/// `addr` must be null or point to a valid sockaddr of at least `addrlen` bytes.
+unsafe fn notify_deny_for_sockaddr(
+    addr: *const sockaddr,
+    addrlen: socklen_t,
+    source_surface: &str,
+) {
+    if daemon_socket_path().is_none() {
+        return;
+    }
+
+    let pid = unsafe { libc::getpid() } as u32;
+    let ppid = unsafe { libc::getppid() } as u32;
+    let mut token_val = [0u32; 8];
+    token_val[5] = pid;
+    token_val[6] = ppid;
+    let audit_token = AuditTokenWire { val: token_val };
+
+    let mut ip_buf = [0u8; 64];
+    let ip_str = unsafe { ip_to_str(addr, addrlen, &mut ip_buf) };
+    let ip_opt = ip_str.and_then(|b| core::str::from_utf8(b).ok());
+
+    let port = if !addr.is_null() && addrlen as usize >= 4 {
+        let sa_bytes = addr as *const u8;
+        u16::from_be_bytes(unsafe { [*sa_bytes.add(2), *sa_bytes.add(3)] })
+    } else {
+        0
+    };
+
+    let (sa_buf, sa_n) = match sockaddr_bytes(addr, addrlen) {
+        Some(v) => v,
+        None => {
+            send_deny_notify(audit_token, None, port, ip_opt, source_surface);
+            return;
+        }
+    };
+    let host_opt = with_cache(|c| {
+        c.lookup(&sa_buf[..sa_n]).map(|h| {
+            let mut buf = [0u8; MAX_HOSTNAME];
+            let len = h.len().min(MAX_HOSTNAME);
+            buf[..len].copy_from_slice(&h[..len]);
+            (buf, len)
+        })
+    });
+    let host_str = host_opt
+        .as_ref()
+        .and_then(|(buf, len)| core::str::from_utf8(&buf[..*len]).ok());
+
+    send_deny_notify(audit_token, host_str, port, ip_opt, source_surface);
 }
 
 fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {

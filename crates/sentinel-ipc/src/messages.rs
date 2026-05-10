@@ -1167,3 +1167,63 @@ impl DeleteInstallArtifactsReply {
         }
     }
 }
+
+// ============================================================
+// v0.3 — DenyNotify (tag 0x12; D-39 deny-notify IPC)
+// ============================================================
+
+/// Dylib → daemon: a libc-level denial just happened. Fire-and-forget with
+/// short timeouts — the denial has already been enforced; this message only
+/// provides forensic logging.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DenyNotify {
+    pub schema_version: u16, // IPC_SCHEMA_V4
+    pub audit_token: AuditTokenWire,
+    pub dest_host: Option<String>,
+    pub dest_port: u16,
+    pub dest_ip: Option<String>,
+    /// Which libc surface triggered the denial.
+    pub source_surface: String, // "connect"|"connectx"|"sendto"|"sendmsg"
+    pub denied_at_ms: u64,
+}
+
+impl DenyNotify {
+    pub fn new(
+        audit_token: AuditTokenWire,
+        dest_host: Option<String>,
+        dest_port: u16,
+        dest_ip: Option<String>,
+        source_surface: impl Into<String>,
+        denied_at_ms: u64,
+    ) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V4,
+            audit_token,
+            dest_host,
+            dest_port,
+            dest_ip,
+            source_surface: source_surface.into(),
+            denied_at_ms,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DenyNotifyAck {
+    Ok { schema_version: u16 },
+    Err { schema_version: u16, message: String },
+}
+
+impl DenyNotifyAck {
+    pub fn ok() -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V4,
+        }
+    }
+    pub fn err(m: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V4,
+            message: m.into(),
+        }
+    }
+}

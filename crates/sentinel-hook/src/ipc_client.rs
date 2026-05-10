@@ -15,8 +15,9 @@
 use core::ffi::{c_char, CStr};
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
-    AuditTokenWire, DylibLoaded, DylibLoadedAck, ExecAck, ExecEvent, ForkAck, ForkEvent,
-    IPC_SCHEMA_V2, IPC_SCHEMA_V3, Resolve, ResolveReply, SOCKADDR_WIRE_LEN,
+    AuditTokenWire, DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, ExecAck, ExecEvent,
+    ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4, Resolve, ResolveReply,
+    SOCKADDR_WIRE_LEN,
 };
 use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
@@ -31,6 +32,7 @@ pub(crate) const TAG_EXEC_EVENT: u8 = 0x04;
 pub(crate) const TAG_DYLIB_LOADED: u8 = 0x05;
 pub(crate) const TAG_RESOLVE: u8 = 0x06;
 pub(crate) const TAG_ENV_NOT_PROPAGATED: u8 = 0x08;
+pub(crate) const TAG_DENY_NOTIFY: u8 = 0x12;
 
 static DAEMON_SOCKET_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
@@ -334,6 +336,34 @@ pub fn send_env_not_propagated_gap_sync(
             Err(IpcClientError::DaemonRejected(message))
         }
     }
+}
+
+/// Fire-and-forget deny notification (D-39). The denial has already been
+/// enforced at the libc level — this IPC only provides forensic logging.
+///
+/// Uses a 50ms total timeout to avoid blocking the hot path. Silently
+/// discards all errors: if the daemon is down, the denial still happened.
+pub fn send_deny_notify(
+    audit_token: AuditTokenWire,
+    dest_host: Option<&str>,
+    dest_port: u16,
+    dest_ip: Option<&str>,
+    source_surface: &str,
+) {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let ev = DenyNotify {
+        schema_version: IPC_SCHEMA_V4,
+        audit_token,
+        dest_host: dest_host.map(|s| s.to_string()),
+        dest_port,
+        dest_ip: dest_ip.map(|s| s.to_string()),
+        source_surface: source_surface.to_string(),
+        denied_at_ms: now_ms,
+    };
+    let _ = send_tagged_and_recv_ack::<DenyNotify, DenyNotifyAck>(TAG_DENY_NOTIFY, &ev, 50);
 }
 
 // ---------------------------------------------------------------------------

@@ -13,11 +13,11 @@ that is reported here as a context number with no fixed budget.
 
 The reference numbers below were measured on:
 
-- **Hardware:** TBD-MAC-MODEL — TBD-RAM GB
-- **macOS:** TBD-MACOS-VERSION
-- **rustc:** TBD-RUSTC-VERSION
-- **git SHA:** TBD-GIT-SHA
-- **Date (UTC):** TBD-ISO-DATE
+- **Hardware:** MacBookAir10,1 — 16 GB
+- **macOS:** 26.3.1
+- **rustc:** 1.93.0 (254b59607 2026-01-19)
+- **git SHA:** a27eafa
+- **Date (UTC):** 2026-05-10T08:14:32Z
 
 > Run `./scripts/bench-hot-path.sh` to populate these fields and the table
 > below from your own machine. The first time the project measures on a new
@@ -89,7 +89,7 @@ sound, but the architectural claim would need re-evaluation.
 
 | machine | RAM | macOS | rustc | git SHA | date (UTC) | cache-hit p99 | live-wrap p99 |
 |---------|-----|-------|-------|---------|------------|----------------|----------------|
-| TBD     | TBD | TBD   | TBD   | TBD     | TBD        | TBD ns         | TBD ns         |
+| MacBookAir10,1 | 16 GB | 26.3.1 | 1.93.0 | a27eafa | 2026-05-10 | 250 ns | — (live-wrap timed out; node unavailable) |
 
 **cache-hit p99** is the BINDING number — the architectural promise. Target:
 **< 100,000 ns (100 µs)**.

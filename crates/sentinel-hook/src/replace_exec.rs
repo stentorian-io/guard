@@ -20,13 +20,12 @@
 //! interpose patching has rewritten their address.
 
 use crate::ipc_client::{copy_cstr_to_buf, send_exec_event_sync};
+use crate::raw_syscall;
 use crate::reentrancy::IN_HOOK;
 use core::ffi::{c_char, c_int};
 use sentinel_ipc::AuditTokenWire;
 
 const IPC_TIMEOUT_MS: u64 = 250;
-// Verified from macOS 15.4 SDK /usr/include/sys/syscall.h:
-const SYS_EXECVE: libc::c_int = 59;
 
 struct InHookGuard {
     _priv: (),
@@ -87,7 +86,7 @@ pub unsafe extern "C" fn sentinel_execve(
             // Already in a hook — bypass via raw syscall (avoids the
             // interpose chain). On success the syscall does not return; on
             // failure it returns -1 with errno set.
-            return unsafe { libc::syscall(SYS_EXECVE, path, argv, envp) as c_int };
+            return unsafe { raw_syscall::raw_execve(path, argv, envp) };
         }
     };
     // Walk the explicit envp BEFORE the real syscall — the exec replaces
@@ -98,7 +97,7 @@ pub unsafe extern "C" fn sentinel_execve(
     // execve(2) contract).
     let pm_env = unsafe { crate::pm_env_filter::extract_pm_env_from_envp(envp) };
     report_exec(path, pm_env);
-    unsafe { libc::syscall(SYS_EXECVE, path, argv, envp) as c_int }
+    unsafe { raw_syscall::raw_execve(path, argv, envp) }
 }
 
 #[unsafe(no_mangle)]

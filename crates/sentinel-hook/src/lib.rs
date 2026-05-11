@@ -98,10 +98,10 @@ unsafe fn sentinel_hook_init() {
     // 1. Capture original libc symbol pointers via RTLD_NEXT.
     unsafe { interpose::capture_originals() };
 
-    // 1.5. dlopen Network.framework and dlsym seven nw_* symbols into AtomicPtrs (D-09).
-    // Missing symbols are logged as coverage-gap lines; NW_AVAILABLE stays false if
-    // dlopen fails (D-20 libc-only fallback path).
-    replace_nw::init();
+    // 1.5. Network.framework init deferred to first NW shadow call to avoid
+    // dispatch_once reentrancy deadlock on macOS 26+ (dlopen during ctor
+    // triggers CoreFoundation initialization which re-enters dispatch_once).
+    // replace_nw::ensure_init() is called lazily from each NW shadow export.
 
     // 1.6. Phase 2 plan 02-05: cache the daemon socket path from env. Subsequent
     //      ipc_client::send_*_sync calls use this cached path. Failure here means

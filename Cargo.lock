@@ -3420,6 +3420,7 @@ dependencies = [
  "rusqlite",
  "sentinel-core",
  "sentinel-daemon",
+ "sentinel-hook",
  "sentinel-ipc",
  "serde_json",
  "sha2",

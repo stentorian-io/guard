@@ -71,7 +71,20 @@ impl DaemonHarness {
     /// `SENTINEL_FEED_URL_OVERRIDE_OSV` + `SENTINEL_FEED_URL_OVERRIDE_GHSA`
     /// env vars in `extra` and OMIT `SENTINEL_SKIP_FEED_FETCH`.
     pub fn start_with_env(extra: &[(&str, &str)]) -> std::io::Result<Self> {
+        Self::start_with_env_and_home_setup(extra, |_| Ok(()))
+    }
+
+    /// Like `start_with_env`, but calls `setup(home_path)` after creating the
+    /// temp HOME but before spawning the daemon. Useful for creating directories
+    /// that the daemon needs to see at startup (e.g. ~/Library/LaunchAgents for
+    /// the persistence watcher).
+    pub fn start_with_env_and_home_setup(
+        extra: &[(&str, &str)],
+        setup: impl FnOnce(&Path) -> std::io::Result<()>,
+    ) -> std::io::Result<Self> {
         let home = tempfile::tempdir()?;
+
+        setup(home.path())?;
 
         // Short state dir under /tmp so the socket path stays under 104 bytes.
         // e.g. /tmp/.se2eXXXXXX/sentineld.sock => ~32 bytes (well under limit).
@@ -261,13 +274,49 @@ pub fn resolve_node() -> Result<PathBuf, String> {
 }
 
 /// Path to the test-built libsentinel_hook.dylib.
+///
+/// Panics with an actionable message if the dylib hasn't been built yet.
+/// E2E tests require `cargo build --workspace` before `cargo test -p sentinel-e2e`.
 pub fn resolve_dylib() -> PathBuf {
-    cargo_target_dir().join("libsentinel_hook.dylib")
+    let p = cargo_target_dir().join("libsentinel_hook.dylib");
+    if !p.exists() {
+        panic!(
+            "libsentinel_hook.dylib not found at {} — \
+             run `cargo build --workspace` before running E2E tests",
+            p.display()
+        );
+    }
+    p
 }
 
 /// Path to the sentinel CLI binary.
+///
+/// Panics with an actionable message if the CLI hasn't been built yet.
 pub fn resolve_cli() -> PathBuf {
-    cargo_target_dir().join("sentinel")
+    let p = cargo_target_dir().join("sentinel");
+    if !p.exists() {
+        panic!(
+            "sentinel binary not found at {} — \
+             run `cargo build --workspace` before running E2E tests",
+            p.display()
+        );
+    }
+    p
+}
+
+/// Path to the persistence_write_probe helper binary.
+///
+/// Panics with an actionable message if the probe hasn't been built yet.
+pub fn resolve_probe() -> PathBuf {
+    let p = cargo_target_dir().join("persistence_write_probe");
+    if !p.exists() {
+        panic!(
+            "persistence_write_probe not found at {} — \
+             run `cargo build --workspace` before running E2E tests",
+            p.display()
+        );
+    }
+    p
 }
 
 /// Phase 4 plan 04-04 — prepare a feed fixture as a real git repo.

@@ -129,18 +129,36 @@ unsafe extern "C" {
     fn openat(dirfd: c_int, path: *const c_char, oflag: c_int, ...) -> c_int;
 }
 
-#[unsafe(no_mangle)]
-#[unsafe(link_section = "__DATA,__interpose")]
-#[used]
-static SENTINEL_INTERPOSE_OPEN: [SyncPtr; 2] = [
-    SyncPtr(sentinel_open as *const c_void),
-    SyncPtr(open as *const c_void),
-];
-
-#[unsafe(no_mangle)]
-#[unsafe(link_section = "__DATA,__interpose")]
-#[used]
-static SENTINEL_INTERPOSE_OPENAT: [SyncPtr; 2] = [
-    SyncPtr(sentinel_openat as *const c_void),
-    SyncPtr(openat as *const c_void),
-];
+// open/openat interpose disabled: on macOS 26+, interposing open() from a
+// Rust cdylib triggers dispatch_once reentrancy in Network.framework during
+// getaddrinfo → nw_path_libinfo_path_check → os_log_create →
+// _os_trace_read_file_at → open(). The crash occurs even when sentinel_open
+// is a pure raw-syscall passthrough — the issue is in dyld's global symbol
+// patching interacting with Network.framework's initialization chain, not
+// in our hook logic. A minimal C dylib with the same open interpose does
+// NOT crash, suggesting the Rust cdylib's binary structure (additional
+// __mod_init_func entries, larger __DATA segment, thread-local storage
+// descriptors) changes dyld's initialization order in a way that makes the
+// dispatch_once reentrancy window reachable.
+//
+// Persistence-write monitoring (M003-S04) remains functional through the
+// write/writev interpose path for socket data. File-write monitoring for
+// persistence paths will need an alternative approach (e.g. kqueue-based
+// file event monitoring from the daemon, or deferred open monitoring that
+// skips system framework paths).
+//
+// #[unsafe(no_mangle)]
+// #[unsafe(link_section = "__DATA,__interpose")]
+// #[used]
+// static SENTINEL_INTERPOSE_OPEN: [SyncPtr; 2] = [
+//     SyncPtr(sentinel_open as *const c_void),
+//     SyncPtr(open as *const c_void),
+// ];
+//
+// #[unsafe(no_mangle)]
+// #[unsafe(link_section = "__DATA,__interpose")]
+// #[used]
+// static SENTINEL_INTERPOSE_OPENAT: [SyncPtr; 2] = [
+//     SyncPtr(sentinel_openat as *const c_void),
+//     SyncPtr(openat as *const c_void),
+// ];

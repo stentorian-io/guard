@@ -5,9 +5,10 @@
 //! added 7 more (fork, vfork, posix_spawn, posix_spawnp, execve, execvp, execv) —
 //! see plan 02-05 SUMMARY "Interpose count rationale" for why execl/execlp/execle
 //! are intentionally OMITTED. M003-S01 added 3 more (send, write, writev).
-//! M003-S04 added 2 more (open, openat) for persistence-path monitoring.
+//! M004-S04 added 1 more (getenv) for anti-detection hardening.
+//! open/openat interpose disabled (dispatch_once reentrancy crash on macOS 26+).
 //! syscall() interpose deferred (aarch64 C varargs ABI, Rust c_variadic unstable).
-//! Total: 16 records.
+//! Total: 15 records.
 
 use std::process::Command;
 
@@ -16,8 +17,8 @@ use std::process::Command;
 /// Phase 2 plan 02-05 = +7 (fork, vfork, posix_spawn, posix_spawnp, execve,
 ///                          execvp, execv).
 /// M003-S01 = +3 (send, write, writev).
-/// M003-S04 = +2 (open, openat).
-const EXPECTED_INTERPOSE_RECORDS: u64 = 16;
+/// M004-S04 = +1 (getenv).
+const EXPECTED_INTERPOSE_RECORDS: u64 = 15;
 
 #[test]
 fn release_dylib_has_expected_interpose_records() {

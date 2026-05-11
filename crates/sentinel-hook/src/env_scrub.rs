@@ -22,6 +22,54 @@ use std::ffi::CStr;
 /// is unrestricted so the hook can read its own config.
 pub static SCRUB_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+unsafe extern "C" {
+    /// The POSIX `environ` global — a NULL-terminated array of "KEY=VALUE\0"
+    /// C strings. We read this directly to implement getenv without calling
+    /// libc's getenv (which is interposed by us, creating infinite recursion).
+    /// dlsym also can't help because dyld patches ALL symbol tables including
+    /// libSystem's, so dlsym(anything, "getenv") returns sentinel_getenv.
+    #[link_name = "environ"]
+    static environ: *const *mut libc::c_char;
+}
+
+/// Manual getenv implementation that reads `environ` directly.
+/// Returns a pointer into the environ array (same semantics as libc getenv).
+unsafe fn raw_getenv(name: *const libc::c_char) -> *mut libc::c_char {
+    if name.is_null() {
+        return std::ptr::null_mut();
+    }
+    let name_cstr = unsafe { CStr::from_ptr(name) };
+    let name_bytes = name_cstr.to_bytes();
+    if name_bytes.is_empty() {
+        return std::ptr::null_mut();
+    }
+
+    let env = unsafe { environ };
+    if env.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let mut i = 0usize;
+    loop {
+        let entry = unsafe { *env.add(i) };
+        if entry.is_null() {
+            break;
+        }
+        let entry_cstr = unsafe { CStr::from_ptr(entry) };
+        let entry_bytes = entry_cstr.to_bytes();
+        // Check if entry starts with "name="
+        if entry_bytes.len() > name_bytes.len()
+            && entry_bytes[name_bytes.len()] == b'='
+            && entry_bytes[..name_bytes.len()] == *name_bytes
+        {
+            // Return pointer to the value (after the '=')
+            return unsafe { entry.add(name_bytes.len() + 1) };
+        }
+        i += 1;
+    }
+    std::ptr::null_mut()
+}
+
 const HIDDEN_NAMES: &[&CStr] = &[
     c"SENTINEL_SNAPSHOT_MANIFEST",
     c"SENTINEL_DAEMON_SOCKET",
@@ -49,13 +97,7 @@ pub unsafe extern "C" fn sentinel_getenv(name: *const libc::c_char) -> *mut libc
     if SCRUB_ACTIVE.load(Ordering::Acquire) && is_hidden_key(name) {
         return std::ptr::null_mut();
     }
-    let real = unsafe { libc::dlsym(libc::RTLD_NEXT, c"getenv".as_ptr()) };
-    if real.is_null() {
-        return std::ptr::null_mut();
-    }
-    let real_fn: unsafe extern "C" fn(*const libc::c_char) -> *mut libc::c_char =
-        unsafe { std::mem::transmute(real) };
-    unsafe { real_fn(name) }
+    unsafe { raw_getenv(name) }
 }
 
 #[cfg(test)]

@@ -41,8 +41,24 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 // pointers that may or may not be NW objects (libuv passes opaque non-NW
 // pointers through `nw_connection_start`; see Phase 1 plan 07's "Phase 2
 // will add proper verdict extraction" note).
-unsafe extern "C" {
-    fn object_getClassName(obj: *mut c_void) -> *const c_char;
+//
+// Resolved via dlsym at runtime instead of a static link to libobjc —
+// explicitly linking libobjc changes dyld's init order and contributes to
+// dispatch_once reentrancy crashes on macOS 26+. The ObjC runtime is
+// always loaded by libSystem so dlsym(RTLD_DEFAULT) finds it.
+static REAL_OBJECT_GET_CLASS_NAME: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
+
+fn resolve_object_get_class_name() -> Option<unsafe extern "C" fn(*mut c_void) -> *const c_char> {
+    let p = REAL_OBJECT_GET_CLASS_NAME.load(Ordering::Relaxed);
+    if !p.is_null() {
+        return Some(unsafe { core::mem::transmute(p) });
+    }
+    let sym = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"object_getClassName".as_ptr()) };
+    if sym.is_null() {
+        return None;
+    }
+    REAL_OBJECT_GET_CLASS_NAME.store(sym, Ordering::Relaxed);
+    Some(unsafe { core::mem::transmute(sym) })
 }
 
 // ---- Per-symbol AtomicPtrs for captured originals ----
@@ -123,39 +139,45 @@ const NW_SYMBOLS: &[NwSym] = &[
     },
 ];
 
-/// Constructor-time init. Called from lib.rs ctor BETWEEN `capture_originals`
-/// and `snapshot::load_from_env` (per plan 06 SUMMARY directive).
-pub fn init() {
-    let handle = unsafe {
-        libc::dlopen(
-            NW_FRAMEWORK_PATH.as_ptr() as *const c_char,
-            libc::RTLD_LAZY,
-        )
-    };
-    if handle.is_null() {
-        LOG_RING.append(
-            b"[sentinel-hook] dlopen(Network.framework) failed (D-20 \xe2\x80\x94 falling back to libc-only)",
-        );
-        return;
-    }
-    NW_AVAILABLE.store(true, Ordering::Release);
-
-    for sym in NW_SYMBOLS {
-        let p = unsafe { libc::dlsym(handle, sym.name_z.as_ptr() as *const c_char) };
-        sym.slot.store(p, Ordering::Release);
-        if p.is_null() {
-            // One coverage-gap line per missing symbol (D-20).
-            let mut msg = [0u8; 96];
-            let prefix = b"[sentinel-hook] nw symbol gap: ";
-            msg[..prefix.len()].copy_from_slice(prefix);
-            // name_z has a trailing NUL — exclude it from the log message.
-            let n_name = sym.name_z.len().saturating_sub(1);
-            let max_copy = msg.len().saturating_sub(prefix.len());
-            let copy = n_name.min(max_copy);
-            msg[prefix.len()..prefix.len() + copy].copy_from_slice(&sym.name_z[..copy]);
-            LOG_RING.append(&msg[..prefix.len() + copy]);
+/// Deferred init — called lazily from each NW shadow export on first use.
+///
+/// Moved out of the ctor to avoid dispatch_once reentrancy deadlock on
+/// macOS 26+: dlopen(Network.framework) during the dylib constructor
+/// triggers CoreFoundation initialization which re-enters dispatch_once
+/// in Network.framework's own init chain, crashing the process.
+pub fn ensure_init() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let handle = unsafe {
+            libc::dlopen(
+                NW_FRAMEWORK_PATH.as_ptr() as *const c_char,
+                libc::RTLD_LAZY,
+            )
+        };
+        if handle.is_null() {
+            LOG_RING.append(
+                b"[sentinel-hook] dlopen(Network.framework) failed (D-20 \xe2\x80\x94 falling back to libc-only)",
+            );
+            return;
         }
-    }
+        NW_AVAILABLE.store(true, Ordering::Release);
+
+        for sym in NW_SYMBOLS {
+            let p = unsafe { libc::dlsym(handle, sym.name_z.as_ptr() as *const c_char) };
+            sym.slot.store(p, Ordering::Release);
+            if p.is_null() {
+                let mut msg = [0u8; 96];
+                let prefix = b"[sentinel-hook] nw symbol gap: ";
+                msg[..prefix.len()].copy_from_slice(prefix);
+                let n_name = sym.name_z.len().saturating_sub(1);
+                let max_copy = msg.len().saturating_sub(prefix.len());
+                let copy = n_name.min(max_copy);
+                msg[prefix.len()..prefix.len() + copy].copy_from_slice(&sym.name_z[..copy]);
+                LOG_RING.append(&msg[..prefix.len() + copy]);
+            }
+        }
+    });
 }
 
 // ---- Helpers ----
@@ -265,18 +287,14 @@ pub fn is_nw_object(ptr: *mut c_void) -> bool {
     if ptr.is_null() {
         return false;
     }
-    // SAFETY: object_getClassName is documented to be safe on any pointer the
-    // caller is willing to dereference (which libuv handles ARE — they live
-    // for the duration of nw_connection_start's call). The runtime treats a
-    // truly bogus pointer as undefined behavior; on Apple Silicon macOS 26
-    // with the typical objc4 dispatch path, non-objc pointers usually return
-    // NULL because the isa-pointer dereference yields zero or invalid data.
-    let cls = unsafe { object_getClassName(ptr) };
+    let get_class_name = match resolve_object_get_class_name() {
+        Some(f) => f,
+        None => return false,
+    };
+    let cls = unsafe { get_class_name(ptr) };
     if cls.is_null() {
         return false;
     }
-    // SAFETY: object_getClassName returns either NULL or a NUL-terminated
-    // C-string owned by the runtime, valid for the lifetime of the class.
     let bytes = unsafe { CStr::from_ptr(cls) }.to_bytes();
     bytes.starts_with(b"OS_nw_")
 }
@@ -363,6 +381,7 @@ pub unsafe extern "C" fn nw_connection_create(
     endpoint: *mut c_void,
     parameters: *mut c_void,
 ) -> *mut c_void {
+    ensure_init();
     if IN_HOOK.with(|c| c.replace(true)) {
         let real = REAL_NW_CONNECTION_CREATE.load(Ordering::Relaxed);
         let r = if real.is_null() {
@@ -405,8 +424,7 @@ pub unsafe extern "C" fn nw_connection_create(
 /// dominant supply-chain enforcement layer and is unaffected.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_connection_start(connection: *mut c_void) {
-    // Reentrancy guard — preserved unchanged from Phase 1 (pass-through on
-    // re-entry, no IPC, no allocation).
+    ensure_init();
     if IN_HOOK.with(|c| c.replace(true)) {
         let real = REAL_NW_CONNECTION_START.load(Ordering::Relaxed);
         if !real.is_null() {
@@ -455,6 +473,7 @@ pub unsafe extern "C" fn nw_connection_start(connection: *mut c_void) {
 /// Shadow `nw_connection_cancel` — pass through. Cancel is benign.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_connection_cancel(connection: *mut c_void) {
+    ensure_init();
     if IN_HOOK.with(|c| c.replace(true)) {
         let real = REAL_NW_CONNECTION_CANCEL.load(Ordering::Relaxed);
         if !real.is_null() {
@@ -478,6 +497,7 @@ pub unsafe extern "C" fn nw_connection_cancel(connection: *mut c_void) {
 /// Returns a non-owning `const char*` valid for the endpoint's lifetime.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_endpoint_get_hostname(endpoint: *mut c_void) -> *const c_char {
+    ensure_init();
     if IN_HOOK.with(|c| c.replace(true)) {
         let real = REAL_NW_ENDPOINT_COPY_HOSTNAME.load(Ordering::Relaxed);
         let r = if real.is_null() {
@@ -504,6 +524,7 @@ pub unsafe extern "C" fn nw_endpoint_get_hostname(endpoint: *mut c_void) -> *con
 /// Shadow `nw_connection_copy_endpoint` — observe endpoint; pass through.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_connection_copy_endpoint(connection: *mut c_void) -> *mut c_void {
+    ensure_init();
     if IN_HOOK.with(|c| c.replace(true)) {
         let real = REAL_NW_CONNECTION_COPY_ENDPOINT.load(Ordering::Relaxed);
         let r = if real.is_null() {

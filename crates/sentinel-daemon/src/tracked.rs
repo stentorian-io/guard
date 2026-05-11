@@ -301,4 +301,13 @@ impl ProcessTree {
     pub fn runs_len(&self) -> usize {
         self.runs.read().unwrap_or_else(|p| p.into_inner()).len()
     }
+
+    /// Return (pid, pidversion) pairs for all tracked nodes.
+    /// Used by the persistence watcher for process attribution.
+    pub fn list_tracked_pids(&self) -> Vec<(u32, u32)> {
+        let g = self.nodes.read().unwrap_or_else(|p| p.into_inner());
+        g.values()
+            .map(|n| (n.audit_token.val[5], n.audit_token.val[7]))
+            .collect()
+    }
 }

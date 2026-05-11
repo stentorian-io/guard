@@ -141,11 +141,10 @@ unsafe extern "C" {
 // descriptors) changes dyld's initialization order in a way that makes the
 // dispatch_once reentrancy window reachable.
 //
-// Persistence-write monitoring (M003-S04) remains functional through the
-// write/writev interpose path for socket data. File-write monitoring for
-// persistence paths will need an alternative approach (e.g. kqueue-based
-// file event monitoring from the daemon, or deferred open monitoring that
-// skips system framework paths).
+// Persistence-write monitoring (M003-S04) is now handled daemon-side via
+// kqueue EVFILT_VNODE directory watching (persistence_watcher.rs). The
+// daemon monitors persistence directories directly, eliminating the need
+// for hook-side open() interposition.
 //
 // #[unsafe(no_mangle)]
 // #[unsafe(link_section = "__DATA,__interpose")]

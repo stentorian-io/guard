@@ -1,12 +1,17 @@
-//! M003-S04: verify that open() to macOS persistence paths is detected and
-//! reported via IPC when running under the sentinel hook.
+//! Verify that file writes to macOS persistence paths are detected and
+//! logged as `persistence-write` gap records.
 //!
-//! The test creates a fake LaunchAgents directory inside a temp HOME,
-//! runs a small C program that opens a file in ~/Library/LaunchAgents/
-//! with O_WRONLY|O_CREAT under `sentinel run`, and verifies that the
-//! daemon's JSONL log contains a `persistence-write` gap record.
+//! The daemon's kqueue-based persistence watcher monitors directories like
+//! ~/Library/LaunchAgents/ for file creation/modification. When a write
+//! occurs during an active `sentinel run` session, the daemon emits a gap
+//! record to its JSONL log.
+//!
+//! This test creates ~/Library/LaunchAgents/ before the daemon starts (so
+//! the watcher picks it up), runs `sentinel run` with a probe that writes
+//! a .plist file, and verifies the gap record appears in the log.
 
-use sentinel_e2e::{cargo_target_dir, resolve_cli, resolve_dylib, DaemonHarness};
+use sentinel_e2e::{resolve_cli, resolve_dylib, resolve_probe, DaemonHarness};
+use std::path::Path;
 use std::process::Command;
 
 /// Writing to ~/Library/LaunchAgents/ under sentinel run produces a
@@ -14,21 +19,25 @@ use std::process::Command;
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
 fn persistence_write_to_launch_agents_detected() {
-    let harness = DaemonHarness::start().expect("start daemon");
+    let harness = DaemonHarness::start_with_env_and_home_setup(
+        &[("SENTINEL_SKIP_FEED_FETCH", "1")],
+        |home| {
+            // Pre-create the LaunchAgents directory so the daemon's persistence
+            // watcher registers a kqueue watch at startup.
+            std::fs::create_dir_all(home.join("Library").join("LaunchAgents"))?;
+            Ok(())
+        },
+    )
+    .expect("start daemon");
+
     let cli = resolve_cli();
     let dylib = resolve_dylib();
     let home = harness.home.path();
 
     let la_dir = home.join("Library").join("LaunchAgents");
-    std::fs::create_dir_all(&la_dir).unwrap();
     let target_plist = la_dir.join("evil.plist");
 
-    let probe = cargo_target_dir().join("persistence_write_probe");
-    assert!(
-        probe.exists(),
-        "persistence_write_probe not built at {}",
-        probe.display()
-    );
+    let probe = resolve_probe();
 
     let output = Command::new(&cli)
         .arg(&probe)
@@ -52,4 +61,32 @@ fn persistence_write_to_launch_agents_detected() {
         stdout.contains("WRITE-OK"),
         "expected WRITE-OK marker; stdout={stdout}"
     );
+
+    // The daemon's persistence watcher detects the write via kqueue. Give it
+    // a moment to process the event and write to the JSONL log.
+    let log_path = home.join("Library/Logs/Sentinel/sentinel.log");
+    let found = wait_for_gap_record(&log_path, "persistence-write", 5);
+
+    assert!(
+        found,
+        "expected persistence-write gap record in daemon log at {}",
+        log_path.display()
+    );
+}
+
+/// Poll the JSONL log for a gap record with the given gap_kind.
+/// Returns true if found within `timeout_secs`.
+fn wait_for_gap_record(log_path: &Path, gap_kind: &str, timeout_secs: u64) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    while std::time::Instant::now() < deadline {
+        if let Ok(contents) = std::fs::read_to_string(log_path) {
+            for line in contents.lines() {
+                if line.contains("\"event\":\"gap\"") && line.contains(gap_kind) {
+                    return true;
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    false
 }

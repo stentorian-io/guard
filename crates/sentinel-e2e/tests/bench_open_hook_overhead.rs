@@ -7,7 +7,7 @@
 //!
 //! Marked #[ignore] — opt-in via `cargo test -p sentinel-e2e --test bench_open_hook_overhead -- --ignored --nocapture`
 
-use sentinel_e2e::{cargo_target_dir, resolve_cli, resolve_dylib, DaemonHarness};
+use sentinel_e2e::{resolve_cli, resolve_dylib, resolve_probe, DaemonHarness};
 use std::process::Command;
 use std::time::Instant;
 
@@ -19,8 +19,7 @@ fn open_hook_overhead_normal_files() {
     let dylib = resolve_dylib();
     let home = harness.home.path();
 
-    let probe = cargo_target_dir().join("persistence_write_probe");
-    assert!(probe.exists(), "persistence_write_probe not built");
+    let probe = resolve_probe();
 
     // Warm up: one run to populate caches
     let warmup_file = home.join("warmup.txt");

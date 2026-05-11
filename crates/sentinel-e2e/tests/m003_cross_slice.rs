@@ -7,7 +7,7 @@
 //!   - S05: `sentinel status persistence` CLI surface
 //!   - S07: Lockfile-scoped registry allowlisting in snapshots
 
-use sentinel_e2e::{cargo_target_dir, resolve_cli, resolve_dylib, DaemonHarness};
+use sentinel_e2e::{resolve_cli, resolve_dylib, resolve_probe, DaemonHarness};
 use std::process::Command;
 use std::time::Duration;
 
@@ -22,8 +22,7 @@ fn open_hook_no_false_positive_on_normal_files() {
     let home = harness.home.path();
 
     let normal_file = home.join("normal-test-file.txt");
-    let probe = cargo_target_dir().join("persistence_write_probe");
-    assert!(probe.exists(), "persistence_write_probe not built");
+    let probe = resolve_probe();
 
     let output = Command::new(&cli)
         .arg(&probe)
@@ -193,8 +192,7 @@ fn persistence_write_detected_in_log() {
     std::fs::create_dir_all(&la_dir).unwrap();
     let target_plist = la_dir.join("cross-slice-test.plist");
 
-    let probe = cargo_target_dir().join("persistence_write_probe");
-    assert!(probe.exists(), "persistence_write_probe not built");
+    let probe = resolve_probe();
 
     let output = Command::new(&cli)
         .arg(&probe)
@@ -246,8 +244,7 @@ fn status_persistence_shows_events() {
     std::fs::create_dir_all(&la_dir).unwrap();
     let target_plist = la_dir.join("status-test.plist");
 
-    let probe = cargo_target_dir().join("persistence_write_probe");
-    assert!(probe.exists(), "persistence_write_probe not built");
+    let probe = resolve_probe();
 
     let output = Command::new(&cli)
         .arg(&probe)

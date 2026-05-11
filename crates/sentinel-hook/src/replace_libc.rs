@@ -173,9 +173,9 @@ pub unsafe extern "C" fn sentinel_connect(
     };
     let verdict = decide_for_sockaddr(addr, addrlen);
     if matches!(verdict, Verdict::Deny) {
-        unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY connect");
         unsafe { notify_deny_for_sockaddr(addr, addrlen, "connect") };
+        unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         return -1;
     }
     unsafe { raw_connect(s, addr, addrlen) }
@@ -234,12 +234,12 @@ unsafe extern "C" fn sentinel_connectx(
     };
 
     if matches!(verdict, Verdict::Deny) {
-        unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY connectx");
         if !endpoints.is_null() {
             let ep = unsafe { &*(endpoints as *const SaEndpoints) };
             unsafe { notify_deny_for_sockaddr(ep.sae_dstaddr, ep.sae_dstaddrlen, "connectx") };
         }
+        unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         return -1;
     }
     unsafe {
@@ -300,9 +300,9 @@ unsafe extern "C" fn sentinel_sendto(
         decide_for_sockaddr(to, tolen)
     };
     if matches!(verdict, Verdict::Deny) {
-        unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         LOG_RING.append(b"[sentinel-hook] DENY sendto");
         unsafe { notify_deny_for_sockaddr(to, tolen, "sendto") };
+        unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         return -1;
     }
     unsafe { raw_sendto(s, buf, len, flags, to, tolen) }

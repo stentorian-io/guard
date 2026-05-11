@@ -164,6 +164,23 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         startup_instant: std::time::Instant::now(),
     });
 
+    // Spawn the per-run snapshot GC sweeper (D-29 / plan 02-07).
+    // The handle is intentionally dropped — the GC thread runs as long as the
+    // daemon process; on daemon exit the OS reaps the thread.
+    let _gc_handle = sentinel_daemon::snapshot_gc::spawn_gc_thread(
+        state_dir.clone(),
+        process_tree.clone(),
+    );
+    info!(interval_secs = sentinel_daemon::snapshot_gc::GC_INTERVAL_SECS, "gc sweeper spawned");
+
+    // Spawn the persistence-path watcher (replaces hook-side open/openat
+    // interpose disabled on macOS 26+ due to dyld init-order crashes).
+    let _persist_handle = sentinel_daemon::persistence_watcher::spawn_watcher(
+        process_tree,
+        state.log_writer.clone(),
+    );
+    info!("persistence watcher spawned");
+
     // TODO(03-08): wire gap_detector → log_writer + recent_gaps when the gap fires.
     //   - hardened-runtime gap (csops): plan 03-08 extends gap_detector closure
     //   - env-not-propagated gap (TREE-06): plan 03-08 extends EnvNotPropagatedGap handler
@@ -178,15 +195,6 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         socket = %socket_path(&state_dir).display(),
         "daemon ready"
     );
-
-    // Spawn the per-run snapshot GC sweeper (D-29 / plan 02-07).
-    // The handle is intentionally dropped — the GC thread runs as long as the
-    // daemon process; on daemon exit the OS reaps the thread.
-    let _gc_handle = sentinel_daemon::snapshot_gc::spawn_gc_thread(
-        state_dir.clone(),
-        process_tree,
-    );
-    info!(interval_secs = sentinel_daemon::snapshot_gc::GC_INTERVAL_SECS, "gc sweeper spawned");
 
     server.run_forever()
 }

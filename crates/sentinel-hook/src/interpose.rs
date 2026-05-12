@@ -211,6 +211,12 @@ pub fn probe_self_test() {
             buf: *const c_void,
             count: libc::size_t,
         ) -> libc::ssize_t;
+        fn sentinel_getaddrinfo(
+            node: *const libc::c_char,
+            service: *const libc::c_char,
+            hints: *const libc::addrinfo,
+            res: *mut *mut libc::addrinfo,
+        ) -> libc::c_int;
     }
     unsafe {
         let active_connect = libc::dlsym(libc::RTLD_DEFAULT, c"connect".as_ptr());
@@ -233,8 +239,18 @@ pub fn probe_self_test() {
             return;
         }
 
+        let active_gai = libc::dlsym(libc::RTLD_DEFAULT, c"getaddrinfo".as_ptr());
+        let ours_gai = sentinel_getaddrinfo as *mut c_void;
+        if active_gai != ours_gai {
+            crate::snapshot::FAIL_CLOSED.store(true, Ordering::Release);
+            crate::log_buffer::LOG_RING.append(
+                b"[sentinel-hook] interpose-not-effective: dlsym(RTLD_DEFAULT,\"getaddrinfo\") != &sentinel_getaddrinfo \xe2\x80\x94 entering FAIL_CLOSED",
+            );
+            return;
+        }
+
         crate::log_buffer::LOG_RING.append(
-            b"[sentinel-hook] interpose self-test passed (sentinel_connect + sentinel_write active)",
+            b"[sentinel-hook] interpose self-test passed (sentinel_connect + sentinel_write + sentinel_getaddrinfo active)",
         );
     }
 }

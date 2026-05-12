@@ -6,9 +6,10 @@
 //! see plan 02-05 SUMMARY "Interpose count rationale" for why execl/execlp/execle
 //! are intentionally OMITTED. M003-S01 added 3 more (send, write, writev).
 //! M004-S04 added 1 more (getenv) for anti-detection hardening.
+//! M005-S01 added 2 more (getaddrinfo, freeaddrinfo) for daemon-proxied DNS.
 //! open/openat interpose disabled (dispatch_once reentrancy crash on macOS 26+).
 //! syscall() interpose deferred (aarch64 C varargs ABI, Rust c_variadic unstable).
-//! Total: 15 records.
+//! Total: 17 records.
 
 use std::process::Command;
 
@@ -18,7 +19,8 @@ use std::process::Command;
 ///                          execvp, execv).
 /// M003-S01 = +3 (send, write, writev).
 /// M004-S04 = +1 (getenv).
-const EXPECTED_INTERPOSE_RECORDS: u64 = 15;
+/// M005-S01 = +2 (getaddrinfo, freeaddrinfo).
+const EXPECTED_INTERPOSE_RECORDS: u64 = 17;
 
 #[test]
 fn release_dylib_has_expected_interpose_records() {

@@ -1964,6 +1964,51 @@ fn handle_resolve_frame(
         let _ = state.deferred_resolve.take(&effective_id);
     }
 
+    // S02: policy gate — evaluate the hostname against the run's snapshot before
+    // resolving. Untracked peers (no run) resolve unconditionally (backward compat).
+    let policy_deny = {
+        let node = state.process_tree.get_node(&peer_token);
+        let run_opt = node
+            .as_ref()
+            .and_then(|n| state.process_tree.get_run(&n.run_uuid));
+        match run_opt {
+            Some(run) if !run.baseline_mode => {
+                match crate::handlers::resolve::load_run_entries(&run.snapshot_path) {
+                    Some(entries) => {
+                        let (verdict, source) = sentinel_core::policy::evaluate_policy(
+                            req.host.as_bytes(),
+                            None,
+                            false,
+                            &entries,
+                        );
+                        match verdict {
+                            sentinel_core::Verdict::Deny => {
+                                debug!(
+                                    host = %req.host,
+                                    source = ?source,
+                                    "Resolve denied by policy gate"
+                                );
+                                true
+                            }
+                            sentinel_core::Verdict::Allow => false,
+                        }
+                    }
+                    None => false,
+                }
+            }
+            _ => false,
+        }
+    };
+
+    if policy_deny {
+        let _ = write_tagged(
+            stream,
+            MessageTag::Resolve,
+            &ResolveReply::err(format!("resolve {} denied by policy", req.host)),
+        );
+        return;
+    }
+
     // Default path: perform DNS resolution and return.
     let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
     if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {

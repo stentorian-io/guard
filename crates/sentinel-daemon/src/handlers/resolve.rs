@@ -5,8 +5,10 @@
 //! creating infinite recursion. Daemon-side resolution uses the daemon's
 //! own libc which is NOT under DYLD interpose — clean.
 
+use sentinel_core::allowlist::AllowlistEntry;
 use sentinel_ipc::{ResolveReply, SOCKADDR_WIRE_LEN};
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::path::Path;
 use tracing::{debug, warn};
 
 pub fn handle_resolve(host: &str, port: u16) -> ResolveReply {
@@ -27,6 +29,14 @@ pub fn handle_resolve(host: &str, port: u16) -> ResolveReply {
     }
     debug!(host = %host, port, count = wire.len(), "Resolve OK");
     ResolveReply::addresses(wire)
+}
+
+/// Load a per-run snapshot from disk and return its entries. Returns None on
+/// any I/O or decode error (caller falls through to unconditional resolve).
+pub fn load_run_entries(snapshot_path: &Path) -> Option<Vec<AllowlistEntry>> {
+    let bytes = std::fs::read(snapshot_path).ok()?;
+    let snap = sentinel_core::Snapshot::decode(&bytes).ok()?;
+    Some(snap.entries)
 }
 
 /// Encode a SocketAddr into a 28-byte buffer (sizeof(sockaddr_in6) on Darwin).

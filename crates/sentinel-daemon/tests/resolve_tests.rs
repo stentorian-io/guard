@@ -1,4 +1,7 @@
-use sentinel_daemon::handlers::resolve::handle_resolve;
+use sentinel_daemon::handlers::resolve::{handle_resolve, load_run_entries};
+use sentinel_core::allowlist::{AllowlistEntry, MatchType, RuleKind, RuleTier};
+use sentinel_core::policy::evaluate_policy;
+use sentinel_core::Snapshot;
 use sentinel_ipc::ResolveReply;
 
 #[test]
@@ -27,4 +30,77 @@ fn resolve_localhost_returns_addresses() {
 fn resolve_invalid_host_returns_err() {
     let r = handle_resolve("this-host-does-not-exist-12345.invalid", 80);
     assert!(matches!(r, ResolveReply::Err { .. }));
+}
+
+#[test]
+fn load_run_entries_from_snapshot() {
+    let snap = Snapshot {
+        schema_version: 2,
+        generated_at_unix_ms: 0,
+        entries: vec![AllowlistEntry {
+            kind: RuleKind::Allow,
+            tier: RuleTier::CuratedAllow,
+            match_type: MatchType::Suffix,
+            pattern: ".npmjs.org".into(),
+            reason: "npm registry".into(),
+        }],
+        run_uuid: Some("test-uuid".into()),
+        project_toml_path: None,
+        project_toml_sha256: None,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.cbor");
+    std::fs::write(&path, snap.encode().unwrap()).unwrap();
+
+    let entries = load_run_entries(&path).expect("should decode");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].pattern, ".npmjs.org");
+}
+
+#[test]
+fn load_run_entries_missing_file_returns_none() {
+    assert!(load_run_entries(std::path::Path::new("/nonexistent/snapshot.cbor")).is_none());
+}
+
+#[test]
+fn policy_gate_allows_matching_host() {
+    let entries = vec![AllowlistEntry {
+        kind: RuleKind::Allow,
+        tier: RuleTier::CuratedAllow,
+        match_type: MatchType::Suffix,
+        pattern: ".npmjs.org".into(),
+        reason: "npm registry".into(),
+    }];
+    let (verdict, _source) = evaluate_policy(
+        b"registry.npmjs.org",
+        None,
+        false,
+        &entries,
+    );
+    assert_eq!(verdict, sentinel_core::Verdict::Allow);
+}
+
+#[test]
+fn policy_gate_denies_unknown_host() {
+    let entries = vec![AllowlistEntry {
+        kind: RuleKind::Allow,
+        tier: RuleTier::CuratedAllow,
+        match_type: MatchType::Suffix,
+        pattern: ".npmjs.org".into(),
+        reason: "npm registry".into(),
+    }];
+    let (verdict, _source) = evaluate_policy(
+        b"evil.attacker.com",
+        None,
+        false,
+        &entries,
+    );
+    assert_eq!(verdict, sentinel_core::Verdict::Deny);
+}
+
+#[test]
+fn policy_gate_allows_loopback_regardless() {
+    let entries = vec![];
+    let (verdict, _) = evaluate_policy(b"localhost", None, false, &entries);
+    assert_eq!(verdict, sentinel_core::Verdict::Allow);
 }

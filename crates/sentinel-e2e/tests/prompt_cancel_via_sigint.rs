@@ -5,7 +5,7 @@
 //! all in-flight prompt IDs, then propagates SIGINT to the wrapped process group.
 //! Expected outcomes:
 //!   - PromptCancel sent → daemon emits a GapRecord with gap_kind="prompt-cancelled"
-//!   - wrapped curl exits (SIGINT propagated to pgid)
+//!   - wrapped node exits (SIGINT propagated to pgid)
 //!   - sentinel run exits reflecting the SIGINT
 //!
 //! Marked #[ignore]: requires PTY + signal-aware test runner + macOS daemon.
@@ -16,6 +16,9 @@ use std::time::{Duration, Instant};
 
 use portable_pty::PtySize;
 
+const DENY_HOST: &str = "discord.com";
+const DENY_PORT: &str = "443";
+
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore = "requires PTY + signal-aware runner + macOS daemon — opt-in via --ignored"]
@@ -23,6 +26,15 @@ fn sigint_during_prompt_sends_cancel_and_propagates_to_child() {
     let harness = sentinel_e2e::DaemonHarness::start().expect("start daemon harness");
     let cli = sentinel_e2e::resolve_cli();
     let dylib = sentinel_e2e::resolve_dylib();
+    let node = match sentinel_e2e::resolve_node() {
+        Ok(p) => p,
+        Err(why) => {
+            eprintln!("SKIP: {why}");
+            return;
+        }
+    };
+    let script = sentinel_e2e::cargo_workspace_root()
+        .join("crates/sentinel-e2e/harness/prompt_probe.js");
 
     let pty_system = portable_pty::native_pty_system();
     let pair = pty_system
@@ -30,15 +42,15 @@ fn sigint_during_prompt_sends_cancel_and_propagates_to_child() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
-    cmd.arg("/usr/bin/curl");
-    cmd.arg("--max-time");
-    cmd.arg("30"); // long timeout so curl is alive when SIGINT fires
-    cmd.arg("https://192.0.2.203/");
-    cmd.arg("-s");
+    cmd.arg(&node);
+    cmd.arg(&script);
     cmd.env("HOME", harness.home.path().to_str().unwrap());
     cmd.env("PATH", std::env::var("PATH").unwrap_or_default().as_str());
     cmd.env("SENTINEL_HOOK_DYLIB", dylib.to_str().unwrap());
     cmd.env("SENTINEL_STATE_DIR", harness.state_dir.to_str().unwrap());
+    cmd.env("PROBE_HOST", DENY_HOST);
+    cmd.env("PROBE_PORT", DENY_PORT);
+    cmd.env("PROBE_CONNECT_AFTER", "0");
 
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
     let pid = child
@@ -50,10 +62,10 @@ fn sigint_during_prompt_sends_cancel_and_propagates_to_child() {
     // Wait for the prompt to appear (sentinel run's render loop prints "Choose: [1]").
     let mut br = BufReader::new(reader);
     let mut buf = String::new();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if Instant::now() > deadline {
-            panic!("prompt never appeared within 10s; buf: {buf}");
+            panic!("prompt never appeared within 15s; buf: {buf}");
         }
         let mut line = String::new();
         match br.read_line(&mut line) {

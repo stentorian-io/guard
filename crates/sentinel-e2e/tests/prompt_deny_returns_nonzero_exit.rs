@@ -1,6 +1,7 @@
-//! Phase 3 plan 03-18 (gap closure for UAT item #3) — D-75 wrapped command
-//! exit code is non-zero when the user picks "deny" at the prompt.
+//! Wrapped command exit code is non-zero when the user picks "deny" at the
+//! prompt.
 //!
+//! Uses node + prompt_probe.js (non-hardened) so DYLD injection works.
 //! This complements prompt_unblock_deny.rs (which only asserts the JSONL
 //! source_kind=prompt_deny row).
 
@@ -9,13 +10,25 @@ use std::time::{Duration, Instant};
 
 use portable_pty::PtySize;
 
+const DENY_HOST: &str = "discord.com";
+const DENY_PORT: &str = "443";
+
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires PTY + non-hardened dylib + macOS daemon — opt-in via --ignored"]
+#[ignore = "requires PTY + non-hardened node + macOS daemon — opt-in via --ignored"]
 fn deny_choice_results_in_nonzero_exit_code() {
     let harness = sentinel_e2e::DaemonHarness::start().expect("start daemon");
     let cli = sentinel_e2e::resolve_cli();
     let dylib = sentinel_e2e::resolve_dylib();
+    let node = match sentinel_e2e::resolve_node() {
+        Ok(p) => p,
+        Err(why) => {
+            eprintln!("SKIP: {why}");
+            return;
+        }
+    };
+    let script = sentinel_e2e::cargo_workspace_root()
+        .join("crates/sentinel-e2e/harness/prompt_probe.js");
 
     let pty_system = portable_pty::native_pty_system();
     let pair = pty_system
@@ -23,15 +36,15 @@ fn deny_choice_results_in_nonzero_exit_code() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
-    cmd.arg("/usr/bin/curl");
-    cmd.arg("--max-time");
-    cmd.arg("5");
-    cmd.arg("-s");
-    cmd.arg("https://192.0.2.123/");
+    cmd.arg(&node);
+    cmd.arg(&script);
     cmd.env("HOME", harness.home.path().to_str().unwrap());
     cmd.env("PATH", std::env::var("PATH").unwrap_or_default().as_str());
     cmd.env("SENTINEL_HOOK_DYLIB", dylib.to_str().unwrap());
     cmd.env("SENTINEL_STATE_DIR", harness.state_dir.to_str().unwrap());
+    cmd.env("PROBE_HOST", DENY_HOST);
+    cmd.env("PROBE_PORT", DENY_PORT);
+    cmd.env("PROBE_CONNECT_AFTER", "0");
 
     let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel run");
     let reader = pair.master.try_clone_reader().expect("clone reader");
@@ -41,7 +54,7 @@ fn deny_choice_results_in_nonzero_exit_code() {
     // Wait for prompt.
     let mut br = BufReader::new(reader);
     let mut full = String::new();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(15);
     let mut buf = String::new();
     while Instant::now() < deadline {
         buf.clear();

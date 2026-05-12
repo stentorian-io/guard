@@ -1962,8 +1962,23 @@ fn handle_resolve_frame(
                 }
                 return;
             }
-            // D-47: block indefinitely on user response. Ctrl-C is the abort path.
-            let verdict = rx.recv().unwrap_or(sentinel_core::Verdict::Deny);
+            // D-47: block on user response with a deadline. The hook's
+            // getaddrinfo timeout is 30s; we allow 35s here so the hook
+            // times out first (clean EAI_AGAIN) rather than the daemon
+            // silently dropping the prompt. If the CLI disconnects or the
+            // user walks away, this reclaims the worker thread.
+            let verdict = rx
+                .recv_timeout(std::time::Duration::from_secs(35))
+                .unwrap_or_else(|_| {
+                    warn!(
+                        prompt_id = %effective_id,
+                        host = %req.host,
+                        "prompt timed out after 35s — denying and reclaiming worker"
+                    );
+                    let _ = state.deferred_resolve.take(&effective_id);
+                    state.prompt_dedup.forget(&run_uuid, &req.host, req.port);
+                    sentinel_core::Verdict::Deny
+                });
             match verdict {
                 sentinel_core::Verdict::Allow => {
                     // Resolve the hostname — user approved the connection.

@@ -114,7 +114,10 @@ sentinel <cmd>        sentineld (LaunchAgent)         libsentinel_hook.dylib
 | v0.4 | Hardening | Watchdog, HMAC-SHA256 snapshot integrity, exec blocking, lockfile extraction, persistence-path monitoring |
 | v0.5 | Stability | macOS 26+ dyld crash fix, getaddrinfo interpose via daemon-proxied DNS, feed fixture CI compat |
 
-**Current:** 9 commits past v0.5 on `main` (getaddrinfo/resolve improvements, CI fixes)
+**Current:** v0.5 shipped. Three milestones to v1.0:
+- **v0.6 (M005):** Interactive prompting via daemon-proxied DNS — planned, not started
+- **v0.7 (M006):** Production hardening (gap-detector wiring, background feed refresh, codesign peer auth, SpscRing fix, probe_self_test)
+- **v1.0 (M007):** Distribution & docs (Homebrew Formula, release CI, man pages, install guide, changelog)
 
 ## CI
 

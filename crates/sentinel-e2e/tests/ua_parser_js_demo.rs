@@ -34,7 +34,9 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use sentinel_e2e::test_support::{sandbox_home, sink_listener};
-use sentinel_e2e::{cargo_workspace_root, resolve_cli, resolve_dylib, DaemonHarness};
+use sentinel_e2e::{
+    cargo_workspace_root, prepare_feed_fixture, resolve_cli, resolve_dylib, DaemonHarness,
+};
 
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
@@ -53,7 +55,16 @@ fn ua_parser_js_postinstall_blocked_with_package_context() {
 
     let cli = resolve_cli();
     let dylib = resolve_dylib();
-    let mut harness = DaemonHarness::start().expect("start daemon");
+
+    // Use a local file:// feed fixture instead of DaemonHarness::start()'s
+    // default SENTINEL_SKIP_FEED_FETCH=1 (which is compiled out in --release
+    // builds, causing CI to attempt a real GitHub clone that times out).
+    let (_feed_dir, feed_url) = prepare_feed_fixture("feed-mock-ua-parser-js");
+    let mut harness = DaemonHarness::start_with_env(&[
+        ("SENTINEL_FEED_URL_OVERRIDE_OSV", feed_url.as_str()),
+        ("SENTINEL_FEED_URL_OVERRIDE_GHSA", feed_url.as_str()),
+    ])
+    .expect("start daemon");
 
     // Sink redirect: c2-sink.test.invalid -> 127.0.0.1 via /etc/hosts (or
     // localhost-listener fallback). RAII Drop restores /etc/hosts on test exit.

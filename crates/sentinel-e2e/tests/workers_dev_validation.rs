@@ -28,7 +28,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use sentinel_e2e::{
-    cargo_workspace_root, resolve_cli, resolve_dylib, resolve_node, DaemonHarness,
+    cargo_workspace_root, prepare_feed_fixture, resolve_cli, resolve_dylib, resolve_node,
+    DaemonHarness,
 };
 
 const DENY_HOST: &str = "exfil.workers.dev";
@@ -46,7 +47,15 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
             return;
         }
     };
-    let mut harness = DaemonHarness::start().expect("start daemon");
+    // Use a local file:// feed fixture instead of DaemonHarness::start()'s
+    // default SENTINEL_SKIP_FEED_FETCH=1 (which is compiled out in --release
+    // builds, causing CI to attempt a real GitHub clone that times out).
+    let (_feed_dir, feed_url) = prepare_feed_fixture("feed-mock-ua-parser-js");
+    let mut harness = DaemonHarness::start_with_env(&[
+        ("SENTINEL_FEED_URL_OVERRIDE_OSV", feed_url.as_str()),
+        ("SENTINEL_FEED_URL_OVERRIDE_GHSA", feed_url.as_str()),
+    ])
+    .expect("start daemon");
 
     // Reuse the Phase 2 harness script — DO NOT MODIFY IT (curated_deny.rs
     // depends on it remaining stable).

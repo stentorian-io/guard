@@ -107,24 +107,18 @@ fn corrupt_snapshot_causes_dylib_to_fail_closed() {
     // WR-06: tighten the assertion. Previously the test only checked that
     // node printed \"DENIED\" — but \"DENIED:\" can fire on ANY connect error
     // (DNS failure, transient network blip, OS pressure), not just on the
-    // dylib's FAIL_CLOSED interceptor returning -1. To distinguish
-    // \"fail-closed engaged\" from \"unrelated network failure\" we require:
+    // dylib's FAIL_CLOSED interceptor. To distinguish "fail-closed engaged"
+    // from "unrelated network failure" we require:
     //
     //   (1) node exited non-zero AND printed \"DENIED:\" — proves the
-    //       connect failed AND the failure path fired before the 4s
-    //       timeout (TIMEOUT exits with code 2; LEAKED with code 0).
-    //   (2) The error code (after \"DENIED:\") looks like a connect-layer
-    //       deny rather than a DNS-resolution failure. The dylib's libc
-    //       interceptor returns -1 with EHOSTUNREACH / ECONNREFUSED /
-    //       EPERM / ENETUNREACH; node maps those to e.code values like
-    //       \"EHOSTUNREACH\", \"ECONNREFUSED\", \"EPERM\", \"ENETUNREACH\".
-    //       A DNS failure surfaces as \"ENOTFOUND\" or \"EAI_AGAIN\" — those
-    //       are genuine network problems, not proof of fail-closed.
-    //
-    // If the dylib's FAIL_CLOSED ctor ever starts emitting an explicit
-    // stderr marker (currently it only writes to an in-process LOG_RING),
-    // tighten further to grep for that marker. Today the connect-error-code
-    // shape is the strongest signal available without changing the dylib.
+    //       connection failed before the 4s timeout.
+    //   (2) The error code matches a fail-closed shape at either layer:
+    //       - getaddrinfo interpose: EAI_FAIL (M005 — fires first for
+    //         hostname-based connections when FAIL_CLOSED=true)
+    //       - connect interpose: EHOSTUNREACH / ECONNREFUSED / EPERM /
+    //         ENETUNREACH / EACCES
+    //       Transient DNS codes (EAI_AGAIN, EAI_NONAME) are NOT valid
+    //       fail-closed evidence — they indicate retry-able DNS errors.
     assert!(
         !out.status.success() && stdout.contains("DENIED"),
         "VAL-04 D-12 HARD assertion failed: node did NOT fail-closed under corrupt snapshot.\n\
@@ -137,26 +131,32 @@ fn corrupt_snapshot_causes_dylib_to_fail_closed() {
         .lines()
         .find(|l| l.contains("DENIED:"))
         .expect("DENIED line present per assertion above");
-    let connect_layer_codes = [
+    // M005: FAIL_CLOSED can fire at two layers:
+    //   - getaddrinfo interpose → returns EAI_FAIL (Node surfaces as "EAI_FAIL")
+    //   - connect interpose → returns EHOSTUNREACH/ECONNREFUSED/EPERM/etc.
+    // Both are valid fail-closed evidence. With M005's getaddrinfo interpose,
+    // hostname-based connections hit getaddrinfo first and see EAI_FAIL.
+    let fail_closed_codes = [
         "EHOSTUNREACH",
         "ECONNREFUSED",
         "EPERM",
         "ENETUNREACH",
         "EACCES",
+        "EAI_FAIL",
     ];
-    let dns_codes = ["ENOTFOUND", "EAI_AGAIN", "EAI_NONAME"];
-    let is_connect_layer = connect_layer_codes
+    let dns_transient_codes = ["EAI_AGAIN", "EAI_NONAME"];
+    let is_fail_closed = fail_closed_codes
         .iter()
         .any(|c| denied_line.contains(c));
-    let is_dns = dns_codes.iter().any(|c| denied_line.contains(c));
+    let is_transient_dns = dns_transient_codes.iter().any(|c| denied_line.contains(c));
     assert!(
-        is_connect_layer && !is_dns,
+        is_fail_closed && !is_transient_dns,
         "VAL-04 D-12 WR-06 HARD assertion failed: node printed DENIED but the error \
-         code does not match a connect-layer fail-closed shape. Could be unrelated \
-         network failure rather than the dylib's interceptor.\n\
+         code does not match a fail-closed shape (connect-layer or getaddrinfo-layer). \
+         Could be unrelated network failure rather than the dylib's interceptor.\n\
          denied line: {denied_line}\n\
-         expected one of: {connect_layer_codes:?}\n\
-         must NOT match: {dns_codes:?}\n\
+         expected one of: {fail_closed_codes:?}\n\
+         must NOT match: {dns_transient_codes:?}\n\
          full stdout: {stdout}\n\
          stderr: {stderr}",
     );

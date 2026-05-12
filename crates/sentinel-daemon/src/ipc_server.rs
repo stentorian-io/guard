@@ -1867,6 +1867,29 @@ fn handle_resolve_frame(
     };
 
     if let Some(run_uuid) = park_eligible {
+        // S03: policy pre-check — if the host is already allowed, resolve
+        // immediately without parking a prompt. Only park for unknown hosts.
+        let run_for_policy = state.process_tree.get_run(&run_uuid);
+        let already_allowed = run_for_policy
+            .and_then(|run| crate::handlers::resolve::load_run_entries(&run.snapshot_path))
+            .map(|entries| {
+                let (verdict, _) = sentinel_core::policy::evaluate_policy(
+                    req.host.as_bytes(),
+                    None,
+                    false,
+                    &entries,
+                );
+                matches!(verdict, sentinel_core::Verdict::Allow)
+            })
+            .unwrap_or(false);
+        if already_allowed {
+            let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
+            if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
+                error!(error = %e, "failed to send ResolveReply (policy-allowed fast path)");
+            }
+            return;
+        }
+
         let prompt_id = state.deferred_resolve.next_prompt_id();
         let outcome = state
             .prompt_dedup

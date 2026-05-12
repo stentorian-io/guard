@@ -248,7 +248,30 @@ fn getaddrinfo_proxy_returns_eai_fail_on_deny() {
     assert!(result.is_null());
 }
 
-// ---- Test 6: null node → EAI_AGAIN (can't proxy wildcard lookups) ----
+// ---- Test 6: FAIL_CLOSED → EAI_FAIL (S04: fail-closed consistency) ----
+
+#[cfg_attr(not(target_os = "macos"), ignore)]
+#[test]
+fn getaddrinfo_returns_eai_fail_when_fail_closed() {
+    let _lock = SOCKET_TEST_LOCK.lock().unwrap();
+    let reply = ResolveReply::addresses(vec![v4_wire_1_2_3_4_port443()]);
+    let (_dir, sock_path) = spawn_stub_resolver(reply);
+    _set_daemon_socket_for_test(sock_path);
+    sentinel_hook::snapshot::FAIL_CLOSED.store(true, std::sync::atomic::Ordering::Release);
+
+    let node = c"any.example.com";
+    let service = c"443";
+    let mut result: *mut libc::addrinfo = std::ptr::null_mut();
+
+    let rc = unsafe { sentinel_getaddrinfo(node.as_ptr(), service.as_ptr(), std::ptr::null(), &mut result) };
+    _clear_daemon_socket_for_test();
+    sentinel_hook::snapshot::FAIL_CLOSED.store(false, std::sync::atomic::Ordering::Release);
+
+    assert_eq!(rc, libc::EAI_FAIL, "FAIL_CLOSED should cause EAI_FAIL");
+    assert!(result.is_null());
+}
+
+// ---- Test 7: null node → EAI_AGAIN (can't proxy wildcard lookups) ----
 
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]

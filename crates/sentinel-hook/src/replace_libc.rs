@@ -302,6 +302,12 @@ pub unsafe extern "C" fn sentinel_getaddrinfo(
     }
     unsafe { *res = core::ptr::null_mut() };
 
+    // Fail-closed: if the snapshot failed to load, deny all DNS resolution
+    // so getaddrinfo is consistent with connect()'s deny path.
+    if FAIL_CLOSED.load(Ordering::Acquire) {
+        return libc::EAI_FAIL;
+    }
+
     // No daemon socket → can't proxy DNS. Return EAI_AGAIN so callers that
     // retry (like curl) get a chance, or fall back to connect-by-IP which
     // hits the existing cache-miss-deny path.

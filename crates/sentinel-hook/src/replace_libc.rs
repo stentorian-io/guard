@@ -9,7 +9,8 @@ use crate::log_buffer::LOG_RING;
 use crate::reentrancy::IN_HOOK;
 use crate::snapshot::FAIL_CLOSED;
 use crate::ALLOWLIST;
-use core::ffi::{c_char, c_int, c_void};
+use core::ffi::{c_char, c_int, c_void, CStr};
+use crate::ipc_client::IpcClientError;
 use core::sync::atomic::Ordering;
 use libc::{msghdr, size_t, ssize_t, sockaddr, socklen_t, AF_INET, AF_INET6};
 use sentinel_core::{
@@ -250,28 +251,217 @@ unsafe extern "C" fn sentinel_connectx(
 
 // ---- getaddrinfo ----
 //
-// BL-05 fix: sentinel_getaddrinfo DELETED.
+// M005-S01: getaddrinfo interpose re-enabled with daemon-proxied DNS.
 //
-// getaddrinfo was removed from the __DATA,__interpose table in plan 01-09
-// (see deviation comment below at the interpose records section) because
-// DYLD_INSERT_LIBRARIES patches ALL symbol-table entries globally — including
-// those within libSystem — so REAL_GETADDRINFO ended up pointing back to
-// sentinel_getaddrinfo, causing infinite recursion on the allow path.
+// BL-05 root cause was calling real getaddrinfo from the hook — DYLD patches
+// it globally, so REAL_GETADDRINFO pointed back to sentinel_getaddrinfo
+// (infinite recursion). The fix: DON'T call real getaddrinfo at all. Instead,
+// proxy DNS through the daemon via Resolve IPC (tag 0x06). The daemon's
+// getaddrinfo is NOT interposed (the daemon binary isn't loaded via
+// DYLD_INSERT_LIBRARIES), so it resolves cleanly.
 //
-// Despite being removed from the interpose table, sentinel_getaddrinfo
-// remained defined with #[unsafe(no_mangle)], making it a globally-visible
-// exported C symbol. This was a foot-gun: the symbol was dead (never called
-// via dyld interpose) but exported, misleading future contributors.
+// Flow:
+//   hooked process calls getaddrinfo("evil.com", "443", ...)
+//   → sentinel_getaddrinfo intercepts
+//   → sends Resolve { host, port } to daemon via Unix socket IPC
+//   → daemon resolves DNS with its own libc, checks policy (M005-S02)
+//   → hook receives ResolveReply::Addresses or ResolveReply::Deny
+//   → on Addresses: populates DNS cache, assembles addrinfo linked list
+//   → subsequent connect() to those IPs cache-hits → allowed
 //
-// Fix: delete the function entirely. The REAL_GETADDRINFO AtomicPtr in
-// interpose.rs is retained (it gets the real getaddrinfo from dlsym at init
-// time, which is harmless — it's just never consulted on the hot path).
-//
-// getaddrinfo_async and getaddrinfo_async_call are also excluded (removed
-// from macOS 26 SDK). Tracked in SUMMARY deviations.
-//
-// [Rule 1 - Bug] Original deviation from plan: reduced interpose set from 7
-// to 5 symbols. Plan 07 adds nw_* Network.framework interception.
+// Reentrancy safety: IPC uses AF_UNIX connect which passes through
+// sentinel_connect's AF_UNIX fast-path (no policy check, no IPC).
+// The InHookGuard also prevents re-entering sentinel_getaddrinfo if
+// the IPC somehow triggers another getaddrinfo (it shouldn't — Unix
+// sockets don't need DNS).
+
+/// Timeout for daemon-proxied DNS resolution (milliseconds).
+/// Generous to allow for prompted calls in M005-S02 (user reading/deciding).
+/// Non-prompted calls complete in <10ms; prompted calls may take up to 30s.
+const GETADDRINFO_RESOLVE_TIMEOUT_MS: u64 = 30_000;
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sentinel_getaddrinfo(
+    node: *const c_char,
+    service: *const c_char,
+    hints: *const libc::addrinfo,
+    res: *mut *mut libc::addrinfo,
+) -> c_int {
+    let _guard = match InHookGuard::enter() {
+        Some(g) => g,
+        None => {
+            // Reentrancy: should not happen (IPC uses AF_UNIX, not DNS), but
+            // if it does, return EAI_AGAIN to signal transient failure.
+            return libc::EAI_AGAIN;
+        }
+    };
+
+    // Null output pointer: undefined behavior in POSIX, but be defensive.
+    if res.is_null() {
+        return libc::EAI_FAIL;
+    }
+    unsafe { *res = core::ptr::null_mut() };
+
+    // No daemon socket → can't proxy DNS. Return EAI_AGAIN so callers that
+    // retry (like curl) get a chance, or fall back to connect-by-IP which
+    // hits the existing cache-miss-deny path.
+    if daemon_socket_path().is_none() {
+        return libc::EAI_AGAIN;
+    }
+
+    // Extract hostname. Null node with AI_PASSIVE means wildcard (bind use
+    // case) — not relevant for outbound resolution, but pass it through.
+    let hostname = if node.is_null() {
+        None
+    } else {
+        let cstr = unsafe { CStr::from_ptr(node) };
+        cstr.to_str().ok()
+    };
+
+    // If no hostname, this is a numeric/wildcard lookup. We can't proxy
+    // meaningfully (the daemon resolves hostnames, not numeric addresses).
+    // Return EAI_AGAIN — the caller typically has the IP already.
+    let host = match hostname {
+        Some(h) if !h.is_empty() => h,
+        _ => return libc::EAI_AGAIN,
+    };
+
+    // Extract port from the service parameter. getaddrinfo accepts either
+    // a numeric port string or a service name ("http", "https"). We only
+    // handle numeric ports; for service names, pass port=0 and let the
+    // daemon resolve without port constraint.
+    let port: u16 = if service.is_null() {
+        0
+    } else {
+        let svc = unsafe { CStr::from_ptr(service) };
+        svc.to_str()
+            .ok()
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(0)
+    };
+
+    // Send Resolve IPC to daemon.
+    let addrs = match send_resolve_sync(host, port, GETADDRINFO_RESOLVE_TIMEOUT_MS) {
+        Ok(a) if !a.is_empty() => a,
+        Ok(_) => return libc::EAI_NONAME,
+        Err(IpcClientError::NotConfigured) => return libc::EAI_AGAIN,
+        Err(IpcClientError::Timeout) => return libc::EAI_AGAIN,
+        Err(IpcClientError::DaemonRejected(ref reason)) => {
+            // DaemonRejected covers both ResolveReply::Deny and
+            // ResolveReply::Err. For Deny (policy block), EAI_FAIL is
+            // correct — non-recoverable. For Err (DNS failure), EAI_NONAME.
+            if reason.starts_with("resolve ") {
+                return libc::EAI_NONAME;
+            }
+            return libc::EAI_FAIL;
+        }
+        Err(_) => return libc::EAI_FAIL,
+    };
+
+    // Extract hint preferences for the result nodes.
+    let (hint_family, hint_socktype, hint_protocol) = if hints.is_null() {
+        (0i32, 0i32, 0i32)
+    } else {
+        let h = unsafe { &*hints };
+        (h.ai_family, h.ai_socktype, h.ai_protocol)
+    };
+
+    // Build the addrinfo linked list from wire addresses.
+    // Each node is a single malloc allocation containing the addrinfo struct
+    // followed by the sockaddr. sentinel_freeaddrinfo walks and frees them.
+    let mut head: *mut libc::addrinfo = core::ptr::null_mut();
+    let mut tail: *mut libc::addrinfo = core::ptr::null_mut();
+
+    for wire in &addrs {
+        // wire layout: [0]=sa_len, [1]=sa_family, [2..4]=port, rest=addr
+        let sa_family = wire[1] as i32;
+        let sa_len = wire[0] as usize;
+
+        // Respect hint_family filter.
+        if hint_family != 0 && hint_family != sa_family {
+            continue;
+        }
+
+        // Determine sockaddr size for this address family.
+        let sockaddr_size = match sa_family {
+            AF_INET => core::mem::size_of::<libc::sockaddr_in>(),
+            AF_INET6 => core::mem::size_of::<libc::sockaddr_in6>(),
+            _ => continue,
+        };
+
+        // Populate the DNS cache with this address → hostname mapping.
+        // The cache key is the raw sockaddr bytes (sa_len bytes of the wire).
+        let cache_key_len = sa_len.min(SOCKADDR_WIRE_LEN);
+        with_cache(|c| c.insert(&wire[..cache_key_len], host.as_bytes()));
+
+        // Allocate addrinfo + embedded sockaddr in a single block.
+        let ai_size = core::mem::size_of::<libc::addrinfo>();
+        let total_size = ai_size + sockaddr_size;
+        let ptr = unsafe { libc::malloc(total_size) } as *mut u8;
+        if ptr.is_null() {
+            // OOM: free what we've built so far and return EAI_MEMORY.
+            unsafe { free_addrinfo_chain(head) };
+            return libc::EAI_MEMORY;
+        }
+        unsafe { core::ptr::write_bytes(ptr, 0, total_size) };
+
+        let ai_ptr = ptr as *mut libc::addrinfo;
+        let sa_ptr = unsafe { ptr.add(ai_size) } as *mut libc::sockaddr;
+
+        // Copy wire bytes into the sockaddr.
+        let copy_len = sockaddr_size.min(SOCKADDR_WIRE_LEN);
+        unsafe { core::ptr::copy_nonoverlapping(wire.as_ptr(), sa_ptr as *mut u8, copy_len) };
+
+        // Fill the addrinfo fields.
+        unsafe {
+            (*ai_ptr).ai_family = sa_family;
+            (*ai_ptr).ai_socktype = if hint_socktype != 0 { hint_socktype } else { libc::SOCK_STREAM };
+            (*ai_ptr).ai_protocol = if hint_protocol != 0 { hint_protocol } else { libc::IPPROTO_TCP };
+            (*ai_ptr).ai_addrlen = sockaddr_size as socklen_t;
+            (*ai_ptr).ai_addr = sa_ptr;
+            (*ai_ptr).ai_canonname = core::ptr::null_mut();
+            (*ai_ptr).ai_next = core::ptr::null_mut();
+        }
+
+        // Append to the linked list.
+        if head.is_null() {
+            head = ai_ptr;
+            tail = ai_ptr;
+        } else {
+            unsafe { (*tail).ai_next = ai_ptr };
+            tail = ai_ptr;
+        }
+    }
+
+    if head.is_null() {
+        return libc::EAI_NONAME;
+    }
+
+    unsafe { *res = head };
+    LOG_RING.append(b"[sentinel-hook] getaddrinfo proxied via daemon");
+    0
+}
+
+/// Free an addrinfo linked list allocated by sentinel_getaddrinfo.
+/// Each node was allocated as a single malloc block (addrinfo + sockaddr),
+/// so a single free per node suffices.
+unsafe fn free_addrinfo_chain(mut p: *mut libc::addrinfo) {
+    while !p.is_null() {
+        let next = unsafe { (*p).ai_next };
+        unsafe { libc::free(p as *mut c_void) };
+        p = next;
+    }
+}
+
+/// Interposed freeaddrinfo — frees addrinfo lists from both
+/// sentinel_getaddrinfo (our malloc'd nodes) and real getaddrinfo (system
+/// nodes). Since we never call real getaddrinfo, all lists come from us
+/// and are safe to free with our chain walker.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sentinel_freeaddrinfo(res: *mut libc::addrinfo) {
+    unsafe { free_addrinfo_chain(res) };
+}
+
 
 // ---- sendto ----
 
@@ -723,30 +913,11 @@ unsafe extern "C" {
     ) -> ssize_t;
 }
 
-// Phase 1 interpose records: connect, connectx, sendto, sendmsg.
-//
-// DEVIATION from plan (getaddrinfo removed, Rule 1 - Bug):
-// getaddrinfo is NOT interposed in Phase 1. Root cause: when libsentinel_hook.dylib
-// is injected via DYLD_INSERT_LIBRARIES, dyld patches ALL symbol table entries
-// globally — including those within libSystem itself. This means dlsym(libSystem,
-// "getaddrinfo") and RTLD_NEXT both return sentinel_getaddrinfo's address. There is
-// no way to call the real getaddrinfo from within the interposing dylib without a raw
-// syscall, and getaddrinfo is NOT a simple syscall (it goes through mDNSResponder
-// via XPC). Using IN_HOOK as a reentrancy guard in the allow path leads to
-// sentinel_getaddrinfo calling itself infinitely via REAL_GETADDRINFO.
-//
-// Phase 1 enforcement strategy without getaddrinfo interception:
-// - DENY path: discord.com and other non-allowlisted hosts are denied at connect(2)
-//   level, AFTER DNS resolution. The IP address returned by getaddrinfo is not in
-//   the D-18 allowlist (which only has 127.0.0.1, ::1, registry.npmjs.org etc.),
-//   so decide_for_ip_sockaddr() returns Deny. Node sees EHOSTUNREACH.
-// - ALLOW path: loopback (127.0.0.1, ::1) connects work because decide_for_ip_sockaddr
-//   matches the Ip() entries in the allowlist.
-// - Cache-based hostname matching (getaddrinfo → cache → connect) is NOT available in
-//   Phase 1 since getaddrinfo isn't intercepted. Phase 5 will add a safer getaddrinfo
-//   interception mechanism (e.g., using mach port messaging or a forked resolver).
-//
-// (getaddrinfo_async and getaddrinfo_async_call are also excluded — removed from macOS 26 SDK.)
+// M005-S01: getaddrinfo interpose re-enabled via daemon-proxied DNS.
+// BL-05 infinite recursion is avoided by never calling real getaddrinfo —
+// DNS is proxied through the daemon's Resolve IPC handler.
+// freeaddrinfo is also interposed so our malloc'd addrinfo nodes are freed
+// correctly (real freeaddrinfo would crash on our custom layout).
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = "__DATA,__interpose")]
@@ -802,6 +973,22 @@ static SENTINEL_INTERPOSE_WRITE: [SyncPtr; 2] = [
 static SENTINEL_INTERPOSE_WRITEV: [SyncPtr; 2] = [
     SyncPtr(sentinel_writev as *const c_void),
     SyncPtr(libc::writev as *const c_void),
+];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_GETADDRINFO: [SyncPtr; 2] = [
+    SyncPtr(sentinel_getaddrinfo as *const c_void),
+    SyncPtr(libc::getaddrinfo as *const c_void),
+];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "__DATA,__interpose")]
+#[used]
+static SENTINEL_INTERPOSE_FREEADDRINFO: [SyncPtr; 2] = [
+    SyncPtr(sentinel_freeaddrinfo as *const c_void),
+    SyncPtr(libc::freeaddrinfo as *const c_void),
 ];
 
 // syscall() interpose: DEFERRED.

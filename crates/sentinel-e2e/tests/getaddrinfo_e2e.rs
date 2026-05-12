@@ -623,3 +623,79 @@ fn connect_evil_denied_via_cached_hostname() {
         "ECONNREFUSED means Sentinel did not enforce. stdout: {stdout}"
     );
 }
+
+// ============================================================================
+// Test 8: Daemon down — getaddrinfo returns EAI_FAIL/EAI_AGAIN, fail-closed
+// ============================================================================
+
+#[cfg_attr(not(target_os = "macos"), ignore)]
+#[test]
+fn daemon_down_getaddrinfo_fails_closed() {
+    let cli = resolve_cli();
+    let dylib = resolve_dylib();
+    let node = match resolve_node() {
+        Ok(p) => p,
+        Err(why) => {
+            eprintln!("SKIP: {why}");
+            return;
+        }
+    };
+
+    // Start a daemon harness, capture the state dir, then kill the daemon.
+    // The hook will have SENTINEL_STATE_DIR pointing at a valid socket path
+    // that no longer has a listener — simulating daemon crash.
+    let harness = DaemonHarness::start().expect("start daemon");
+    let state_dir = harness.state_dir.clone();
+    let home = harness.home.path().to_path_buf();
+    // Kill daemon.
+    drop(harness);
+    // Brief pause for socket cleanup.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    let script = probe_script();
+
+    let output = Command::new(&cli)
+        .arg(&node)
+        .arg(&script)
+        .env_clear()
+        .env("HOME", &home)
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("SENTINEL_HOOK_DYLIB", &dylib)
+        .env("SENTINEL_STATE_DIR", &state_dir)
+        .env("PROBE_HOST", DENY_HOST)
+        .env("PROBE_PORT", DENY_PORT)
+        .env("PROBE_MODE", "resolve_only")
+        .output()
+        .expect("run sentinel");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // With daemon down, the CLI may either:
+    // (a) refuse to launch the child at all ("daemon not running" in stderr), or
+    // (b) launch the child, but the hook's getaddrinfo returns EAI_AGAIN/FAIL
+    //     because the socket is gone.
+    // Both are valid fail-closed outcomes.
+    assert!(
+        !output.status.success(),
+        "daemon-down: expected non-zero exit (fail-closed), but got success.\n\
+         stdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // The CLI surfaces the daemon-down error in stderr.
+    let fail_closed = stderr.contains("daemon not running")
+        || stderr.contains("socket inaccessible")
+        || stdout.contains("RESOLVE-FAILED");
+    assert!(
+        fail_closed,
+        "daemon-down: expected a fail-closed indicator; got:\n\
+         stdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // Must NOT see RESOLVE-OK — that would mean DNS bypassed the daemon.
+    assert!(
+        !stdout.contains("RESOLVE-OK"),
+        "daemon-down: RESOLVE-OK means DNS bypassed the daemon (fail-open bug).\n\
+         stdout: {stdout}"
+    );
+}

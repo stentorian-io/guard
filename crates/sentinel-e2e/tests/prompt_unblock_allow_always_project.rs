@@ -1,11 +1,11 @@
-//! Phase 3 plan 03-14 BLOCKER #3 / POL-02 acceptance — AllowAlwaysProject verdict.
+//! M005-S05: AllowAlwaysProject verdict via PTY prompt.
 //!
 //! Test: sends "3\n" (AllowAlwaysProject) into the PTY prompt. The daemon
 //! appends a rule to .sentinel.toml (in cwd or state_dir fallback) and inserts
 //! a trusted_policy_files entry in SQLite. A JSONL row with
 //! source_kind=prompt_allow_project appears.
 //!
-//! Marked #[ignore]: requires PTY + non-hardened dylib + macOS daemon.
+//! Marked #[ignore]: requires PTY + non-hardened node + macOS daemon.
 //! Opt-in via: cargo test -p sentinel-e2e -- --ignored allow_always_project
 
 use std::io::{BufRead, BufReader, Write as _};
@@ -13,13 +13,25 @@ use std::time::{Duration, Instant};
 
 use portable_pty::PtySize;
 
+const DENY_HOST: &str = "discord.com";
+const DENY_PORT: &str = "443";
+
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires PTY + non-hardened dylib + macOS daemon — opt-in via --ignored"]
+#[ignore = "requires PTY + non-hardened node + macOS daemon — opt-in via --ignored"]
 fn allow_always_project_appends_toml_and_trusts_policy() {
     let harness = sentinel_e2e::DaemonHarness::start().expect("start daemon harness");
     let cli = sentinel_e2e::resolve_cli();
     let dylib = sentinel_e2e::resolve_dylib();
+    let node = match sentinel_e2e::resolve_node() {
+        Ok(p) => p,
+        Err(why) => {
+            eprintln!("SKIP: {why}");
+            return;
+        }
+    };
+    let script = sentinel_e2e::cargo_workspace_root()
+        .join("crates/sentinel-e2e/harness/prompt_probe.js");
 
     let pty_system = portable_pty::native_pty_system();
     let pair = pty_system
@@ -27,15 +39,15 @@ fn allow_always_project_appends_toml_and_trusts_policy() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
-    cmd.arg("/usr/bin/curl");
-    cmd.arg("--max-time");
-    cmd.arg("5");
-    cmd.arg("https://192.0.2.201/");
-    cmd.arg("-s");
+    cmd.arg(&node);
+    cmd.arg(&script);
     cmd.env("HOME", harness.home.path().to_str().unwrap());
     cmd.env("PATH", std::env::var("PATH").unwrap_or_default().as_str());
     cmd.env("SENTINEL_HOOK_DYLIB", dylib.to_str().unwrap());
     cmd.env("SENTINEL_STATE_DIR", harness.state_dir.to_str().unwrap());
+    cmd.env("PROBE_HOST", DENY_HOST);
+    cmd.env("PROBE_PORT", DENY_PORT);
+    cmd.env("PROBE_CONNECT_AFTER", "0");
 
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
     let reader = pair.master.try_clone_reader().expect("reader");
@@ -44,10 +56,10 @@ fn allow_always_project_appends_toml_and_trusts_policy() {
 
     let mut br = BufReader::new(reader);
     let mut buf = String::new();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if Instant::now() > deadline {
-            panic!("prompt never appeared; buf: {buf}");
+            panic!("prompt never appeared within 15s; buf:\n{buf}");
         }
         let mut line = String::new();
         match br.read_line(&mut line) {

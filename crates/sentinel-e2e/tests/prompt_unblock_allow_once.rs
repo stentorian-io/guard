@@ -1,14 +1,14 @@
-//! Phase 3 plan 03-14 BLOCKER #3 / POL-02 acceptance — AllowOnce verdict.
+//! M005-S05: AllowOnce verdict via PTY prompt.
 //!
-//! Test: sentinel run wraps curl against a non-allowlisted host (192.0.2.123,
-//! RFC 5737 TEST-NET-1). The daemon parks the Resolve IPC because the process
-//! is TTY-attached. The test sends "1\n" (AllowOnce) into the PTY. The daemon
-//! resumes Resolve with Allow → curl can connect (or fail for unrelated reasons,
-//! but NOT because Sentinel blocked it). A JSONL row with source_kind=prompt_allow_once
-//! appears in sentinel.log.
+//! Test: sentinel run wraps node against a non-allowlisted hostname. The hook's
+//! sentinel_getaddrinfo sends Resolve IPC to the daemon. Because the run is
+//! TTY-attached, the daemon parks the Resolve and sends a PromptRequest to the
+//! CLI. The test sends "1\n" (AllowOnce) into the PTY. The daemon unparks,
+//! resolves DNS, returns addresses to the hook. The JSONL log records a
+//! source_kind=prompt_allow_once row.
 //!
-//! Marked #[ignore]: requires PTY (portable-pty) + non-hardened dylib + macOS
-//! LaunchAgent path. Opt-in via:
+//! Marked #[ignore]: requires PTY (portable-pty) + non-hardened node + macOS
+//! daemon. Opt-in via:
 //!   cargo test -p sentinel-e2e -- --ignored allow_once_unblocks
 
 use std::io::{BufRead, BufReader, Write as _};
@@ -16,13 +16,25 @@ use std::time::{Duration, Instant};
 
 use portable_pty::PtySize;
 
+const DENY_HOST: &str = "discord.com";
+const DENY_PORT: &str = "443";
+
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires PTY + non-hardened dylib + macOS daemon — opt-in via --ignored"]
+#[ignore = "requires PTY + non-hardened node + macOS daemon — opt-in via --ignored"]
 fn allow_once_unblocks_connection_in_live_run() {
     let harness = sentinel_e2e::DaemonHarness::start().expect("start daemon harness");
     let cli = sentinel_e2e::resolve_cli();
     let dylib = sentinel_e2e::resolve_dylib();
+    let node = match sentinel_e2e::resolve_node() {
+        Ok(p) => p,
+        Err(why) => {
+            eprintln!("SKIP: {why}");
+            return;
+        }
+    };
+    let script = sentinel_e2e::cargo_workspace_root()
+        .join("crates/sentinel-e2e/harness/prompt_probe.js");
 
     let pty_system = portable_pty::native_pty_system();
     let pair = pty_system
@@ -30,34 +42,27 @@ fn allow_once_unblocks_connection_in_live_run() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
-    cmd.arg("/usr/bin/curl");
-    cmd.arg("--max-time");
-    cmd.arg("5");
-    cmd.arg("https://192.0.2.123/");
-    cmd.arg("-s");
+    cmd.arg(&node);
+    cmd.arg(&script);
     cmd.env("HOME", harness.home.path().to_str().unwrap());
-    cmd.env(
-        "PATH",
-        std::env::var("PATH").unwrap_or_default().as_str(),
-    );
+    cmd.env("PATH", std::env::var("PATH").unwrap_or_default().as_str());
     cmd.env("SENTINEL_HOOK_DYLIB", dylib.to_str().unwrap());
-    cmd.env(
-        "SENTINEL_STATE_DIR",
-        harness.state_dir.to_str().unwrap(),
-    );
+    cmd.env("SENTINEL_STATE_DIR", harness.state_dir.to_str().unwrap());
+    cmd.env("PROBE_HOST", DENY_HOST);
+    cmd.env("PROBE_PORT", DENY_PORT);
+    cmd.env("PROBE_CONNECT_AFTER", "0");
 
     let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel run");
     let reader = pair.master.try_clone_reader().expect("clone reader");
     let mut writer = pair.master.take_writer().expect("take writer");
     drop(pair.slave);
 
-    // Wait for the prompt to appear ("Choose: [1]" text from prompt_render.rs).
     let mut br = BufReader::new(reader);
     let mut buf = String::new();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if Instant::now() > deadline {
-            panic!("prompt never appeared in PTY output within 10s; buf so far: {buf}");
+            panic!("prompt never appeared in PTY output within 15s; buf so far:\n{buf}");
         }
         let mut line = String::new();
         match br.read_line(&mut line) {
@@ -70,7 +75,6 @@ fn allow_once_unblocks_connection_in_live_run() {
         }
     }
 
-    // Send AllowOnce choice.
     writer.write_all(b"1\n").expect("write choice 1");
     drop(writer);
 

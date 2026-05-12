@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.7.4",
+  "id": "MAL-2026-FIXTURE-UAPARSER",
+  "modified": "2026-01-15T00:00:00Z",
+  "published": "2026-01-15T00:00:00Z",
+  "summary": "Fixture: ua-parser-js@0.7.29 supply-chain compromise (sanitized reproduction)",
+  "affected": [
+    {
+      "package": {"ecosystem": "npm", "name": "ua-parser-js"},
+      "ranges": [
+        {
+          "type": "SEMVER",
+          "events": [
+            {"introduced": "0.7.29"},
+            {"fixed": "0.7.30"}
+          ]
+        }
+      ]
+    }
+  ],
+  "database_specific": {
+    "iocs": {
+      "domains": ["c2-sink.test.invalid"],
+      "urls": [],
+      "ips": []
+    }
+  }
+}

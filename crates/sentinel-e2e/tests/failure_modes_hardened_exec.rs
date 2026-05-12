@@ -15,14 +15,21 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-use sentinel_e2e::{resolve_cli, resolve_dylib, DaemonHarness};
+use sentinel_e2e::{prepare_feed_fixture, resolve_cli, resolve_dylib, DaemonHarness};
 
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
 fn hardened_runtime_exec_surfaces_coverage_gap() {
     let cli = resolve_cli();
     let dylib = resolve_dylib();
-    let mut harness = DaemonHarness::start().expect("start daemon");
+    // Use a local file:// feed fixture instead of DaemonHarness::start()'s
+    // default SENTINEL_SKIP_FEED_FETCH=1 (compiled out in --release builds).
+    let (_feed_dir, feed_url) = prepare_feed_fixture("feed-mock-ua-parser-js");
+    let mut harness = DaemonHarness::start_with_env(&[
+        ("SENTINEL_FEED_URL_OVERRIDE_OSV", feed_url.as_str()),
+        ("SENTINEL_FEED_URL_OVERRIDE_GHSA", feed_url.as_str()),
+    ])
+    .expect("start daemon");
 
     let target = pick_hardened_binary();
     eprintln!("[VAL-04 D-10] hardened target = {}", target.display());

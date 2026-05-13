@@ -18,7 +18,7 @@ pub mod trust;
 
 use std::path::Path;
 
-use sentinel_ipc::{DaemonStateKind, GapInfo, StatusCounters, StatusReply, TrackedRootInfo, InstallInfo};
+use sentinel_ipc::{DaemonStateKind, FeedInfo, GapInfo, StatusCounters, StatusReply, TrackedRootInfo, InstallInfo};
 
 use crate::CliError;
 
@@ -76,6 +76,7 @@ pub fn run_status(sock: &Path, state_dir: &Path, verbose: bool, json: bool) -> R
             tracked_roots,
             recent_gaps,
             counters,
+            feeds,
             install_info,
             ..
         } => {
@@ -91,12 +92,12 @@ pub fn run_status(sock: &Path, state_dir: &Path, verbose: bool, json: bool) -> R
                 .count();
 
             if verbose {
-                render_verbose(daemon_state, &tracked_roots, &recent_gaps, &counters, install_info.as_ref());
+                render_verbose(daemon_state, &tracked_roots, &recent_gaps, &counters, &feeds, install_info.as_ref());
                 if let Some(wd) = read_watchdog_health(state_dir) {
                     render_watchdog_health(&wd);
                 }
             } else {
-                render_minimal(daemon_state, recent_count_24h);
+                render_minimal(daemon_state, recent_count_24h, &feeds);
             }
             Ok(0)
         }
@@ -132,18 +133,18 @@ pub(crate) fn render_offline_to<W: std::io::Write>(
         gaps_today: 0,
     };
     if verbose {
-        render_verbose_to(w, state, &[], &[], &zero_counters, None);
+        render_verbose_to(w, state, &[], &[], &zero_counters, &[], None);
     } else {
-        render_minimal_to(w, state, 0);
+        render_minimal_to(w, state, 0, &[]);
     }
     Ok(2)
 }
 
-pub(crate) fn render_minimal(state: DaemonStateKind, gaps_24h: usize) {
-    render_minimal_to(&mut std::io::stdout().lock(), state, gaps_24h);
+pub(crate) fn render_minimal(state: DaemonStateKind, gaps_24h: usize, feeds: &[FeedInfo]) {
+    render_minimal_to(&mut std::io::stdout().lock(), state, gaps_24h, feeds);
 }
 
-pub(crate) fn render_minimal_to<W: std::io::Write>(w: &mut W, state: DaemonStateKind, gaps_24h: usize) {
+pub(crate) fn render_minimal_to<W: std::io::Write>(w: &mut W, state: DaemonStateKind, gaps_24h: usize, feeds: &[FeedInfo]) {
     let ambient = std::env::var_os("SENTINEL_AMBIENT").is_some();
     match state {
         DaemonStateKind::Operational => {
@@ -158,7 +159,16 @@ pub(crate) fn render_minimal_to<W: std::io::Write>(w: &mut W, state: DaemonState
             "sentinel: degraded — {gaps_24h} coverage gap(s) in last 24h. Run `sentinel status --verbose` for detail."
         ); }
         DaemonStateKind::StaleFeeds => {
-            let _ = writeln!(w, "sentinel: stale-feeds — feeds older than threshold. (Phase 4 reserved.)");
+            let stale_names: Vec<&str> = feeds.iter().filter(|f| !f.fresh).map(|f| f.name.as_str()).collect();
+            if stale_names.is_empty() {
+                let _ = writeln!(w, "sentinel: stale-feeds — threat-intel feeds older than 7 days. Run `sentinel run` to refresh.");
+            } else {
+                let _ = writeln!(
+                    w,
+                    "sentinel: stale-feeds — {} older than 7 days. Run `sentinel run` to refresh.",
+                    stale_names.join(", ")
+                );
+            }
         }
         DaemonStateKind::DaemonNotRunning => { let _ = writeln!(
             w,
@@ -173,6 +183,7 @@ pub(crate) fn render_verbose(
     tracked_roots: &[TrackedRootInfo],
     recent_gaps: &[GapInfo],
     counters: &StatusCounters,
+    feeds: &[FeedInfo],
     install_info: Option<&InstallInfo>,
 ) {
     render_verbose_to(
@@ -181,6 +192,7 @@ pub(crate) fn render_verbose(
         tracked_roots,
         recent_gaps,
         counters,
+        feeds,
         install_info,
     );
 }
@@ -191,6 +203,7 @@ pub(crate) fn render_verbose_to<W: std::io::Write>(
     tracked_roots: &[TrackedRootInfo],
     recent_gaps: &[GapInfo],
     counters: &StatusCounters,
+    feeds: &[FeedInfo],
     install_info: Option<&InstallInfo>,
 ) {
     let state_str = match state {
@@ -219,6 +232,29 @@ pub(crate) fn render_verbose_to<W: std::io::Write>(
     let _ = writeln!(w, "  blocks_today:       {}", counters.blocks_today);
     let _ = writeln!(w, "  allows_today:       {}", counters.allows_today);
     let _ = writeln!(w, "  gaps_today:         {}", counters.gaps_today);
+
+    let _ = writeln!(w, "\nFeeds ({}):", feeds.len());
+    for f in feeds {
+        let age_str = match f.last_pulled_at_ms {
+            Some(ms) => {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let age_h = now_ms.saturating_sub(ms) / (60 * 60 * 1000);
+                if age_h < 1 {
+                    "< 1h ago".to_string()
+                } else if age_h < 24 {
+                    format!("{age_h}h ago")
+                } else {
+                    format!("{}d ago", age_h / 24)
+                }
+            }
+            None => "never".to_string(),
+        };
+        let fresh_str = if f.fresh { "fresh" } else { "STALE" };
+        let _ = writeln!(w, "  {:<6} {:<12} ({})", f.name, age_str, fresh_str);
+    }
 
     let _ = writeln!(w, "\nTracked roots ({}):", tracked_roots.len());
     for r in tracked_roots {
@@ -277,12 +313,12 @@ mod render_tests {
             (DaemonStateKind::DaemonNotRunning, &["daemon-not-running", "launchctl"]),
             (DaemonStateKind::Operational, &["operational"]),
             (DaemonStateKind::Degraded, &["degraded", "coverage gap"]),
-            (DaemonStateKind::StaleFeeds, &["stale-feeds", "Phase 4"]),
+            (DaemonStateKind::StaleFeeds, &["stale-feeds", "7 days"]),
         ];
 
         for (state, expected_substrings) in cases {
             let mut buf = Vec::new();
-            render_minimal_to(&mut buf, *state, 0);
+            render_minimal_to(&mut buf, *state, 0, &[]);
             let s = String::from_utf8(buf).unwrap();
             for expected in *expected_substrings {
                 assert!(
@@ -300,7 +336,7 @@ mod render_tests {
     #[test]
     fn render_minimal_includes_gap_count_for_degraded() {
         let mut buf = Vec::new();
-        render_minimal_to(&mut buf, DaemonStateKind::Degraded, 7);
+        render_minimal_to(&mut buf, DaemonStateKind::Degraded, 7, &[]);
         let s = String::from_utf8(buf).unwrap();
         assert!(
             s.contains("7 coverage gap"),
@@ -322,7 +358,7 @@ mod render_tests {
 
         for (state, expected_first_line) in cases {
             let mut buf = Vec::new();
-            render_verbose_to(&mut buf, *state, &[], &[], &empty_counters(), None);
+            render_verbose_to(&mut buf, *state, &[], &[], &empty_counters(), &[], None);
             let s = String::from_utf8(buf).unwrap();
             let first_line = s.lines().next().unwrap_or("");
             assert_eq!(
@@ -331,6 +367,37 @@ mod render_tests {
                 state
             );
         }
+    }
+
+    /// Test 5: render_minimal_to shows stale feed names when available.
+    #[test]
+    fn render_minimal_stale_feeds_shows_feed_names() {
+        use sentinel_ipc::FeedInfo;
+        let feeds = vec![
+            FeedInfo { name: "OSV".to_string(), last_pulled_at_ms: Some(100), fresh: false },
+            FeedInfo { name: "GHSA".to_string(), last_pulled_at_ms: Some(200), fresh: true },
+        ];
+        let mut buf = Vec::new();
+        render_minimal_to(&mut buf, DaemonStateKind::StaleFeeds, 0, &feeds);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("OSV"), "should mention the stale feed name");
+        assert!(!s.contains("GHSA"), "should not mention the fresh feed");
+    }
+
+    /// Test 6: render_verbose_to includes Feeds section.
+    #[test]
+    fn render_verbose_includes_feeds_section() {
+        use sentinel_ipc::FeedInfo;
+        let feeds = vec![
+            FeedInfo { name: "OSV".to_string(), last_pulled_at_ms: None, fresh: false },
+        ];
+        let mut buf = Vec::new();
+        render_verbose_to(&mut buf, DaemonStateKind::Operational, &[], &[], &empty_counters(), &feeds, None);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("Feeds (1):"), "should have Feeds section");
+        assert!(s.contains("OSV"), "should list OSV feed");
+        assert!(s.contains("never"), "should show 'never' for unpulled feed");
+        assert!(s.contains("STALE"), "should show STALE for non-fresh feed");
     }
 
     /// Test 4: render_offline_to with json=true emits correct "daemon_state" discriminator.

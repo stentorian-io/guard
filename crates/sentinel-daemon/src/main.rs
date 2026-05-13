@@ -181,6 +181,16 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     );
     info!("persistence watcher spawned");
 
+    // M006-S01: background feed refresh timer. Sleeps for the configured
+    // interval (default 6h), then calls fetch_feeds_blocking. Errors are
+    // logged, never crash the daemon.
+    let _feed_refresh_handle = sentinel_daemon::feed_refresh::spawn_feed_refresh_thread(
+        state_dir.clone(),
+        state.feed_store.clone(),
+        state.feed_fetch_mutex.clone(),
+        state.last_fetch_result.clone(),
+    );
+
     // TODO(03-08): wire gap_detector → log_writer + recent_gaps when the gap fires.
     //   - hardened-runtime gap (csops): plan 03-08 extends gap_detector closure
     //   - env-not-propagated gap (TREE-06): plan 03-08 extends EnvNotPropagatedGap handler

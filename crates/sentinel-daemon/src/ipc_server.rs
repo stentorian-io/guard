@@ -390,6 +390,16 @@ impl IpcServer {
             }
         };
 
+        // M006-S02: codesign peer verification.
+        if !crate::codesign::should_accept_peer(&peer_token) {
+            warn!(
+                peer_pid = peer_token.pid(),
+                "peer rejected: invalid code signature"
+            );
+            let _ = write_legacy_err(&mut stream, "codesign verification failed");
+            return;
+        }
+
         // Classify the frame: tagged or legacy length-prefixed.
         let kind = match classify_frame(&mut stream) {
             Ok(k) => k,

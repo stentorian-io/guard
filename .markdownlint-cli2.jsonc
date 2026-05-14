@@ -1,0 +1,18 @@
+{
+  "config": {
+    "MD013": false,
+    "MD024": { "siblings_only": true },
+    "MD033": {
+      "allowed_elements": ["details", "summary", "br", "sub", "sup"]
+    },
+    "MD036": false,
+    "MD040": false,
+    "MD041": false,
+    "MD060": false
+  },
+  "ignores": [
+    "target/**",
+    ".gsd/**",
+    "CHANGELOG.md"
+  ]
+}

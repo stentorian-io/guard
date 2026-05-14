@@ -13,14 +13,17 @@ body = """
 ## [{{ version | trim_start_matches(pat="v") }}] — {{ timestamp | date(format="%Y-%m-%d") }}
 {% else -%}
 ## [Unreleased]
-{% endif -%}
-
+{% endif %}
+{%- if version == "v0.1" %}
+Initial release.
+{% else -%}
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | striptags | trim | upper_first }}
 {% for commit in commits -%}
 - {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | upper_first }}
 {% endfor -%}
-{% endfor %}\n
+{% endfor -%}
+{% endif %}\n
 """
 footer = ""
 trim = true
@@ -33,13 +36,14 @@ commit_parsers = [
     { message = "^feat", group = "<!-- 0 -->Features" },
     { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
     { message = "^perf", group = "<!-- 2 -->Performance" },
-    { message = "^refactor", group = "<!-- 3 -->Refactoring" },
-    { message = "^test", group = "<!-- 4 -->Testing" },
-    { message = "^doc", group = "<!-- 5 -->Documentation" },
-    { message = "^chore", group = "<!-- 6 -->Miscellaneous" },
+    { message = "^docs", group = "<!-- 3 -->Documentation" },
+    { message = "^test", skip = true },
+    { message = "^refactor", skip = true },
+    { message = "^chore", skip = true },
+    { message = "^build", skip = true },
     { message = "^ci", skip = true },
 ]
 protect_breaking_commits = false
-filter_commits = false
+filter_commits = true
 tag_pattern = "v[0-9].*"
 sort_commits = "oldest"

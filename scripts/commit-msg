@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+#
+# commit-msg hook: enforces conventional commits, rejects Co-Authored-By.
+# Install: ./scripts/install-hooks.sh
+#
+set -euo pipefail
+
+MSG_FILE="$1"
+MSG=$(head -1 "$MSG_FILE")
+
+if grep -qi '^Co-Authored-By:' "$MSG_FILE"; then
+  echo "error: Co-Authored-By trailers are not allowed." >&2
+  echo "Remove the Co-Authored-By line from your commit message." >&2
+  exit 1
+fi
+
+PATTERN='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?!?: .+'
+if ! echo "$MSG" | grep -Eq "$PATTERN"; then
+  echo "error: commit message does not follow Conventional Commits." >&2
+  echo "Expected: <type>(<scope>): <description>" >&2
+  echo "Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert" >&2
+  echo "Got: $MSG" >&2
+  exit 1
+fi

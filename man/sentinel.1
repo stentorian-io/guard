@@ -1,0 +1,252 @@
+.\" sentinel.1 — Sentinel CLI manual page
+.TH SENTINEL 1 "2026-05-14" "Sentinel v0.8" "Sentinel Manual"
+.SH NAME
+sentinel \- macOS supply-chain firewall for package installs
+.SH SYNOPSIS
+.B sentinel
+.RI [ OPTIONS ]
+.I command
+.RI [ args... ]
+.br
+.B sentinel setup
+.RI [ target ]
+.RI [ FLAGS ]
+.br
+.B sentinel status
+.RI [ subcommand ]
+.RI [ FLAGS ]
+.br
+.B sentinel repair
+.br
+.B sentinel unwrap\-all
+.RI [ FLAGS ]
+.SH DESCRIPTION
+.B sentinel
+enforces default-deny outbound network policy on package-install subtrees.
+Wrap any package manager command with
+.B sentinel
+and every outbound connection from the process tree is checked against a
+multi-tier policy: curated registry allowlist, project rules, user rules,
+threat-intel deny list, then default deny.
+.PP
+Enforcement uses DYLD library injection
+.RB ( DYLD_INSERT_LIBRARIES )
+to interpose libc network calls. A background daemon
+.RB ( sentineld (8))
+manages feeds, snapshots, and interactive prompts.
+.SH OPTIONS
+.TP
+.B \-\-learn
+Auto-allow unknown destinations and record them to
+.IR .sentinel.toml .
+Requires a TTY; refuses to run in non-interactive environments.
+Use this on a known-clean install to build a project baseline.
+.SH COMMANDS
+.SS sentinel \fIcommand\fR [\fIargs...\fR]
+The default action. Wraps
+.I command
+under Sentinel enforcement. All arguments are passed verbatim.
+.PP
+.RS
+.nf
+sentinel npm install
+sentinel pip install \-r requirements.txt
+sentinel cargo build
+sentinel \-\-learn npm install
+.fi
+.RE
+.SS sentinel setup [\fItarget\fR]
+Install Sentinel components. Without a target, installs everything.
+.TP
+.B daemon
+Install the LaunchAgent plist and bootstrap the daemon.
+.TP
+.B shell
+Install shell integration marker blocks in shell RC files.
+.PP
+.B Flags:
+.TP
+.B \-\-remove
+Remove the targeted component(s) instead of installing.
+Cannot be combined with
+.BR \-\-reinstall .
+.TP
+.B \-\-reinstall
+Force-clean reinstall: wipe and re-derive all state.
+Cannot be combined with
+.BR \-\-remove .
+.TP
+.BR \-y ", " \-\-yes
+Skip TTY confirmation prompts.
+.SS sentinel status [\fIsubcommand\fR]
+Show Sentinel operational status. Without a subcommand, prints a summary
+of daemon health, hook integrity, and recent activity.
+.PP
+.B Flags (bare status only):
+.TP
+.B \-\-verbose
+Verbose status output. Invalid when a subcommand is given.
+.TP
+.B \-\-json
+JSON output. Invalid when a subcommand is given.
+.PP
+.B Subcommands:
+.TP
+.B logs
+Show the JSONL forensic log.
+.RS
+.TP
+.B \-\-follow
+Stream new log entries as they arrive.
+.TP
+.B \-\-json
+JSON output.
+.RE
+.TP
+.B rules
+List active policy rules.
+.RS
+.TP
+.B \-\-all
+Include built-in registry-allowlist rules.
+.TP
+.B \-\-project
+Filter to rules from the closest
+.I .sentinel.toml
+above the current directory.
+.TP
+.B \-\-json
+JSON output.
+.RE
+.TP
+.B trust
+Show trust policy state for project configuration files.
+.RS
+.TP
+.B \-\-json
+JSON output.
+.RE
+.TP
+.BI "denials " run_uuid
+Show denied connections from a specific run.
+.RS
+.TP
+.B \-\-json
+JSON output.
+.RE
+.TP
+.BI "review " [run_uuid]
+Interactively walk through denied connections and create allow/deny rules.
+If
+.I run_uuid
+is omitted, reviews the most recent run.
+.TP
+.BI "persistence " [run_uuid]
+Show persistence artifacts (files written during install) for a run.
+.RS
+.TP
+.B \-\-json
+JSON output.
+.RE
+.SS sentinel repair
+Verify and repair Sentinel installation integrity. Re-derives the HMAC key
+and hook hash, and re-bootstraps LaunchAgents.
+.SS sentinel unwrap\-all
+Emergency escape hatch. Boots out the daemon and watchdog LaunchAgents
+and clears all tracked process roots. Use when Sentinel is interfering
+with a critical operation.
+.PP
+.B Flags:
+.TP
+.BR \-y ", " \-\-yes
+Skip TTY confirmation prompt.
+.SH CONFIGURATION
+.SS .sentinel.toml
+Per-project rules file. Sentinel walks from the current directory upward
+to find the nearest
+.IR .sentinel.toml .
+On first use, the file must be trusted via a TTY prompt (or auto-trusted
+in non-TTY mode after SHA-256 validation).
+.PP
+Example:
+.RS
+.nf
+[[allow]]
+host = "api.example.com"
+port = 443
+reason = "Internal API"
+.fi
+.RE
+.SS Policy Tiers (precedence order)
+.TP
+.B 1. Curated Allow
+Built-in allowlist: package registries, CDNs.
+.TP
+.B 2. Project Allow
+Rules from
+.IR .sentinel.toml .
+.TP
+.B 3. User Allow
+Rules created via interactive prompts or
+.BR "sentinel status review" .
+.TP
+.B 4. Curated Deny
+Threat-intel IOCs from OSV/GHSA feeds.
+.TP
+.B 5. Default Deny
+Everything else is blocked. In TTY mode, the user is prompted.
+.SH ENVIRONMENT
+.TP
+.B SENTINEL_STATE_DIR
+Override the state directory. Defaults to a platform-specific location
+under
+.IR ~/Library/Application\~Support/Sentinel/ .
+.TP
+.B RUST_LOG
+Control logging verbosity. Defaults to
+.BR warn .
+.SH FILES
+.TP
+.I ~/Library/Application\~Support/Sentinel/
+State directory: database, snapshots, HMAC keys.
+.TP
+.I ~/Library/Logs/Sentinel/
+JSONL forensic logs.
+.TP
+.I .sentinel.toml
+Per-project policy file.
+.SH EXIT STATUS
+.TP
+.B 0
+Wrapped command exited successfully and no policy violations occurred.
+.TP
+.B non-zero
+The wrapped command's exit code is forwarded.
+.SH EXAMPLES
+Wrap an npm install and review what was blocked:
+.RS
+.nf
+$ sentinel npm install
+$ sentinel status denials <run-uuid>
+$ sentinel status review <run-uuid>
+.fi
+.RE
+.PP
+Build a baseline for a known-clean project:
+.RS
+.nf
+$ sentinel --learn npm install
+.fi
+.RE
+.PP
+Install Sentinel for the first time:
+.RS
+.nf
+$ cargo build --workspace --release
+$ sentinel setup
+.fi
+.RE
+.SH SEE ALSO
+.BR sentineld (8)
+.SH AUTHORS
+Daniel van Dijk

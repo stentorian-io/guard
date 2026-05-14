@@ -1,0 +1,157 @@
+.\" sentineld.8 — Sentinel daemon manual page
+.TH SENTINELD 8 "2026-05-14" "Sentinel v0.8" "Sentinel Manual"
+.SH NAME
+sentineld \- Sentinel daemon for policy enforcement and threat-intel feeds
+.SH SYNOPSIS
+.B sentineld serve
+.RI [ OPTIONS ]
+.br
+.B sentineld dev\-install
+.RI [ OPTIONS ]
+.SH DESCRIPTION
+.B sentineld
+is the background daemon for Sentinel. It runs as a user-level LaunchAgent
+(no root required) and provides:
+.IP \(bu 2
+IPC server on a Unix domain socket for the hook library and CLI
+.IP \(bu 2
+Threat-intel feed fetching and parsing (OSV/GHSA via git clone)
+.IP \(bu 2
+CBOR snapshot preparation with HMAC-SHA256 signing
+.IP \(bu 2
+DNS resolution proxying for hooked processes
+.IP \(bu 2
+Interactive prompt coordination (deduplication, timeout)
+.IP \(bu 2
+JSONL forensic log writing
+.IP \(bu 2
+Process tree tracking via audit tokens
+.IP \(bu 2
+SQLite persistence for rules, feed IOCs, and install artifacts
+.PP
+The daemon is normally managed by
+.BR launchd (8)
+with
+.B KeepAlive=true
+and monitored by the Sentinel watchdog. Users should not need to invoke
+.B sentineld
+directly; use
+.BR sentinel (1)
+.B setup
+to install and manage it.
+.SH COMMANDS
+.SS sentineld serve
+Start the IPC server and begin accepting connections. This is the main
+operating mode, invoked by the LaunchAgent plist.
+.PP
+.B Options:
+.TP
+.BI \-\-state\-dir " PATH"
+Path to the Sentinel state directory. Defaults to the platform-specific
+location (typically
+.IR ~/Library/Application\~Support/Sentinel/ ).
+.SS sentineld dev\-install
+Write the LaunchAgent plist for development use.
+.PP
+.B Options:
+.TP
+.BI \-\-state\-dir " PATH"
+Path to the Sentinel state directory.
+.TP
+.B \-\-skip\-bootstrap
+Write the plist file without running
+.BR "launchctl bootstrap" .
+Useful for CI environments where launchd bootstrapping is not available.
+.SH IPC PROTOCOL
+The daemon listens on a Unix domain socket. The wire protocol uses
+length-prefixed CBOR frames (4-byte big-endian length + CBOR payload).
+Peer authentication uses kernel-sourced audit tokens via the
+.B LOCAL_PEERTOKEN
+socket option.
+.PP
+Protocol schema versions:
+.TP
+.B V1
+RegisterRoot (frozen)
+.TP
+.B V2
+PrepareSnapshot, Prompt
+.TP
+.B V3
+Resolve (DNS), Status
+.TP
+.B V4
+ForkEvent, ExecEvent, DylibLoaded
+.SH ARCHITECTURE
+The daemon runs a synchronous 32-thread worker pool with a bounded
+request queue (64 slots). Feed fetches happen in a background thread.
+The database uses SQLite with WAL mode.
+.PP
+On startup, the daemon:
+.IP 1. 3
+Opens or creates the SQLite database and runs migrations
+.IP 2. 3
+Binds the Unix domain socket
+.IP 3. 3
+Spawns worker threads for IPC handling
+.IP 4. 3
+Optionally triggers a background feed refresh
+.SH ENVIRONMENT
+.TP
+.B SENTINEL_STATE_DIR
+Override the state directory path.
+.TP
+.B SENTINEL_LOG_DIR
+Override the log directory. Defaults to
+.IR ~/Library/Logs/Sentinel/ .
+.TP
+.B RUST_LOG
+Control logging verbosity. Defaults to
+.BR info .
+.SH FILES
+.TP
+.I ~/Library/Application\~Support/Sentinel/sentinel.db
+SQLite database: rules, feed IOCs, install artifacts, process roots.
+.TP
+.I ~/Library/Application\~Support/Sentinel/sentinel.sock
+Unix domain socket for IPC.
+.TP
+.I ~/Library/Application\~Support/Sentinel/snapshots/
+CBOR snapshot files (per-run, HMAC-signed).
+.TP
+.I ~/Library/Logs/Sentinel/
+JSONL forensic log directory. Logs are rotated automatically.
+.TP
+.I ~/Library/LaunchAgents/sh.vandijk.sentinel.daemon.plist
+LaunchAgent plist (installed by
+.BR "sentinel setup" ).
+.SH SECURITY
+.IP \(bu 2
+All IPC connections are authenticated via kernel audit tokens.
+.IP \(bu 2
+Snapshots are HMAC-SHA256 signed; the hook verifies signatures at load time.
+.IP \(bu 2
+The daemon runs as the current user with no elevated privileges.
+.IP \(bu 2
+Feed data is pulled from public threat-intel sources; no data is sent upstream.
+.SH DIAGNOSTICS
+The watchdog process
+.RB ( sentinel\-watchdog )
+pings the daemon every 500ms. Two consecutive missed pings trigger
+SIGTERM followed by SIGKILL. The LaunchAgent's
+.B KeepAlive
+directive ensures launchd restarts the daemon after any termination.
+.PP
+Check daemon health with:
+.RS
+.nf
+sentinel status
+sentinel status \-\-verbose
+.fi
+.RE
+.SH SEE ALSO
+.BR sentinel (1),
+.BR launchd (8),
+.BR launchctl (1)
+.SH AUTHORS
+Daniel van Dijk

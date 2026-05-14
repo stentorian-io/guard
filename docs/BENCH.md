@@ -28,7 +28,7 @@ The reference numbers below were measured on:
 The Numbers table and the Reference Machine block both ship with `TBD`
 placeholders. The binding p99 number is intentionally human-curated by
 the project author on a specific Apple Silicon machine (see CONTEXT D-33
-+ D-35); it is not a CI artifact. Anyone reproducing on their own M-series
+and D-35); it is not a CI artifact. Anyone reproducing on their own M-series
 Mac follows the same procedure to land an appendix row.
 
 **Pre-flight (any dev machine, ~1 second):**
@@ -74,10 +74,8 @@ Paste the row below into docs/BENCH.md under the numbers table.
 3. Optionally delete this `## Capture Procedure` section once the binding
    number lands. (Keeping it is also fine — the procedure stays useful for
    re-runs on different SKUs.)
-4. Commit with a message like:
-   ```
-   docs(bench): capture cache-hit p99 on <machine> reference run
-   ```
+4. Commit with a message like
+   `docs(bench): capture cache-hit p99 on <machine> reference run`.
 
 **Cross-check:** the cache-hit p99 must be < 100,000 ns (i.e., < 100 µs)
 for the v0.1 / v0.2 hot-path budget claim to hold. If the captured number

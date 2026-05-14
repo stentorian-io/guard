@@ -113,39 +113,48 @@ sentinel <cmd>        sentineld (LaunchAgent)         libsentinel_hook.dylib
 | v0.3 | Prompt + Install | Prompt channel (dedup 5s), install artifacts, JSONL logging, persistence watcher, PID-reuse guard |
 | v0.4 | Hardening | Watchdog, HMAC-SHA256 snapshot integrity, exec blocking, lockfile extraction, persistence-path monitoring |
 | v0.5 | Stability | macOS 26+ dyld crash fix, getaddrinfo interpose via daemon-proxied DNS, feed fixture CI compat |
+| v0.6 | Prompt + E2E | Prompt timeout, E2E test modernization |
+| v0.7 | Production Hardening | Gap-detector wiring, background feed refresh, codesign peer auth, SpscRing fix, probe_self_test |
 
-**Current:** v0.5 shipped. Three milestones to v1.0:
-- **v0.6 (M005):** Interactive prompting via daemon-proxied DNS — planned, not started
-- **v0.7 (M006):** Production hardening (gap-detector wiring, background feed refresh, codesign peer auth, SpscRing fix, probe_self_test)
-- **v1.0 (M007):** Distribution & docs (Homebrew Formula, release CI, man pages, install guide, changelog)
+**Current:** v0.7 shipped. Three milestones to v1.0:
+
+- **v0.8 (M007):** Docs — man pages, install guide, changelog, README polish
+- **v0.9 (M008):** Pre-distribution — branch protection, tag-on-merge automation, CI gating (green required to merge), release workflow scaffolding
+- **v1.0 (M009):** Distribution — Homebrew Formula, signing/notarization, first public release
 
 ## CI
 
 GitHub Actions workflow (`.github/workflows/validation.yml`):
+
 - Runner: macOS-14
 - Steps: checkout → Node 20 (non-hardened) → cargo cache → verify fixture SHA-256 → `cargo build --workspace --release` → 6 validation E2E tests (ua-parser-js demo, workers.dev edge case, 4 failure-mode tests)
 
 ## Conventions
 
 ### Commit Messages
+
 Conventional commits scoped by subsystem: `feat(hook):`, `fix(daemon):`, `test(e2e):`, `docs(bench):`, `chore:`
 
 ### Error Handling
+
 - Hook: fail-closed — any error in snapshot load, HMAC verify, or IPC timeout → deny all network
 - Daemon: launchd KeepAlive restart on crash; feed panics (gix) are terminal but non-blocking to user
 - CLI: structured error types via `thiserror`
 
 ### Testing
+
 - Unit tests in each crate (`#[cfg(test)]` modules)
 - Integration tests in `crates/*/tests/`
 - E2E tests in `crates/sentinel-e2e/tests/` — spawn real daemon + hook, exercise full flow
 - Benchmarks: criterion micro-benchmarks + E2E live-wrap bench (see `docs/BENCH.md`)
 
 ### IPC Protocol
+
 - Schema versions: V1 (RegisterRoot — frozen), V2 (PrepareSnapshot/Prompt), V3 (Resolve/Status), V4 (ForkEvent/ExecEvent/DylibLoaded)
 - Frame format: 4-byte big-endian length prefix + CBOR payload
 - Auth: kernel-sourced audit token via `LOCAL_PEERTOKEN` socket option
 
 ### Project Config
+
 - `.sentinel.toml` — per-project rules (boundary walk from cwd to find it)
 - Trust gate: TTY prompt on first use; auto-trust in non-TTY (SHA-256 validated)

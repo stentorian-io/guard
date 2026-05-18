@@ -31,7 +31,7 @@ pub fn handle_list_rules(
     store: &RuleStore,
     curated: &[AllowlistEntry],
 ) -> ListRulesReply {
-    let mut rows: Vec<RuleRow> = match store.all_rules_with_source(req.project_filter.as_deref()) {
+    let mut rows: Vec<RuleRow> = match store.all_rules_with_source() {
         Ok(rs) => rs.into_iter().map(rule_row_from_storage).collect(),
         Err(e) => return ListRulesReply::err(format!("rule_store: {e}")),
     };

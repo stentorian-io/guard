@@ -1,15 +1,6 @@
 //! crates/sentinel-cli/src/status/rules.rs
 //!
-//! Phase 07 plan 03 — `sentinel status rules [--all] [--project] [--json]`
-//! (CLI-16, D-20). The CLI is a dumb client (D-21): it sends a `ListRules`
-//! IPC request and formats the reply. The daemon owns rule storage and
-//! filtering — the CLI never touches `sentinel.db` directly.
-//!
-//! Default scope: user + trusted_toml rules.
-//! `--all`: include built-in registry-allowlist rules.
-//! `--project`: walk `find_sentinel_toml(cwd)` and pass its canonical path
-//!              as the daemon's project filter (Phase 2 D-36 boundary).
-//! `--json`: emit the raw `Vec<RuleRow>` as JSON to stdout.
+//! `sentinel status rules [--all] [--json]` (CLI-16).
 
 use std::path::Path;
 
@@ -18,44 +9,8 @@ use sentinel_ipc::RuleRow;
 use crate::ipc_client;
 use crate::CliError;
 
-pub fn run(sock: &Path, all: bool, project: bool, json: bool) -> Result<i32, CliError> {
-    let project_filter = if project {
-        let cwd = std::env::current_dir()
-            .map_err(|e| CliError::Other(format!("cwd: {e}")))?;
-        match sentinel_core::policy_file::find_sentinel_toml(&cwd) {
-            Some(toml_path) => {
-                let canonical = toml_path
-                    .canonicalize()
-                    .map_err(|e| CliError::Other(format!(
-                        "canonicalize {}: {e}",
-                        toml_path.display()
-                    )))?;
-                Some(canonical.display().to_string())
-            }
-            None => {
-                println!(
-                    "sentinel: no .sentinel.toml found above {}",
-                    cwd.display()
-                );
-                return Ok(0);
-            }
-        }
-    } else {
-        None
-    };
-
-    let rules = ipc_client::list_rules_request(sock, all, project_filter)?;
-
-    // WR-01: --project must narrow the listing to project rules only. The
-    // daemon's all_rules_with_source applies project_filter only to
-    // trusted_toml rows (user rows are global). Drop user rows here so the
-    // CLI surface matches the help-text contract: "Filter to rules from the
-    // closest .sentinel.toml above cwd."
-    let rules = if project {
-        rules.into_iter().filter(|r| r.source == "trusted_toml").collect()
-    } else {
-        rules
-    };
+pub fn run(sock: &Path, all: bool, json: bool) -> Result<i32, CliError> {
+    let rules = ipc_client::list_rules_request(sock, all)?;
 
     if json {
         let s = serde_json::to_string(&rules)

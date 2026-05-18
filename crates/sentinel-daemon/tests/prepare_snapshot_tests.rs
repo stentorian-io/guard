@@ -97,50 +97,6 @@ fn prepare_snapshot_includes_curated_entries_sorted_by_tier() {
     }
 }
 
-#[test]
-fn prepare_snapshot_with_trusted_sentinel_toml_includes_project_rules() {
-    let tmp = TempDir::new().unwrap();
-    let state_dir = tmp.path().to_path_buf();
-    sentinel_daemon::state_dir::ensure_runs_dir(&state_dir).unwrap();
-    let rs = RuleStore::open(&sentinel_daemon::state_dir::db_path(&state_dir)).unwrap();
-    let pt = Arc::new(ProcessTree::new());
-    let curated = vec![];
-
-    // Lay out a project with a trusted .sentinel.toml.
-    let proj = tmp.path().join("proj");
-    std::fs::create_dir_all(&proj).unwrap();
-    let toml_path = proj.join(".sentinel.toml");
-    std::fs::write(
-        &toml_path,
-        "version = 1\n[[rules]]\nkind = \"allow\"\nmatch = \"exact\"\npattern = \"internal.acme.com\"\nreason = \"corp registry\"\n",
-    )
-    .unwrap();
-    let canonical = toml_path.canonicalize().unwrap();
-    let sha = sentinel_daemon::policy_file::sha256_of_file(&canonical).unwrap();
-    rs.insert_trusted(&canonical.display().to_string(), &sha, "cli")
-        .unwrap();
-
-    let reply = handle_prepare_snapshot(&proj, &curated, &rs, &pt, &state_dir, false, false);
-    match reply {
-        sentinel_ipc::SnapshotReply::Ok { run_uuid, .. } => {
-            let snap_path =
-                sentinel_daemon::state_dir::run_snapshot_path(&state_dir, &run_uuid);
-            let bytes = std::fs::read(&snap_path).unwrap();
-            let snap = sentinel_core::Snapshot::decode(&bytes).expect("decode");
-            // Project rules tagged ProjectAllow.
-            let has_project = snap.entries.iter().any(|e| {
-                e.pattern == "internal.acme.com" && matches!(e.tier, RuleTier::ProjectAllow)
-            });
-            assert!(has_project, "project rule should appear with ProjectAllow tier");
-            assert!(snap.project_toml_path.is_some());
-            assert_eq!(snap.project_toml_sha256.as_deref(), Some(sha.as_str()));
-        }
-        sentinel_ipc::SnapshotReply::Err { message, .. } => {
-            panic!("expected Ok; got Err: {message}");
-        }
-    }
-}
-
 // ============================================================================
 // Phase 4 plan 04-03 — V4 entry-point tests (D-83 fetch-pre-flight + D-90
 // FeedDeny merge). These exercise `handle_prepare_snapshot_v4_full` against a

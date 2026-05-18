@@ -17,7 +17,6 @@
 //! via #[serde(default)] on the wire fields.
 
 use crate::ipc_server::DaemonState;
-use crate::policy_file::{find_sentinel_toml, parse_file, sha256_of_file};
 use crate::rule_store::RuleStore;
 use crate::snapshot::publish_run;
 use crate::state_dir::run_manifest_path;
@@ -38,12 +37,6 @@ pub enum PrepareError {
     #[error("merge: {0}")]
     Merge(String),
 }
-
-/// Result of `resolve_project_entries`: (project_entries, project_toml_path, project_toml_sha256).
-/// Both metadata fields are `None` when no `.sentinel.toml` was found, `Some` (with empty
-/// entries) when one was found but is not trusted (so the snapshot can name the file in
-/// downstream block-log entries), and `Some` (with non-empty entries) when found and trusted.
-type ProjectResolution = (Vec<AllowlistEntry>, Option<String>, Option<String>);
 
 /// Inputs are passed by reference; outputs are the SnapshotReply to write back.
 ///
@@ -209,20 +202,7 @@ fn handle_prepare_snapshot_inner(
             _ => Vec::new(),
         };
 
-    // 1. Walk-up + trust check + parse.
-    let (project_entries, project_path, project_sha256) =
-        match resolve_project_entries(cwd, rule_store) {
-            Ok(triple) => triple,
-            Err(e) => {
-                warn!(
-                    error = %e,
-                    "PrepareSnapshot: project entries resolution failed; proceeding without project rules"
-                );
-                (Vec::new(), None, None)
-            }
-        };
-
-    // 2. SQLite user rules.
+    // 1. SQLite user rules.
     let user_entries = match rule_store.all_user_rules() {
         Ok(r) => r,
         Err(e) => {
@@ -234,7 +214,7 @@ fn handle_prepare_snapshot_inner(
         }
     };
 
-    // 2a. Phase 4 plan 04-03 (D-90): merge FeedDeny entries derived from
+    // 1a. Phase 4 plan 04-03 (D-90): merge FeedDeny entries derived from
     //     feed_iocs WHERE host_ioc IS NOT NULL. Non-fatal failure path follows
     //     the existing project-entries / user-entries discipline (warn + empty
     //     vec). The structural POL-06 invariant — `RuleTier::CuratedAllow=1 <
@@ -254,7 +234,7 @@ fn handle_prepare_snapshot_inner(
         None => Vec::new(),
     };
 
-    // 2b. M003-S07: discover lockfile near cwd and extract custom registry
+    // 1b. M003-S07: discover lockfile near cwd and extract custom registry
     //     hostnames. These become ProjectAllow entries so private-registry
     //     fetches are not blocked. Non-fatal: log and continue if anything fails.
     let lockfile_entries: Vec<AllowlistEntry> =
@@ -287,32 +267,30 @@ fn handle_prepare_snapshot_inner(
             None => Vec::new(),
         };
 
-    // 3. Concatenate + sort by tier.
+    // 2. Concatenate + sort by tier.
     let mut entries: Vec<AllowlistEntry> = Vec::with_capacity(
         curated.len()
             + user_entries.len()
-            + project_entries.len()
             + feeddeny_entries.len()
             + lockfile_entries.len(),
     );
     entries.extend_from_slice(curated);
-    entries.extend(project_entries);
     entries.extend(user_entries);
     entries.extend(feeddeny_entries);
     entries.extend(lockfile_entries);
     entries.sort_by_key(|e| e.tier);
 
-    // 4. Build snapshot.
+    // 3. Build snapshot.
     let snap = Snapshot {
         schema_version: SCHEMA_V2,
         generated_at_unix_ms: unix_ms_now(),
         entries,
         run_uuid: Some(run_uuid.clone()),
-        project_toml_path: project_path.clone(),
-        project_toml_sha256: project_sha256.clone(),
+        project_toml_path: None,
+        project_toml_sha256: None,
     };
 
-    // 5. Publish per-run snapshot.
+    // 4. Publish per-run snapshot.
     let pub_ = match publish_run(state_dir, &snap, &run_uuid) {
         Ok(p) => p,
         Err(e) => {
@@ -320,7 +298,7 @@ fn handle_prepare_snapshot_inner(
         }
     };
 
-    // 6. Insert RunRecord. The tracked_root is unknown at this point (the
+    // 5. Insert RunRecord. The tracked_root is unknown at this point (the
     //    CLI hasn't sent RegisterRoot yet). We record the run with a zero
     //    audit_token; plan 02-04's RegisterRoot handler updates it later.
     //
@@ -333,7 +311,7 @@ fn handle_prepare_snapshot_inner(
         manifest_path: run_manifest_path(state_dir, &run_uuid),
         is_tty,
         baseline_mode,
-        project_toml_path: project_path.clone(),
+        project_toml_path: None,
     });
 
     // Phase 3 plan 03-07: also apply via setters so any downstream code that
@@ -346,7 +324,6 @@ fn handle_prepare_snapshot_inner(
 
     info!(
         run_uuid = %run_uuid,
-        project_toml = ?project_path,
         is_tty,
         baseline_mode,
         snapshot = %pub_.path.display(),
@@ -358,51 +335,6 @@ fn handle_prepare_snapshot_inner(
         run_uuid,
         feed_warnings,
     )
-}
-
-fn resolve_project_entries(
-    cwd: &Path,
-    rule_store: &RuleStore,
-) -> Result<ProjectResolution, PrepareError> {
-    let toml_path = match find_sentinel_toml(cwd) {
-        Some(p) => p,
-        None => return Ok((Vec::new(), None, None)),
-    };
-    let path_str = toml_path.display().to_string();
-    let sha = sha256_of_file(&toml_path)?;
-
-    let trusted = rule_store
-        .is_trusted(&path_str, &sha)
-        .map_err(|e| PrepareError::RuleStore(e.to_string()))?;
-
-    if !trusted {
-        info!(
-            path = %path_str,
-            sha = %sha,
-            "found .sentinel.toml but not trusted; ignoring rules"
-        );
-        // We DO record the path + sha in the snapshot metadata so block-log
-        // entries can name the untrusted file (e.g. "denied — closest .sentinel.toml at ... is untrusted").
-        return Ok((Vec::new(), Some(path_str), Some(sha)));
-    }
-
-    let toml = parse_file(&toml_path).map_err(|e| PrepareError::Merge(e.to_string()))?;
-    let mut out = Vec::with_capacity(toml.rules.len());
-    for r in toml.rules {
-        let tier = match r.kind {
-            RuleKind::Allow => RuleTier::ProjectAllow,
-            RuleKind::Deny => RuleTier::ProjectDeny,
-        };
-        out.push(AllowlistEntry {
-            kind: r.kind,
-            tier,
-            match_type: r.match_type,
-            pattern: r.pattern,
-            reason: r.reason,
-        });
-    }
-    debug!(path = %path_str, count = out.len(), "loaded project rules");
-    Ok((out, Some(path_str), Some(sha)))
 }
 
 /// CR-05: canonicalize the wire-claimed cwd and reject obviously-suspicious

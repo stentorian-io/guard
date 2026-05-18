@@ -23,7 +23,7 @@
 # What this script DOES (deterministic, byte-identical across hosts):
 #   1. Construct an in-tempdir `package/` tree:
 #      - package.json (synthetic, declares preinstall script)
-#      - preinstall.js (opens TCP to c2-sink.test.invalid:443, exits 0)
+#      - preinstall.js (opens TCP to c2-sink.test.invalid:443, then exits 0)
 #      - index.js (empty stub so `require('ua-parser-js')` does not throw)
 #   2. Pack the tree into a .tgz with normalized owner/group/mtime so the
 #      output is byte-identical regardless of build host.
@@ -70,7 +70,7 @@ trap 'rm -rf "$tempdir"' EXIT
 # ---------------------------------------------------------------------------
 # Pinned hash. Replace <FILL_ON_FIRST_RUN> via the --update-pin flow above.
 # ---------------------------------------------------------------------------
-EXPECTED_OUTPUT_SHA256="9398ea5503135f17bc0c424e6373ddce7c0e113d23577a136638dd7ddcdce984"
+EXPECTED_OUTPUT_SHA256="70f5af6cde74fdb75c698c3045de459e277ae1bdd4324d28be89328e258b2f07"
 
 # Determinism knobs.
 SOURCE_DATE_EPOCH=1577836800   # 2020-01-01T00:00:00Z UTC
@@ -105,7 +105,7 @@ JSON
 
 # preinstall.js — synthetic postinstall hook. Opens an outbound TCP connection
 # to a sink host (c2-sink.test.invalid) on port 443, prints a marker line to
-# stdout, and exits 0 regardless of connect outcome. Sentinel's hook dylib
+# stdout, and exits 0 after connect/error/timeout. Sentinel's hook dylib
 # blocks the connect at libc; the test harness asserts on the JSONL Decision
 # row emitted by the daemon.
 cat > "$pkg_dir/preinstall.js" <<JS
@@ -116,12 +116,16 @@ cat > "$pkg_dir/preinstall.js" <<JS
 var net = require('net');
 process.stdout.write('ua-parser-js-mock: attempting connect to ${SINK_HOST}:${SINK_PORT}\n');
 var sock = net.createConnection({ host: '${SINK_HOST}', port: ${SINK_PORT} });
-sock.on('error', function () { /* swallow — Sentinel may EHOSTUNREACH us */ });
-sock.on('connect', function () { try { sock.destroy(); } catch (_) {} });
-// Exit 0 immediately so npm install does not abort before Sentinel's
-// JSONL Decision row is observable. The connection attempt is the
-// observable side-effect VAL-01 asserts on.
-process.exit(0);
+var done = false;
+function finish() {
+  if (done) return;
+  done = true;
+  try { sock.destroy(); } catch (_) {}
+  process.exit(0);
+}
+sock.on('error', finish);   // Sentinel may EHOSTUNREACH us.
+sock.on('connect', finish); // A leak should not hang npm forever.
+setTimeout(finish, 1000);
 JS
 
 # index.js — empty stub so require('ua-parser-js') after install succeeds.

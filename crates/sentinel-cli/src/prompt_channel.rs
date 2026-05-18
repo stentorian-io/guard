@@ -12,6 +12,7 @@
 
 use std::collections::HashSet;
 use std::io::{Read, Write};
+use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -19,8 +20,8 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use sentinel_ipc::{
-    IPC_SCHEMA_V3, PromptCancel, PromptChannelInit, PromptChannelInitAck,
-    PromptRequest, PromptResponse,
+    IPC_SCHEMA_V3, PromptCancel, PromptChannelInit, PromptChannelInitAck, PromptRequest,
+    PromptResponse,
 };
 
 use crate::CliError;
@@ -101,9 +102,7 @@ impl PromptChannel {
         match ack {
             PromptChannelInitAck::Ok { .. } => {}
             PromptChannelInitAck::Err { message, .. } => {
-                return Err(CliError::Other(format!(
-                    "PromptChannelInit Err: {message}"
-                )));
+                return Err(CliError::Other(format!("PromptChannelInit Err: {message}")));
             }
         }
         // Remove timeouts — the channel is long-lived (D-47).
@@ -166,11 +165,9 @@ impl PromptChannel {
     /// Send the user's response back to the daemon. Removes the prompt_id from in-flight.
     pub fn answer(&mut self, resp: PromptResponse) -> Result<(), CliError> {
         let prompt_id = resp.prompt_id.clone();
-        let result = sentinel_ipc::frame::write_frame(
-            &mut self.writer,
-            &ClientChannelFrame::Response(resp),
-        )
-        .map_err(|e| CliError::DaemonUnreachable(format!("write response: {e}")));
+        let result =
+            sentinel_ipc::frame::write_frame(&mut self.writer, &ClientChannelFrame::Response(resp))
+                .map_err(|e| CliError::DaemonUnreachable(format!("write response: {e}")));
         if let Ok(mut g) = self.inflight.0.lock() {
             g.remove(&prompt_id);
         }
@@ -193,6 +190,18 @@ impl PromptChannel {
 }
 
 impl PromptReader {
+    /// Clone the underlying socket so the orchestrator can interrupt a blocked
+    /// `next_prompt` during run teardown.
+    pub fn shutdown_handle(&self) -> Result<UnixStream, CliError> {
+        self.stream
+            .try_clone()
+            .map_err(|e| CliError::DaemonUnreachable(format!("try_clone prompt reader: {e}")))
+    }
+
+    pub fn shutdown(stream: &UnixStream) {
+        let _ = stream.shutdown(Shutdown::Both);
+    }
+
     /// Block until the daemon sends a PromptRequest. CR-02: this is the
     /// production read entry point — the render thread owns the `PromptReader`
     /// and calls this without holding the SharedChannel mutex, so a concurrent

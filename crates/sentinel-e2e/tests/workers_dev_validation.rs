@@ -23,13 +23,13 @@
 //! regardless of underlying tier), so we honor C-04 by intent rather than
 //! by literal-string match.
 
-use std::io::{BufRead, BufReader, Write as _};
-use std::time::{Duration, Instant};
+use std::io::Write as _;
+use std::time::Duration;
 
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use sentinel_e2e::{
-    cargo_workspace_root, prepare_feed_fixture, resolve_cli, resolve_dylib, resolve_node,
-    DaemonHarness,
+    DaemonHarness, cargo_workspace_root, prepare_feed_fixture, read_pty_until, resolve_cli,
+    resolve_dylib, resolve_node,
 };
 
 const DENY_HOST: &str = "exfil.workers.dev";
@@ -59,8 +59,7 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
 
     // Reuse the Phase 2 harness script — DO NOT MODIFY IT (curated_deny.rs
     // depends on it remaining stable).
-    let script = cargo_workspace_root()
-        .join("crates/sentinel-e2e/harness/connect_workers_dev.js");
+    let script = cargo_workspace_root().join("crates/sentinel-e2e/harness/connect_workers_dev.js");
     assert!(
         script.exists(),
         "harness script missing at {} — Phase 2 plan 02-07 should have created it",
@@ -97,26 +96,8 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
     drop(pair.slave);
 
     // Wait for prompt + pre-script Deny.
-    let mut br = BufReader::new(reader);
-    let mut buf = String::new();
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        if Instant::now() > deadline {
-            panic!(
-                "prompt never appeared within 15s; PTY buf:\n{buf}\nstderr:\n{}",
-                harness.drain_stderr()
-            );
-        }
-        let mut line = String::new();
-        match br.read_line(&mut line) {
-            Ok(0) | Err(_) => break,
-            Ok(_) => {}
-        }
-        buf.push_str(&line);
-        if buf.contains("Choose: [1]") || buf.contains("[d]eny") || buf.contains("Deny:") {
-            break;
-        }
-    }
+    let _buf = read_pty_until(reader, "Choose: [1]", Duration::from_secs(15))
+        .unwrap_or_else(|e| panic!("{e}\nstderr:\n{}", harness.drain_stderr()));
     writer.write_all(b"4\n").expect("write Deny");
     drop(writer);
 

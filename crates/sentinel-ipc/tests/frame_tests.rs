@@ -1,11 +1,15 @@
 use sentinel_ipc::frame::{MAX_FRAME_BYTES, read_frame, write_frame};
-use sentinel_ipc::{IpcError, RegisterRoot, AuditTokenWire, IPC_SCHEMA_V1};
+use sentinel_ipc::{AuditTokenWire, IPC_SCHEMA_V1, IpcError, RegisterRoot};
 
 #[test]
 fn register_root_roundtrip_through_framing() {
     let msg = RegisterRoot {
         schema_version: IPC_SCHEMA_V1,
-        audit_token: AuditTokenWire { val: [1, 2, 3, 4, 5, 4242, 7, 99] },
+        audit_token: AuditTokenWire {
+            val: [1, 2, 3, 4, 5, 4242, 7, 99],
+        },
+        run_uuid: Some("run-123".to_string()),
+        pm_env: vec![("npm_package_name".to_string(), "ua-parser-js".to_string())],
     };
     let mut buf: Vec<u8> = Vec::new();
     write_frame(&mut buf, &msg).expect("write");
@@ -16,7 +20,8 @@ fn register_root_roundtrip_through_framing() {
 
 #[test]
 fn audit_token_8_u32_preserved_exactly() {
-    let original = sentinel_core::AuditToken::synthetic([0xAAAAAAAA, 0, 0, 0, 0, 0xBBBBBBBB, 0, 0xCCCCCCCC]);
+    let original =
+        sentinel_core::AuditToken::synthetic([0xAAAAAAAA, 0, 0, 0, 0, 0xBBBBBBBB, 0, 0xCCCCCCCC]);
     let wire = AuditTokenWire::from(original);
     let back: sentinel_core::AuditToken = wire.into();
     assert_eq!(original.val, back.val);
@@ -47,7 +52,11 @@ fn garbage_cbor_after_valid_prefix_returns_codec_error() {
     buf.extend_from_slice(b"NOT-CBOR");
     let mut cursor = std::io::Cursor::new(buf);
     let result: Result<RegisterRoot, _> = read_frame(&mut cursor);
-    assert!(matches!(result, Err(IpcError::Codec(_))), "expected Codec, got {:?}", result);
+    assert!(
+        matches!(result, Err(IpcError::Codec(_))),
+        "expected Codec, got {:?}",
+        result
+    );
 }
 
 #[test]
@@ -57,7 +66,11 @@ fn truncated_payload_returns_io_error() {
     buf.extend_from_slice(b"only-twelve!"); // provide 12
     let mut cursor = std::io::Cursor::new(buf);
     let result: Result<RegisterRoot, _> = read_frame(&mut cursor);
-    assert!(matches!(result, Err(IpcError::Io(_))), "expected Io, got {:?}", result);
+    assert!(
+        matches!(result, Err(IpcError::Io(_))),
+        "expected Io, got {:?}",
+        result
+    );
 }
 
 #[test]
@@ -73,8 +86,14 @@ fn reply_ack_and_err_roundtrip() {
     write_frame(&mut buf, &Reply::err("nope")).unwrap();
     let mut c = std::io::Cursor::new(buf);
     let r: Reply = read_frame(&mut c).unwrap();
-    if let Reply::Err { schema_version, message } = r {
+    if let Reply::Err {
+        schema_version,
+        message,
+    } = r
+    {
         assert_eq!(schema_version, IPC_SCHEMA_V1);
         assert_eq!(message, "nope");
-    } else { panic!("expected Err variant"); }
+    } else {
+        panic!("expected Err variant");
+    }
 }

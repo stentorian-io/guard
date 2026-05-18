@@ -32,6 +32,10 @@ impl From<AuditTokenWire> for sentinel_core::AuditToken {
 pub struct RegisterRoot {
     pub schema_version: u16, // FIRST field — must equal IPC_SCHEMA_V1
     pub audit_token: AuditTokenWire,
+    #[serde(default)]
+    pub run_uuid: Option<String>,
+    #[serde(default)]
+    pub pm_env: Vec<(String, String)>,
 }
 
 impl RegisterRoot {
@@ -39,6 +43,30 @@ impl RegisterRoot {
         Self {
             schema_version: IPC_SCHEMA_V1,
             audit_token: AuditTokenWire::from(token),
+            run_uuid: None,
+            pm_env: Vec::new(),
+        }
+    }
+
+    pub fn new_for_run(token: sentinel_core::AuditToken, run_uuid: impl Into<String>) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V1,
+            audit_token: AuditTokenWire::from(token),
+            run_uuid: Some(run_uuid.into()),
+            pm_env: Vec::new(),
+        }
+    }
+
+    pub fn new_for_run_with_pm_env(
+        token: sentinel_core::AuditToken,
+        run_uuid: impl Into<String>,
+        pm_env: Vec<(String, String)>,
+    ) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V1,
+            audit_token: AuditTokenWire::from(token),
+            run_uuid: Some(run_uuid.into()),
+            pm_env,
         }
     }
 }
@@ -46,8 +74,13 @@ impl RegisterRoot {
 /// Daemon → CLI: response to RegisterRoot.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Reply {
-    Ack { schema_version: u16 },
-    Err { schema_version: u16, message: String },
+    Ack {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
 }
 
 impl Reply {
@@ -94,9 +127,9 @@ pub const IPC_SCHEMA_V4: u16 = 4;
 /// OSV and GHSA shows two rows).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IntelMatch {
-    pub feed: String,           // "OSV" | "GHSA"
+    pub feed: String, // "OSV" | "GHSA"
     pub advisory_id: String,
-    pub source: String,         // "package" | "host"
+    pub source: String, // "package" | "host"
     pub severity: Option<String>,
     pub tag: Option<String>,
     pub first_seen_ms: u64,
@@ -108,7 +141,7 @@ pub struct IntelMatch {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FeedWarning {
     pub feed: String,
-    pub kind: String,           // "parse_error" | "schema_unknown" | "partial"
+    pub kind: String, // "parse_error" | "schema_unknown" | "partial"
     pub message: String,
 }
 
@@ -122,12 +155,12 @@ pub struct FeedWarning {
 /// `#[serde(default)]` so V2-encoded messages decode cleanly with false.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PrepareSnapshot {
-    pub schema_version: u16,  // V2 or V3 — daemon accepts both (D-73, D-58)
+    pub schema_version: u16, // V2 or V3 — daemon accepts both (D-73, D-58)
     pub cwd: String,
     #[serde(default)]
-    pub is_tty: bool,         // NEW V3 (D-73). Default false on V2 decode.
+    pub is_tty: bool, // NEW V3 (D-73). Default false on V2 decode.
     #[serde(default)]
-    pub baseline_mode: bool,  // NEW V3 (D-58). Default false on V2 decode.
+    pub baseline_mode: bool, // NEW V3 (D-58). Default false on V2 decode.
 }
 
 impl PrepareSnapshot {
@@ -230,8 +263,13 @@ impl ForkEvent {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ForkAck {
-    Ok { schema_version: u16 },
-    Err { schema_version: u16, message: String },
+    Ok {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
 }
 
 impl ForkAck {
@@ -307,8 +345,13 @@ impl ExecEvent {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ExecAck {
-    Ok { schema_version: u16 },
-    Err { schema_version: u16, message: String },
+    Ok {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
 }
 
 impl ExecAck {
@@ -346,8 +389,13 @@ impl DylibLoaded {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DylibLoadedAck {
-    Ok { schema_version: u16 },
-    Err { schema_version: u16, message: String },
+    Ok {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
 }
 
 impl DylibLoadedAck {
@@ -451,8 +499,13 @@ impl TrustPolicy {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TrustPolicyReply {
-    Ok { schema_version: u16 },
-    Err { schema_version: u16, message: String },
+    Ok {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
 }
 
 impl TrustPolicyReply {
@@ -507,8 +560,13 @@ impl EnvNotPropagatedGap {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EnvNotPropagatedGapAck {
-    Ok { schema_version: u16 },
-    Err { schema_version: u16, message: String },
+    Ok {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
 }
 
 impl EnvNotPropagatedGapAck {
@@ -555,7 +613,7 @@ pub enum DaemonStateKind {
     NotInstalled,
     DaemonNotRunning,
     Degraded,
-    StaleFeeds,   // reserved Phase 4 — Phase 3 never emits
+    StaleFeeds, // reserved Phase 4 — Phase 3 never emits
     Operational,
 }
 
@@ -572,7 +630,7 @@ pub struct TrackedRootInfo {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GapInfo {
     pub run_uuid: String,
-    pub gap_kind: String,                // "hardened-runtime" | "env-not-propagated"
+    pub gap_kind: String, // "hardened-runtime" | "env-not-propagated"
     pub binary_path: Option<String>,
     pub detected_at_ms: u64,
 }
@@ -608,7 +666,7 @@ pub struct InstallArtifact {
 /// Aggregated install metadata returned by ReadInstallArtifacts or StatusReply.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstallInfo {
-    pub version: String,          // sentinel-cli compile-time version
+    pub version: String, // sentinel-cli compile-time version
     pub installed_at_ms: u64,
     pub artifacts: Vec<InstallArtifact>,
 }
@@ -622,7 +680,7 @@ pub enum StatusReply {
         tracked_roots: Vec<TrackedRootInfo>,
         recent_gaps: Vec<GapInfo>,
         counters: StatusCounters,
-        feeds: Vec<FeedInfo>,                // empty in Phase 3 (Phase 4 reserved)
+        feeds: Vec<FeedInfo>, // empty in Phase 3 (Phase 4 reserved)
         install_info: Option<InstallInfo>,
     },
     Err {
@@ -674,8 +732,13 @@ pub struct PromptChannelInit {
 /// Daemon → CLI: response to PromptChannelInit.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PromptChannelInitAck {
-    Ok { schema_version: u16 },
-    Err { schema_version: u16, message: String },
+    Ok {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
 }
 
 impl PromptChannelInitAck {
@@ -699,11 +762,11 @@ impl PromptChannelInitAck {
 /// Package-manager context for a prompt — identifies which package triggered the connection.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PackageContext {
-    pub ecosystem: String,        // "npm"|"pip"|"cargo"|"bundle"|"gem"|"go"|"mix"|"hex"|"composer"
+    pub ecosystem: String, // "npm"|"pip"|"cargo"|"bundle"|"gem"|"go"|"mix"|"hex"|"composer"
     pub package: String,
     pub version: String,
     pub lifecycle: Option<String>, // "postinstall"|"install"|"build"|null
-    pub root_command: String,     // argv.join(' ') truncated to 256
+    pub root_command: String,      // argv.join(' ') truncated to 256
 }
 
 /// Process context snapshot at the time of a connection attempt.
@@ -726,12 +789,12 @@ pub struct SuggestedRule {
 /// Daemon → CLI (prompt channel): request user decision on an outbound connection.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptRequest {
-    pub schema_version: u16,                // V3
-    pub prompt_id: String,                  // UUID v4
+    pub schema_version: u16, // V3
+    pub prompt_id: String,   // UUID v4
     pub dest_host: String,
     pub dest_port: u16,
     pub dest_ip: Option<String>,
-    pub source_kind: String,                // Phase 2 D-27 enum string repr
+    pub source_kind: String, // Phase 2 D-27 enum string repr
     pub source_locator: Option<String>,
     pub package_context: Option<PackageContext>,
     pub process: ProcessCtx,
@@ -763,7 +826,7 @@ pub struct RulePattern {
 /// CLI → daemon (prompt channel): user's decision on a PromptRequest.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptResponse {
-    pub schema_version: u16,             // V3
+    pub schema_version: u16, // V3
     pub prompt_id: String,
     pub verdict: PromptVerdict,
     pub rule_pattern: Option<RulePattern>,
@@ -783,18 +846,24 @@ pub struct PromptCancel {
 /// CLI → daemon: insert a user-authored rule into the SQLite rule store.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InsertUserRule {
-    pub schema_version: u16,  // V3
-    pub kind: String,          // "allow"|"deny"
-    pub match_type: String,    // "exact"|"suffix"|"ip"
+    pub schema_version: u16, // V3
+    pub kind: String,        // "allow"|"deny"
+    pub match_type: String,  // "exact"|"suffix"|"ip"
     pub pattern: String,
-    pub reason: String,        // non-empty (D-39)
+    pub reason: String, // non-empty (D-39)
 }
 
 /// Daemon → CLI: response to InsertUserRule.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum InsertUserRuleReply {
-    Ok { schema_version: u16, rule_id: i64 },
-    Err { schema_version: u16, message: String },
+    Ok {
+        schema_version: u16,
+        rule_id: i64,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
 }
 
 impl InsertUserRuleReply {
@@ -1210,8 +1279,13 @@ impl DenyNotify {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DenyNotifyAck {
-    Ok { schema_version: u16 },
-    Err { schema_version: u16, message: String },
+    Ok {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
 }
 
 impl DenyNotifyAck {
@@ -1267,8 +1341,13 @@ impl ExecBlocked {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ExecBlockedAck {
-    Ok { schema_version: u16 },
-    Err { schema_version: u16, message: String },
+    Ok {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
 }
 
 impl ExecBlockedAck {
@@ -1321,8 +1400,13 @@ impl PersistenceWrite {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PersistenceWriteAck {
-    Ok { schema_version: u16 },
-    Err { schema_version: u16, message: String },
+    Ok {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
 }
 
 impl PersistenceWriteAck {

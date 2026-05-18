@@ -15,7 +15,12 @@ use sha2::Digest;
 
 use crate::CliError;
 
-pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, learn_mode: bool) -> Result<i32, CliError> {
+pub fn run(
+    sock: &Path,
+    state_dir: &Path,
+    command: Vec<OsString>,
+    learn_mode: bool,
+) -> Result<i32, CliError> {
     let _ = state_dir; // currently unused; baseline IPC routes via sock
     let cwd = std::env::current_dir().map_err(|e| CliError::Other(format!("cwd: {e}")))?;
     let is_tty = std::io::stdin().is_terminal();
@@ -28,7 +33,8 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, learn_mode: bo
     // auto-trust + stderr notice. The daemon re-hashes the file at the
     // TrustPolicy IPC handler (T-02-06a-01).
     if let Some(toml_path) = sentinel_core::policy_file::find_sentinel_toml(&cwd) {
-        let canonical = toml_path.canonicalize()
+        let canonical = toml_path
+            .canonicalize()
             .map_err(|e| CliError::Other(format!("canonicalize {}: {e}", toml_path.display())))?;
         let canonical_str = canonical.display().to_string();
         let bytes = std::fs::read(&canonical)
@@ -86,7 +92,10 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, learn_mode: bo
     // (D-85 strict-fail returns SnapshotReply::Err, which becomes the `?`
     // above). Warnings here are the D-87 partial-parse path.
     for w in &outcome.feed_warnings {
-        eprintln!("\u{26A0} feed warning ({}): {} \u{2014} {}", w.feed, w.kind, w.message);
+        eprintln!(
+            "\u{26A0} feed warning ({}): {} \u{2014} {}",
+            w.feed, w.kind, w.message
+        );
     }
 
     // Open PromptChannel BEFORE spawning the wrapped child. The shared mutex is
@@ -141,7 +150,13 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, learn_mode: bo
     let child_pid = child.id() as libc::pid_t;
     let token = crate::audit_token::audit_token_for_pid(child_pid)
         .map_err(|e| CliError::DaemonUnreachable(format!("audit_token: {e}")))?;
-    crate::ipc_client::register_root_with_daemon(sock, token)?;
+    let root_pm_env = capture_pm_env_from_current_env();
+    crate::ipc_client::register_root_for_run_with_pm_env_with_daemon(
+        sock,
+        token,
+        &run_uuid,
+        root_pm_env,
+    )?;
 
     // BLOCKER #1 / CR-01: ALWAYS install the SIGINT handler so Ctrl-C reliably
     // propagates to the wrapped child's process group, even when the prompt
@@ -149,14 +164,9 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, learn_mode: bo
     // transient daemon error). When `inflight_handle` is None we install with
     // an empty in-flight registry; `handle_sigint` tolerates an absent channel
     // and a zero-length set, falling through to the load-bearing `killpg`.
-    let inflight_for_sigint = inflight_handle
-        .clone()
-        .unwrap_or_default();
-    let _sigint_handle = crate::sigint_handler::install(
-        inflight_for_sigint,
-        Arc::clone(&shared_channel),
-        pgid,
-    )?;
+    let inflight_for_sigint = inflight_handle.clone().unwrap_or_default();
+    let _sigint_handle =
+        crate::sigint_handler::install(inflight_for_sigint, Arc::clone(&shared_channel), pgid)?;
 
     // Render-loop thread (only when interactive AND not baseline-recording).
     //
@@ -165,6 +175,10 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, learn_mode: bo
     // the SharedChannel mutex which is also held briefly by the SIGINT
     // handler — but never simultaneously with a blocking read.
     let stop_flag = Arc::new(AtomicBool::new(false));
+    let render_shutdown = prompt_reader
+        .as_ref()
+        .map(|reader| reader.shutdown_handle())
+        .transpose()?;
     let render_handle = if let Some(reader) = prompt_reader.take() {
         let shared = Arc::clone(&shared_channel);
         let stop = Arc::clone(&stop_flag);
@@ -179,7 +193,9 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, learn_mode: bo
     };
 
     // Wait for child.
-    let exit_status = child.wait().map_err(|e| CliError::Other(format!("wait: {e}")))?;
+    let exit_status = child
+        .wait()
+        .map_err(|e| CliError::Other(format!("wait: {e}")))?;
     let exit_code = exit_status.code().unwrap_or(1);
 
     // Baseline commit flow.
@@ -189,20 +205,76 @@ pub fn run(sock: &Path, state_dir: &Path, command: Vec<OsString>, learn_mode: bo
         }
     }
 
-    // WR-13: drop the SharedChannel writer half so the render thread's blocked
-    // `read_frame` returns Err (the daemon-side reader exits when our writer
-    // closes the socket; on its half-close the kernel propagates EOF back to
-    // our reader). Without this, `render_handle.join()` would sit forever
-    // because the daemon won't proactively close the channel after the run
-    // ends — it relies on the CLI side to drop the socket on exit.
+    // WR-13: drop the SharedChannel writer half and explicitly shut down the
+    // render reader clone so a blocked `read_frame` wakes up before join.
+    // Dropping only the writer clone is insufficient: the render thread owns a
+    // separate cloned UnixStream that can remain parked in recvfrom forever.
     if let Ok(mut g) = shared_channel.lock() {
         *g = None;
     }
     stop_flag.store(true, Ordering::SeqCst);
+    if let Some(stream) = render_shutdown.as_ref() {
+        crate::prompt_channel::PromptReader::shutdown(stream);
+    }
     if let Some(h) = render_handle {
         let _ = h.join();
     }
     Ok(exit_code)
+}
+
+fn capture_pm_env_from_current_env() -> Vec<(String, String)> {
+    const PM_ENV_PREFIXES: &[&str] = &[
+        "npm_",
+        "PIP_",
+        "VIRTUAL_ENV",
+        "CARGO_",
+        "BUNDLE_",
+        "GEM_HOME",
+        "GO",
+        "MIX_",
+        "HEX_",
+        "COMPOSER_",
+    ];
+    const SECRET_SUBSTRING_PATTERNS: &[&str] =
+        &["TOKEN", "PASSWORD", "SECRET", "PASSWD", "APIKEY", "API_KEY"];
+    const MAX_VALUE_BYTES: usize = 512;
+    const MAX_TOTAL_BYTES: usize = sentinel_ipc::ExecEvent::MAX_PM_ENV_BYTES;
+
+    let mut out = Vec::new();
+    let mut total = 0usize;
+    for (key, value) in std::env::vars() {
+        if !PM_ENV_PREFIXES.iter().any(|prefix| key.starts_with(prefix)) {
+            continue;
+        }
+        let upper = key.to_ascii_uppercase();
+        if SECRET_SUBSTRING_PATTERNS
+            .iter()
+            .any(|pattern| upper.contains(pattern))
+            || upper.ends_with("_AUTH")
+            || upper.contains("__AUTH")
+        {
+            continue;
+        }
+        let value = truncate_utf8(value, MAX_VALUE_BYTES);
+        let pair_size = key.len() + value.len() + 2;
+        if total + pair_size > MAX_TOTAL_BYTES {
+            break;
+        }
+        total += pair_size;
+        out.push((key, value));
+    }
+    out
+}
+
+fn truncate_utf8(value: String, max: usize) -> String {
+    if value.len() <= max {
+        return value;
+    }
+    let mut end = max;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_string()
 }
 
 /// Phase 4 plan 04-03 — CR-overwrite stderr progress while the daemon is in

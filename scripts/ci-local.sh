@@ -37,13 +37,21 @@ fail() { echo -e "${RED}${BOLD}FAIL: $1${RESET}" >&2; exit 1; }
 warn() { echo -e "${YELLOW}⚠${RESET} $1"; }
 
 # ── lint-markdown job (ubuntu) ─────────────────────────────────────────────
+# Prefer brew's node (declared in Brewfile) over whatever the user's PATH
+# resolves to — the latest markdownlint-cli2 needs Node 20+ and some users
+# have an older nvm default that shadows brew.
 step "Markdown lint"
-if command -v npx >/dev/null; then
-  npx --yes markdownlint-cli2 "**/*.md" "#target" "#.gsd" \
+node_bin="$(command -v node || true)"
+if [ -x /opt/homebrew/bin/node ]; then
+  node_bin=/opt/homebrew/bin/node
+fi
+if [ -n "$node_bin" ]; then
+  node_dir="$(dirname "$node_bin")"
+  PATH="$node_dir:$PATH" npx --yes markdownlint-cli2 "**/*.md" "#target" "#.gsd" \
     || fail "markdown lint"
-  pass "markdown lint"
+  pass "markdown lint (node $($node_bin --version))"
 else
-  warn "npx not found — skipping markdown lint"
+  warn "node not found — skipping markdown lint"
 fi
 
 # ── validation job: fixture SHA check ──────────────────────────────────────

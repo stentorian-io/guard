@@ -1,5 +1,5 @@
 //! Sentinel CLI library — exposes spawn / locate / audit_token / ipc_client /
-//! trust_policy for use by integration tests AND main.rs.
+//! for use by integration tests AND main.rs.
 
 pub mod audit_token;
 pub mod baseline;
@@ -13,17 +13,11 @@ pub mod logs;
 pub mod logs_follow;
 pub mod prompt_channel;
 pub mod prompt_render;
-pub mod repair;
 pub mod run_orchestrator;
-pub mod setup;
-pub mod shell_setup;
 pub mod sigint_handler;
 pub mod spawn;
 pub mod status;
-pub mod trust_policy;
 pub mod tty;
-pub mod uninstall;
-pub mod unwrap_all;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -35,8 +29,7 @@ pub enum CliError {
     Io(#[from] std::io::Error),
     #[error("ipc: {0}")]
     Ipc(#[from] sentinel_ipc::IpcError),
-    /// Generic CLI error with a free-form message — used for trust-policy
-    /// (canonicalize / read / parse / TTY) and prepare_snapshot client paths.
+    /// Generic CLI error with a free-form message.
     #[error("{0}")]
     Other(String),
 }

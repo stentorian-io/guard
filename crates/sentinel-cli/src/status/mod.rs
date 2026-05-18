@@ -14,7 +14,6 @@ pub mod denials;
 pub mod persistence;
 pub mod review;
 pub mod rules;
-pub mod trust;
 
 use std::path::Path;
 

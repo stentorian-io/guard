@@ -12,10 +12,9 @@ use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     BaselineCommit, BaselineCommitReply, DeleteInstallArtifacts, DeleteInstallArtifactsReply,
-    FeedWarning, InsertUserRule, InsertUserRuleReply, InstallArtifact, IsTrusted, IsTrustedReply,
-    ListRules, ListRulesReply, ListTrust, ListTrustReply, PrepareSnapshot, ReadInstallArtifacts,
-    ReadInstallArtifactsReply, RegisterRoot, Reply, RuleRow, SnapshotReply, TrustPolicy,
-    TrustPolicyReply, TrustRow,
+    FeedWarning, InsertUserRule, InsertUserRuleReply, InstallArtifact,
+    ListRules, ListRulesReply, PrepareSnapshot, ReadInstallArtifacts,
+    ReadInstallArtifactsReply, RegisterRoot, Reply, RuleRow, SnapshotReply,
 };
 use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
@@ -26,17 +25,12 @@ use std::time::Duration;
 // Tag bytes — must match plan 02-04's MessageTag values exactly. The dylib
 // uses the same values in `sentinel_hook::ipc_client`.
 const TAG_PREPARE_SNAPSHOT: u8 = 0x02;
-const TAG_TRUST_POLICY: u8 = 0x07;
 const TAG_STATUS: u8 = 0x09;
 pub(crate) const TAG_PROMPT_CHANNEL_INIT: u8 = 0x0A;
 const TAG_INSERT_USER_RULE: u8 = 0x0B;
 const TAG_READ_INSTALL_ARTIFACTS: u8 = 0x0C;
 const TAG_BASELINE_COMMIT: u8 = 0x0D;
-// Phase 07 plan 03: list/lookup tags for `sentinel status rules`,
-// `sentinel status trust`, and the first-trust pre-check (D-21, D-24, CLI-16/17/21).
 const TAG_LIST_RULES: u8 = 0x0E;
-const TAG_LIST_TRUST: u8 = 0x0F;
-const TAG_IS_TRUSTED: u8 = 0x10;
 // Phase 07 plan 02 (D-15 WARNING-5): per-target install_artifacts cleanup.
 const TAG_DELETE_INSTALL_ARTIFACTS: u8 = 0x11;
 
@@ -341,22 +335,6 @@ pub fn baseline_commit_request(
     send_tagged_request(sock, TAG_BASELINE_COMMIT, &req)
 }
 
-/// Phase 2 D-38: send `TrustPolicy { path, sha256 }` so the daemon inserts the
-/// (path, sha256) tuple into `trusted_policy_files`. The daemon performs a
-/// defense-in-depth re-hash of the file at handler time (T-02-06a-01) and
-/// rejects on mismatch — the CLI's claimed sha256 is treated as a diagnostic
-/// value, never trusted on its own.
-pub fn trust_policy_request(sock: &Path, path: &str, sha256: &str) -> Result<(), CliError> {
-    let req = TrustPolicy::new(path, sha256);
-    let reply: TrustPolicyReply = send_tagged_request(sock, TAG_TRUST_POLICY, &req)?;
-    match reply {
-        TrustPolicyReply::Ok { .. } => Ok(()),
-        TrustPolicyReply::Err { message, .. } => {
-            Err(CliError::Other(format!("TrustPolicy: {message}")))
-        }
-    }
-}
-
 /// Phase 07 plan 02 D-15 WARNING-5: clear install_artifacts rows for the given
 /// kinds. Invoked by `uninstall::components::remove_*` helpers after their
 /// on-disk teardown so the daemon's view of installed artifacts matches
@@ -378,58 +356,17 @@ pub fn delete_install_artifacts_request(sock: &Path, kinds: Vec<String>) -> Resu
     }
 }
 
-/// Phase 07 tag 0x0E: list user + trusted_toml rules (CLI-16, D-20/D-21).
-///
-/// `include_builtins`: when true, include built-in registry-allowlist rules
-/// (matches the `--all` CLI flag).
-///
-/// `project_filter`: when `Some(canonical_path)`, restrict to rules sourced
-/// from the `.sentinel.toml` at that canonical path (matches the `--project`
-/// CLI flag, where the CLI walks `find_sentinel_toml(cwd)` and canonicalizes
-/// before sending).
+/// List user rules (and optionally builtins) from the daemon.
 pub fn list_rules_request(
     sock: &Path,
     include_builtins: bool,
-    project_filter: Option<String>,
 ) -> Result<Vec<RuleRow>, CliError> {
-    let req = ListRules::new(include_builtins, project_filter);
+    let req = ListRules::new(include_builtins, None);
     let reply: ListRulesReply = send_tagged_request(sock, TAG_LIST_RULES, &req)?;
     match reply {
         ListRulesReply::Ok { rules, .. } => Ok(rules),
         ListRulesReply::Err { message, .. } => {
             Err(CliError::Other(format!("ListRules: {message}")))
-        }
-    }
-}
-
-/// Phase 07 tag 0x0F: list trusted .sentinel.toml entries (CLI-17, D-21).
-pub fn list_trust_request(sock: &Path) -> Result<Vec<TrustRow>, CliError> {
-    let req = ListTrust::new();
-    let reply: ListTrustReply = send_tagged_request(sock, TAG_LIST_TRUST, &req)?;
-    match reply {
-        ListTrustReply::Ok { entries, .. } => Ok(entries),
-        ListTrustReply::Err { message, .. } => {
-            Err(CliError::Other(format!("ListTrust: {message}")))
-        }
-    }
-}
-
-/// Phase 07 tag 0x10: first-trust pre-check (CLI-21, D-24).
-///
-/// `canonical_path` MUST be canonicalized by the caller — the daemon-side
-/// `is_trusted` handler enforces this defense-in-depth and rejects
-/// non-canonical input (mirrors the BLOCKER-03 fix in `handle_trust_policy`).
-pub fn is_trusted_request(
-    sock: &Path,
-    canonical_path: &str,
-    sha256: &str,
-) -> Result<bool, CliError> {
-    let req = IsTrusted::new(canonical_path, sha256);
-    let reply: IsTrustedReply = send_tagged_request(sock, TAG_IS_TRUSTED, &req)?;
-    match reply {
-        IsTrustedReply::Ok { trusted, .. } => Ok(trusted),
-        IsTrustedReply::Err { message, .. } => {
-            Err(CliError::Other(format!("IsTrusted: {message}")))
         }
     }
 }

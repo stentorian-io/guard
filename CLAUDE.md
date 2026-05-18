@@ -2,7 +2,7 @@
 
 **Sentinel**
 
-Sentinel is a free, open-source macOS supply-chain firewall that enforces default-deny on outbound network connections from package-install subtrees. The user runs `sentinel wrap npm install …` (or `pip`, `cargo`, etc.) and Sentinel sandboxes that subtree's network egress — registries are allowed, anything else is denied or surfaces an interactive prompt. v1 is process-tree-only and uses DYLD library injection (no system extension, no kernel components). Whole-machine mode is deferred to v2.
+Sentinel is a free, open-source macOS supply-chain firewall that enforces default-deny on outbound network connections from package-install subtrees. The user runs `sentinel wrap npm install …` (or `pip`, `cargo`, etc.) and Sentinel sandboxes that subtree's network egress — registries are allowed, anything else is denied or surfaces an interactive prompt. Users manage daemon setup themselves (LaunchAgent plist, shell wrapping) per the README. v1 is process-tree-only and uses DYLD library injection (no system extension, no kernel components). Whole-machine mode is deferred to v2.
 
 **Core Value:** **When a compromised package tries to phone home during install, Sentinel blocks it cold and tells the user what happened.** That's the one thing that must work. Every other feature serves this.
 
@@ -27,7 +27,7 @@ Sentinel is a free, open-source macOS supply-chain firewall that enforces defaul
 | IPC | **Unix domain socket** + length-prefixed **CBOR** frames | Peer auth via `getsockopt(SOL_LOCAL, LOCAL_PEERTOKEN)` (kernel-sourced audit token) |
 | Daemon | **sentineld** — sync 32-thread worker pool, bounded queue (64) | LaunchAgent with KeepAlive=true; watchdog crate monitors liveness |
 | Persistence | **rusqlite** (bundled SQLite) | Migrations in `crates/sentinel-daemon/migrations/`; stores rules, feed IOCs, install artifacts |
-| CLI parsing | **clap 4.6** (derive) | Subcommands: wrap, setup, repair, unwrap-all, status |
+| CLI parsing | **clap 4.6** (derive) | Subcommands: wrap, status |
 | Serialization | **ciborium** (CBOR), **serde** | Snapshot format, IPC wire protocol |
 | Logging | **tracing** + **tracing-subscriber** | Daemon logs; JSONL forensic log to `~/Library/Logs/Sentinel/` |
 | Threat-intel | **gix** (git2 in Rust) | Clones ossf/malicious-packages + github/advisory-database repos; OSV JSON parsing |
@@ -53,7 +53,6 @@ sentinel wrap <cmd>   sentineld (LaunchAgent)         libsentinel_hook.dylib
 │ spawn    │          │  resolve (DNS)    │           │  bind/listen/send/   │
 │ child    │          │  prompt_channel   │           │  getaddrinfo/        │
 │ w/ DYLD  │          │  insert_user_rule │           │  exec*/fork/vfork/   │
-│          │          │  trust_policy     │           │  posix_spawn/open    │
 │ wait +   │          │  status/rules/... │           │                      │
 │ report   │          │                   │           │ hot path:            │
 └──────────┘          │ feed system:      │           │  decide_for_sockaddr │
@@ -72,7 +71,7 @@ sentinel wrap <cmd>   sentineld (LaunchAgent)         libsentinel_hook.dylib
 
 | Crate | Type | Purpose |
 |---|---|---|
-| `sentinel-cli` | bin | CLI entry point — `sentinel wrap <cmd>`, `sentinel setup`, `sentinel status`, `sentinel repair` |
+| `sentinel-cli` | bin | CLI entry point — `sentinel wrap <cmd>`, `sentinel status` |
 | `sentinel-daemon` | bin | `sentineld serve` — IPC server, policy engine, feed fetcher, log writer |
 | `sentinel-hook` | cdylib | `libsentinel_hook.dylib` — DYLD-injected interposition library |
 | `sentinel-core` | lib | Domain types: ProcessIdentity, AllowlistEntry, Snapshot (CBOR), policy evaluator, lockfile parser |
@@ -82,20 +81,19 @@ sentinel wrap <cmd>   sentineld (LaunchAgent)         libsentinel_hook.dylib
 
 ### Policy Evaluation Flow
 
-1. CLI sends `PrepareSnapshot` IPC → daemon fetches feeds, merges curated + project + user rules → returns CBOR snapshot (HMAC-signed)
+1. CLI sends `PrepareSnapshot` IPC → daemon fetches feeds, merges curated + user rules → returns CBOR snapshot (HMAC-signed)
 2. CLI spawns child with `DYLD_INSERT_LIBRARIES=libsentinel_hook.dylib` + `SENTINEL_SNAPSHOT_MANIFEST=<path>`
 3. Hook `#[ctor]` loads snapshot, captures original libc symbols via `RTLD_NEXT`
-4. On `connect()` / `sendto()` / etc.: `decide_for_sockaddr()` → in-process cache → `evaluate_policy()` (tier walk: CuratedAllow → ProjectAllow → UserAllow → CuratedDeny → default Deny)
+4. On `connect()` / `sendto()` / etc.: `decide_for_sockaddr()` → in-process cache → `evaluate_policy()` (tier walk: CuratedAllow → UserAllow → CuratedDeny → default Deny)
 5. Cache miss → `Resolve` IPC to daemon for DNS → cache result → re-evaluate
 6. Deny + TTY → prompt channel → user Allow/Deny → persist to SQLite
 
 ### Rule Tiers (precedence order)
 
 1. **CuratedAllow** — built-in allowlist (`crates/sentinel-core/data/allowlist.yaml`): package registries, CDNs
-2. **ProjectAllow** — `.sentinel.toml` in project tree (trust-gated)
-3. **UserAllow** — user-created rules (via prompt or CLI)
-4. **CuratedDeny** — threat-intel IOCs from OSV/GHSA feeds
-5. **Default Deny** — everything else
+2. **UserAllow** — user-created rules (via prompt or CLI), persisted in SQLite
+3. **CuratedDeny** — threat-intel IOCs from OSV/GHSA feeds
+4. **Default Deny** — everything else
 
 ### Known Limitations (v1 / DYLD approach)
 
@@ -154,7 +152,8 @@ Conventional commits scoped by subsystem: `feat(hook):`, `fix(daemon):`, `test(e
 - Frame format: 4-byte big-endian length prefix + CBOR payload
 - Auth: kernel-sourced audit token via `LOCAL_PEERTOKEN` socket option
 
-### Project Config
+### User Rules
 
-- `.sentinel.toml` — per-project rules (boundary walk from cwd to find it)
-- Trust gate: TTY prompt on first use; auto-trust in non-TTY (SHA-256 validated)
+- Managed via interactive prompts during `sentinel wrap` or the `--learn` flag
+- Persisted in SQLite (`sentinel.db`) — no per-project config files
+- Viewable via `sentinel status rules [--all] [--json]`

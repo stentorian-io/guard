@@ -82,20 +82,7 @@ pub fn run_baseline_commit(sock: &Path, run_uuid: &str) -> Result<(), CliError> 
     tf.persist(&target)
         .map_err(|e| CliError::Other(format!("persist: {e}")))?;
 
-    use sha2::{Digest, Sha256};
-    let canonical = target
-        .canonicalize()
-        .unwrap_or_else(|_| target.clone());
-    let sha = format!("{:x}", Sha256::digest(new_content.as_bytes()));
-    crate::ipc_client::trust_policy_request(
-        sock,
-        &canonical.display().to_string(),
-        &sha,
-    )?;
-    println!(
-        "Baseline committed; trust updated for sha256={}.",
-        &sha[..12]
-    );
+    println!("Baseline committed to {}.", target.display());
     Ok(())
 }
 

@@ -24,7 +24,6 @@ pub mod dev_install;
 pub mod feed_refresh;
 pub mod persistence_watcher;
 pub mod rule_store;
-pub mod policy_file;
 
 // Convenience re-exports for integration tests (plan 03-12).
 pub use ipc_server::DaemonState;

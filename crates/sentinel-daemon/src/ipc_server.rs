@@ -34,10 +34,10 @@ use sentinel_ipc::{
     DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap,
     EnvNotPropagatedGapAck, ExecAck, ExecBlocked, ExecBlockedAck, ExecEvent, ForkAck, ForkEvent,
     IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4, InsertUserRule, InsertUserRuleReply, IpcError,
-    IsTrusted, IsTrustedReply, ListRules, ListRulesReply, ListTrust, ListTrustReply,
+    ListRules, ListRulesReply,
     PersistenceWrite, PersistenceWriteAck, Ping, PingReply, PrepareSnapshot, PromptChannelInit,
     PromptChannelInitAck, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply,
-    Resolve, ResolveReply, SnapshotReply, Status, StatusReply, TrustPolicy, TrustPolicyReply,
+    Resolve, ResolveReply, SnapshotReply, Status, StatusReply,
 };
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
@@ -432,9 +432,6 @@ impl IpcServer {
             FrameKind::Tagged(MessageTag::PrepareSnapshot) => {
                 handle_prepare_snapshot_frame(&mut stream, peer_token, state);
             }
-            FrameKind::Tagged(MessageTag::TrustPolicy) => {
-                handle_trust_policy_frame(&mut stream, peer_token, state);
-            }
             FrameKind::Tagged(MessageTag::Resolve) => {
                 handle_resolve_frame(&mut stream, peer_token, state);
             }
@@ -464,12 +461,6 @@ impl IpcServer {
             FrameKind::Tagged(MessageTag::ListRules) => {
                 handle_list_rules_frame(&mut stream, state);
             }
-            FrameKind::Tagged(MessageTag::ListTrust) => {
-                handle_list_trust_frame(&mut stream, state);
-            }
-            FrameKind::Tagged(MessageTag::IsTrusted) => {
-                handle_is_trusted_frame(&mut stream, state);
-            }
             FrameKind::Tagged(MessageTag::DeleteInstallArtifacts) => {
                 handle_delete_install_artifacts_frame(&mut stream, state);
             }
@@ -484,6 +475,9 @@ impl IpcServer {
             }
             FrameKind::Tagged(MessageTag::Ping) => {
                 handle_ping_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(tag) => {
+                warn!(?tag, "unhandled message tag — ignoring");
             }
         }
     }
@@ -653,66 +647,6 @@ fn handle_list_rules_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
     );
     if let Err(e) = write_tagged(stream, MessageTag::ListRules, &reply) {
         error!(error = %e, "failed to send ListRulesReply");
-    }
-}
-
-fn handle_list_trust_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    let req: ListTrust = match read_tagged_body(stream) {
-        Ok(m) => m,
-        Err(e) => {
-            warn!(error = %e, "ListTrust decode failed");
-            let _ = write_tagged(
-                stream,
-                MessageTag::ListTrust,
-                &ListTrustReply::err(format!("decode: {e}")),
-            );
-            return;
-        }
-    };
-    if req.schema_version != IPC_SCHEMA_V3 {
-        let _ = write_tagged(
-            stream,
-            MessageTag::ListTrust,
-            &ListTrustReply::err(format!(
-                "schema_version {} != IPC_SCHEMA_V3",
-                req.schema_version
-            )),
-        );
-        return;
-    }
-    let reply = crate::handlers::list_trust::handle_list_trust(&req, &state.rule_store);
-    if let Err(e) = write_tagged(stream, MessageTag::ListTrust, &reply) {
-        error!(error = %e, "failed to send ListTrustReply");
-    }
-}
-
-fn handle_is_trusted_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    let req: IsTrusted = match read_tagged_body(stream) {
-        Ok(m) => m,
-        Err(e) => {
-            warn!(error = %e, "IsTrusted decode failed");
-            let _ = write_tagged(
-                stream,
-                MessageTag::IsTrusted,
-                &IsTrustedReply::err(format!("decode: {e}")),
-            );
-            return;
-        }
-    };
-    if req.schema_version != IPC_SCHEMA_V3 {
-        let _ = write_tagged(
-            stream,
-            MessageTag::IsTrusted,
-            &IsTrustedReply::err(format!(
-                "schema_version {} != IPC_SCHEMA_V3",
-                req.schema_version
-            )),
-        );
-        return;
-    }
-    let reply = crate::handlers::is_trusted::handle_is_trusted(&req, &state.rule_store);
-    if let Err(e) = write_tagged(stream, MessageTag::IsTrusted, &reply) {
-        error!(error = %e, "failed to send IsTrustedReply");
     }
 }
 
@@ -1794,44 +1728,6 @@ fn handle_prepare_snapshot_frame(
     );
     if let Err(e) = write_tagged(stream, MessageTag::PrepareSnapshot, &reply) {
         error!(error = %e, "failed to send SnapshotReply");
-    }
-}
-
-fn handle_trust_policy_frame(
-    stream: &mut UnixStream,
-    _peer_token: AuditToken,
-    state: &Arc<DaemonState>,
-) {
-    let req: TrustPolicy = match read_tagged_body(stream) {
-        Ok(m) => m,
-        Err(e) => {
-            warn!(error = %e, "TrustPolicy decode failed");
-            let _ = write_tagged(
-                stream,
-                MessageTag::TrustPolicy,
-                &TrustPolicyReply::err(format!("decode: {e}")),
-            );
-            return;
-        }
-    };
-    if req.schema_version != IPC_SCHEMA_V2 {
-        let _ = write_tagged(
-            stream,
-            MessageTag::TrustPolicy,
-            &TrustPolicyReply::err(format!(
-                "schema_version {} != IPC_SCHEMA_V2",
-                req.schema_version
-            )),
-        );
-        return;
-    }
-    let reply = crate::handlers::trust_policy::handle_trust_policy(
-        &req.path,
-        &req.sha256,
-        &state.rule_store,
-    );
-    if let Err(e) = write_tagged(stream, MessageTag::TrustPolicy, &reply) {
-        error!(error = %e, "failed to send TrustPolicyReply");
     }
 }
 

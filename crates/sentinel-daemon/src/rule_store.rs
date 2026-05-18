@@ -26,7 +26,6 @@ use rusqlite_migration::{Migrations, M};
 use sentinel_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
 use std::path::Path;
 use std::sync::Mutex;
-use tracing::warn;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuleStoreError {
@@ -250,92 +249,25 @@ impl RuleStore {
     /// `crates/sentinel-core/data/allowlist.yaml` via
     /// `crates/sentinel-daemon/src/curated.rs::load_curated()`). The
     /// caller (`handle_list_rules`) merges them in.
-    ///
-    /// `project_filter == Some(p)` filters trusted-toml rows to the .sentinel.toml
-    /// at `p` (exact canonical-string match — caller has already canonicalized).
-    /// User rows are unaffected by the project filter (they are global).
-    ///
-    /// Per-file parse errors / file-not-found / IO errors are tolerated and the
-    /// row is skipped (logged via `tracing::warn!`). Only SQLite errors propagate.
-    pub fn all_rules_with_source(
-        &self,
-        project_filter: Option<&str>,
-    ) -> SqlResult<Vec<StoredRule>> {
+    pub fn all_rules_with_source(&self) -> SqlResult<Vec<StoredRule>> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         let mut out: Vec<StoredRule> = Vec::new();
 
-        // 1. User rules from the `rules` table.
-        {
-            let mut stmt = conn.prepare(
-                "SELECT kind, match_type, pattern, reason FROM rules ORDER BY id",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                Ok(StoredRule {
-                    source: "user".into(),
-                    kind: row.get::<_, String>(0)?,
-                    match_type: row.get::<_, String>(1)?,
-                    pattern: row.get::<_, String>(2)?,
-                    reason: row.get::<_, String>(3)?,
-                    source_path: None,
-                })
-            })?;
-            for r in rows {
-                out.push(r?);
-            }
-        }
-
-        // 2. Trusted-toml rules: enumerate trusted_policy_files, lazy-parse
-        // each .sentinel.toml on disk, expand its [[rules]] table.
-        // Per-file IO/parse errors are tolerated (drift between trust insert
-        // and ListRules call is expected when files move/are edited).
-        {
-            let mut stmt = conn.prepare(
-                "SELECT path FROM trusted_policy_files ORDER BY trusted_at",
-            )?;
-            let path_rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<SqlResult<Vec<String>>>()?;
-            for path in path_rows {
-                if let Some(filter) = project_filter {
-                    if path != filter {
-                        continue;
-                    }
-                }
-                // Read + parse the .sentinel.toml. Any error ⇒ skip + warn.
-                let content = match std::fs::read_to_string(&path) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        warn!(path = %path, error = %e, "trusted .sentinel.toml read failed — skipping");
-                        continue;
-                    }
-                };
-                let parsed = match sentinel_core::policy_file::parse(&content) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        warn!(path = %path, error = %e, "trusted .sentinel.toml parse failed — skipping");
-                        continue;
-                    }
-                };
-                for rule in parsed.rules {
-                    let kind_str = match rule.kind {
-                        RuleKind::Allow => "allow",
-                        RuleKind::Deny => "deny",
-                    };
-                    let match_str = match rule.match_type {
-                        MatchType::Exact => "exact",
-                        MatchType::Suffix => "suffix",
-                        MatchType::Ip => "ip",
-                    };
-                    out.push(StoredRule {
-                        source: "trusted_toml".into(),
-                        kind: kind_str.into(),
-                        match_type: match_str.into(),
-                        pattern: rule.pattern,
-                        reason: rule.reason,
-                        source_path: Some(path.clone()),
-                    });
-                }
-            }
+        let mut stmt = conn.prepare(
+            "SELECT kind, match_type, pattern, reason FROM rules ORDER BY id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(StoredRule {
+                source: "user".into(),
+                kind: row.get::<_, String>(0)?,
+                match_type: row.get::<_, String>(1)?,
+                pattern: row.get::<_, String>(2)?,
+                reason: row.get::<_, String>(3)?,
+                source_path: None,
+            })
+        })?;
+        for r in rows {
+            out.push(r?);
         }
 
         Ok(out)

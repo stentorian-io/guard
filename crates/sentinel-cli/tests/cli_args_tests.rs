@@ -1,5 +1,5 @@
 use clap::Parser;
-use sentinel_cli::cli::{Cli, Cmd, SetupTarget, StatusSub};
+use sentinel_cli::cli::{Cli, Cmd, StatusSub};
 use std::ffi::OsString;
 
 // ---- sentinel wrap parser shape -----------------------------------------------
@@ -97,7 +97,7 @@ fn unrecognized_subcommand_is_parse_error() {
 
 #[test]
 fn learn_on_non_wrap_verb_is_parse_error() {
-    let r = Cli::try_parse_from(["sentinel", "setup", "--learn"]);
+    let r = Cli::try_parse_from(["sentinel", "status", "--learn"]);
     assert!(r.is_err(), "--learn must only be accepted on wrap");
 }
 
@@ -145,62 +145,7 @@ fn non_tty_learn_returns_exit_64() {
     );
 }
 
-// ---- Setup / Status / Repair / UnwrapAll parser tests -----------------------
-
-#[test]
-fn setup_bare_no_target_no_flags() {
-    let cli = Cli::try_parse_from(["sentinel", "setup"]).expect("parse");
-    match cli.cmd {
-        Cmd::Setup { target, remove, reinstall, yes } => {
-            assert!(target.is_none());
-            assert!(!remove); assert!(!reinstall); assert!(!yes);
-        }
-        other => panic!("expected Setup, got {other:?}"),
-    }
-}
-
-#[test]
-fn setup_daemon_no_flags() {
-    let cli = Cli::try_parse_from(["sentinel", "setup", "daemon"]).expect("parse");
-    match cli.cmd {
-        Cmd::Setup { target: Some(SetupTarget::Daemon), remove, reinstall, yes } => {
-            assert!(!remove); assert!(!reinstall); assert!(!yes);
-        }
-        other => panic!("expected Setup{{Daemon}}, got {other:?}"),
-    }
-}
-
-#[test]
-fn setup_shell_no_flags() {
-    let cli = Cli::try_parse_from(["sentinel", "setup", "shell"]).expect("parse");
-    match cli.cmd {
-        Cmd::Setup { target: Some(SetupTarget::Shell), remove, reinstall, yes } => {
-            assert!(!remove); assert!(!reinstall); assert!(!yes);
-        }
-        other => panic!("expected Setup{{Shell}}, got {other:?}"),
-    }
-}
-
-#[test]
-fn setup_daemon_remove_yes() {
-    let cli = Cli::try_parse_from(["sentinel", "setup", "daemon", "--remove", "-y"]).expect("parse");
-    match cli.cmd {
-        Cmd::Setup { target: Some(SetupTarget::Daemon), remove: true, yes: true, .. } => {}
-        other => panic!("expected Setup{{Daemon,remove,yes}}, got {other:?}"),
-    }
-}
-
-#[test]
-fn setup_force_is_not_a_synonym_for_yes() {
-    let r = Cli::try_parse_from(["sentinel", "setup", "--remove", "--force"]);
-    assert!(r.is_err(), "--force must be rejected; got {:?}", r);
-}
-
-#[test]
-fn setup_remove_reinstall_conflict() {
-    let r = Cli::try_parse_from(["sentinel", "setup", "--remove", "--reinstall"]);
-    assert!(r.is_err(), "--remove + --reinstall must conflict; got {:?}", r);
-}
+// ---- Status parser tests ---------------------------------------------------
 
 #[test]
 fn status_bare_no_sub() {

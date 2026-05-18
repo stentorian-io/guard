@@ -76,7 +76,7 @@ fn ua_parser_js_postinstall_blocked_with_package_context() {
     // Sink redirect: c2-sink.test.invalid -> 127.0.0.1 via /etc/hosts (or
     // localhost-listener fallback). RAII Drop restores /etc/hosts on test exit.
     let _sink =
-        sink_listener::start_or_hosts(&["c2-sink.test.invalid"], 18443).expect("sink redirect");
+        sink_listener::start_or_hosts(&["c2-sink.test.invalid"], 0).expect("sink redirect");
 
     // Fixture path (committed bytes from Plan 05-01).
     let fixture = cargo_workspace_root()
@@ -143,17 +143,13 @@ fn ua_parser_js_postinstall_blocked_with_package_context() {
     drop(pair.slave);
 
     // -----------------------------------------------------------------------
-    // Wait for the prompt to appear, then pre-script Deny (choice 4).
-    // The CLI prompt UI (prompt_render.rs:66) prints:
-    //   "  Choose: [1]once  [2]always-machine  [3]always-project  [4]deny  [?]help"
-    // We match on the unambiguous "Choose: [1]" prefix (matches every existing
-    // PTY-driven e2e test in this crate).
+    // Wait for the prompt to appear, then pre-script Deny (choice 3).
+    // The CLI prompt UI (prompt_render.rs:65) prints:
+    //   "  Choose: [1]once  [2]always  [3]deny  [?]help"
     // -----------------------------------------------------------------------
     let _buf = read_pty_until(reader, "Choose: [1]", Duration::from_secs(60))
         .unwrap_or_else(|e| panic!("{e}\nstderr:\n{}", harness.drain_stderr()));
-    // Choice "4" is the Deny option in the prompt UI (prompt_render.rs:66).
-    // If the prompt UX changes, update this to match the current Deny shortcut.
-    writer.write_all(b"4\n").expect("write Deny");
+    writer.write_all(b"3\n").expect("write Deny");
     drop(writer);
 
     // Wait for the wrapped command to exit. PTY exit codes are unreliable

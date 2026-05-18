@@ -99,7 +99,7 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
     // Wait for prompt + pre-script Deny.
     let _buf = read_pty_until(reader, "Choose: [1]", Duration::from_secs(15))
         .unwrap_or_else(|e| panic!("{e}\nstderr:\n{}", harness.drain_stderr()));
-    writer.write_all(b"4\n").expect("write Deny");
+    writer.write_all(b"3\n").expect("write Deny");
     drop(writer);
 
     let _ = child.wait();

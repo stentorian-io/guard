@@ -75,8 +75,8 @@ fn deny_blocks_connection_and_logs_prompt_deny() {
         }
     }
 
-    // Choice 4 = Deny.
-    writer.write_all(b"4\n").expect("write choice 4");
+    // Choice 3 = Deny.
+    writer.write_all(b"3\n").expect("write choice 3");
     drop(writer);
 
     let exit_status = child.wait().expect("wait");

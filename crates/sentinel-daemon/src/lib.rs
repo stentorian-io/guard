@@ -20,7 +20,6 @@ pub mod ipc_server;
 pub mod os_ffi;
 pub mod peer_auth;
 pub mod tracked;
-pub mod dev_install;
 pub mod feed_refresh;
 pub mod persistence_watcher;
 pub mod rule_store;

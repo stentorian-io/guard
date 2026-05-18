@@ -51,7 +51,7 @@ pub fn handle_status(state: &DaemonState) -> StatusReply {
     let (blocks, allows, gaps) = state.log_writer.counters_snapshot();
     let counters = StatusCounters {
         rules_user: state.rule_store.count_user_rules().unwrap_or(0),
-        rules_trusted_toml: state.rule_store.count_trusted().unwrap_or(0),
+        rules_trusted_toml: 0,
         blocks_today: blocks,
         allows_today: allows,
         gaps_today: gaps,

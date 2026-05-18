@@ -17,7 +17,7 @@ pub mod rules;
 
 use std::path::Path;
 
-use sentinel_ipc::{DaemonStateKind, FeedInfo, GapInfo, StatusCounters, StatusReply, TrackedRootInfo, InstallInfo};
+use sentinel_ipc::{DaemonStateKind, FeedInfo, GapInfo, InstallInfo, StatusCounters, StatusReply, TrackedRootInfo};
 
 use crate::CliError;
 
@@ -38,27 +38,8 @@ fn read_watchdog_health(state_dir: &Path) -> Option<WatchdogHealth> {
 }
 
 pub fn run_status(sock: &Path, state_dir: &Path, verbose: bool, json: bool) -> Result<i32, CliError> {
-    let reply = match crate::ipc_client::probe_daemon_alive(sock) {
-        Ok(()) => match crate::ipc_client::status_request(sock) {
-            Ok(r) => r,
-            Err(_) => {
-                let db = state_dir.join("sentinel.db");
-                return render_offline(
-                    if db.exists() { DaemonStateKind::DaemonNotRunning } else { DaemonStateKind::NotInstalled },
-                    verbose,
-                    json,
-                );
-            }
-        },
-        Err(_) => {
-            let db = state_dir.join("sentinel.db");
-            return render_offline(
-                if db.exists() { DaemonStateKind::DaemonNotRunning } else { DaemonStateKind::NotInstalled },
-                verbose,
-                json,
-            );
-        }
-    };
+    let _ = state_dir;
+    let reply = crate::ipc_client::status_request(sock)?;
 
     if json {
         let s = serde_json::to_string(&reply).map_err(|e| CliError::Other(format!("json: {e}")))?;
@@ -103,55 +84,14 @@ pub fn run_status(sock: &Path, state_dir: &Path, verbose: bool, json: bool) -> R
     }
 }
 
-pub(crate) fn render_offline(state: DaemonStateKind, verbose: bool, json: bool) -> Result<i32, CliError> {
-    render_offline_to(&mut std::io::stdout().lock(), state, verbose, json)
-}
-
-pub(crate) fn render_offline_to<W: std::io::Write>(
-    w: &mut W,
-    state: DaemonStateKind,
-    verbose: bool,
-    json: bool,
-) -> Result<i32, CliError> {
-    if json {
-        let payload = serde_json::json!({
-            "daemon_state": match state {
-                DaemonStateKind::NotInstalled => "NotInstalled",
-                DaemonStateKind::DaemonNotRunning => "DaemonNotRunning",
-                _ => "Unknown",
-            }
-        });
-        let _ = writeln!(w, "{}", payload);
-        return Ok(2);
-    }
-    let zero_counters = StatusCounters {
-        rules_user: 0,
-        rules_trusted_toml: 0,
-        blocks_today: 0,
-        allows_today: 0,
-        gaps_today: 0,
-    };
-    if verbose {
-        render_verbose_to(w, state, &[], &[], &zero_counters, &[], None);
-    } else {
-        render_minimal_to(w, state, 0, &[]);
-    }
-    Ok(2)
-}
-
-pub(crate) fn render_minimal(state: DaemonStateKind, gaps_24h: usize, feeds: &[FeedInfo]) {
+pub fn render_minimal(state: DaemonStateKind, gaps_24h: usize, feeds: &[FeedInfo]) {
     render_minimal_to(&mut std::io::stdout().lock(), state, gaps_24h, feeds);
 }
 
-pub(crate) fn render_minimal_to<W: std::io::Write>(w: &mut W, state: DaemonStateKind, gaps_24h: usize, feeds: &[FeedInfo]) {
-    let ambient = std::env::var_os("SENTINEL_AMBIENT").is_some();
+pub fn render_minimal_to<W: std::io::Write>(w: &mut W, state: DaemonStateKind, gaps_24h: usize, feeds: &[FeedInfo]) {
     match state {
         DaemonStateKind::Operational => {
-            if ambient {
-                let _ = writeln!(w, "sentinel: operational (ambient shell wrapping active)");
-            } else {
-                let _ = writeln!(w, "sentinel: operational");
-            }
+            let _ = writeln!(w, "sentinel: operational");
         }
         DaemonStateKind::Degraded => { let _ = writeln!(
             w,
@@ -169,15 +109,10 @@ pub(crate) fn render_minimal_to<W: std::io::Write>(w: &mut W, state: DaemonState
                 );
             }
         }
-        DaemonStateKind::DaemonNotRunning => { let _ = writeln!(
-            w,
-            "sentinel: daemon-not-running — run `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.sentinel.daemon.plist`"
-        ); }
-        DaemonStateKind::NotInstalled => { let _ = writeln!(w, "sentinel: not-installed — run `sentinel install`"); }
     }
 }
 
-pub(crate) fn render_verbose(
+pub fn render_verbose(
     state: DaemonStateKind,
     tracked_roots: &[TrackedRootInfo],
     recent_gaps: &[GapInfo],
@@ -196,7 +131,7 @@ pub(crate) fn render_verbose(
     );
 }
 
-pub(crate) fn render_verbose_to<W: std::io::Write>(
+pub fn render_verbose_to<W: std::io::Write>(
     w: &mut W,
     state: DaemonStateKind,
     tracked_roots: &[TrackedRootInfo],
@@ -209,13 +144,8 @@ pub(crate) fn render_verbose_to<W: std::io::Write>(
         DaemonStateKind::Operational => "operational",
         DaemonStateKind::Degraded => "degraded",
         DaemonStateKind::StaleFeeds => "stale-feeds",
-        DaemonStateKind::DaemonNotRunning => "daemon-not-running",
-        DaemonStateKind::NotInstalled => "not-installed",
     };
     let _ = writeln!(w, "State: {state_str}");
-    if std::env::var_os("SENTINEL_AMBIENT").is_some() {
-        let _ = writeln!(w, "Ambient: active (shell wrapping enabled)");
-    }
     if let Some(info) = install_info {
         let _ = writeln!(w, "Version: {} (installed_at_ms {})", info.version, info.installed_at_ms);
         let _ = writeln!(w, "Artifacts:");
@@ -226,11 +156,10 @@ pub(crate) fn render_verbose_to<W: std::io::Write>(
         let _ = writeln!(w, "Install info: (none)");
     }
     let _ = writeln!(w, "\nCounters:");
-    let _ = writeln!(w, "  rules_user:         {}", counters.rules_user);
-    let _ = writeln!(w, "  rules_trusted_toml: {}", counters.rules_trusted_toml);
-    let _ = writeln!(w, "  blocks_today:       {}", counters.blocks_today);
-    let _ = writeln!(w, "  allows_today:       {}", counters.allows_today);
-    let _ = writeln!(w, "  gaps_today:         {}", counters.gaps_today);
+    let _ = writeln!(w, "  rules_user:   {}", counters.rules_user);
+    let _ = writeln!(w, "  blocks_today: {}", counters.blocks_today);
+    let _ = writeln!(w, "  allows_today: {}", counters.allows_today);
+    let _ = writeln!(w, "  gaps_today:   {}", counters.gaps_today);
 
     let _ = writeln!(w, "\nFeeds ({}):", feeds.len());
     for f in feeds {
@@ -304,12 +233,9 @@ mod render_tests {
         }
     }
 
-    /// Test 1: render_minimal_to emits state-specific content for all 5 variants.
     #[test]
     fn render_minimal_emits_correct_line_for_each_state() {
         let cases: &[(DaemonStateKind, &[&str])] = &[
-            (DaemonStateKind::NotInstalled, &["not-installed", "sentinel install"]),
-            (DaemonStateKind::DaemonNotRunning, &["daemon-not-running", "launchctl"]),
             (DaemonStateKind::Operational, &["operational"]),
             (DaemonStateKind::Degraded, &["degraded", "coverage gap"]),
             (DaemonStateKind::StaleFeeds, &["stale-feeds", "7 days"]),
@@ -331,7 +257,6 @@ mod render_tests {
         }
     }
 
-    /// Test 2: render_minimal_to includes gap count for Degraded state.
     #[test]
     fn render_minimal_includes_gap_count_for_degraded() {
         let mut buf = Vec::new();
@@ -344,15 +269,12 @@ mod render_tests {
         );
     }
 
-    /// Test 3: render_verbose_to emits "State: <state-string>" as the first line for all 5 variants.
     #[test]
     fn render_verbose_emits_correct_state_string() {
         let cases: &[(DaemonStateKind, &str)] = &[
             (DaemonStateKind::Operational, "State: operational"),
             (DaemonStateKind::Degraded, "State: degraded"),
             (DaemonStateKind::StaleFeeds, "State: stale-feeds"),
-            (DaemonStateKind::DaemonNotRunning, "State: daemon-not-running"),
-            (DaemonStateKind::NotInstalled, "State: not-installed"),
         ];
 
         for (state, expected_first_line) in cases {
@@ -368,7 +290,6 @@ mod render_tests {
         }
     }
 
-    /// Test 5: render_minimal_to shows stale feed names when available.
     #[test]
     fn render_minimal_stale_feeds_shows_feed_names() {
         use sentinel_ipc::FeedInfo;
@@ -383,7 +304,6 @@ mod render_tests {
         assert!(!s.contains("GHSA"), "should not mention the fresh feed");
     }
 
-    /// Test 6: render_verbose_to includes Feeds section.
     #[test]
     fn render_verbose_includes_feeds_section() {
         use sentinel_ipc::FeedInfo;
@@ -397,33 +317,5 @@ mod render_tests {
         assert!(s.contains("OSV"), "should list OSV feed");
         assert!(s.contains("never"), "should show 'never' for unpulled feed");
         assert!(s.contains("STALE"), "should show STALE for non-fresh feed");
-    }
-
-    /// Test 4: render_offline_to with json=true emits correct "daemon_state" discriminator.
-    #[test]
-    fn render_offline_json_emits_correct_discriminator() {
-        // NotInstalled
-        let mut buf = Vec::new();
-        render_offline_to(&mut buf, DaemonStateKind::NotInstalled, false, true)
-            .expect("render_offline_to NotInstalled json");
-        let s = String::from_utf8(buf).unwrap();
-        let v: serde_json::Value = serde_json::from_str(s.trim()).expect("valid JSON for NotInstalled");
-        assert_eq!(
-            v.get("daemon_state").and_then(|x| x.as_str()),
-            Some("NotInstalled"),
-            "NotInstalled json: got: {v}"
-        );
-
-        // DaemonNotRunning
-        let mut buf2 = Vec::new();
-        render_offline_to(&mut buf2, DaemonStateKind::DaemonNotRunning, false, true)
-            .expect("render_offline_to DaemonNotRunning json");
-        let s2 = String::from_utf8(buf2).unwrap();
-        let v2: serde_json::Value = serde_json::from_str(s2.trim()).expect("valid JSON for DaemonNotRunning");
-        assert_eq!(
-            v2.get("daemon_state").and_then(|x| x.as_str()),
-            Some("DaemonNotRunning"),
-            "DaemonNotRunning json: got: {v2}"
-        );
     }
 }

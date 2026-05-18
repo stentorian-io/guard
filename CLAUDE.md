@@ -2,7 +2,7 @@
 
 **Sentinel**
 
-Sentinel is a free, open-source macOS supply-chain firewall that enforces default-deny on outbound network connections from package-install subtrees. The user runs `sentinel wrap npm install …` (or `pip`, `cargo`, etc.) and Sentinel sandboxes that subtree's network egress — registries are allowed, anything else is denied or surfaces an interactive prompt. Users manage daemon setup themselves (LaunchAgent plist, shell wrapping) per the README. v1 is process-tree-only and uses DYLD library injection (no system extension, no kernel components). Whole-machine mode is deferred to v2.
+Sentinel is a free, open-source macOS supply-chain firewall that enforces default-deny on outbound network connections from package-install subtrees. The user runs `sentinel wrap npm install …` (or `pip`, `cargo`, etc.) and Sentinel sandboxes that subtree's network egress — registries are allowed, anything else is denied or surfaces an interactive prompt. The daemon (`sentineld`) is auto-spawned on demand by the CLI — no manual setup required. v1 is process-tree-only and uses DYLD library injection (no system extension, no kernel components). Whole-machine mode is deferred to v2.
 
 **Core Value:** **When a compromised package tries to phone home during install, Sentinel blocks it cold and tells the user what happened.** That's the one thing that must work. Every other feature serves this.
 
@@ -25,7 +25,7 @@ Sentinel is a free, open-source macOS supply-chain firewall that enforces defaul
 | Build | **Cargo workspaces** | 11 member crates; release profile: LTO thin, codegen-units=1, panic=abort, strip symbols |
 | Enforcement | **DYLD_INSERT_LIBRARIES** → `libsentinel_hook.dylib` (cdylib) | Interposes libc network/exec/fork/open calls via `dlsym(RTLD_NEXT, ...)` |
 | IPC | **Unix domain socket** + length-prefixed **CBOR** frames | Peer auth via `getsockopt(SOL_LOCAL, LOCAL_PEERTOKEN)` (kernel-sourced audit token) |
-| Daemon | **sentineld** — sync 32-thread worker pool, bounded queue (64) | LaunchAgent with KeepAlive=true; watchdog crate monitors liveness |
+| Daemon | **sentineld** — sync 32-thread worker pool, bounded queue (64) | Auto-spawned by CLI on demand; watchdog crate monitors liveness |
 | Persistence | **rusqlite** (bundled SQLite) | Migrations in `crates/sentinel-daemon/migrations/`; stores rules, feed IOCs, install artifacts |
 | CLI parsing | **clap 4.6** (derive) | Subcommands: wrap, status |
 | Serialization | **ciborium** (CBOR), **serde** | Snapshot format, IPC wire protocol |
@@ -43,22 +43,22 @@ Sentinel is a free, open-source macOS supply-chain firewall that enforces defaul
 ## Architecture
 
 ```
-sentinel wrap <cmd>   sentineld (LaunchAgent)         libsentinel_hook.dylib
+sentinel wrap <cmd>   sentineld (auto-spawned)        libsentinel_hook.dylib
 ┌──────────┐          ┌───────────────────┐           ┌──────────────────────┐
 │ CLI      │          │ IPC server        │           │ DYLD-injected cdylib │
-│          │ ──IPC──→ │ (Unix socket)     │           │                      │
-│ prepare  │          │                   │           │ ctor: load snapshot  │
-│ snapshot │          │ handlers:         │           │ interpose:           │
+│          │          │ (Unix socket)     │           │                      │
+│ ensure   │          │                   │           │ ctor: load snapshot  │
+│ daemon   │ ──IPC──→ │ handlers:         │           │ interpose:           │
 │          │          │  prepare_snapshot  │           │  socket/connect/     │
-│ spawn    │          │  resolve (DNS)    │           │  bind/listen/send/   │
-│ child    │          │  prompt_channel   │           │  getaddrinfo/        │
-│ w/ DYLD  │          │  insert_user_rule │           │  exec*/fork/vfork/   │
-│ wait +   │          │  status/rules/... │           │                      │
-│ report   │          │                   │           │ hot path:            │
-└──────────┘          │ feed system:      │           │  decide_for_sockaddr │
-                      │  gix fetch → OSV  │           │  → cache hit: <100µs│
-                      │  parse → SQLite   │           │  → cache miss: IPC  │
-                      │                   │           │    Resolve → daemon  │
+│ prepare  │          │  resolve (DNS)    │           │  bind/listen/send/   │
+│ snapshot │          │  prompt_channel   │           │  getaddrinfo/        │
+│          │          │  insert_user_rule │           │  exec*/fork/vfork/   │
+│ spawn    │          │  status/rules/... │           │                      │
+│ child    │          │                   │           │ hot path:            │
+│ w/ DYLD  │          │ feed system:      │           │  decide_for_sockaddr │
+│ wait +   │          │  gix fetch → OSV  │           │  → cache hit: <100µs│
+│ report   │          │  parse → SQLite   │           │  → cache miss: IPC  │
+└──────────┘          │                   │           │    Resolve → daemon  │
                       │ log writer: JSONL │           │                      │
                       │ process tree      │           │ fail-closed on:      │
                       │ snapshot GC       │           │  corrupt snapshot    │
@@ -100,7 +100,7 @@ sentinel wrap <cmd>   sentineld (LaunchAgent)         libsentinel_hook.dylib
 - **Hardened-runtime binaries** (`/bin/bash`, `/usr/bin/python3`, system binaries) reject DYLD injection; hook cannot interpose them. Mitigated by exec-blocking hardened children from wrapped subtrees.
 - **Raw syscalls** bypass libc interposition entirely. Not a realistic supply-chain attack vector (packages use libc).
 - **macOS 26+** required a dyld init-order fix (v0.5); `open`/`openat` interposition disabled on 26+ (replaced with kqueue watcher).
-- **panic=abort workspace-wide** — gix panics terminate the daemon (launchd restarts it). Cannot use catch_unwind because cdylib must not unwind through foreign C++ frames.
+- **panic=abort workspace-wide** — gix panics terminate the daemon (next CLI invocation auto-restarts it). Cannot use catch_unwind because cdylib must not unwind through foreign C++ frames.
 
 ## Version History
 

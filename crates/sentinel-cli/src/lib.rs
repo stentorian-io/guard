@@ -5,6 +5,7 @@ pub mod audit_token;
 pub mod baseline;
 pub mod cli;
 pub mod denial_log;
+pub mod ensure_daemon;
 pub mod install;
 pub mod persistence_log;
 pub mod ipc_client;

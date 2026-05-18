@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+#
+# Pre-push hook for Sentinel.
+# Install: ./scripts/install-hooks.sh
+#
+# Runs the same checks as the validation GHA workflow so you catch
+# regressions before consuming GH minutes. Skip with SKIP_PREPUSH=1.
+#
+set -euo pipefail
+
+if [ "${SKIP_PREPUSH:-0}" = "1" ]; then
+  echo "pre-push: SKIP_PREPUSH=1 — bypassing local validation" >&2
+  exit 0
+fi
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+exec "$REPO_ROOT/scripts/ci-local.sh"

@@ -3,6 +3,17 @@
 All notable changes to Sentinel are documented in this file.
 This changelog is generated from [conventional commits](https://www.conventionalcommits.org/).
 
+## [0.9] — 2026-05-18
+
+### Features
+- **cli:** Replace external-subcommand catch-all with explicit `sentinel wrap`
+- **cli,daemon:** Remove install/setup/trust policy and project config
+- **cli,daemon:** Auto-spawn daemon on demand, remove LaunchAgent/DevInstall
+- **core,daemon,cli:** Remove .sentinel.toml project-config feature
+
+### Bug Fixes
+- **e2e,cli,daemon:** Unblock prompt teardown and stabilize CI e2e
+
 ## [0.8] — 2026-05-14
 
 ### Documentation

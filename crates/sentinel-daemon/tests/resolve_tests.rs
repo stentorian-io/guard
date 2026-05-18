@@ -45,8 +45,6 @@ fn load_run_entries_from_snapshot() {
             reason: "npm registry".into(),
         }],
         run_uuid: Some("test-uuid".into()),
-        project_toml_path: None,
-        project_toml_sha256: None,
     };
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("test.cbor");

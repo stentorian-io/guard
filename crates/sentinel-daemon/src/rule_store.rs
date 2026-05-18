@@ -1,4 +1,4 @@
-//! SQLite rule store and trusted-policy-files table (POL-01 + D-37).
+//! SQLite rule store (POL-01 + D-37).
 //!
 //! Owned by the daemon. The dylib never reads SQLite directly — instead, the
 //! daemon merges SQLite rules into the per-run snapshot at PrepareSnapshot
@@ -6,20 +6,19 @@
 //!
 //! WARNING-08 fix (Phase 2 review): the original implementation wrapped a
 //! single `Connection` in a process-global `Mutex`, serializing ALL
-//! rule-store reads (`is_trusted`, `all_user_rules`) and ALL writes
-//! (`insert_trusted`) through one lock. Under heavy fork load the daemon's
-//! 16 worker threads contended on this mutex, effectively reducing
-//! rule-store concurrency to 1 — which blocks `PrepareSnapshot`, which
-//! blocks `sentinel wrap` startup, which blocks the user's `npm install`.
+//! rule-store reads (`all_user_rules`) and ALL writes through one lock.
+//! Under heavy fork load the daemon's 16 worker threads contended on this
+//! mutex, effectively reducing rule-store concurrency to 1 — which blocks
+//! `PrepareSnapshot`, which blocks `sentinel wrap` startup, which blocks
+//! the user's `npm install`.
 //!
 //! The fix opens a fresh `Connection` per read call. SQLite supports this
 //! natively (file-level locking + WAL mode handles concurrent readers
 //! cleanly). Writes still take a mutex on the long-lived connection so
-//! migrations and the singleton `INSERT OR REPLACE` path are serialized.
-//! In WAL mode this would also be true with separate connections, but the
-//! current schema does not yet enable WAL — keeping the write path on a
-//! shared mutex preserves the existing behaviour while removing the read
-//! contention.
+//! migrations and the singleton write path are serialized. In WAL mode this
+//! would also be true with separate connections, but keeping the write path
+//! on a shared mutex preserves the existing behaviour while removing the
+//! read contention.
 
 use rusqlite::{params, Connection, OpenFlags, Result as SqlResult};
 use rusqlite_migration::{Migrations, M};
@@ -39,21 +38,11 @@ pub enum RuleStoreError {
 /// match the wire shape exactly so the handler does no enum mapping.
 #[derive(Debug, Clone)]
 pub struct StoredRule {
-    pub source: String,     // "user" | "trusted_toml" | "builtin"
+    pub source: String,     // "user" | "builtin"
     pub kind: String,       // "allow" | "deny"
     pub match_type: String, // "exact" | "suffix" | "ip"
     pub pattern: String,
     pub reason: String,
-    pub source_path: Option<String>,
-}
-
-/// Phase 07 plan 01 — storage-side row for ListTrust.
-#[derive(Debug, Clone)]
-pub struct StoredTrustEntry {
-    pub canonical_path: String,
-    pub sha256: String,
-    pub trusted_at_ms: u64,
-    pub trusted_via: String,
 }
 
 const SQL_001_INITIAL: &str = include_str!("../migrations/001_initial.sql");
@@ -61,8 +50,8 @@ const SQL_002_INSTALL_ARTIFACTS: &str = include_str!("../migrations/002_install_
 const SQL_003_FEED_IOCS_AND_WAL: &str = include_str!("../migrations/003_feed_iocs_and_wal.sql");
 
 pub struct RuleStore {
-    /// Long-lived connection used for migrations + the write path
-    /// (`insert_trusted`). Serializes all writes.
+    /// Long-lived connection used for migrations + the write path.
+    /// Serializes all writes.
     conn: Mutex<Connection>,
     /// WR-05 fix: shared long-lived read-only connection. Replaces the
     /// per-query `open_reader()` pattern that opened a fresh Connection on
@@ -125,37 +114,6 @@ impl RuleStore {
         })
     }
 
-    pub fn is_trusted(&self, path: &str, sha256: &str) -> SqlResult<bool> {
-        let conn = self.reader.lock().expect("rule store reader mutex");
-        let count: u32 = conn.query_row(
-            "SELECT COUNT(*) FROM trusted_policy_files WHERE path = ?1 AND sha256 = ?2",
-            params![path, sha256],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
-    }
-
-    pub fn insert_trusted(
-        &self,
-        path: &str,
-        sha256: &str,
-        trusted_via: &str,
-    ) -> SqlResult<()> {
-        debug_assert!(
-            matches!(trusted_via, "cli" | "prompt"),
-            "trusted_via must be 'cli' or 'prompt'; got {trusted_via}"
-        );
-        // Writes still take the shared writer mutex so migrations and the
-        // singleton `INSERT OR REPLACE` are serialized.
-        let conn = self.conn.lock().expect("rule store mutex");
-        let now = unix_ms_now();
-        conn.execute(
-            "INSERT OR REPLACE INTO trusted_policy_files (path, sha256, trusted_at, trusted_via) VALUES (?1, ?2, ?3, ?4)",
-            params![path, sha256, now, trusted_via],
-        )?;
-        Ok(())
-    }
-
     /// Insert a user-approved rule (called by `sentinel approve` IPC handler in plan 03-11).
     /// Validates kind/match_type at the boundary; reason must be non-empty (D-39).
     /// Returns the new row id.
@@ -177,14 +135,6 @@ impl RuleStore {
     pub fn count_user_rules(&self) -> SqlResult<u64> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         conn.query_row("SELECT COUNT(*) FROM rules", [], |r| r.get::<_, i64>(0))
-            .map(|n| n as u64)
-    }
-
-    /// Count all rows in the trusted_policy_files table.
-    /// Used by StatusReply handler in plan 03-08.
-    pub fn count_trusted(&self) -> SqlResult<u64> {
-        let conn = self.reader.lock().expect("rule store reader mutex");
-        conn.query_row("SELECT COUNT(*) FROM trusted_policy_files", [], |r| r.get::<_, i64>(0))
             .map(|n| n as u64)
     }
 
@@ -242,7 +192,7 @@ impl RuleStore {
         Ok(out)
     }
 
-    /// Phase 07 plan 01 — enumerate user + trusted-toml rules for ListRules.
+    /// Phase 07 plan 01 — enumerate user rules for ListRules.
     ///
     /// Built-in / curated rules are NOT a parameter here: they live on
     /// `DaemonState.curated: Arc<Vec<AllowlistEntry>>` (loaded from
@@ -263,40 +213,12 @@ impl RuleStore {
                 match_type: row.get::<_, String>(1)?,
                 pattern: row.get::<_, String>(2)?,
                 reason: row.get::<_, String>(3)?,
-                source_path: None,
             })
         })?;
         for r in rows {
             out.push(r?);
         }
 
-        Ok(out)
-    }
-
-    /// Phase 07 plan 01 — enumerate trusted_policy_files rows for ListTrust.
-    ///
-    /// `trusted_at` is stored as unix-millis (verified: `insert_trusted` uses
-    /// `unix_ms_now()` which returns ms since epoch). Map directly to
-    /// `trusted_at_ms` without conversion.
-    pub fn all_trusted_files(&self) -> SqlResult<Vec<StoredTrustEntry>> {
-        let conn = self.reader.lock().expect("rule store reader mutex");
-        let mut stmt = conn.prepare(
-            "SELECT path, sha256, trusted_at, trusted_via FROM trusted_policy_files ORDER BY trusted_at",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            // trusted_at is unix-millis (i64 storage; widen to u64).
-            let trusted_at_ms: i64 = row.get::<_, i64>(2)?;
-            Ok(StoredTrustEntry {
-                canonical_path: row.get::<_, String>(0)?,
-                sha256: row.get::<_, String>(1)?,
-                trusted_at_ms: trusted_at_ms.max(0) as u64,
-                trusted_via: row.get::<_, String>(3)?,
-            })
-        })?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
         Ok(out)
     }
 }

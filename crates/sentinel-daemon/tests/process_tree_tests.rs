@@ -100,7 +100,6 @@ fn run_records_insert_get_remove() {
         manifest_path: "/tmp/u1.manifest".into(),
         is_tty: false,
         baseline_mode: false,
-        project_toml_path: None,
     };
     t.insert_run(rec.clone());
     let got = t.get_run("u1").expect("get");

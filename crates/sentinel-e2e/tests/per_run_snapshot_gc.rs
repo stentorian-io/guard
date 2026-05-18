@@ -65,7 +65,6 @@ fn gc_preserves_live_snapshots() {
         manifest_path: manifest_path.clone(),
         is_tty: false,
         baseline_mode: false,
-        project_toml_path: None,
     });
 
     gc_sweep(&state_dir, &tree);
@@ -99,7 +98,6 @@ fn gc_removes_dead_pid_snapshots() {
         manifest_path: manifest_path.clone(),
         is_tty: false,
         baseline_mode: false,
-        project_toml_path: None,
     });
 
     gc_sweep(&state_dir, &tree);
@@ -133,7 +131,6 @@ fn gc_skips_runrecord_with_zero_pid_placeholder() {
         manifest_path: manifest_path.clone(),
         is_tty: false,
         baseline_mode: false,
-        project_toml_path: None,
     });
 
     gc_sweep(&state_dir, &tree);

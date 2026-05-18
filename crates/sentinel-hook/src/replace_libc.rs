@@ -39,7 +39,7 @@ const RESOLVE_TIMEOUT_MS: u64 = 100;
 /// for `169.254.169.254` / `fe80::a9fe:a9fe`, the raw-IP cache-miss hard rule
 /// (D-25c / ALLOW-08), AND the loopback hard rule (D-25a) are now ALL
 /// enforced on the libc connect/sendto/sendmsg/connectx path — even when a
-/// `.sentinel.toml` ProjectAllow entry tries to allow IMDS. The tier-walk
+/// a user-approved AllowlistEntry tries to allow IMDS. The tier-walk
 /// also produces correct `SourceKind` attribution for the daemon's block-log
 /// (Phase 3 surfacing).
 ///
@@ -671,7 +671,7 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
     //
     // On cache miss, before falling through to the raw-IP cache-miss-deny path,
     // attempt to reverse-lookup the destination IP against the per-run snapshot's
-    // Exact CuratedAllow / ProjectAllow hostname entries via the daemon's Resolve
+    // Exact CuratedAllow hostname entries via the daemon's Resolve
     // handler (tag 0x06). If a match is found, populate the cache and re-issue
     // evaluate_policy with the resolved hostname.
     //
@@ -698,14 +698,14 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
                 0
             };
 
-            // Walk Exact CuratedAllow / ProjectAllow entries, capped at MAX_RESOLVE_ATTEMPTS.
+            // Walk Exact CuratedAllow entries, capped at MAX_RESOLVE_ATTEMPTS.
             let mut host_from_resolve: Option<(/* buf */ [u8; MAX_HOSTNAME], /* len */ usize)> = None;
             let mut attempts = 0usize;
             'resolve_walk: for entry in entries
                 .iter()
                 .filter(|e| {
                     e.kind == RuleKind::Allow
-                        && (e.tier == RuleTier::CuratedAllow || e.tier == RuleTier::ProjectAllow)
+                        && e.tier == RuleTier::CuratedAllow
                         && e.match_type == MatchType::Exact
                 })
             {

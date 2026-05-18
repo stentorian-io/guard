@@ -60,7 +60,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 #[cfg(target_os = "macos")]
-/// Build a realistic per-run snapshot's entry mix — CuratedAllow + ProjectAllow,
+/// Build a realistic per-run snapshot's entry mix — CuratedAllow + UserAllow,
 /// Exact + Suffix + Ip match types. Mirrors what `prepare_snapshot` produces for
 /// a typical npm-install run. The fixed entries match RESEARCH §Pattern 1
 /// lines 358-367; the additional padding to ~10 entries makes the tier-walk
@@ -77,7 +77,7 @@ fn realistic_entries() -> Vec<AllowlistEntry> {
         // The four canonical entries from RESEARCH §Pattern 1.
         allow(RuleTier::CuratedAllow, MatchType::Exact, "registry.npmjs.org"),
         allow(RuleTier::CuratedAllow, MatchType::Suffix, ".npmjs.org"),
-        allow(RuleTier::ProjectAllow, MatchType::Exact, "github.com"),
+        allow(RuleTier::UserAllow, MatchType::Exact, "github.com"),
         allow(RuleTier::CuratedAllow, MatchType::Ip, "127.0.0.1"),
         // Padding to ~10 entries to mirror a realistic per-run snapshot mix
         // (npm install workloads typically see 50-200 — we deliberately stay

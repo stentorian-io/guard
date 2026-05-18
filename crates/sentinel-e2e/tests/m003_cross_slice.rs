@@ -48,7 +48,7 @@ fn open_hook_no_false_positive_on_normal_files() {
     );
 }
 
-/// Lockfile registry extraction produces ProjectAllow entries in the snapshot.
+/// Lockfile registry extraction produces CuratedAllow entries in the snapshot.
 /// We create a fake package-lock.json with a private registry, run sentinel
 /// with cwd pointing to that directory, and verify the snapshot contains the
 /// registry host.

@@ -91,7 +91,7 @@ fn evaluate_cloud_metadata_denies_unconditionally() {
     // Entries trying to allow 169.254.169.254 must NOT override the hard rule.
     let entries = [entry(
         RuleKind::Allow,
-        RuleTier::ProjectAllow,
+        RuleTier::UserAllow,
         MatchType::Exact,
         "169.254.169.254",
     )];
@@ -114,16 +114,16 @@ fn blocker_01_regression_libc_hot_path_contract() {
     //      cloud-metadata short-circuits first.
     //
     // The previous Phase 1 `match_hostname_compat` walker did NOT enforce
-    // these hard rules — a `.sentinel.toml` ProjectAllow for IMDS would have
-    // allowed AWS/Azure/GCP cloud-metadata exfil. Closing that gap is the
-    // single most important behaviour change of the Phase 2 review fix pass.
+    // these hard rules — a UserAllow for IMDS would have allowed
+    // AWS/Azure/GCP cloud-metadata exfil. Closing that gap is the single most
+    // important behaviour change of the Phase 2 review fix pass.
 
-    // Case 1: cache-hit on cloud-metadata host with a project allow override —
+    // Case 1: cache-hit on cloud-metadata host with a user allow override —
     // the hard rule MUST win even though host+ip+entries+resolved matches a
     // would-be allow.
     let allow_imds = [entry(
         RuleKind::Allow,
-        RuleTier::ProjectAllow,
+        RuleTier::UserAllow,
         MatchType::Ip,
         "169.254.169.254",
     )];
@@ -133,7 +133,7 @@ fn blocker_01_regression_libc_hot_path_contract() {
         true,
         &allow_imds,
     );
-    assert_eq!(v1, Verdict::Deny, "cloud-metadata hard rule must win even with ProjectAllow override");
+    assert_eq!(v1, Verdict::Deny, "cloud-metadata hard rule must win even with UserAllow override");
     assert_eq!(src1, SourceKind::HardRule("cloud-metadata"));
 
     // Case 2: cache-miss / numeric-IP connect with no prior getaddrinfo →
@@ -228,8 +228,8 @@ fn pol_06_curated_allow_beats_feed_deny() {
 // --- D-26 regression --------------------------------------------------
 
 #[test]
-fn sentinel_toml_cannot_override_builtin_deny() {
-    // BuiltinDeny at tier 0; ProjectAllow at tier 5. Tier 0 fires first.
+fn lower_tier_cannot_override_builtin_deny() {
+    // BuiltinDeny at tier 0; UserAllow at tier 4. Tier 0 fires first.
     let entries = [
         entry(
             RuleKind::Deny,
@@ -239,7 +239,7 @@ fn sentinel_toml_cannot_override_builtin_deny() {
         ),
         entry(
             RuleKind::Allow,
-            RuleTier::ProjectAllow,
+            RuleTier::UserAllow,
             MatchType::Suffix,
             ".workers.dev",
         ),
@@ -247,29 +247,6 @@ fn sentinel_toml_cannot_override_builtin_deny() {
     let (v, src) = evaluate_policy(b"my-deploy.workers.dev", None, true, &entries);
     assert_eq!(v, Verdict::Deny);
     assert_eq!(src, SourceKind::BuiltinDeny);
-}
-
-// --- ProjectDeny / UserAllow tiers --------------------------------------
-
-#[test]
-fn project_deny_fires_before_user_allow() {
-    let entries = [
-        entry(
-            RuleKind::Deny,
-            RuleTier::ProjectDeny,
-            MatchType::Exact,
-            "x.com",
-        ),
-        entry(
-            RuleKind::Allow,
-            RuleTier::UserAllow,
-            MatchType::Exact,
-            "x.com",
-        ),
-    ];
-    let (v, src) = evaluate_policy(b"x.com", None, true, &entries);
-    assert_eq!(v, Verdict::Deny);
-    assert_eq!(src, SourceKind::ProjectDeny);
 }
 
 #[test]

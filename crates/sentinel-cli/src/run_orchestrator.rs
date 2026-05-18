@@ -1,8 +1,8 @@
 //! crates/sentinel-cli/src/run_orchestrator.rs
 //!
-//! Phase 3 plan 03-13 (Phase 06 rename) — wrap-mode end-to-end orchestrator:
-//! V3 PrepareSnapshot + prompt channel + spawn + wait + (optional) baseline-commit.
-//! BLOCKER #1 SIGINT handler is registered here.
+//! Wrap-mode end-to-end orchestrator:
+//! V3 PrepareSnapshot + prompt channel + spawn + wait.
+//! SIGINT handler is registered here.
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write as _};
@@ -19,7 +19,7 @@ pub fn run(
     command: Vec<OsString>,
     learn_mode: bool,
 ) -> Result<i32, CliError> {
-    let _ = state_dir; // currently unused; baseline IPC routes via sock
+    let _ = state_dir; // reserved for future use
     let cwd = std::env::current_dir().map_err(|e| CliError::Other(format!("cwd: {e}")))?;
     let is_tty = std::io::stdin().is_terminal();
 
@@ -111,19 +111,19 @@ pub fn run(
         root_pm_env,
     )?;
 
-    // BLOCKER #1 / CR-01: ALWAYS install the SIGINT handler so Ctrl-C reliably
-    // propagates to the wrapped child's process group, even when the prompt
-    // channel is unavailable (non-TTY, baseline mode, R-05 cap, schema skew,
-    // transient daemon error). When `inflight_handle` is None we install with
-    // an empty in-flight registry; `handle_sigint` tolerates an absent channel
-    // and a zero-length set, falling through to the load-bearing `killpg`.
+    // ALWAYS install the SIGINT handler so Ctrl-C reliably propagates to the
+    // wrapped child's process group, even when the prompt channel is
+    // unavailable (non-TTY, learn mode, schema skew, transient daemon error).
+    // When `inflight_handle` is None we install with an empty in-flight
+    // registry; `handle_sigint` tolerates an absent channel and a zero-length
+    // set, falling through to the load-bearing `killpg`.
     let inflight_for_sigint = inflight_handle.clone().unwrap_or_default();
     let _sigint_handle =
         crate::sigint_handler::install(inflight_for_sigint, Arc::clone(&shared_channel), pgid)?;
 
-    // Render-loop thread (only when interactive AND not baseline-recording).
+    // Render-loop thread (only when interactive AND not learn-mode).
     //
-    // CR-02: the thread owns the `PromptReader` directly and reads without
+    // The thread owns the `PromptReader` directly and reads without
     // holding the SharedChannel mutex. Writes (`answer`/`cancel`) go through
     // the SharedChannel mutex which is also held briefly by the SIGINT
     // handler — but never simultaneously with a blocking read.
@@ -151,14 +151,7 @@ pub fn run(
         .map_err(|e| CliError::Other(format!("wait: {e}")))?;
     let exit_code = exit_status.code().unwrap_or(1);
 
-    // Baseline commit flow.
-    if learn_mode {
-        if let Err(e) = crate::baseline::run_baseline_commit(sock, &run_uuid) {
-            eprintln!("baseline commit error: {e}");
-        }
-    }
-
-    // WR-13: drop the SharedChannel writer half and explicitly shut down the
+    // Drop the SharedChannel writer half and explicitly shut down the
     // render reader clone so a blocked `read_frame` wakes up before join.
     // Dropping only the writer clone is insufficient: the render thread owns a
     // separate cloned UnixStream that can remain parked in recvfrom forever.

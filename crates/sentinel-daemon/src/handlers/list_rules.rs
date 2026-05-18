@@ -2,8 +2,8 @@
 //!
 //! Phase 07 plan 01 — ListRules handler (CLI-16 sentinel status rules).
 //!
-//! Reads user rules + trusted-toml rules from the SQLite store and returns
-//! them as wire-friendly RuleRow records. CLI is a dumb client (D-21).
+//! Reads user rules from the SQLite store and returns them as wire-friendly
+//! RuleRow records. CLI is a dumb client (D-21).
 
 use sentinel_core::{AllowlistEntry, MatchType, RuleKind};
 use sentinel_ipc::{ListRules, ListRulesReply, RuleRow};
@@ -14,10 +14,8 @@ use crate::rule_store::{RuleStore, StoredRule};
 ///
 /// Sources merged into the reply:
 ///   1. User rules — SQLite `rules` table via `RuleStore::all_rules_with_source`,
-///      emitted with `source = "user"` and `source_path = None`.
-///   2. Trusted-toml rules — same RuleStore method, `source = "trusted_toml"`,
-///      `source_path = Some(canonical_path)`.
-///   3. Built-in / curated rules (when `req.include_builtins == true`, D-20 `--all`):
+///      emitted with `source = "user"`.
+///   2. Built-in / curated rules (when `req.include_builtins == true`, D-20 `--all`):
 ///      sourced from the in-memory `curated: Arc<Vec<AllowlistEntry>>` on
 ///      `DaemonState`. The slice is loaded once at daemon startup by
 ///      `crates/sentinel-daemon/src/curated.rs::load_curated()` from the
@@ -25,7 +23,7 @@ use crate::rule_store::{RuleStore, StoredRule};
 ///      This is the authoritative source — `RuleStore` does NOT hold these rows.
 ///      Verified: `ipc_server.rs:190` (`pub curated: Arc<Vec<sentinel_core::AllowlistEntry>>`)
 ///      and `prepare_snapshot.rs:69` (the snapshot handler already merges this
-///      slice with user/project rules via the same shape — we mirror its access path).
+///      slice with user rules via the same shape — we mirror its access path).
 pub fn handle_list_rules(
     req: &ListRules,
     store: &RuleStore,
@@ -52,7 +50,6 @@ fn rule_row_from_storage(row: StoredRule) -> RuleRow {
         match_type: row.match_type,
         pattern: row.pattern,
         reason: row.reason,
-        source_path: row.source_path,
     }
 }
 
@@ -75,7 +72,6 @@ fn curated_to_rule_row(e: &AllowlistEntry) -> RuleRow {
         match_type: match_type.into(),
         pattern: e.pattern.clone(),
         reason: e.reason.clone(),
-        source_path: None,
     }
 }
 
@@ -106,7 +102,7 @@ mod tests {
     #[test]
     fn include_builtins_false_omits_curated() {
         let (_tmp, store) = empty_store();
-        let req = ListRules::new(false, None);
+        let req = ListRules::new(false);
         let reply = handle_list_rules(&req, &store, &fixture_curated());
         match reply {
             ListRulesReply::Ok { rules, .. } => {
@@ -122,7 +118,7 @@ mod tests {
     #[test]
     fn include_builtins_true_emits_curated_rows() {
         let (_tmp, store) = empty_store();
-        let req = ListRules::new(true, None);
+        let req = ListRules::new(true);
         let reply = handle_list_rules(&req, &store, &fixture_curated());
         match reply {
             ListRulesReply::Ok { rules, .. } => {
@@ -133,7 +129,6 @@ mod tests {
                 assert_eq!(r.kind, "allow");
                 assert_eq!(r.match_type, "suffix");
                 assert_eq!(r.pattern, ".npmjs.org");
-                assert!(r.source_path.is_none());
             }
             ListRulesReply::Err { message, .. } => panic!("unexpected err: {message}"),
         }

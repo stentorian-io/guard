@@ -90,16 +90,6 @@ fn resolve_roundtrip() {
 }
 
 #[test]
-fn trust_policy_roundtrip() {
-    let m = TrustPolicy::new("/Users/x/proj/.sentinel.toml", "a".repeat(64));
-    assert_eq!(m.schema_version, IPC_SCHEMA_V2);
-    assert_eq!(cbor_roundtrip(&m), m);
-    assert_eq!(cbor_roundtrip(&TrustPolicyReply::ok()), TrustPolicyReply::ok());
-    let e = TrustPolicyReply::err("file not found");
-    assert_eq!(cbor_roundtrip(&e), e);
-}
-
-#[test]
 fn sockaddr_wire_len_is_28() {
     assert_eq!(SOCKADDR_WIRE_LEN, 28);
 }

@@ -25,7 +25,7 @@ fn prepare_snapshot_writes_per_run_files_and_returns_ok() {
     let pt = Arc::new(ProcessTree::new());
     let curated = vec![allow("registry.npmjs.org", RuleTier::CuratedAllow)];
 
-    // Use a cwd with no .sentinel.toml.
+    // Use the temp dir as cwd.
     let cwd = tmp.path().to_path_buf();
     let reply = handle_prepare_snapshot(&cwd, &curated, &rs, &pt, &state_dir, false, false);
 

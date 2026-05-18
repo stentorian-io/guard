@@ -9,7 +9,7 @@ what happened.
 
 [![CI](https://github.com/anthropics/sentinel/actions/workflows/validation.yml/badge.svg)](https://github.com/anthropics/sentinel/actions/workflows/validation.yml)
 
-> **Status:** pre-release (v0.7). Core enforcement works end-to-end.
+> **Status:** pre-release (v0.9). Core enforcement works end-to-end.
 > Build from source; packaged distribution coming in v1.0.
 
 ## How it works
@@ -22,13 +22,12 @@ Sentinel wraps your command via DYLD library injection. Every outbound
 network call from the process tree is checked against a multi-tier policy:
 
 1. **Curated Allow** — package registries and CDNs (built-in)
-2. **Project Allow** — `.sentinel.toml` rules in your repo
-3. **User Allow** — personal allow/deny decisions
-4. **Curated Deny** — known-malicious hosts from OSV/GHSA threat-intel feeds
-5. **Default Deny** — everything else is blocked (or prompts in TTY mode)
+2. **User Allow** — personal allow/deny decisions
+3. **Curated Deny** — known-malicious hosts from OSV/GHSA threat-intel feeds
+4. **Default Deny** — everything else is blocked (or prompts in TTY mode)
 
 No root privileges required. No kernel extensions. No system extension.
-Just a user-level daemon and a DYLD-injected library.
+No manual setup — the daemon auto-starts on first use.
 
 ## Quick start
 
@@ -38,10 +37,7 @@ git clone https://github.com/anthropics/sentinel.git
 cd sentinel
 cargo build --workspace --release
 
-# Install (LaunchAgent + shell integration)
-sentinel setup
-
-# Protect a package install
+# Protect a package install (daemon auto-starts on first use)
 sentinel wrap npm install
 
 # Learn mode — record what a clean install talks to
@@ -74,7 +70,7 @@ Build a baseline of expected network destinations for a known-clean project:
 sentinel wrap --learn npm install
 ```
 
-This records all contacted hosts to `.sentinel.toml` for future installs.
+This records all contacted hosts for future installs.
 
 ### Status and review
 
@@ -84,52 +80,28 @@ sentinel status --verbose      # detailed output
 sentinel status --json         # machine-readable output
 sentinel status logs --follow  # stream forensic log
 sentinel status rules          # list active policy rules
-sentinel status trust          # trust policy state
-```
-
-### Project configuration
-
-Create `.sentinel.toml` in your project root:
-
-```toml
-[[allow]]
-host = "api.example.com"
-port = 443
-reason = "Internal API"
-```
-
-### Management
-
-```sh
-sentinel setup           # install all components
-sentinel setup daemon    # install LaunchAgent only
-sentinel setup shell     # install shell integration only
-sentinel setup --remove  # uninstall
-sentinel repair          # verify and repair installation
-sentinel unwrap-all      # emergency: stop all enforcement
 ```
 
 ## Architecture
 
 ```text
-sentinel wrap <cmd>   sentineld (LaunchAgent)         libsentinel_hook.dylib
+sentinel wrap <cmd>   sentineld (auto-spawned)        libsentinel_hook.dylib
 ┌──────────┐          ┌───────────────────┐           ┌──────────────────────┐
 │ CLI      │          │ IPC server        │           │ DYLD-injected cdylib │
-│          │ ──IPC──→ │ (Unix socket)     │           │                      │
-│ prepare  │          │                   │           │ ctor: load snapshot  │
-│ snapshot │          │ handlers:         │           │ interpose:           │
+│          │          │ (Unix socket)     │           │                      │
+│ ensure   │          │                   │           │ ctor: load snapshot  │
+│ daemon   │ ──IPC──→ │ handlers:         │           │ interpose:           │
 │          │          │  prepare_snapshot  │           │  socket/connect/     │
-│ spawn    │          │  resolve (DNS)    │           │  bind/listen/send/   │
-│ child    │          │  prompt_channel   │           │  getaddrinfo/        │
-│ w/ DYLD  │          │  insert_user_rule │           │  exec*/fork/vfork/   │
-│          │          │  trust_policy     │           │  posix_spawn/open    │
-│ wait +   │          │  status/rules/... │           │                      │
-│ report   │          │                   │           │ hot path:            │
-└──────────┘          │ feed system:      │           │  decide_for_sockaddr │
-                      │  gix fetch → OSV  │           │  → cache hit: <100µs│
-                      │  parse → SQLite   │           │  → cache miss: IPC  │
-                      │                   │           │    Resolve → daemon  │
-                      │ log writer: JSONL │           │                      │
+│ prepare  │          │  resolve (DNS)    │           │  bind/listen/send/   │
+│ snapshot │          │  prompt_channel   │           │  getaddrinfo/        │
+│          │          │  insert_user_rule │           │  exec*/fork/vfork/   │
+│ spawn    │          │  status/rules/... │           │                      │
+│ child    │          │                   │           │ hot path:            │
+│ w/ DYLD  │          │ feed system:      │           │  decide_for_sockaddr │
+│          │          │  gix fetch → OSV  │           │  → cache hit: <100µs│
+│ wait +   │          │  parse → SQLite   │           │  → cache miss: IPC  │
+│ report   │          │                   │           │    Resolve → daemon  │
+└──────────┘          │ log writer: JSONL │           │                      │
                       │ process tree      │           │ fail-closed on:      │
                       │ snapshot GC       │           │  corrupt snapshot    │
                       │ persistence watch │           │  IPC timeout (250ms) │

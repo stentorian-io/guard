@@ -114,8 +114,8 @@ network destinations:
 sentinel --learn npm install
 ```
 
-This auto-allows all destinations encountered and records them in
-`.sentinel.toml` for future installs. Only use this on a project you trust.
+This auto-allows all destinations encountered and records them for future
+installs. Only use this on a project you trust.
 
 ### Review blocked connections
 
@@ -129,30 +129,14 @@ sentinel status review <run-uuid>
 The `review` subcommand walks you through each denial interactively so you
 can create allow or deny rules.
 
-## Configuration
-
-### .sentinel.toml
-
-Create a `.sentinel.toml` in your project root to define per-project rules:
-
-```toml
-[[allow]]
-host = "api.example.com"
-port = 443
-reason = "Internal API"
-```
-
-On first use, Sentinel prompts you to trust the file (SHA-256 validated).
-
-### Policy tiers
+## Policy tiers
 
 Sentinel evaluates rules in this order:
 
 1. **Curated Allow** — built-in package registries and CDNs
-2. **Project Allow** — rules from `.sentinel.toml`
-3. **User Allow** — rules created via interactive prompts
-4. **Curated Deny** — known-malicious hosts from threat-intel feeds
-5. **Default Deny** — everything else
+2. **User Allow** — rules created via interactive prompts, persisted in SQLite
+3. **Curated Deny** — known-malicious hosts from threat-intel feeds
+4. **Default Deny** — everything else
 
 ## Troubleshooting
 

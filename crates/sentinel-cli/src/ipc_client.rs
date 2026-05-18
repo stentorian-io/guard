@@ -11,7 +11,7 @@ use crate::CliError;
 use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
-    BaselineCommit, BaselineCommitReply, DeleteInstallArtifacts, DeleteInstallArtifactsReply,
+    DeleteInstallArtifacts, DeleteInstallArtifactsReply,
     FeedWarning, InsertUserRule, InsertUserRuleReply, InstallArtifact,
     ListRules, ListRulesReply, PrepareSnapshot, ReadInstallArtifacts,
     ReadInstallArtifactsReply, RegisterRoot, Reply, RuleRow, SnapshotReply,
@@ -29,9 +29,7 @@ const TAG_STATUS: u8 = 0x09;
 pub(crate) const TAG_PROMPT_CHANNEL_INIT: u8 = 0x0A;
 const TAG_INSERT_USER_RULE: u8 = 0x0B;
 const TAG_READ_INSTALL_ARTIFACTS: u8 = 0x0C;
-const TAG_BASELINE_COMMIT: u8 = 0x0D;
 const TAG_LIST_RULES: u8 = 0x0E;
-// Phase 07 plan 02 (D-15 WARNING-5): per-target install_artifacts cleanup.
 const TAG_DELETE_INSTALL_ARTIFACTS: u8 = 0x11;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -199,12 +197,11 @@ where
     Ok(reply)
 }
 
-/// Phase 2 D-29: send `PrepareSnapshot { cwd }` BEFORE posix_spawn so the
-/// daemon walks `cwd` for `.sentinel.toml`, merges curated YAML + SQLite + the
-/// project policy, writes a per-run snapshot to `${state_dir}/runs/{uuid}.cbor`,
-/// and returns the manifest path. The CLI then sets that manifest path as
-/// `SENTINEL_SNAPSHOT_MANIFEST` in the wrapped child's envp so the dylib
-/// loads the per-run policy.
+/// Send `PrepareSnapshot { cwd }` BEFORE posix_spawn so the daemon merges
+/// curated YAML + SQLite rules, writes a per-run snapshot to
+/// `${state_dir}/runs/{uuid}.cbor`, and returns the manifest path. The CLI
+/// then sets that manifest path as `SENTINEL_SNAPSHOT_MANIFEST` in the
+/// wrapped child's envp so the dylib loads the per-run policy.
 pub fn prepare_snapshot(sock: &Path, cwd: &Path) -> Result<(PathBuf, String), CliError> {
     let req = PrepareSnapshot::new(cwd.display().to_string());
     // WR-11: use the extended read timeout so the CLI doesn't trip a
@@ -237,20 +234,18 @@ pub struct PrepareSnapshotOutcome {
     pub feed_warnings: Vec<FeedWarning>,
 }
 
-/// Phase 3 plan 03-13: V3 PrepareSnapshot with is_tty + baseline_mode (D-73, D-58).
+/// V3 PrepareSnapshot with is_tty + learn_mode.
 /// Used by run_orchestrator instead of prepare_snapshot.
 ///
-/// Phase 4 plan 04-03: returns `PrepareSnapshotOutcome` carrying
-/// `feed_warnings` from the V4-shaped reply. V3 daemons (no Phase 4 wiring)
-/// reply with `feed_warnings = vec![]` via `#[serde(default)]`, so this
-/// function is forward-compatible against pre-Phase-4 daemons.
+/// Returns `PrepareSnapshotOutcome` carrying `feed_warnings` from the
+/// V4-shaped reply.
 pub fn prepare_snapshot_v3(
     sock: &Path,
     cwd: &Path,
     is_tty: bool,
-    baseline_mode: bool,
+    learn_mode: bool,
 ) -> Result<PrepareSnapshotOutcome, CliError> {
-    let req = PrepareSnapshot::new_v3(cwd.display().to_string(), is_tty, baseline_mode);
+    let req = PrepareSnapshot::new_v3(cwd.display().to_string(), is_tty, learn_mode);
     // WR-11: 150s read timeout (vs the default 5s) so a legitimate
     // first-run shallow clone (up to ~78s for GHSA on Apple Silicon
     // per RESEARCH.md Pitfall 1, with the daemon's 120s ceiling)
@@ -323,19 +318,7 @@ pub fn read_install_artifacts_request(sock: &Path) -> Result<Vec<InstallArtifact
     }
 }
 
-/// Phase 3 tag 0x0D: commit a baseline run into proposed rules.
-pub fn baseline_commit_request(
-    sock: &Path,
-    run_uuid: &str,
-) -> Result<BaselineCommitReply, CliError> {
-    let req = BaselineCommit {
-        schema_version: sentinel_ipc::IPC_SCHEMA_V3,
-        run_uuid: run_uuid.into(),
-    };
-    send_tagged_request(sock, TAG_BASELINE_COMMIT, &req)
-}
-
-/// Phase 07 plan 02 D-15 WARNING-5: clear install_artifacts rows for the given
+/// Clear install_artifacts rows for the given
 /// kinds. Invoked by `uninstall::components::remove_*` helpers after their
 /// on-disk teardown so the daemon's view of installed artifacts matches
 /// reality. Errors are surfaced as `CliError::Other`; callers typically
@@ -361,7 +344,7 @@ pub fn list_rules_request(
     sock: &Path,
     include_builtins: bool,
 ) -> Result<Vec<RuleRow>, CliError> {
-    let req = ListRules::new(include_builtins, None);
+    let req = ListRules::new(include_builtins);
     let reply: ListRulesReply = send_tagged_request(sock, TAG_LIST_RULES, &req)?;
     match reply {
         ListRulesReply::Ok { rules, .. } => Ok(rules),

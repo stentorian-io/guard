@@ -2,13 +2,12 @@
 //!
 //! Flow per `sentinel wrap`:
 //!   1. CLI sends PrepareSnapshot { cwd } before posix_spawn
-//!   2. Daemon walks up cwd to find .sentinel.toml (plan 02-03)
-//!   3. If found and trusted (RuleStore::is_trusted), parses rules → ProjectAllow / ProjectDeny tier
-//!   4. Concatenates curated YAML (plan 02-02) + SQLite user rules (plan 02-03) + project rules
-//!   5. Sorts by RuleTier (Ord derived in plan 02-01)
-//!   6. Writes runs/{uuid}.cbor + runs/{uuid}.manifest atomically
-//!   7. Inserts RunRecord into ProcessTree (plan 02-07 GC will use it on tracked-root exit)
-//!   8. Returns SnapshotReply::Ok { manifest_path, run_uuid }
+//!   2. Concatenates curated YAML (plan 02-02) + SQLite user rules + lockfile-discovered registries
+//!   3. Merges FeedDeny entries from threat-intel IOCs
+//!   4. Sorts by RuleTier (Ord derived in plan 02-01)
+//!   5. Writes runs/{uuid}.cbor + runs/{uuid}.manifest atomically
+//!   6. Inserts RunRecord into ProcessTree (plan 02-07 GC will use it on tracked-root exit)
+//!   7. Returns SnapshotReply::Ok { manifest_path, run_uuid }
 //!
 //! Phase 3 plan 03-07 (IPC_SCHEMA_V3): handler now accepts V3 payloads carrying
 //! `is_tty` (D-73) and `baseline_mode` (D-58). The dispatcher in ipc_server.rs
@@ -48,7 +47,7 @@ pub enum PrepareError {
 /// [`handle_prepare_snapshot_v4_full`], which performs:
 ///   1. `fetch_feeds_blocking(...)` BEFORE building the snapshot (D-83 pure
 ///      on-demand). Strict-fail on fetch error (D-85) → SnapshotReply::Err.
-///   2. Project / user / curated entries assembly (existing Phase 2 path).
+///   2. User / curated / lockfile entries assembly (existing Phase 2 path).
 ///   3. `build_feeddeny_entries(feed_store)` merge step (D-90).
 ///   4. Sort + publish per-run snapshot.
 ///   5. SnapshotReply::ok_v4 carrying any non-fatal `feed_warnings`.
@@ -170,7 +169,7 @@ fn handle_prepare_snapshot_inner(
 
     // CR-05: validate the wire-claimed cwd before walking the filesystem from
     // it. A same-uid local attacker could send `cwd = "/Users/victim/.ssh"`
-    // and have the daemon walk up looking for `.sentinel.toml`. Although the
+    // and trigger lockfile discovery from a suspicious location. Although the
     // v1 trust boundary is same-uid only, refusing obviously-suspicious paths
     // is cheap defense-in-depth.
     let cwd = match validate_cwd(cwd) {
@@ -235,7 +234,7 @@ fn handle_prepare_snapshot_inner(
     };
 
     // 1b. M003-S07: discover lockfile near cwd and extract custom registry
-    //     hostnames. These become ProjectAllow entries so private-registry
+    //     hostnames. These become CuratedAllow entries so private-registry
     //     fetches are not blocked. Non-fatal: log and continue if anything fails.
     let lockfile_entries: Vec<AllowlistEntry> =
         match sentinel_core::lockfile::discover_lockfile(cwd) {
@@ -251,7 +250,7 @@ fn handle_prepare_snapshot_inner(
                             .into_iter()
                             .map(|host| AllowlistEntry {
                                 kind: RuleKind::Allow,
-                                tier: RuleTier::ProjectAllow,
+                                tier: RuleTier::CuratedAllow,
                                 match_type: MatchType::Exact,
                                 pattern: host,
                                 reason: format!(
@@ -286,8 +285,6 @@ fn handle_prepare_snapshot_inner(
         generated_at_unix_ms: unix_ms_now(),
         entries,
         run_uuid: Some(run_uuid.clone()),
-        project_toml_path: None,
-        project_toml_sha256: None,
     };
 
     // 4. Publish per-run snapshot.
@@ -303,7 +300,6 @@ fn handle_prepare_snapshot_inner(
     //    audit_token; plan 02-04's RegisterRoot handler updates it later.
     //
     //    Phase 3 plan 03-07: is_tty and baseline_mode are set at insertion.
-    //    project_toml_path is set from the walk-up result.
     process_tree.insert_run(RunRecord {
         run_uuid: run_uuid.clone(),
         tracked_root: sentinel_core::AuditToken { val: [0; 8] },
@@ -311,7 +307,6 @@ fn handle_prepare_snapshot_inner(
         manifest_path: run_manifest_path(state_dir, &run_uuid),
         is_tty,
         baseline_mode,
-        project_toml_path: None,
     });
 
     // Phase 3 plan 03-07: also apply via setters so any downstream code that
@@ -340,7 +335,7 @@ fn handle_prepare_snapshot_inner(
 /// CR-05: canonicalize the wire-claimed cwd and reject obviously-suspicious
 /// system paths. The path must (a) exist, (b) be a directory, (c) canonicalize
 /// successfully, and (d) not be inside a list of system directories the daemon
-/// should never walk for `.sentinel.toml`.
+/// should never walk.
 fn validate_cwd(cwd: &Path) -> Result<std::path::PathBuf, String> {
     let canonical = cwd
         .canonicalize()
@@ -349,7 +344,6 @@ fn validate_cwd(cwd: &Path) -> Result<std::path::PathBuf, String> {
         return Err(format!("not a directory: {}", canonical.display()));
     }
     // System path denylist — defense-in-depth, not the trust boundary itself.
-    // The daemon should never be walking these for project policy.
     const FORBIDDEN_PREFIXES: &[&str] = &[
         "/etc",
         "/private/etc",

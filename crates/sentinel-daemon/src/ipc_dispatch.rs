@@ -15,7 +15,8 @@
 //! valid legacy frame has only 0x00 in the high byte (0x01 already implies
 //! a 16+ MiB body, far above MAX_FRAME_BYTES). The dispatcher now treats:
 //!   - 0x02..=0x15            → tagged Phase 2/3/07/v0.3/v0.4/v0.5 message
-//!                              (0x0E..=0x11 = ListRules/ListTrust/IsTrusted/DeleteInstallArtifacts, plan 07-01)
+//!                              (0x0E = ListRules, 0x11 = DeleteInstallArtifacts, plan 07-01;
+//!                               0x07/0x0F/0x10 formerly TrustPolicy/ListTrust/IsTrusted — removed)
 //!                              (0x12 = DenyNotify, v0.3 D-39)
 //!                              (0x13 = ExecBlocked, v0.4 M003-S02)
 //!                              (0x14 = PersistenceWrite, v0.4 M003-S04)
@@ -39,7 +40,7 @@ pub enum MessageTag {
     ExecEvent = 0x04,
     DylibLoaded = 0x05,
     Resolve = 0x06,
-    TrustPolicy = 0x07,
+    // 0x07 was TrustPolicy (removed)
     EnvNotPropagatedGap = 0x08,
     // Phase 3 — new IPC tag bytes (D-69 + research recommendations):
     Status = 0x09,
@@ -49,8 +50,8 @@ pub enum MessageTag {
     BaselineCommit = 0x0D,
     // Phase 07 plan 01 — management-IPC family (additive at IPC_SCHEMA_V3):
     ListRules = 0x0E,
-    ListTrust = 0x0F,
-    IsTrusted = 0x10,
+    // 0x0F was ListTrust (removed)
+    // 0x10 was IsTrusted (removed)
     DeleteInstallArtifacts = 0x11,
     // v0.3 — D-39 deny-notify IPC:
     DenyNotify = 0x12,
@@ -70,7 +71,7 @@ impl MessageTag {
             0x04 => Some(Self::ExecEvent),
             0x05 => Some(Self::DylibLoaded),
             0x06 => Some(Self::Resolve),
-            0x07 => Some(Self::TrustPolicy),
+            // 0x07 was TrustPolicy (removed)
             0x08 => Some(Self::EnvNotPropagatedGap),
             // Phase 3:
             0x09 => Some(Self::Status),
@@ -80,8 +81,8 @@ impl MessageTag {
             0x0D => Some(Self::BaselineCommit),
             // Phase 07 plan 01:
             0x0E => Some(Self::ListRules),
-            0x0F => Some(Self::ListTrust),
-            0x10 => Some(Self::IsTrusted),
+            // 0x0F was ListTrust (removed)
+            // 0x10 was IsTrusted (removed)
             0x11 => Some(Self::DeleteInstallArtifacts),
             // v0.3 — D-39:
             0x12 => Some(Self::DenyNotify),
@@ -158,7 +159,6 @@ mod tests {
             MessageTag::ExecEvent,
             MessageTag::DylibLoaded,
             MessageTag::Resolve,
-            MessageTag::TrustPolicy,
             MessageTag::EnvNotPropagatedGap,
             // Phase 3:
             MessageTag::Status,
@@ -168,8 +168,6 @@ mod tests {
             MessageTag::BaselineCommit,
             // Phase 07 plan 01:
             MessageTag::ListRules,
-            MessageTag::ListTrust,
-            MessageTag::IsTrusted,
             MessageTag::DeleteInstallArtifacts,
             // v0.3 D-39:
             MessageTag::DenyNotify,
@@ -191,6 +189,10 @@ mod tests {
         assert!(MessageTag::from_byte(0x00).is_none());
         // 0x01 — was reserved for RegisterRoot in early drafts; legacy path now.
         assert!(MessageTag::from_byte(0x01).is_none());
+        // 0x07 was TrustPolicy, 0x0F was ListTrust, 0x10 was IsTrusted (all removed).
+        assert!(MessageTag::from_byte(0x07).is_none());
+        assert!(MessageTag::from_byte(0x0F).is_none());
+        assert!(MessageTag::from_byte(0x10).is_none());
         // 0x16+ — unassigned tag space (0x15 = Ping, v0.5 M004-S01).
         assert!(MessageTag::from_byte(0x16).is_none());
         assert!(MessageTag::from_byte(0xff).is_none());
@@ -205,7 +207,8 @@ mod tests {
         assert_eq!(MessageTag::ExecEvent.as_byte(), 0x04);
         assert_eq!(MessageTag::DylibLoaded.as_byte(), 0x05);
         assert_eq!(MessageTag::Resolve.as_byte(), 0x06);
-        assert_eq!(MessageTag::TrustPolicy.as_byte(), 0x07);
+        // 0x07 was TrustPolicy (removed)
+        assert_eq!(MessageTag::from_byte(0x07), None);
         assert_eq!(MessageTag::EnvNotPropagatedGap.as_byte(), 0x08);
         // Phase 3:
         assert_eq!(MessageTag::Status.as_byte(), 0x09);
@@ -215,8 +218,10 @@ mod tests {
         assert_eq!(MessageTag::BaselineCommit.as_byte(), 0x0D);
         // Phase 07 plan 01:
         assert_eq!(MessageTag::ListRules as u8, 0x0E);
-        assert_eq!(MessageTag::ListTrust as u8, 0x0F);
-        assert_eq!(MessageTag::IsTrusted as u8, 0x10);
+        // 0x0F was ListTrust (removed)
+        assert_eq!(MessageTag::from_byte(0x0F), None);
+        // 0x10 was IsTrusted (removed)
+        assert_eq!(MessageTag::from_byte(0x10), None);
         assert_eq!(MessageTag::DeleteInstallArtifacts as u8, 0x11);
         // from_byte round-trips for all Phase 3 tags:
         assert!(matches!(MessageTag::from_byte(0x09), Some(MessageTag::Status)));
@@ -238,8 +243,6 @@ mod tests {
         ));
         // Phase 07 plan 01:
         assert_eq!(MessageTag::from_byte(0x0E), Some(MessageTag::ListRules));
-        assert_eq!(MessageTag::from_byte(0x0F), Some(MessageTag::ListTrust));
-        assert_eq!(MessageTag::from_byte(0x10), Some(MessageTag::IsTrusted));
         assert_eq!(
             MessageTag::from_byte(0x11),
             Some(MessageTag::DeleteInstallArtifacts)

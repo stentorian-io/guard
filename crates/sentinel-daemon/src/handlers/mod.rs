@@ -1,4 +1,4 @@
-//! Phase 2 IPC handlers — PrepareSnapshot, TrustPolicy, Resolve.
+//! Phase 2 IPC handlers — PrepareSnapshot, Resolve.
 //! Phase 3 plan 03-08 additions — Status, InsertUserRule, ReadInstallArtifacts, BaselineCommit.
 //!
 //! Plan 02-04 owns the Phase 2 fork/exec/dylib_loaded handlers (which live

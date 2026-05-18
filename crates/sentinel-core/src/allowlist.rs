@@ -35,21 +35,17 @@ pub enum MatchType {
 ///
 ///   Tier 0: BuiltinDeny       (YAML kind:deny, non-overridable D-26)
 ///   Tier 1: CuratedAllow      (YAML kind:allow, beats feed-deny POL-06)
-///   Tier 2: ProjectDeny       (.sentinel.toml kind:deny)
-///   Tier 3: UserDeny          (SQLite rules kind:deny)
-///   Tier 4: FeedDeny          (Phase 4 placeholder; empty in Phase 2)
-///   Tier 5: ProjectAllow      (.sentinel.toml kind:allow)
-///   Tier 6: UserAllow         (SQLite rules kind:allow)
+///   Tier 2: UserDeny          (SQLite rules kind:deny)
+///   Tier 3: FeedDeny          (threat-intel IOCs from OSV/GHSA feeds)
+///   Tier 4: UserAllow         (SQLite rules kind:allow)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum RuleTier {
     BuiltinDeny = 0,
     CuratedAllow = 1,
-    ProjectDeny = 2,
-    UserDeny = 3,
-    FeedDeny = 4,
-    ProjectAllow = 5,
-    UserAllow = 6,
+    UserDeny = 2,
+    FeedDeny = 3,
+    UserAllow = 4,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

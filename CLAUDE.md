@@ -36,7 +36,7 @@ Sentinel is a free, open-source macOS supply-chain firewall that enforces defaul
 
 ### Key Dependencies
 
-**Production:** libc, ciborium, serde, nix, clap, rusqlite, uuid, signal-hook, memmap2, socket2, tracing, plist, ctor, gix, toml, dialoguer, chrono, notify, flate2, semver, url, walkdir
+**Production:** libc, ciborium, serde, nix, clap, rusqlite, uuid, signal-hook, memmap2, socket2, tracing, plist, ctor, gix, notify, flate2, semver, url, walkdir
 
 **Dev/Test:** criterion, tempfile, assert_cmd, predicates, sha2, hmac, rand
 

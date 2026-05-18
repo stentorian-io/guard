@@ -2,7 +2,7 @@
 //!
 //! Parses package-manager lockfiles near the project root to discover
 //! custom registry hostnames.  These are merged into the per-run snapshot
-//! as ProjectAllow entries so legitimate fetches from private registries
+//! as allow entries so legitimate fetches from private registries
 //! are not blocked.
 
 use std::collections::BTreeSet;

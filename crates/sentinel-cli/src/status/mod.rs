@@ -226,7 +226,6 @@ mod render_tests {
     fn empty_counters() -> StatusCounters {
         StatusCounters {
             rules_user: 0,
-            rules_trusted_toml: 0,
             blocks_today: 0,
             allows_today: 0,
             gaps_today: 0,

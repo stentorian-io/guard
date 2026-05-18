@@ -85,14 +85,14 @@ fn pol_06_holds_when_entries_supplied_in_arbitrary_order() {
 }
 
 #[test]
-fn d_26_builtin_deny_beats_project_allow() {
-    // D-26 invariant: a BuiltinDeny entry at Tier 0 must beat a ProjectAllow
-    // entry at Tier 5 for the same suffix. .sentinel.toml CANNOT override
+fn d_26_builtin_deny_beats_user_allow() {
+    // D-26 invariant: a BuiltinDeny entry at Tier 0 must beat a UserAllow
+    // entry at Tier 4 for the same suffix. User rules CANNOT override
     // the curated YAML's abuse-pattern denies.
     let mut entries = vec![
         entry(
             RuleKind::Allow,
-            RuleTier::ProjectAllow,
+            RuleTier::UserAllow,
             MatchType::Suffix,
             ".workers.dev",
         ),

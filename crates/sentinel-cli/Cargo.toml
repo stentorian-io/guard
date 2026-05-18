@@ -29,21 +29,14 @@ sha2 = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
-dialoguer = { workspace = true }
 notify = { workspace = true }
-similar = { workspace = true }
 serde_json = { workspace = true }
-tempfile = { workspace = true }
 signal-hook = { workspace = true }
-chrono = { workspace = true }
-toml_edit = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 sha2 = { workspace = true }
-ciborium = { workspace = true }
-similar = { workspace = true }
 sentinel-core = { workspace = true }
 sentinel-ipc = { workspace = true }

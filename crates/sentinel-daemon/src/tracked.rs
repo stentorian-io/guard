@@ -71,8 +71,6 @@ pub struct RunRecord {
     /// Phase 3 plan 03-04: true if this run was started with --baseline-mode
     /// (learn-mode: observe and record, but don't block).
     pub baseline_mode: bool,
-    /// Phase 3 plan 03-04: path to the .sentinel.toml governing this run, if any.
-    pub project_toml_path: Option<String>,
 }
 
 #[derive(Default)]
@@ -215,15 +213,6 @@ impl ProcessTree {
         let mut g = self.runs.write().unwrap_or_else(|p| p.into_inner());
         if let Some(rec) = g.get_mut(run_uuid) {
             rec.baseline_mode = baseline_mode;
-        }
-    }
-
-    /// Update project_toml_path on a RunRecord identified by run_uuid.
-    /// No-op if the run_uuid is not in the map.
-    pub fn set_run_project_toml_path(&self, run_uuid: &str, path: Option<String>) {
-        let mut g = self.runs.write().unwrap_or_else(|p| p.into_inner());
-        if let Some(rec) = g.get_mut(run_uuid) {
-            rec.project_toml_path = path;
         }
     }
 

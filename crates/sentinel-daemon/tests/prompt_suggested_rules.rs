@@ -7,7 +7,6 @@ fn s3_amazonaws_shared_cdn_three_suggestions() {
     assert_eq!(s[0].pattern, "foo.s3.amazonaws.com"); assert_eq!(s[0].match_type, "exact");
     assert_eq!(s[1].pattern, "s3.amazonaws.com");    assert_eq!(s[1].match_type, "exact");
     assert_eq!(s[2].pattern, ".s3.amazonaws.com");   assert_eq!(s[2].match_type, "suffix");
-    for r in &s { assert_eq!(r.scope_hint, "machine"); }
 }
 
 #[test]

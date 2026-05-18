@@ -23,7 +23,6 @@ fn status_reply_ok_round_trip() {
         vec![],
         StatusCounters {
             rules_user: 0,
-            rules_trusted_toml: 0,
             blocks_today: 0,
             allows_today: 0,
             gaps_today: 0,
@@ -80,7 +79,6 @@ fn prompt_request_round_trip() {
         suggested_rules: vec![SuggestedRule {
             match_type: "exact".into(),
             pattern: "evil.example.com".into(),
-            scope_hint: "machine".into(),
         }],
     };
     round_trip(&r);
@@ -145,8 +143,6 @@ fn baseline_commit_round_trip() {
             pattern: ".s3.amazonaws.com".into(),
             reason: "baseline: ...".into(),
         }],
-        Some("/tmp/.sentinel.toml".into()),
-        Some("version = 1\n".into()),
     ));
 }
 
@@ -168,7 +164,6 @@ fn status_reply_full_ok_round_trip() {
         }],
         StatusCounters {
             rules_user: 5,
-            rules_trusted_toml: 12,
             blocks_today: 3,
             allows_today: 100,
             gaps_today: 1,

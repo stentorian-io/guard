@@ -147,9 +147,9 @@ pub struct FeedWarning {
 
 // --- PrepareSnapshot / SnapshotReply (D-29, D-30) --------------------------
 
-/// CLI → daemon: sent BEFORE posix_spawn. Daemon walks up cwd to .sentinel.toml,
-/// merges curated YAML + SQLite + project rules, writes per-run snapshot,
-/// returns the manifest path the CLI will set as SENTINEL_SNAPSHOT_MANIFEST.
+/// CLI → daemon: sent BEFORE posix_spawn. Daemon merges curated YAML + SQLite
+/// rules, writes per-run snapshot, returns the manifest path the CLI will set
+/// as SENTINEL_SNAPSHOT_MANIFEST.
 ///
 /// V3 additions: `is_tty` (D-73) and `baseline_mode` (D-58). Both are
 /// `#[serde(default)]` so V2-encoded messages decode cleanly with false.
@@ -475,53 +475,6 @@ impl ResolveReply {
     }
 }
 
-// --- TrustPolicy / TrustPolicyReply (D-38) ---------------------------------
-
-/// CLI → daemon: trust the (path, sha256) tuple — inserts into
-/// `trusted_policy_files` SQLite table. Subsequent `sentinel wrap` invocations
-/// from working directories below `path` will honor that .sentinel.toml.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TrustPolicy {
-    pub schema_version: u16,
-    pub path: String,   // canonicalized absolute path
-    pub sha256: String, // 64-char lowercase hex
-}
-
-impl TrustPolicy {
-    pub fn new(path: impl Into<String>, sha256: impl Into<String>) -> Self {
-        Self {
-            schema_version: IPC_SCHEMA_V2,
-            path: path.into(),
-            sha256: sha256.into(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum TrustPolicyReply {
-    Ok {
-        schema_version: u16,
-    },
-    Err {
-        schema_version: u16,
-        message: String,
-    },
-}
-
-impl TrustPolicyReply {
-    pub fn ok() -> Self {
-        Self::Ok {
-            schema_version: IPC_SCHEMA_V2,
-        }
-    }
-    pub fn err(m: impl Into<String>) -> Self {
-        Self::Err {
-            schema_version: IPC_SCHEMA_V2,
-            message: m.into(),
-        }
-    }
-}
-
 // --- EnvNotPropagatedGap / Ack (TREE-06 — gap-closure 02-09) -----------------
 
 /// Dylib → daemon: parent process detected pre-spawn that the envp passed to
@@ -637,8 +590,6 @@ pub struct GapInfo {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatusCounters {
     pub rules_user: u64,
-    #[serde(default)]
-    pub rules_trusted_toml: u64,
     pub blocks_today: u64,
     pub allows_today: u64,
     pub gaps_today: u64,
@@ -782,7 +733,6 @@ pub struct ProcessCtx {
 pub struct SuggestedRule {
     pub match_type: String, // "exact"|"suffix"
     pub pattern: String,
-    pub scope_hint: String, // "machine"|"project"
 }
 
 /// Daemon → CLI (prompt channel): request user decision on an outbound connection.
@@ -811,7 +761,6 @@ pub struct PromptRequest {
 pub enum PromptVerdict {
     AllowOnce,
     AllowAlwaysMachine,
-    AllowAlwaysProject,
     Deny,
 }
 
@@ -957,8 +906,6 @@ pub enum BaselineCommitReply {
     Ok {
         schema_version: u16,
         proposed_rules: Vec<ProposedRule>,
-        existing_toml_path: Option<String>,
-        existing_toml_content: Option<String>,
     },
     Err {
         schema_version: u16,
@@ -967,16 +914,10 @@ pub enum BaselineCommitReply {
 }
 
 impl BaselineCommitReply {
-    pub fn ok(
-        proposed_rules: Vec<ProposedRule>,
-        existing_toml_path: Option<String>,
-        existing_toml_content: Option<String>,
-    ) -> Self {
+    pub fn ok(proposed_rules: Vec<ProposedRule>) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V3,
             proposed_rules,
-            existing_toml_path,
-            existing_toml_content,
         }
     }
     pub fn err(message: impl Into<String>) -> Self {
@@ -1002,24 +943,20 @@ pub struct ListRules {
     pub schema_version: u16, // V3
     /// Include built-in registry-allowlist rules in the response (CLI: --all).
     pub include_builtins: bool,
-    /// If Some(path), filter to rules sourced from the .sentinel.toml at this
-    /// canonical path (CLI: --project, walked from cwd by the CLI before sending).
-    pub project_filter: Option<String>,
 }
 
 impl ListRules {
-    pub fn new(include_builtins: bool, project_filter: Option<String>) -> Self {
+    pub fn new(include_builtins: bool) -> Self {
         Self {
             schema_version: IPC_SCHEMA_V3,
             include_builtins,
-            project_filter,
         }
     }
 }
 
 impl Default for ListRules {
     fn default() -> Self {
-        Self::new(false, None)
+        Self::new(false)
     }
 }
 
@@ -1028,13 +965,11 @@ impl Default for ListRules {
 /// `match_type` strings without importing core enum types.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuleRow {
-    pub source: String,     // "user" | "trusted_toml" | "builtin"
+    pub source: String,     // "user" | "builtin"
     pub kind: String,       // "allow" | "deny"
     pub match_type: String, // "exact" | "suffix" | "ip"
     pub pattern: String,
     pub reason: String,
-    /// For trusted_toml rows: canonical path of the source .sentinel.toml.
-    pub source_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1054,123 +989,6 @@ impl ListRulesReply {
         Self::Ok {
             schema_version: IPC_SCHEMA_V3,
             rules,
-        }
-    }
-    pub fn err(message: impl Into<String>) -> Self {
-        Self::Err {
-            schema_version: IPC_SCHEMA_V3,
-            message: message.into(),
-        }
-    }
-}
-
-// ============================================================
-// Phase 07 — ListTrust (tag 0x0F; sentinel status trust)
-// ============================================================
-
-/// CLI → daemon: enumerate trusted .sentinel.toml entries.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ListTrust {
-    pub schema_version: u16, // V3
-}
-
-impl ListTrust {
-    pub fn new() -> Self {
-        Self {
-            schema_version: IPC_SCHEMA_V3,
-        }
-    }
-}
-
-impl Default for ListTrust {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TrustRow {
-    /// Canonical absolute path of the trusted .sentinel.toml.
-    pub canonical_path: String,
-    /// SHA-256 hex of the trusted file content (lowercase).
-    pub sha256: String,
-    /// Unix-millis timestamp the row was inserted.
-    pub trusted_at_ms: u64,
-    /// "cli" | "prompt" — provenance of the trust decision.
-    pub trusted_via: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ListTrustReply {
-    Ok {
-        schema_version: u16,
-        entries: Vec<TrustRow>,
-    },
-    Err {
-        schema_version: u16,
-        message: String,
-    },
-}
-
-impl ListTrustReply {
-    pub fn ok(entries: Vec<TrustRow>) -> Self {
-        Self::Ok {
-            schema_version: IPC_SCHEMA_V3,
-            entries,
-        }
-    }
-    pub fn err(message: impl Into<String>) -> Self {
-        Self::Err {
-            schema_version: IPC_SCHEMA_V3,
-            message: message.into(),
-        }
-    }
-}
-
-// ============================================================
-// Phase 07 — IsTrusted (tag 0x10; first-trust pre-check, D-24)
-// ============================================================
-
-/// CLI → daemon: check whether a `(canonical_path, sha256)` pair is trusted.
-///
-/// Read-only existence check. CLI MUST canonicalize the path before sending;
-/// the daemon-side handler rejects non-canonical input as defense-in-depth
-/// (mirrors the BLOCKER-03 fix in `handle_trust_policy`).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct IsTrusted {
-    pub schema_version: u16, // V3
-    pub path: String,
-    /// SHA-256 hex of the file the CLI hashed; lookup is by (path, sha256).
-    pub sha256: String,
-}
-
-impl IsTrusted {
-    pub fn new(path: impl Into<String>, sha256: impl Into<String>) -> Self {
-        Self {
-            schema_version: IPC_SCHEMA_V3,
-            path: path.into(),
-            sha256: sha256.into(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum IsTrustedReply {
-    Ok {
-        schema_version: u16,
-        trusted: bool,
-    },
-    Err {
-        schema_version: u16,
-        message: String,
-    },
-}
-
-impl IsTrustedReply {
-    pub fn ok(trusted: bool) -> Self {
-        Self::Ok {
-            schema_version: IPC_SCHEMA_V3,
-            trusted,
         }
     }
     pub fn err(message: impl Into<String>) -> Self {

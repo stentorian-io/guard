@@ -36,45 +36,6 @@ fn db_file_has_mode_0600() {
 }
 
 #[test]
-fn insert_then_is_trusted_returns_true() {
-    let (_tmp, s) = store();
-    s.insert_trusted("/Users/x/proj/.sentinel.toml", "abc123", "cli")
-        .expect("insert");
-    assert!(s
-        .is_trusted("/Users/x/proj/.sentinel.toml", "abc123")
-        .unwrap());
-}
-
-#[test]
-fn is_trusted_returns_false_for_unknown_pair() {
-    let (_tmp, s) = store();
-    s.insert_trusted("/path/a", "hash_a", "cli").unwrap();
-    assert!(
-        !s.is_trusted("/path/a", "hash_b").unwrap(),
-        "different hash → untrusted"
-    );
-    assert!(
-        !s.is_trusted("/path/b", "hash_a").unwrap(),
-        "different path → untrusted"
-    );
-}
-
-#[test]
-fn insert_trusted_is_idempotent() {
-    let (_tmp, s) = store();
-    s.insert_trusted("/x", "abc", "cli").unwrap();
-    s.insert_trusted("/x", "abc", "cli").unwrap(); // INSERT OR REPLACE
-    assert!(s.is_trusted("/x", "abc").unwrap());
-}
-
-#[test]
-fn insert_trusted_via_prompt_also_works() {
-    let (_tmp, s) = store();
-    s.insert_trusted("/x", "abc", "prompt").unwrap();
-    assert!(s.is_trusted("/x", "abc").unwrap());
-}
-
-#[test]
 fn all_user_rules_empty_initially() {
     let (_tmp, s) = store();
     let rules = s.all_user_rules().expect("all_user_rules");
@@ -138,5 +99,4 @@ fn insert_user_rule_returns_rowid_and_appears_in_count() {
     let id2 = store.insert_user_rule("allow", "suffix", ".example.com", "approved").expect("insert");
     assert!(id1 > 0 && id2 > id1);
     assert_eq!(store.count_user_rules().unwrap(), 2);
-    assert_eq!(store.count_trusted().unwrap(), 0);
 }

@@ -23,11 +23,6 @@ pub struct Snapshot {
     /// Per-`sentinel wrap` snapshot: Some(uuid) for runs/{uuid}.cbor; None for the
     /// daemon-startup snapshot (deprecated post-Phase-2 but kept for compat).
     pub run_uuid: Option<String>,
-    /// Absolute path of the trusted .sentinel.toml that contributed project rules
-    /// to this per-run snapshot. None if no .sentinel.toml was found or trusted.
-    pub project_toml_path: Option<String>,
-    /// SHA-256 hex of the .sentinel.toml content at snapshot-write time.
-    pub project_toml_sha256: Option<String>,
 }
 
 impl Snapshot {
@@ -39,8 +34,6 @@ impl Snapshot {
             generated_at_unix_ms: 0,
             entries: Vec::new(),
             run_uuid: None,
-            project_toml_path: None,
-            project_toml_sha256: None,
         }
     }
 
@@ -75,8 +68,6 @@ impl Snapshot {
                 },
             ],
             run_uuid: None,
-            project_toml_path: None,
-            project_toml_sha256: None,
         }
     }
 

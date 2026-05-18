@@ -20,11 +20,10 @@ const SHARED_CDN_SLDS: &[&str] = &[
 
 pub fn generate_suggested_rules(host: &str) -> Vec<SuggestedRule> {
     let mut out = Vec::new();
-    // Always: exact-host machine.
+    // Always: exact-host.
     out.push(SuggestedRule {
         match_type: "exact".into(),
         pattern: host.to_string(),
-        scope_hint: "machine".into(),
     });
 
     // Raw IP: short-circuit (no suffix variants).
@@ -43,7 +42,6 @@ pub fn generate_suggested_rules(host: &str) -> Vec<SuggestedRule> {
         out.push(SuggestedRule {
             match_type: "exact".into(),
             pattern: parent.clone(),
-            scope_hint: "machine".into(),
         });
     }
 
@@ -51,7 +49,6 @@ pub fn generate_suggested_rules(host: &str) -> Vec<SuggestedRule> {
     out.push(SuggestedRule {
         match_type: "suffix".into(),
         pattern: format!(".{parent}"),
-        scope_hint: "machine".into(),
     });
 
     out

@@ -6,7 +6,6 @@ use sentinel_ipc::{DaemonStateKind, StatusCounters};
 fn verbose_render_produces_output() {
     let counters = StatusCounters {
         rules_user: 3,
-        rules_trusted_toml: 0,
         blocks_today: 1,
         allows_today: 10,
         gaps_today: 0,

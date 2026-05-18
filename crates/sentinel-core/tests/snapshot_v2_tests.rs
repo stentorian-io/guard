@@ -15,8 +15,6 @@ fn phase2_default_has_v2_schema_and_nonempty_entries() {
         "phase2_default must seed at least loopback + registry.npmjs.org"
     );
     assert!(s.run_uuid.is_none(), "daemon-startup snapshot has no run_uuid");
-    assert!(s.project_toml_path.is_none());
-    assert!(s.project_toml_sha256.is_none());
 }
 
 #[test]
@@ -55,11 +53,7 @@ fn decode_truncated_returns_codec_error() {
 fn snapshot_with_run_uuid_roundtrips() {
     let mut s = Snapshot::phase2_default();
     s.run_uuid = Some("11111111-2222-3333-4444-555555555555".into());
-    s.project_toml_path = Some("/Users/x/proj/.sentinel.toml".into());
-    s.project_toml_sha256 = Some("a".repeat(64));
     let bytes = s.encode().expect("encode");
     let back = Snapshot::decode(&bytes).expect("decode");
     assert_eq!(s.run_uuid, back.run_uuid);
-    assert_eq!(s.project_toml_path, back.project_toml_path);
-    assert_eq!(s.project_toml_sha256, back.project_toml_sha256);
 }

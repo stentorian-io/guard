@@ -58,11 +58,9 @@ fn evaluate_rule_returns_kind_on_match_none_on_miss() {
 #[test]
 fn tier_ordering_implements_precedence() {
     assert!(RuleTier::BuiltinDeny < RuleTier::CuratedAllow);
-    assert!(RuleTier::CuratedAllow < RuleTier::ProjectDeny);
-    assert!(RuleTier::ProjectDeny < RuleTier::UserDeny);
+    assert!(RuleTier::CuratedAllow < RuleTier::UserDeny);
     assert!(RuleTier::UserDeny < RuleTier::FeedDeny);
-    assert!(RuleTier::FeedDeny < RuleTier::ProjectAllow);
-    assert!(RuleTier::ProjectAllow < RuleTier::UserAllow);
+    assert!(RuleTier::FeedDeny < RuleTier::UserAllow);
 }
 
 #[test]
@@ -85,10 +83,8 @@ fn rule_tier_serde_roundtrips_each_variant() {
     for &t in &[
         RuleTier::BuiltinDeny,
         RuleTier::CuratedAllow,
-        RuleTier::ProjectDeny,
         RuleTier::UserDeny,
         RuleTier::FeedDeny,
-        RuleTier::ProjectAllow,
         RuleTier::UserAllow,
     ] {
         let mut buf = Vec::new();

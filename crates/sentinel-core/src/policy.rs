@@ -15,10 +15,8 @@ pub enum SourceKind {
     HardRule(&'static str),
     BuiltinDeny,
     CuratedAllow,
-    ProjectDeny,
     UserDeny,
     FeedDeny,
-    ProjectAllow,
     UserAllow,
     DefaultDeny,
 }
@@ -28,10 +26,8 @@ impl SourceKind {
         match tier {
             RuleTier::BuiltinDeny => SourceKind::BuiltinDeny,
             RuleTier::CuratedAllow => SourceKind::CuratedAllow,
-            RuleTier::ProjectDeny => SourceKind::ProjectDeny,
             RuleTier::UserDeny => SourceKind::UserDeny,
             RuleTier::FeedDeny => SourceKind::FeedDeny,
-            RuleTier::ProjectAllow => SourceKind::ProjectAllow,
             RuleTier::UserAllow => SourceKind::UserAllow,
         }
     }
@@ -121,7 +117,7 @@ pub fn is_cloud_metadata_ip(ip: &[u8]) -> bool {
 ///
 /// The function iterates `entries` linearly and returns at the first match.
 /// Because entries are sorted by tier, the first match is the highest-priority
-/// match — implementing RESEARCH.md §5's seven-tier precedence stack.
+/// match — implementing RESEARCH.md §5's five-tier precedence stack.
 pub fn evaluate_policy(
     host: &[u8],
     ip: Option<&[u8]>,
@@ -155,7 +151,7 @@ pub fn evaluate_policy(
         return (Verdict::Deny, SourceKind::HardRule("raw-ip-cache-miss"));
     }
 
-    // --- Tiers 1..6: walk entries in tier order ---
+    // --- Tiers 1..4: walk entries in tier order ---
     // Caller MUST supply pre-sorted entries (daemon's snapshot-write step does
     // this). On the dylib hot path we do not re-sort — that would allocate.
     for entry in entries {

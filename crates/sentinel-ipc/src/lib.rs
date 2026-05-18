@@ -34,8 +34,6 @@ pub use messages::{
     ResolveReply,
     SOCKADDR_WIRE_LEN,
     SnapshotReply,
-    TrustPolicy,
-    TrustPolicyReply,
     // Phase 3
     IPC_SCHEMA_V3,
     // Phase 3 — Status (tag 0x09)
@@ -78,13 +76,6 @@ pub use messages::{
     ListRules,
     ListRulesReply,
     RuleRow,
-    // Phase 07 — ListTrust (tag 0x0F)
-    ListTrust,
-    ListTrustReply,
-    TrustRow,
-    // Phase 07 — IsTrusted (tag 0x10)
-    IsTrusted,
-    IsTrustedReply,
     // Phase 07 — DeleteInstallArtifacts (tag 0x11; D-15 WARNING-5 fix)
     DeleteInstallArtifacts,
     DeleteInstallArtifactsReply,

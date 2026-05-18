@@ -610,10 +610,10 @@ fn handle_baseline_commit_frame(stream: &mut UnixStream, state: &Arc<DaemonState
 }
 
 // ============================================================================
-// Phase 07 plan 01 — management-IPC frame handlers (ListRules / ListTrust /
-// IsTrusted / DeleteInstallArtifacts). Each is a verbatim copy of the
+// Phase 07 plan 01 — management-IPC frame handlers (ListRules /
+// DeleteInstallArtifacts). Each is a verbatim copy of the
 // `handle_read_install_artifacts_frame` shape with type names swapped.
-// All four enforce `schema_version == IPC_SCHEMA_V3`.
+// Both enforce `schema_version == IPC_SCHEMA_V3`.
 // ============================================================================
 
 fn handle_list_rules_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {

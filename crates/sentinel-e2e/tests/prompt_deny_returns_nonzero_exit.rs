@@ -70,8 +70,8 @@ fn deny_choice_results_in_nonzero_exit_code() {
     }
     assert!(full.contains("Choose: [1]"), "no prompt: {full}");
 
-    // Send "4" (deny).
-    writer.write_all(b"4\n").expect("write 4");
+    // Send "3" (deny).
+    writer.write_all(b"3\n").expect("write 3");
     drop(writer);
 
     // Wait for the wrapped child to exit and capture status.

@@ -476,9 +476,6 @@ impl IpcServer {
             FrameKind::Tagged(MessageTag::Ping) => {
                 handle_ping_frame(&mut stream, state);
             }
-            FrameKind::Tagged(tag) => {
-                warn!(?tag, "unhandled message tag — ignoring");
-            }
         }
     }
 }

@@ -1,6 +1,6 @@
 //! M005-S05: Deny verdict via PTY prompt.
 //!
-//! Test: sentinel run wraps node against a non-allowlisted hostname. The hook's
+//! Test: sentinel wrap wraps node against a non-allowlisted hostname. The hook's
 //! sentinel_getaddrinfo sends Resolve IPC to the daemon. Because the run is
 //! TTY-attached, the daemon parks the Resolve and sends a PromptRequest to the
 //! CLI. The test sends "4\n" (Deny) into the PTY. The daemon resumes Resolve
@@ -41,6 +41,7 @@ fn deny_blocks_connection_and_logs_prompt_deny() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
+    cmd.arg("wrap");
     cmd.arg(&node);
     cmd.arg(&script);
     cmd.env("HOME", harness.home.path().to_str().unwrap());
@@ -51,7 +52,7 @@ fn deny_blocks_connection_and_logs_prompt_deny() {
     cmd.env("PROBE_PORT", DENY_PORT);
     cmd.env("PROBE_CONNECT_AFTER", "0");
 
-    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel run");
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel wrap");
     let reader = pair.master.try_clone_reader().expect("reader");
     let mut writer = pair.master.take_writer().expect("writer");
     drop(pair.slave);

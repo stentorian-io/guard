@@ -93,6 +93,7 @@ fn node_connect_to_non_allowlisted_host_is_denied() {
     );
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()
@@ -188,6 +189,7 @@ fn node_connect_to_loopback_is_allowed() {
         setTimeout(() => process.exit(3), 5000);";
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg("-e")
         .arg(inline_script)

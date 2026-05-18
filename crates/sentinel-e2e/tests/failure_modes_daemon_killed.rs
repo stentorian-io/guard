@@ -136,6 +136,7 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
     "#;
 
     let mut wrapped = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg("-e")
         .arg(script)
@@ -147,7 +148,7 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn sentinel run");
+        .expect("spawn sentinel wrap");
 
     // Wait for PHASE1_CONNECTED on stdout (RESEARCH §Pitfall 5 race avoidance).
     let stdout = wrapped.stdout.take().expect("stdout pipe");

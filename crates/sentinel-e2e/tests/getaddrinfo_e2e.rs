@@ -90,6 +90,7 @@ fn getaddrinfo_proxied_then_connect_denied_for_non_allowlisted_host() {
     assert!(script.exists(), "probe script missing at {}", script.display());
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()
@@ -176,6 +177,7 @@ fn getaddrinfo_resolve_only_succeeds_for_non_allowlisted_host() {
     let script = probe_script();
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()
@@ -236,6 +238,7 @@ fn getaddrinfo_allowlisted_host_resolves_and_connects() {
     let script = probe_script();
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()
@@ -315,6 +318,7 @@ fn getaddrinfo_differential_deny_vs_loopback_allow() {
     // Part A: non-allowlisted host — resolve succeeds, connect denied.
     let script = probe_script();
     let deny_output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()
@@ -353,6 +357,7 @@ fn getaddrinfo_differential_deny_vs_loopback_allow() {
         setTimeout(() => process.exit(3), 5000);";
 
     let allow_output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg("-e")
         .arg(loopback_script)
@@ -413,6 +418,7 @@ fn getaddrinfo_non_tty_denies_without_prompt() {
     let script = probe_script();
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()
@@ -505,6 +511,7 @@ fn dns_cache_enables_hostname_based_connect_deny() {
     );
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg("-e")
         .arg(&inline)
@@ -578,6 +585,7 @@ fn connect_evil_denied_via_cached_hostname() {
     let script = cargo_workspace_root().join("crates/sentinel-e2e/harness/connect_evil.js");
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()
@@ -655,6 +663,7 @@ fn daemon_down_getaddrinfo_fails_closed() {
     let script = probe_script();
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()

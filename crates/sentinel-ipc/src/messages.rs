@@ -478,7 +478,7 @@ impl ResolveReply {
 // --- TrustPolicy / TrustPolicyReply (D-38) ---------------------------------
 
 /// CLI → daemon: trust the (path, sha256) tuple — inserts into
-/// `trusted_policy_files` SQLite table. Subsequent `sentinel run` invocations
+/// `trusted_policy_files` SQLite table. Subsequent `sentinel wrap` invocations
 /// from working directories below `path` will honor that .sentinel.toml.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrustPolicy {
@@ -934,7 +934,7 @@ impl ReadInstallArtifactsReply {
 }
 
 // ============================================================
-// Phase 3 — BaselineCommit (tag 0x0D; sentinel run --baseline exit)
+// Phase 3 — BaselineCommit (tag 0x0D; sentinel wrap --baseline exit)
 // ============================================================
 
 /// CLI → daemon: commit an accumulated baseline run into proposed rules.
@@ -949,7 +949,7 @@ pub struct BaselineCommit {
 pub struct ProposedRule {
     pub match_type: String, // "exact"|"suffix"
     pub pattern: String,
-    pub reason: String, // "baseline: recorded YYYY-MM-DD by sentinel run --baseline"
+    pub reason: String, // "baseline: recorded YYYY-MM-DD by sentinel wrap --baseline"
 }
 
 /// Daemon → CLI: response to BaselineCommit.

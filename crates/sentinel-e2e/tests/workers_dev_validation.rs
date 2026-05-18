@@ -80,6 +80,7 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
         .expect("openpty");
 
     let mut cmd = CommandBuilder::new(&cli);
+    cmd.arg("wrap");
     cmd.arg(&node);
     cmd.arg(&script);
     cmd.env("HOME", harness.home.path().to_str().unwrap());
@@ -90,7 +91,7 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
     cmd.env("SENTINEL_DENY_HOST", DENY_HOST);
     cmd.env("SENTINEL_DENY_PORT", DENY_PORT);
 
-    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel run");
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel wrap");
     let reader = pair.master.try_clone_reader().expect("reader");
     let mut writer = pair.master.take_writer().expect("writer");
     drop(pair.slave);

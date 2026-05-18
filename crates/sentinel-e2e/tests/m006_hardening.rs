@@ -29,9 +29,9 @@ fn feed_refresh_timer_spawns_at_startup() {
 
 /// Test 2: Codesign peer auth accepts a legitimate node process.
 ///
-/// Run `sentinel run node -e 'process.exit(0)'` and verify it exits 0.
+/// Run `sentinel wrap node -e 'process.exit(0)'` and verify it exits 0.
 /// The daemon's codesign check runs on every IPC connection; if it
-/// rejected the peer, the sentinel run would fail with a non-zero exit.
+/// rejected the peer, the sentinel wrap would fail with a non-zero exit.
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
 fn codesign_accepts_legitimate_peer() {
@@ -49,6 +49,7 @@ fn codesign_accepts_legitimate_peer() {
     let script = cargo_workspace_root().join("crates/sentinel-e2e/harness/smoke_node.js");
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()
@@ -61,7 +62,7 @@ fn codesign_accepts_legitimate_peer() {
 
     assert!(
         output.status.success(),
-        "sentinel run node should exit 0 (codesign check must not reject a legitimate peer);\n\
+        "sentinel wrap node should exit 0 (codesign check must not reject a legitimate peer);\n\
          stderr:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -96,6 +97,7 @@ fn probe_self_test_passes_for_node() {
     let script = cargo_workspace_root().join("crates/sentinel-e2e/harness/smoke_node.js");
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()
@@ -109,7 +111,7 @@ fn probe_self_test_passes_for_node() {
 
     assert!(
         output.status.success(),
-        "sentinel run node should exit 0;\nstderr:\n{}",
+        "sentinel wrap node should exit 0;\nstderr:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 

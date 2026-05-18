@@ -3,18 +3,18 @@
 //!
 //! The daemon's kqueue-based persistence watcher monitors directories like
 //! ~/Library/LaunchAgents/ for file creation/modification. When a write
-//! occurs during an active `sentinel run` session, the daemon emits a gap
+//! occurs during an active `sentinel wrap` session, the daemon emits a gap
 //! record to its JSONL log.
 //!
 //! This test creates ~/Library/LaunchAgents/ before the daemon starts (so
-//! the watcher picks it up), runs `sentinel run` with a probe that writes
+//! the watcher picks it up), runs `sentinel wrap` with a probe that writes
 //! a .plist file, and verifies the gap record appears in the log.
 
 use sentinel_e2e::{resolve_cli, resolve_dylib, resolve_probe, DaemonHarness};
 use std::path::Path;
 use std::process::Command;
 
-/// Writing to ~/Library/LaunchAgents/ under sentinel run produces a
+/// Writing to ~/Library/LaunchAgents/ under sentinel wrap produces a
 /// persistence-write gap record in the daemon log.
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
@@ -40,6 +40,7 @@ fn persistence_write_to_launch_agents_detected() {
     let probe = resolve_probe();
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&probe)
         .arg(target_plist.to_str().unwrap())
         .env_clear()

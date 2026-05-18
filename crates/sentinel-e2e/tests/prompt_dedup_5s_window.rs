@@ -44,6 +44,7 @@ fn second_attempt_within_5s_does_not_reprompt() {
     );
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
+    cmd.arg("wrap");
     cmd.arg(&node);
     cmd.arg("-e");
     cmd.arg(&inline);
@@ -52,7 +53,7 @@ fn second_attempt_within_5s_does_not_reprompt() {
     cmd.env("SENTINEL_HOOK_DYLIB", dylib.to_str().unwrap());
     cmd.env("SENTINEL_STATE_DIR", harness.state_dir.to_str().unwrap());
 
-    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel run");
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel wrap");
     let reader = pair.master.try_clone_reader().expect("clone reader");
     let mut writer = pair.master.take_writer().expect("take writer");
     drop(pair.slave);

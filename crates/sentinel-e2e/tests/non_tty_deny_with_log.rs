@@ -1,6 +1,6 @@
-//! Phase 3 plan 03-14 — CLI-07 / D-74: non-TTY sentinel run → no prompt → deny-with-log.
+//! Phase 3 plan 03-14 — CLI-07 / D-74: non-TTY sentinel wrap → no prompt → deny-with-log.
 //!
-//! AC-NTTY-02 / D-74: When stdin is not a TTY, sentinel run sets is_tty=false;
+//! AC-NTTY-02 / D-74: When stdin is not a TTY, sentinel wrap sets is_tty=false;
 //! the daemon's Resolve handler fires deny immediately (no prompt park). The
 //! wrapped command exits non-zero on a denied connection.
 //!
@@ -25,6 +25,7 @@ fn non_tty_run_blocks_and_logs() {
     // curl with --max-time 3 will fail immediately when Sentinel denies at the
     // connect() layer (sub-ms) rather than waiting for TCP timeout (75s+).
     let out = std::process::Command::new(&cli)
+        .arg("wrap")
         .arg("/usr/bin/curl")
         .arg("--max-time")
         .arg("3")

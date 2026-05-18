@@ -40,7 +40,7 @@ fn build_state(state_dir: &Path) -> (Arc<ProcessTree>, Arc<DaemonState>) {
 ///
 /// When the connecting process sends a RegisterRoot with wire_pid == kernel_pid
 /// (it is registering ITSELF as a tracked root), the daemon stores the kernel-sourced
-/// peer token (not the wire token). This is the standard path used by `sentinel run`
+/// peer token (not the wire token). This is the standard path used by `sentinel wrap`
 /// when the CLI registers itself — before REGISTER-01 it was the only path.
 ///
 /// This test verifies that after self-registration, `is_tracked` with the FULL

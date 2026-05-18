@@ -40,6 +40,7 @@ fn first_trust_non_tty_emits_auto_trust_notice() {
     // sees non-TTY stdin, and takes the auto-trust path — emitting the D-25
     // stderr notice before continuing into prepare_snapshot_v3.
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg("/bin/echo").arg("hi")
         .env_clear()
         .env("HOME", harness.home.path())

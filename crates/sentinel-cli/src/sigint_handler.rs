@@ -2,7 +2,7 @@
 //!
 //! Phase 3 plan 03-13 BLOCKER #1 / D-79 — SIGINT handler.
 //!
-//! On Ctrl-C during `sentinel run`:
+//! On Ctrl-C during `sentinel wrap`:
 //!   1. Snapshot in-flight prompt_ids from the shared InflightPrompts registry.
 //!   2. Send PromptCancel for each over the live prompt channel (so the daemon
 //!      unblocks parked Resolve handlers with Deny).

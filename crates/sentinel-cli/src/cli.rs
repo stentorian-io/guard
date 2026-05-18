@@ -1,4 +1,4 @@
-//! clap derive structs for the `sentinel` CLI (Phase 07 redesign — D-09 hard-cut, 2-verb shape).
+//! clap derive structs for the `sentinel` CLI.
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
@@ -12,32 +12,36 @@ use std::ffi::OsString;
 Sentinel sandboxes outbound network egress from a command and its children.
 
 USAGE:
-  sentinel <cmd> [args...]            Wrap a command under enforcement
-  sentinel --learn <cmd> [args...]    Record unknown destinations to .sentinel.toml
-                                      (TTY required; fails clear in non-TTY)
+  sentinel wrap <cmd> [args...]              Wrap a command under enforcement
+  sentinel wrap --learn <cmd> [args...]      Record unknown destinations to .sentinel.toml
+                                             (TTY required; fails clear in non-TTY)
 
   sentinel setup [daemon|shell] [--remove|--reinstall] [-y]
-                                      Install / repair / remove components
+                                             Install / repair / remove components
   sentinel status [logs|rules|trust|denials|review|persistence] [--follow|--all|--project|--json]
-                                      Inspect daemon health, rules, trust, denials
-
-To wrap a binary whose name collides with a Sentinel verb, pass its full path:
-  sentinel /usr/local/bin/status
+                                             Inspect daemon health, rules, trust, denials
 "
 )]
 pub struct Cli {
-    /// Auto-allow unknown destinations and record them to .sentinel.toml.
-    /// TTY required; refuses to run in non-interactive environments.
-    #[arg(long, global = false)]
-    pub learn: bool,
-
     #[command(subcommand)]
     pub cmd: Cmd,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
-    /// Install / repair / remove daemon and shell components (CLI-11..CLI-13).
+    /// Wrap a command under default-deny network enforcement.
+    Wrap {
+        /// Auto-allow unknown destinations and record them to .sentinel.toml.
+        /// TTY required; refuses to run in non-interactive environments.
+        #[arg(long)]
+        learn: bool,
+
+        /// The command and its arguments to wrap.
+        #[arg(trailing_var_arg = true, num_args = 1.., required = true)]
+        argv: Vec<OsString>,
+    },
+
+    /// Install / repair / remove daemon and shell components.
     Setup {
         /// Optional component target: `daemon` (LaunchAgent + plist + state)
         /// or `shell` (marker blocks). Bare `setup` targets all components.
@@ -46,15 +50,15 @@ pub enum Cmd {
         /// Remove the targeted component(s) instead of installing.
         #[arg(long, conflicts_with = "reinstall")]
         remove: bool,
-        /// Force-clean reinstall: wipe + re-derive (D-16/D-17).
+        /// Force-clean reinstall: wipe + re-derive.
         #[arg(long, conflicts_with = "remove")]
         reinstall: bool,
-        /// Skip TTY confirmation prompts (D-18). `--force` is NOT a synonym.
+        /// Skip TTY confirmation prompts. `--force` is NOT a synonym.
         #[arg(long, short = 'y')]
         yes: bool,
     },
 
-    /// Inspect daemon health, rules, trust, denials (CLI-14..CLI-19).
+    /// Inspect daemon health, rules, trust, denials.
     Status {
         #[command(subcommand)]
         sub: Option<StatusSub>,
@@ -66,22 +70,17 @@ pub enum Cmd {
         json: bool,
     },
 
-    /// Verify and repair installation integrity (M004-S05).
+    /// Verify and repair installation integrity.
     /// Re-derives HMAC key (if missing), hook hash, and re-bootstraps agents.
     Repair,
 
     /// Emergency escape hatch: bootout daemon + watchdog, clear tracked roots,
-    /// so all wrapped processes lose enforcement immediately (M004-S05).
+    /// so all wrapped processes lose enforcement immediately.
     UnwrapAll {
         /// Skip TTY confirmation prompt.
         #[arg(long, short = 'y')]
         yes: bool,
     },
-
-    /// (Default) Wrap a command under enforcement.
-    /// `argv[0]` is the binary name; subsequent elements are passed verbatim.
-    #[command(external_subcommand)]
-    External(Vec<OsString>),
 }
 
 /// Per-target setup dispatch (D-15).

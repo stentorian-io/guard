@@ -19,7 +19,7 @@ pub fn run(_sock: &Path, state_dir: &Path, yes: bool) -> Result<i32, CliError> {
     if !yes {
         if !crate::tty::confirm(
             "This will immediately stop the daemon and watchdog, disabling \
-             all enforcement. Active `sentinel run` sessions will lose \
+             all enforcement. Active `sentinel wrap` sessions will lose \
              coverage. Continue?",
         )? {
             println!("Aborted.");

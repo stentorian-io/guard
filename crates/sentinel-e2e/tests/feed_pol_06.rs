@@ -36,6 +36,7 @@ fn registry_npmjs_org_allowed_despite_planted_feed_deny() {
     // because /usr/bin/true does no networking; we exercise PrepareSnapshot
     // (which does the fetch + snapshot build) via this trivial process.
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg("/usr/bin/true")
         .env_clear()
         .env("HOME", harness.home.path())
@@ -47,7 +48,7 @@ fn registry_npmjs_org_allowed_despite_planted_feed_deny() {
 
     assert!(
         output.status.success(),
-        "sentinel run /usr/bin/true should succeed even with planted FeedDeny for registry.npmjs.org\n\
+        "sentinel wrap /usr/bin/true should succeed even with planted FeedDeny for registry.npmjs.org\n\
          exit code: {:?}\nstdout:\n{}\nstderr:\n{}\ndaemon stderr:\n{}",
         output.status.code(),
         String::from_utf8_lossy(&output.stdout),

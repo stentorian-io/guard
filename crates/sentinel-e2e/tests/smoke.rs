@@ -1,8 +1,8 @@
-//! Roadmap success criterion #1: `sentinel run echo hello` registers the
+//! Roadmap success criterion #1: `sentinel wrap echo hello` registers the
 //! wrapped process's (pid, pidversion) with the daemon AND the wrapped command
 //! exits 0.
 //!
-//! In Phase 1, the simplest reproducer is `sentinel run echo hello`. echo on
+//! In Phase 1, the simplest reproducer is `sentinel wrap echo hello`. echo on
 //! macOS 26 is hardened, but for THIS test we don't need the dylib to fire —
 //! we only need to verify (a) the daemon received a RegisterRoot and (b) the
 //! wrapped command exited 0. The full dylib-injection verification is in
@@ -34,8 +34,9 @@ fn sentinel_run_echo_hello_registers_with_daemon_and_exits_zero() {
 
     let harness = DaemonHarness::start().expect("start daemon");
 
-    // Run sentinel run echo hello with a clean env + our tempdir HOME.
+    // Run sentinel wrap echo hello with a clean env + our tempdir HOME.
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg("echo")
         .arg("hello")
         .env_clear()
@@ -48,7 +49,7 @@ fn sentinel_run_echo_hello_registers_with_daemon_and_exits_zero() {
 
     assert!(
         output.status.success(),
-        "sentinel run echo hello must exit 0; stderr:\n{}",
+        "sentinel wrap echo hello must exit 0; stderr:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -78,6 +79,7 @@ fn sentinel_run_propagates_child_exit_code() {
 
     // /usr/bin/false exits 1; sentinel-wrapped exit code should propagate.
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg("false")
         .env_clear()
         .env("HOME", harness.home.path())
@@ -93,7 +95,7 @@ fn sentinel_run_propagates_child_exit_code() {
     assert_eq!(
         output.status.code(),
         Some(1),
-        "sentinel run should propagate child's non-zero exit; status={:?}",
+        "sentinel wrap should propagate child's non-zero exit; status={:?}",
         output.status
     );
 }
@@ -107,7 +109,7 @@ fn sentinel_run_propagates_child_exit_code() {
 /// `SENTINEL_TEST_MARKER` when that env var is set. The test:
 ///   1. Picks a short tempdir path for the marker file.
 ///   2. Wraps a trivial Node script (harness/smoke_node.js — just `process.exit(0)`)
-///      under `sentinel run` with `SENTINEL_TEST_MARKER` set.
+///      under `sentinel wrap` with `SENTINEL_TEST_MARKER` set.
 ///   3. Asserts: child exits 0 AND marker file exists.
 ///
 /// The existing `sentinel_run_echo_hello_registers_with_daemon_and_exits_zero`
@@ -171,6 +173,7 @@ fn smoke_dylib_loaded() {
     );
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()
@@ -187,7 +190,7 @@ fn smoke_dylib_loaded() {
 
     assert!(
         output.status.success(),
-        "smoke_dylib_loaded: sentinel run node smoke_node.js must exit 0;\n\
+        "smoke_dylib_loaded: sentinel wrap node smoke_node.js must exit 0;\n\
          stderr:\n{stderr}"
     );
 

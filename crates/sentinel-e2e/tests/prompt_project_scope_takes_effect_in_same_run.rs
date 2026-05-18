@@ -59,6 +59,7 @@ fn project_scope_rule_applies_to_second_connection_no_prompt() {
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
     cmd.cwd(project.path());
+    cmd.arg("wrap");
     cmd.arg(&node);
     cmd.arg("-e");
     cmd.arg(&inline);
@@ -67,7 +68,7 @@ fn project_scope_rule_applies_to_second_connection_no_prompt() {
     cmd.env("SENTINEL_HOOK_DYLIB", dylib.to_str().unwrap());
     cmd.env("SENTINEL_STATE_DIR", harness.state_dir.to_str().unwrap());
 
-    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel run");
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel wrap");
     let reader = pair.master.try_clone_reader().expect("clone reader");
     let mut writer = pair.master.take_writer().expect("take writer");
     drop(pair.slave);

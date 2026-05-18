@@ -2,7 +2,7 @@
 //!
 //! Monitors macOS persistence directories (LaunchAgents, LaunchDaemons,
 //! crontabs, periodic scripts, shell profiles) for file writes. When a write
-//! lands during an active `sentinel run` session, the watcher emits a
+//! lands during an active `sentinel wrap` session, the watcher emits a
 //! `gap_kind="persistence-write"` GapRecord to the log writer.
 //!
 //! This replaces the hook-side open()/openat() interpose that was disabled on
@@ -91,7 +91,7 @@ fn persistence_dirs() -> Vec<(PathBuf, &'static str)> {
     dirs
 }
 
-/// Also watch these directories during `sentinel run` if they get created
+/// Also watch these directories during `sentinel wrap` if they get created
 /// after initial scan. Called on the 30s timeout to pick up newly-created
 /// directories (e.g. ~/Library/LaunchAgents/ created by a package script).
 fn persistence_dirs_with_create() -> Vec<(PathBuf, &'static str)> {

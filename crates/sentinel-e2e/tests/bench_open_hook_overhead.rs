@@ -24,6 +24,7 @@ fn open_hook_overhead_normal_files() {
     // Warm up: one run to populate caches
     let warmup_file = home.join("warmup.txt");
     let _ = Command::new(&cli)
+        .arg("wrap")
         .arg(&probe)
         .arg(warmup_file.to_str().unwrap())
         .env_clear()
@@ -42,6 +43,7 @@ fn open_hook_overhead_normal_files() {
         let target = home.join(format!("bench-{i}.txt"));
         let start = Instant::now();
         let output = Command::new(&cli)
+            .arg("wrap")
             .arg(&probe)
             .arg(target.to_str().unwrap())
             .env_clear()

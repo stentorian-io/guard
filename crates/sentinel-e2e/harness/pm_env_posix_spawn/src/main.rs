@@ -8,7 +8,7 @@
 //!     defense-in-depth `pm_env_filter` BEFORE the IPC frame is sent.
 //!
 //! Inherits SENTINEL_DAEMON_SOCKET / SENTINEL_SNAPSHOT_MANIFEST /
-//! DYLD_INSERT_LIBRARIES from the wrapped `sentinel run` invocation so the
+//! DYLD_INSERT_LIBRARIES from the wrapped `sentinel wrap` invocation so the
 //! child still loads the dylib and can talk to the daemon. Plus the
 //! `SENTINEL_E2E_PROBE` env vars are prepended explicitly into the spawned
 //! envp so the test-side filter has known input.
@@ -74,7 +74,7 @@ fn main() {
     // 2. Build argv: /bin/sh -c 'true'. The inner /bin/sh is hardened (Apple
     //    SIP-protected), so the dylib WILL NOT load into it — but that does
     //    not matter: the dylib is loaded into THIS process (the wrapped
-    //    sentinel run child), and our posix_spawn call IS what we're
+    //    sentinel wrap child), and our posix_spawn call IS what we're
     //    intercepting. The dylib captures envp at the call site, not from
     //    the child.
     let path = CString::new("/bin/sh").expect("cstring /bin/sh");

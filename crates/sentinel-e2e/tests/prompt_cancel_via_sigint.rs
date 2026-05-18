@@ -1,12 +1,12 @@
 //! Phase 3 plan 03-14 BLOCKER #1 / D-79 acceptance — SIGINT cancels parked prompt.
 //!
-//! Test: SIGINT is sent to the sentinel run process while a prompt is parked.
+//! Test: SIGINT is sent to the sentinel wrap process while a prompt is parked.
 //! The SIGINT handler (sigint_handler.rs, plan 03-13) calls PromptCancel for
 //! all in-flight prompt IDs, then propagates SIGINT to the wrapped process group.
 //! Expected outcomes:
 //!   - PromptCancel sent → daemon emits a GapRecord with gap_kind="prompt-cancelled"
 //!   - wrapped node exits (SIGINT propagated to pgid)
-//!   - sentinel run exits reflecting the SIGINT
+//!   - sentinel wrap exits reflecting the SIGINT
 //!
 //! Marked #[ignore]: requires PTY + signal-aware test runner + macOS daemon.
 //! Opt-in via: cargo test -p sentinel-e2e -- --ignored sigint_during_prompt
@@ -42,6 +42,7 @@ fn sigint_during_prompt_sends_cancel_and_propagates_to_child() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
+    cmd.arg("wrap");
     cmd.arg(&node);
     cmd.arg(&script);
     cmd.env("HOME", harness.home.path().to_str().unwrap());
@@ -59,7 +60,7 @@ fn sigint_during_prompt_sends_cancel_and_propagates_to_child() {
     let reader = pair.master.try_clone_reader().expect("reader");
     drop(pair.slave);
 
-    // Wait for the prompt to appear (sentinel run's render loop prints "Choose: [1]").
+    // Wait for the prompt to appear (sentinel wrap's render loop prints "Choose: [1]").
     let mut br = BufReader::new(reader);
     let mut buf = String::new();
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -78,13 +79,13 @@ fn sigint_during_prompt_sends_cancel_and_propagates_to_child() {
         }
     }
 
-    // Send SIGINT to the sentinel run process (which will propagate to the pgid).
+    // Send SIGINT to the sentinel wrap process (which will propagate to the pgid).
     // The SIGINT handler (D-79) should: cancel in-flight prompts + SIGINT to pgid.
     unsafe {
         libc::kill(pid, libc::SIGINT);
     }
 
-    // Wait for sentinel run to exit (SIGINT handled + child reaped).
+    // Wait for sentinel wrap to exit (SIGINT handled + child reaped).
     let _ = child.wait();
     std::thread::sleep(Duration::from_millis(500));
 

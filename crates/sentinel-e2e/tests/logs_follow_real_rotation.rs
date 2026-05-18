@@ -103,11 +103,12 @@ fn real_rotation_produces_gz_archive_and_follow_continues() {
         .expect("spawn follow");
     std::thread::sleep(Duration::from_millis(500));
 
-    // Trigger a Block via non-TTY sentinel run against TEST-NET-1.
+    // Trigger a Block via non-TTY sentinel wrap against TEST-NET-1.
     // 192.0.2.123 is TEST-NET-1 (RFC 5737), not in any allowlist.
     // stdin=null → non-TTY → daemon denies-with-log, no prompt (CLI-07).
     let dylib = sentinel_e2e::resolve_dylib();
     let run_out = Command::new(&cli)
+        .arg("wrap")
         .arg("/usr/bin/curl")
         .arg("--max-time")
         .arg("3")
@@ -122,7 +123,7 @@ fn real_rotation_produces_gz_archive_and_follow_continues() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .output()
-        .expect("sentinel run");
+        .expect("sentinel wrap");
     // Non-TTY deny → curl fails → exit non-zero. Not asserted here;
     // the rotation assertion is what matters.
     let _ = run_out;

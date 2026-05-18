@@ -2,7 +2,7 @@
 # E2E harness: double-fork + setsid pattern for TREE-05 reparenting test.
 #
 # Process tree at fork-time:
-#   sh (root)               <- sentinel run wraps this
+#   sh (root)               <- sentinel wrap wraps this
 #     └── sh (intermediate, exits immediately after setsid)
 #         └── sh (grandchild, attempts a connection)
 #
@@ -17,7 +17,7 @@
 
 # Spawn a backgrounded subshell that double-forks via setsid and probes a
 # deny target. We don't assert on the grandchild's exit code — its stdout
-# is consumed by the wrapping sentinel run's pipe. The wrapped sh root's
+# is consumed by the wrapping sentinel wrap's pipe. The wrapped sh root's
 # job is simply to NOT fail-closed at fork (which would happen if the
 # daemon were unreachable; D-33 / fail-closed-on-fork).
 (

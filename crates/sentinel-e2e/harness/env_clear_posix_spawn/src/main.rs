@@ -1,5 +1,5 @@
 //! E2E harness: invokes posix_spawn with env_clear() to trigger
-//! TREE-06 EnvNotPropagatedGap. The wrapped sentinel run inherits
+//! TREE-06 EnvNotPropagatedGap. The wrapped sentinel wrap inherits
 //! all three SENTINEL_* / DYLD_* env vars; this harness intentionally
 //! drops them when spawning the inner child.
 

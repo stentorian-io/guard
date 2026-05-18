@@ -1471,7 +1471,7 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     }
     // BLOCKER-02 fix: verify the peer is in the tracked tree BEFORE recording
     // a fork. Without this gate, a stray DYLD_INSERT_LIBRARIES injection into
-    // a process that is NOT under `sentinel run` would trigger ForkEvent IPC
+    // a process that is NOT under `sentinel wrap` would trigger ForkEvent IPC
     // for every child the parent forks; the daemon would call `record_fork`
     // (which fails with `ParentNotFound`), the dylib would receive
     // `ForkAck::Err`, and `replace_fork.rs::sentinel_fork` would fail-closed
@@ -1485,7 +1485,7 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     if !state.process_tree.is_tracked(&peer_token) {
         debug!(
             peer_pid = peer_token.val[5],
-            "ForkEvent from untracked peer; ignoring (peer is not under sentinel run)"
+            "ForkEvent from untracked peer; ignoring (peer is not under sentinel wrap)"
         );
         let _ = write_tagged(
             stream,
@@ -1596,12 +1596,12 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     }
     // BLOCKER-02 fix: verify the peer is in the tracked tree BEFORE recording
     // an exec or arming the gap detector. An untracked peer (DYLD-injected
-    // dylib in a process outside `sentinel run`) must not be able to mutate
+    // dylib in a process outside `sentinel wrap`) must not be able to mutate
     // tree state or arm a coverage-gap timer.
     if !state.process_tree.is_tracked(&peer_token) {
         debug!(
             peer_pid = peer_token.val[5],
-            "ExecEvent from untracked peer; ignoring (peer is not under sentinel run)"
+            "ExecEvent from untracked peer; ignoring (peer is not under sentinel wrap)"
         );
         let _ = write_tagged(
             stream,
@@ -2117,7 +2117,7 @@ fn handle_env_not_propagated_frame(
     if !state.process_tree.is_tracked(&peer_token) {
         debug!(
             peer_pid = peer_token.val[5],
-            "EnvNotPropagatedGap from untracked peer; ignoring (peer is not under sentinel run)"
+            "EnvNotPropagatedGap from untracked peer; ignoring (peer is not under sentinel wrap)"
         );
         let _ = write_tagged(
             stream,

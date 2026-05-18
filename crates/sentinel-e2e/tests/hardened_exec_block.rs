@@ -16,6 +16,7 @@ fn run_probe(harness: &DaemonHarness, mode: &str) -> std::process::Output {
     assert!(probe.exists(), "hardened_exec_probe not built at {}", probe.display());
 
     Command::new(&cli)
+        .arg("wrap")
         .arg(&probe)
         .arg(mode)
         .env_clear()

@@ -7,7 +7,7 @@
 //!
 //! The trust LOOKUP lives in rule_store.rs; this module orchestrates the
 //! walk + hash + lookup pipeline that plan 02-06's PrepareSnapshot handler
-//! calls per `sentinel run` invocation.
+//! calls per `sentinel wrap` invocation.
 
 use sentinel_core::policy_file::{parse as parse_toml, PolicyFileError as ParseError, SentinelToml};
 use sha2::{Digest, Sha256};

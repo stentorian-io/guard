@@ -21,10 +21,10 @@ pub struct ProcessNode {
     pub audit_token: AuditToken,
     /// None for tracked-roots; Some(parent) for children.
     pub parent_audit_token: Option<AuditToken>,
-    /// The original `sentinel run` root this node descends from. Set at fork
+    /// The original `sentinel wrap` root this node descends from. Set at fork
     /// time (or insert_root for the root itself) and NEVER changed afterwards
     /// — TREE-05: surviving reparenting means surviving ppid changes; the
-    /// `tracked_root` field is the immutable view of "which sentinel run does
+    /// `tracked_root` field is the immutable view of "which sentinel wrap does
     /// this process belong to."
     pub tracked_root: AuditToken,
     pub run_uuid: String,

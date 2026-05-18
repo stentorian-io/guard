@@ -1,6 +1,6 @@
 //! Phase 5 plan 05-04 — VAL-01: ua-parser-js@0.7.29 supply-chain CVE reproduction.
 //!
-//! Drives `sentinel run npm install ./fixtures/ua-parser-js-0.7.29-sanitized.tgz`
+//! Drives `sentinel wrap npm install ./fixtures/ua-parser-js-0.7.29-sanitized.tgz`
 //! through a PTY so the daemon's prompt path fires (CONTEXT C-01: libc-deny path
 //! does NOT emit JSONL today; prompt path is the only path that emits
 //! Decision rows for outbound denies). Pre-scripts a Deny via writer.write_all,
@@ -122,6 +122,7 @@ fn ua_parser_js_postinstall_blocked_with_package_context() {
     // which exercises TREE-06 instead of the prompt path. This direct run keeps
     // the supply-chain lifecycle shape by setting the same npm_* context vars.
     let mut cmd = CommandBuilder::new(&cli);
+    cmd.arg("wrap");
     cmd.arg(&node);
     cmd.arg(&preinstall);
     cmd.cwd(&package_dir);
@@ -136,7 +137,7 @@ fn ua_parser_js_postinstall_blocked_with_package_context() {
     cmd.env("npm_package_version", "0.7.29");
     cmd.env("npm_lifecycle_event", "preinstall");
 
-    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel run");
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel wrap");
     let reader = pair.master.try_clone_reader().expect("reader");
     let mut writer = pair.master.take_writer().expect("writer");
     drop(pair.slave);

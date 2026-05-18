@@ -66,7 +66,7 @@ fn open_prompt_channel_init(
     Ok((s, ack))
 }
 
-/// Start a background `sentinel run -- /bin/sleep 600` so a run_uuid is
+/// Start a background `sentinel wrap -- /bin/sleep 600` so a run_uuid is
 /// registered with the daemon. Returns the child handle (caller must kill it)
 /// and the run_uuid (recovered from the manifest written by PrepareSnapshot).
 fn start_background_tracked_run(
@@ -75,6 +75,7 @@ fn start_background_tracked_run(
     let cli = sentinel_e2e::resolve_cli();
     let dylib = sentinel_e2e::resolve_dylib();
     let child = std::process::Command::new(&cli)
+        .arg("wrap")
         .arg("/bin/sleep")
         .arg("600")
         .env_clear()
@@ -86,7 +87,7 @@ fn start_background_tracked_run(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .expect("spawn background sentinel run");
+        .expect("spawn background sentinel wrap");
 
     // Allow PrepareSnapshot IPC to complete and register a run record.
     std::thread::sleep(Duration::from_millis(600));

@@ -36,6 +36,7 @@ fn pm_env_captured_via_v3_exec_event_with_dylib_side_filter() {
     let mut harness = DaemonHarness::start().expect("start daemon");
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&harness_bin)
         .env_clear()
         .env("HOME", harness.home.path())

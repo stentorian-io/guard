@@ -10,7 +10,7 @@
 //! (`insert_trusted`) through one lock. Under heavy fork load the daemon's
 //! 16 worker threads contended on this mutex, effectively reducing
 //! rule-store concurrency to 1 — which blocks `PrepareSnapshot`, which
-//! blocks `sentinel run` startup, which blocks the user's `npm install`.
+//! blocks `sentinel wrap` startup, which blocks the user's `npm install`.
 //!
 //! The fix opens a fresh `Connection` per read call. SQLite supports this
 //! natively (file-level locking + WAL mode handles concurrent readers

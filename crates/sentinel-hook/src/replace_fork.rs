@@ -25,7 +25,7 @@ use sentinel_ipc::AuditTokenWire;
 const IPC_TIMEOUT_MS: u64 = 250;
 
 /// BLOCKER-02 fix: distinguish "daemon says I'm not tracked" (do not fail
-/// closed — the dylib is loaded into a process outside `sentinel run`, so
+/// closed — the dylib is loaded into a process outside `sentinel wrap`, so
 /// fork hooks should pass through to the real syscall) from any other IPC
 /// error (fail-closed per D-33).
 ///
@@ -196,14 +196,14 @@ pub unsafe extern "C" fn sentinel_fork() -> libc::pid_t {
     }
     // PARENT path: send ForkEvent IPC. Fail-closed on error per D-33,
     // EXCEPT when the daemon explicitly tells us this peer is not in the
-    // tracked tree (BLOCKER-02 — dylib loaded into a non-`sentinel run`
+    // tracked tree (BLOCKER-02 — dylib loaded into a non-`sentinel wrap`
     // process; fail-closed there would self-DoS every fork on the box).
     let pv = child_pidversion(pid);
     let parent = current_audit_token_wire();
     match send_fork_event_sync(parent, pid as i32, pv, IPC_TIMEOUT_MS) {
         Ok(()) => pid,
         Err(e) if is_untracked_peer(&e) => {
-            // BLOCKER-02: not under sentinel run → behave as if Sentinel
+            // BLOCKER-02: not under sentinel wrap → behave as if Sentinel
             // wasn't loaded for this fork. Return the child pid normally.
             pid
         }
@@ -344,7 +344,7 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
         Ok(()) => {}
         Err(e) if is_untracked_peer(&e) => {
             // Pass-through — Sentinel is loaded but this caller is not
-            // under `sentinel run`. Skip the exec-half best-effort IPC too
+            // under `sentinel wrap`. Skip the exec-half best-effort IPC too
             // (the daemon would just reject it).
             return 0;
         }

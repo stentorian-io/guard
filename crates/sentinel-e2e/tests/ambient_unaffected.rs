@@ -2,7 +2,7 @@
 //! when sentineld is running.
 //!
 //! Approach: start DaemonHarness; then run `curl http://example.com/` WITHOUT
-//! `sentinel run` and WITHOUT DYLD_INSERT_LIBRARIES. The dylib is NOT injected
+//! `sentinel wrap` and WITHOUT DYLD_INSERT_LIBRARIES. The dylib is NOT injected
 //! into curl → no enforcement → the connect should succeed.
 //!
 //! Pre-test sanity: if curl is unavailable OR example.com is unreachable

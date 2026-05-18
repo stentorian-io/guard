@@ -33,10 +33,11 @@ fn planted_host_ioc_blocks_with_intel_attribution() {
     ])
     .expect("start daemon");
 
-    // First sentinel run: trigger PrepareSnapshot which fetches the fixture
+    // First sentinel wrap: trigger PrepareSnapshot which fetches the fixture
     // and merges FeedDeny entries into the per-run snapshot. /usr/bin/true
     // exits 0; we only need PrepareSnapshot to fire.
     let primer = Command::new(&cli)
+        .arg("wrap")
         .arg("/usr/bin/true")
         .env_clear()
         .env("HOME", harness.home.path())
@@ -125,6 +126,7 @@ fn planted_host_ioc_blocks_with_intel_attribution() {
                   s.on('connect', () => { console.log('UNEXPECTED ALLOW'); process.exit(2); }); \
                   setTimeout(() => process.exit(3), 5000);";
     let connect_out = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg("-e")
         .arg(script)

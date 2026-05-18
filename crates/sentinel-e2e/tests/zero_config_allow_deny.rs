@@ -1,6 +1,6 @@
 //! E2E test verifying ROADMAP Phase 2 success criteria #2 and #3:
-//!   #2: zero-config sentinel run succeeds for allowlisted destinations
-//!   #3: zero-config sentinel run blocks non-allowlisted destinations via
+//!   #2: zero-config sentinel wrap succeeds for allowlisted destinations
+//!   #3: zero-config sentinel wrap blocks non-allowlisted destinations via
 //!       the dylib's in-process snapshot lookup
 //!
 //! Harness design — UPDATED FROM PLAN per executor-discovered constraint:
@@ -114,7 +114,7 @@ fn e2e_zero_config_allow_deny() {
     let dylib = resolve_dylib();
     let harness = DaemonHarness::start().expect("start daemon");
 
-    // Run the probe under `sentinel run`. We measure both exit code and
+    // Run the probe under `sentinel wrap`. We measure both exit code and
     // elapsed wall-clock time:
     //   - exit code bit 0 (= 1 in result) MUST be set: addr_a connects
     //     successfully (loopback hard-rule allow).
@@ -124,6 +124,7 @@ fn e2e_zero_config_allow_deny() {
     //     to TEST-NET-1 would consume the full 500ms timeout per addr.
     let start = Instant::now();
     let out = Command::new(&cli)
+        .arg("wrap")
         .arg(&probe)
         .arg(&addr_a)
         .arg(&addr_b)
@@ -133,7 +134,7 @@ fn e2e_zero_config_allow_deny() {
         .env("SENTINEL_HOOK_DYLIB", &dylib)
         .env("SENTINEL_STATE_DIR", &harness.state_dir)
         .output()
-        .expect("run sentinel run");
+        .expect("run sentinel wrap");
     let elapsed = start.elapsed();
 
     let exit_code = out.status.code().unwrap_or(-1);
@@ -148,7 +149,7 @@ fn e2e_zero_config_allow_deny() {
     // ROADMAP #2: addr_a (allowlisted via loopback hard-rule) MUST succeed.
     assert!(
         exit_code & 1 == 1,
-        "ROADMAP #2 violation: probe's bit 0 not set (addr_a 127.0.0.1 connect failed under sentinel run)\n\
+        "ROADMAP #2 violation: probe's bit 0 not set (addr_a 127.0.0.1 connect failed under sentinel wrap)\n\
          exit={exit_code} elapsed={elapsed:?}\nstdout: {stdout}\nstderr: {stderr}"
     );
 
@@ -156,7 +157,7 @@ fn e2e_zero_config_allow_deny() {
     // dylib's libc connect hook returns Deny → connect() returns -1.
     assert!(
         exit_code & 2 == 0,
-        "ROADMAP #3 violation: probe's bit 1 SET (addr_b 192.0.2.1 connect SUCCEEDED under sentinel run — \
+        "ROADMAP #3 violation: probe's bit 1 SET (addr_b 192.0.2.1 connect SUCCEEDED under sentinel wrap — \
          sentinel did NOT block the non-allowlisted destination)\n\
          exit={exit_code} elapsed={elapsed:?}\nstdout: {stdout}\nstderr: {stderr}"
     );

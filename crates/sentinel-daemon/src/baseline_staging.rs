@@ -2,7 +2,7 @@
 //!
 //! Phase 3 plan 03-07 — per-run baseline accumulator (POL-04 / D-58).
 //!
-//! In `sentinel run --baseline` mode, every allow-and-log decision is recorded
+//! In `sentinel wrap --baseline` mode, every allow-and-log decision is recorded
 //! into a per-run-uuid Vec<ProposedRule>. On tracked-root exit, the BaselineCommit
 //! IPC handler `take()`s the entries and returns them to the CLI for diff-confirm.
 //! Curated denies and hard rules (D-25/D-26) still fire and are NOT staged.

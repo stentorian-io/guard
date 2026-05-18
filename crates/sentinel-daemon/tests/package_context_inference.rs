@@ -1,6 +1,14 @@
-use sentinel_daemon::log_writer::package_context::package_context_from_pm_env;
+use sentinel_core::AuditToken;
+use sentinel_daemon::log_writer::package_context::{
+    infer_package_context_with_retry, package_context_from_pm_env,
+};
+use sentinel_daemon::tracked::ProcessTree;
+use std::sync::Arc;
+use std::time::Duration;
 
-fn pair(k: &str, v: &str) -> (String, String) { (k.to_string(), v.to_string()) }
+fn pair(k: &str, v: &str) -> (String, String) {
+    (k.to_string(), v.to_string())
+}
 
 #[test]
 fn npm_package_with_lifecycle() {
@@ -61,20 +69,65 @@ fn root_command_truncated() {
 }
 
 #[test]
+fn retry_waits_for_pm_env_snapshot() {
+    let tree = Arc::new(ProcessTree::new());
+    let token = AuditToken {
+        val: [0, 0, 0, 0, 0, 42, 0, 7],
+    };
+    tree.insert_root(token, "run".into(), "node".into());
+
+    let setter_tree = Arc::clone(&tree);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(25));
+        setter_tree.set_pm_env_snapshot(
+            &token,
+            vec![
+                pair("npm_package_name", "ua-parser-js"),
+                pair("npm_package_version", "0.7.29"),
+            ],
+        );
+    });
+
+    let ctx =
+        infer_package_context_with_retry(&tree, &token, "npm install", Duration::from_millis(250))
+            .expect("ctx");
+    assert_eq!(ctx.package, "ua-parser-js");
+    assert_eq!(ctx.version, "0.7.29");
+}
+
+#[test]
 fn writer_handle_send_does_not_block() {
-    use sentinel_daemon::log_writer::{LogWriter, LogRow, Decision, ProcessCtxLog, RootCtxLog,
-                                      JSONL_SCHEMA_VERSION, now_rfc3339};
+    use sentinel_daemon::log_writer::{
+        Decision, JSONL_SCHEMA_VERSION, LogRow, LogWriter, ProcessCtxLog, RootCtxLog, now_rfc3339,
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let log = dir.path().join("sentinel.log");
     let writer = LogWriter::spawn(log.clone()).expect("spawn");
-    let ctx = ProcessCtxLog { pid: 1, pidversion: 1, argv: vec!["x".into()], cwd: "/tmp".into() };
-    let root = RootCtxLog { audit_token: [0;8], argv: vec!["x".into()] };
+    let ctx = ProcessCtxLog {
+        pid: 1,
+        pidversion: 1,
+        argv: vec!["x".into()],
+        cwd: "/tmp".into(),
+    };
+    let root = RootCtxLog {
+        audit_token: [0; 8],
+        argv: vec!["x".into()],
+    };
     let dec = Decision {
-        schema_version: JSONL_SCHEMA_VERSION, ts: now_rfc3339(), verdict: "Deny",
-        dest_host: "h".into(), dest_port: 1, dest_ip: None, run_uuid: "r".into(),
-        source_kind: "k".into(), source_locator: None,
-        process: ctx.clone(), parent: ctx, root,
-        package_context: None, intel: None,
+        schema_version: JSONL_SCHEMA_VERSION,
+        ts: now_rfc3339(),
+        verdict: "Deny",
+        dest_host: "h".into(),
+        dest_port: 1,
+        dest_ip: None,
+        run_uuid: "r".into(),
+        source_kind: "k".into(),
+        source_locator: None,
+        process: ctx.clone(),
+        parent: ctx,
+        root,
+        package_context: None,
+        intel: None,
     };
     writer.send(LogRow::Block(dec));
     // Wait briefly for the writer thread to drain.

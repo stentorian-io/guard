@@ -1,0 +1,12 @@
+# act configuration — keeps `scripts/ci-local.sh` non-interactive.
+# https://nektosact.com/usage/index.html#configuration-file
+
+# Medium image (~500MB) — has node/npm so the lint-markdown job works.
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+
+# Force amd64 on Apple Silicon; act warns and may misbehave without this.
+--container-architecture linux/amd64
+
+# Don't bind-mount the host docker socket — Colima's socket path isn't
+# mountable into the container and we don't run docker-in-docker anyway.
+--container-daemon-socket -

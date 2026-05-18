@@ -9,6 +9,7 @@
 
 use sentinel_core::AuditToken;
 use sentinel_ipc::PackageContext;
+use std::time::{Duration, Instant};
 
 use crate::tracked::ProcessTree;
 
@@ -31,11 +32,35 @@ pub fn infer_package_context(
         match current.parent_audit_token {
             Some(parent) => {
                 visited += 1;
-                if visited > 64 { return None; }   // defensive: walk depth cap
+                if visited > 64 {
+                    return None;
+                } // defensive: walk depth cap
                 current = process_tree.get_node(&parent)?;
             }
             None => return None,
         }
+    }
+}
+
+/// Like `infer_package_context`, but briefly waits for an ExecEvent handler to
+/// attach the package-manager environment snapshot. ExecEvent and Resolve use
+/// separate IPC connections, so a fast lifecycle script can resolve a hostname
+/// before its just-sent ExecEvent has been processed.
+pub fn infer_package_context_with_retry(
+    process_tree: &ProcessTree,
+    audit_token: &AuditToken,
+    root_command: &str,
+    timeout: Duration,
+) -> Option<PackageContext> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(ctx) = infer_package_context(process_tree, audit_token, root_command) {
+            return Some(ctx);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -49,7 +74,8 @@ pub fn package_context_from_pm_env(
         env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
     };
     // Order matters: npm_* before BUNDLE_* etc., since some envs leak across.
-    let (ecosystem, package, version, lifecycle) = if env.iter().any(|(k, _)| k.starts_with("npm_")) {
+    let (ecosystem, package, version, lifecycle) = if env.iter().any(|(k, _)| k.starts_with("npm_"))
+    {
         (
             "npm",
             get("npm_package_name")?,
@@ -63,21 +89,30 @@ pub fn package_context_from_pm_env(
             get("CARGO_PKG_VERSION").unwrap_or_default(),
             None,
         )
-    } else if env.iter().any(|(k, _)| k == "BUNDLE_GEMFILE" || k.starts_with("BUNDLE_")) {
+    } else if env
+        .iter()
+        .any(|(k, _)| k == "BUNDLE_GEMFILE" || k.starts_with("BUNDLE_"))
+    {
         (
             "bundle",
             get("BUNDLE_GEMFILE").unwrap_or_else(|| "Gemfile".into()),
             String::new(),
             None,
         )
-    } else if env.iter().any(|(k, _)| k.starts_with("PIP_") || k == "VIRTUAL_ENV") {
+    } else if env
+        .iter()
+        .any(|(k, _)| k.starts_with("PIP_") || k == "VIRTUAL_ENV")
+    {
         (
             "pip",
             get("VIRTUAL_ENV").unwrap_or_else(|| "(unknown)".into()),
             String::new(),
             None,
         )
-    } else if env.iter().any(|(k, _)| k.starts_with("GO") || k == "GOPATH" || k == "GOPROXY") {
+    } else if env
+        .iter()
+        .any(|(k, _)| k.starts_with("GO") || k == "GOPATH" || k == "GOPROXY")
+    {
         ("go", "(go)".into(), String::new(), None)
     } else if env.iter().any(|(k, _)| k.starts_with("MIX_")) {
         ("mix", "(mix)".into(), String::new(), get("MIX_ENV"))
@@ -99,8 +134,12 @@ pub fn package_context_from_pm_env(
 
 fn truncate_root_command(s: &str) -> String {
     const MAX: usize = 256;
-    if s.len() <= MAX { return s.to_string(); }
+    if s.len() <= MAX {
+        return s.to_string();
+    }
     let mut end = MAX;
-    while end > 0 && !s.is_char_boundary(end) { end -= 1; }
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
     s[..end].to_string()
 }

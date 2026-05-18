@@ -10,6 +10,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 pub mod test_support;
@@ -93,8 +94,7 @@ impl DaemonHarness {
             .tempdir_in("/tmp")?;
         let state_dir = state_tmp.path().to_path_buf();
 
-        let (socket, manifest, child) =
-            spawn_daemon_into(&state_dir, home.path(), extra)?;
+        let (socket, manifest, child) = spawn_daemon_into(&state_dir, home.path(), extra)?;
 
         Ok(Self {
             socket,
@@ -137,9 +137,9 @@ impl DaemonHarness {
         let mut chunk = [0u8; 1024];
         loop {
             match stderr.read(&mut chunk) {
-                Ok(0) => break,                                                    // EOF
+                Ok(0) => break, // EOF
                 Ok(n) => buf.extend_from_slice(&chunk[..n]),
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,    // no more data
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break, // no more data
                 Err(_) => break,
             }
             if buf.len() > (1 << 20) {
@@ -244,10 +244,7 @@ pub fn resolve_node() -> Result<PathBuf, String> {
     if let Some(p) = std::env::var_os("SENTINEL_E2E_NODE") {
         let p = PathBuf::from(p);
         if !p.exists() {
-            return Err(format!(
-                "SENTINEL_E2E_NODE={} does not exist",
-                p.display()
-            ));
+            return Err(format!("SENTINEL_E2E_NODE={} does not exist", p.display()));
         }
         return Ok(p);
     }
@@ -304,6 +301,71 @@ pub fn resolve_cli() -> PathBuf {
     p
 }
 
+/// Read PTY output until `needle` appears, EOF is reached, or `timeout`
+/// expires. PTY output may use carriage returns without newlines, so callers
+/// must not block on `BufRead::read_line` when enforcing prompt deadlines.
+pub fn read_pty_until(
+    mut reader: Box<dyn std::io::Read + Send>,
+    needle: &str,
+    timeout: Duration,
+) -> Result<String, String> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("sentinel-e2e-pty-reader".into())
+        .spawn(move || {
+            let mut chunk = [0u8; 512];
+            loop {
+                match reader.read(&mut chunk) {
+                    Ok(0) => {
+                        let _ = tx.send(None);
+                        break;
+                    }
+                    Ok(n) => {
+                        let text = String::from_utf8_lossy(&chunk[..n]).into_owned();
+                        if tx.send(Some(text)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Some(format!("\n[PTY read error: {e}]\n")));
+                        let _ = tx.send(None);
+                        break;
+                    }
+                }
+            }
+        })
+        .map_err(|e| format!("spawn PTY reader: {e}"))?;
+
+    let deadline = Instant::now() + timeout;
+    let mut buf = String::new();
+    loop {
+        if buf.contains(needle) {
+            return Ok(buf);
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(format!(
+                "PTY output did not contain {needle:?} within {:?}; buffer:\n{buf}",
+                timeout,
+            ));
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let wait = remaining.min(Duration::from_millis(100));
+        match rx.recv_timeout(wait) {
+            Ok(Some(text)) => buf.push_str(&text),
+            Ok(None) => {
+                return Err(format!("PTY reached EOF before {needle:?}; buffer:\n{buf}",));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(format!(
+                    "PTY reader disconnected before {needle:?}; buffer:\n{buf}",
+                ));
+            }
+        }
+    }
+}
+
 /// Path to the persistence_write_probe helper binary.
 ///
 /// Panics with an actionable message if the probe hasn't been built yet.
@@ -347,10 +409,7 @@ pub fn prepare_feed_fixture(name: &str) -> (tempfile::TempDir, String) {
     let init_sh = dest.path().join("init.sh");
     {
         use std::os::unix::fs::PermissionsExt as _;
-        let _ = std::fs::set_permissions(
-            &init_sh,
-            std::fs::Permissions::from_mode(0o755),
-        );
+        let _ = std::fs::set_permissions(&init_sh, std::fs::Permissions::from_mode(0o755));
     }
     let output = Command::new(&init_sh)
         .arg(dest.path())
@@ -407,6 +466,15 @@ fn spawn_daemon_into(
         )));
     }
 
+    // Restart paths reuse state_dir. Clear stale readiness before spawning so
+    // the wait below observes the new daemon, not a previous daemon.ready file.
+    let ready = sentinel_daemon::state_dir::ready_path(state_dir);
+    match std::fs::remove_file(&ready) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+
     let mut cmd = Command::new(&daemon_bin);
     cmd.arg("serve")
         .arg("--state-dir")
@@ -418,12 +486,8 @@ fn spawn_daemon_into(
     for (k, v) in extra {
         cmd.env(*k, *v);
     }
-    let child = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
 
-    let ready = sentinel_daemon::state_dir::ready_path(state_dir);
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if ready.exists() {
@@ -526,17 +590,13 @@ impl StoppedHarness {
     /// Spawn a fresh daemon over the preserved state_dir + home. Mirrors
     /// DaemonHarness::start_with_env spawn semantics (uses the same
     /// `spawn_daemon_into` helper) but skips tempdir creation.
-    pub fn restart_with_env(
-        self,
-        extra_env: &[(&str, &str)],
-    ) -> std::io::Result<DaemonHarness> {
+    pub fn restart_with_env(self, extra_env: &[(&str, &str)]) -> std::io::Result<DaemonHarness> {
         let StoppedHarness {
             state_dir,
             home,
             _state_tmp,
         } = self;
-        let (socket, manifest, child) =
-            spawn_daemon_into(&state_dir, home.path(), extra_env)?;
+        let (socket, manifest, child) = spawn_daemon_into(&state_dir, home.path(), extra_env)?;
         Ok(DaemonHarness {
             state_dir,
             socket,

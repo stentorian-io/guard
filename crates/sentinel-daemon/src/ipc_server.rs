@@ -20,22 +20,22 @@
 use crate::baseline_staging::BaselineStaging;
 use crate::gap_detector::GapDetector;
 use crate::install_artifacts::InstallArtifactStore;
-use crate::ipc_dispatch::{classify_frame, DispatchError, FrameKind, MessageTag};
+use crate::ipc_dispatch::{DispatchError, FrameKind, MessageTag, classify_frame};
 use crate::log_writer::LogWriter;
 use crate::os_ffi::is_hardened_runtime;
 use crate::peer_auth::authenticate;
 use crate::prompt::{PromptDedup, RecentGapsRing};
 use crate::tracked::{CoverageGap, ProcessTree};
-use crossbeam_channel::{bounded, TrySendError};
+use crossbeam_channel::{TrySendError, bounded};
 use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     BaselineCommit, BaselineCommitReply, DeleteInstallArtifacts, DeleteInstallArtifactsReply,
     DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap,
-    EnvNotPropagatedGapAck, ExecAck, ExecBlocked, ExecBlockedAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3,
-    IPC_SCHEMA_V4, InsertUserRule, InsertUserRuleReply, IpcError, IsTrusted, IsTrustedReply,
-    Ping, PingReply, PersistenceWrite, PersistenceWriteAck,
-    ListRules, ListRulesReply, ListTrust, ListTrustReply, PrepareSnapshot, PromptChannelInit,
+    EnvNotPropagatedGapAck, ExecAck, ExecBlocked, ExecBlockedAck, ExecEvent, ForkAck, ForkEvent,
+    IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4, InsertUserRule, InsertUserRuleReply, IpcError,
+    IsTrusted, IsTrustedReply, ListRules, ListRulesReply, ListTrust, ListTrustReply,
+    PersistenceWrite, PersistenceWriteAck, Ping, PingReply, PrepareSnapshot, PromptChannelInit,
     PromptChannelInitAck, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply,
     Resolve, ResolveReply, SnapshotReply, Status, StatusReply, TrustPolicy, TrustPolicyReply,
 };
@@ -194,7 +194,7 @@ pub struct DaemonState {
     pub state_dir: std::path::PathBuf,
     // Phase 3 plan 03-07 additions
     pub install_artifact_store: Arc<InstallArtifactStore>,
-    pub log_writer: LogWriter,          // already Clone (backed by Arc<channel>)
+    pub log_writer: LogWriter, // already Clone (backed by Arc<channel>)
     pub prompt_dedup: Arc<PromptDedup>,
     pub recent_gaps: Arc<RecentGapsRing>,
     pub baseline_staging: Arc<BaselineStaging>,
@@ -232,8 +232,7 @@ impl DaemonState {
         // ipc_server tests compile without changes. main.rs uses `DaemonState { .. }`
         // struct literal with all fields when constructing the live daemon.
         let install_artifact_store = Arc::new(
-            InstallArtifactStore::open_in_memory()
-                .expect("in-memory install_artifact_store"),
+            InstallArtifactStore::open_in_memory().expect("in-memory install_artifact_store"),
         );
         let log_writer = LogWriter::noop();
         let prompt_dedup = Arc::new(PromptDedup::new());
@@ -241,8 +240,7 @@ impl DaemonState {
         let baseline_staging = Arc::new(BaselineStaging::new());
         // Phase 4 plan 04-03 — in-memory feed store + fresh mutex/rwlock.
         let feed_store = Arc::new(
-            crate::feed::store::FeedStore::open_in_memory()
-                .expect("in-memory feed_store"),
+            crate::feed::store::FeedStore::open_in_memory().expect("in-memory feed_store"),
         );
         let feed_fetch_mutex = Arc::new(Mutex::new(()));
         let last_fetch_result = Arc::new(std::sync::RwLock::new(None));
@@ -330,7 +328,6 @@ impl IpcServer {
             }
         }
     }
-
 }
 
 /// WARNING-03: spawn a worker that catches panics and respawns itself.
@@ -501,7 +498,11 @@ fn handle_status_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "Status decode failed");
-            let _ = write_tagged(stream, MessageTag::Status, &StatusReply::err(format!("decode: {e}")));
+            let _ = write_tagged(
+                stream,
+                MessageTag::Status,
+                &StatusReply::err(format!("decode: {e}")),
+            );
             return;
         }
     };
@@ -509,7 +510,10 @@ fn handle_status_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
         let _ = write_tagged(
             stream,
             MessageTag::Status,
-            &StatusReply::err(format!("schema_version {} != IPC_SCHEMA_V3", req.schema_version)),
+            &StatusReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V3",
+                req.schema_version
+            )),
         );
         return;
     }
@@ -751,7 +755,7 @@ fn handle_delete_install_artifacts_frame(stream: &mut UnixStream, state: &Arc<Da
 
 fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
     use crate::log_writer::jsonl_row::{
-        Decision, LogRow, ProcessCtxLog, RootCtxLog, JSONL_SCHEMA_VERSION, now_rfc3339,
+        Decision, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
     };
 
     let req: DenyNotify = match read_tagged_body(stream) {
@@ -808,16 +812,21 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
                     cwd: String::new(),
                 })
                 .unwrap_or(ProcessCtxLog {
-                    pid: 0, pidversion: 0, argv: vec![], cwd: String::new(),
+                    pid: 0,
+                    pidversion: 0,
+                    argv: vec![],
+                    cwd: String::new(),
                 });
             let root_node = state.process_tree.get_node(&node.tracked_root);
             let root_ctx = RootCtxLog {
                 audit_token: node.tracked_root.val,
                 argv: root_node
-                    .map(|rn| if rn.binary_path.is_empty() {
-                        vec![]
-                    } else {
-                        vec![rn.binary_path.clone()]
+                    .map(|rn| {
+                        if rn.binary_path.is_empty() {
+                            vec![]
+                        } else {
+                            vec![rn.binary_path.clone()]
+                        }
                     })
                     .unwrap_or_default(),
             };
@@ -826,7 +835,13 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
                 &sender_token,
                 &root_ctx.argv.join(" "),
             );
-            (node.run_uuid.clone(), process_ctx, parent_ctx, root_ctx, pkg_ctx)
+            (
+                node.run_uuid.clone(),
+                process_ctx,
+                parent_ctx,
+                root_ctx,
+                pkg_ctx,
+            )
         }
         None => {
             let process_ctx = ProcessCtxLog {
@@ -836,7 +851,10 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
                 cwd: String::new(),
             };
             let parent_ctx = ProcessCtxLog {
-                pid: 0, pidversion: 0, argv: vec![], cwd: String::new(),
+                pid: 0,
+                pidversion: 0,
+                argv: vec![],
+                cwd: String::new(),
             };
             let root_ctx = RootCtxLog {
                 audit_token: [0; 8],
@@ -882,9 +900,7 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
 // ============================================================================
 
 fn handle_exec_blocked_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    use crate::log_writer::jsonl_row::{
-        LogRow, ProcessCtxLog, JSONL_SCHEMA_VERSION, now_rfc3339,
-    };
+    use crate::log_writer::jsonl_row::{JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, now_rfc3339};
 
     let req: ExecBlocked = match read_tagged_body(stream) {
         Ok(m) => m,
@@ -966,9 +982,7 @@ fn handle_exec_blocked_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) 
 // ============================================================================
 
 fn handle_persistence_write_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    use crate::log_writer::jsonl_row::{
-        LogRow, ProcessCtxLog, JSONL_SCHEMA_VERSION, now_rfc3339,
-    };
+    use crate::log_writer::jsonl_row::{JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, now_rfc3339};
 
     let req: PersistenceWrite = match read_tagged_body(stream) {
         Ok(m) => m,
@@ -1040,7 +1054,11 @@ fn handle_persistence_write_frame(stream: &mut UnixStream, state: &Arc<DaemonSta
         "persistence write detected"
     );
 
-    if let Err(e) = write_tagged(stream, MessageTag::PersistenceWrite, &PersistenceWriteAck::ok()) {
+    if let Err(e) = write_tagged(
+        stream,
+        MessageTag::PersistenceWrite,
+        &PersistenceWriteAck::ok(),
+    ) {
         error!(error = %e, "failed to send PersistenceWriteAck");
     }
 }
@@ -1054,7 +1072,11 @@ fn handle_ping_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "Ping decode failed");
-            let _ = write_tagged(stream, MessageTag::Ping, &PingReply::err(format!("decode: {e}")));
+            let _ = write_tagged(
+                stream,
+                MessageTag::Ping,
+                &PingReply::err(format!("decode: {e}")),
+            );
             return;
         }
     };
@@ -1095,10 +1117,7 @@ fn handle_prompt_channel_init_frame(mut stream: UnixStream, state: &Arc<DaemonSt
         let _ = write_tagged(
             &mut stream,
             MessageTag::PromptChannelInit,
-            &PromptChannelInitAck::err(format!(
-                "schema_version {} != V3",
-                init.schema_version
-            )),
+            &PromptChannelInitAck::err(format!("schema_version {} != V3", init.schema_version)),
         );
         return;
     }
@@ -1256,20 +1275,15 @@ fn handle_legacy_register_root(
         if !verify_wire_pid_same_uid(wire_pid as libc::pid_t, msg.audit_token.val[7]) {
             warn!(
                 kernel_pid,
-                wire_pid,
-                "RegisterRoot: refusing cross-uid or non-existent wire pid (WR-08)"
+                wire_pid, "RegisterRoot: refusing cross-uid or non-existent wire pid (WR-08)"
             );
-            let _ = write_legacy_err(
-                stream,
-                format!("WR-08: refusing wire pid {wire_pid}"),
-            );
+            let _ = write_legacy_err(stream, format!("WR-08: refusing wire pid {wire_pid}"));
             return;
         }
         // REGISTER-01: CLI is registering a child process's token.
         info!(
             kernel_pid,
-            wire_pid,
-            "RegisterRoot: CLI delegating child registration (REGISTER-01)"
+            wire_pid, "RegisterRoot: CLI delegating child registration (REGISTER-01)"
         );
         // Use the full wire-claimed audit token — it was obtained by the CLI
         // via task_info(TASK_AUDIT_TOKEN) which is kernel-sourced.
@@ -1277,16 +1291,32 @@ fn handle_legacy_register_root(
     } else {
         peer_token
     };
-    // Phase 2: insert_root replaces TrackedRoots::insert. We don't have a
-    // run_uuid yet (PrepareSnapshot is plan 02-06); use a placeholder that
-    // plan 02-06's PrepareSnapshot handler can later upgrade to a real uuid.
-    let inserted = state
-        .process_tree
-        .insert_root(registration_token, String::new(), String::new());
+    // Phase 2: insert_root replaces TrackedRoots::insert. Modern CLIs include
+    // the run_uuid from PrepareSnapshot so prompt/status paths can associate
+    // the child root with the interactive run. Older V1 clients omit it and
+    // keep the historical empty-run placeholder behavior.
+    let run_uuid = msg.run_uuid.clone().unwrap_or_default();
+    let inserted =
+        state
+            .process_tree
+            .insert_root(registration_token, run_uuid.clone(), String::new());
+    if let Some(run_uuid) = msg.run_uuid.as_deref() {
+        state
+            .process_tree
+            .bind_run_root(run_uuid, registration_token);
+    }
+    let captured = crate::env_capture::extract_pm_env(&msg.pm_env);
+    if !captured.is_empty() {
+        state
+            .process_tree
+            .set_pm_env_snapshot(&registration_token, captured);
+    }
     info!(
         pid = registration_token.val[5],
         pidversion = registration_token.val[7],
+        run_uuid = %run_uuid,
         inserted,
+        pm_env_pairs = msg.pm_env.len(),
         "registered tracked root"
     );
     if let Err(e) = write_frame(stream, &Reply::ack()) {
@@ -1471,7 +1501,8 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
         // WARNING-09: escalate to error — see handle_legacy_register_root
         // for the full rationale.
         error!(
-            wire_parent_pid, kernel_pid,
+            wire_parent_pid,
+            kernel_pid,
             "ENF-08 violation: ForkEvent wire-claimed parent disagrees with peer-auth; trusting peer-auth"
         );
     }
@@ -1480,16 +1511,7 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     // child's identity (which must be obtained by the dylib via proc_pidinfo
     // before sending — see plan 02-05).
     let child = AuditToken {
-        val: [
-            0,
-            0,
-            0,
-            0,
-            0,
-            ev.child_pid as u32,
-            0,
-            ev.child_pidversion,
-        ],
+        val: [0, 0, 0, 0, 0, ev.child_pid as u32, 0, ev.child_pidversion],
     };
     let result = state.process_tree.record_fork(peer_token, child);
     let recorded_ok = result.is_ok();
@@ -1643,7 +1665,9 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
         "pm_env_captured"
     );
     if !captured.is_empty() {
-        state.process_tree.set_pm_env_snapshot(&peer_token, captured);
+        state
+            .process_tree
+            .set_pm_env_snapshot(&peer_token, captured);
     }
 
     // D-34 Phase A: csops pre-check on the calling process.
@@ -1715,10 +1739,7 @@ fn handle_dylib_loaded(stream: &mut UnixStream, peer_token: AuditToken, state: &
     // process image (post-exec), but the peer-auth gives us the same token
     // (the connecting process is the new image). Cancel under peer_token.
     let cancelled = state.gap_detector.cancel(&peer_token);
-    debug!(
-        pid = peer_token.val[5],
-        cancelled, "DylibLoaded received"
-    );
+    debug!(pid = peer_token.val[5], cancelled, "DylibLoaded received");
     if let Err(e) = write_tagged(stream, MessageTag::DylibLoaded, &DylibLoadedAck::ok()) {
         error!(error = %e, "failed to send DylibLoadedAck");
     }
@@ -1804,18 +1825,17 @@ fn handle_trust_policy_frame(
         );
         return;
     }
-    let reply =
-        crate::handlers::trust_policy::handle_trust_policy(&req.path, &req.sha256, &state.rule_store);
+    let reply = crate::handlers::trust_policy::handle_trust_policy(
+        &req.path,
+        &req.sha256,
+        &state.rule_store,
+    );
     if let Err(e) = write_tagged(stream, MessageTag::TrustPolicy, &reply) {
         error!(error = %e, "failed to send TrustPolicyReply");
     }
 }
 
-fn handle_resolve_frame(
-    stream: &mut UnixStream,
-    peer_token: AuditToken,
-    state: &Arc<DaemonState>,
-) {
+fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: &Arc<DaemonState>) {
     let req: Resolve = match read_tagged_body(stream) {
         Ok(m) => m,
         Err(e) => {
@@ -1921,10 +1941,11 @@ fn handle_resolve_frame(
         // per-run root-command helper.
         let root_command_for_pkg = String::new();
         let resolved_package_context: Option<sentinel_ipc::PackageContext> =
-            crate::log_writer::infer_package_context(
+            crate::log_writer::package_context::infer_package_context_with_retry(
                 &state.process_tree,
                 &peer_token,
                 &root_command_for_pkg,
+                std::time::Duration::from_millis(250),
             );
         let (tx, rx) = crossbeam_channel::bounded::<sentinel_core::Verdict>(1);
         state.deferred_resolve.insert(

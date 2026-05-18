@@ -12,13 +12,10 @@ use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     BaselineCommit, BaselineCommitReply, DeleteInstallArtifacts, DeleteInstallArtifactsReply,
-    FeedWarning, InsertUserRule, InsertUserRuleReply,
-    InstallArtifact,
-    IsTrusted, IsTrustedReply,
-    ListRules, ListRulesReply, RuleRow,
-    ListTrust, ListTrustReply, TrustRow,
-    PrepareSnapshot, ReadInstallArtifacts, ReadInstallArtifactsReply,
-    RegisterRoot, Reply, SnapshotReply, TrustPolicy, TrustPolicyReply,
+    FeedWarning, InsertUserRule, InsertUserRuleReply, InstallArtifact, IsTrusted, IsTrustedReply,
+    ListRules, ListRulesReply, ListTrust, ListTrustReply, PrepareSnapshot, ReadInstallArtifacts,
+    ReadInstallArtifactsReply, RegisterRoot, Reply, RuleRow, SnapshotReply, TrustPolicy,
+    TrustPolicyReply, TrustRow,
 };
 use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
@@ -67,16 +64,13 @@ const PREPARE_SNAPSHOT_READ_TIMEOUT: Duration = Duration::from_secs(150);
 /// `UnixStream::connect` which has no documented timeout and could block
 /// indefinitely on certain Darwin states.
 pub(crate) fn connect_with_timeout(sock: &Path) -> Result<UnixStream, CliError> {
-    let addr = SockAddr::unix(sock).map_err(|e| {
-        CliError::DaemonUnreachable(format!("sockaddr({}): {e}", sock.display()))
-    })?;
+    let addr = SockAddr::unix(sock)
+        .map_err(|e| CliError::DaemonUnreachable(format!("sockaddr({}): {e}", sock.display())))?;
     let socket = Socket::new(Domain::UNIX, Type::STREAM, None)
         .map_err(|e| CliError::DaemonUnreachable(format!("socket: {e}")))?;
     socket
         .connect_timeout(&addr, CONNECT_TIMEOUT)
-        .map_err(|e| {
-            CliError::DaemonUnreachable(format!("connect({}): {e}", sock.display()))
-        })?;
+        .map_err(|e| CliError::DaemonUnreachable(format!("connect({}): {e}", sock.display())))?;
     socket.set_read_timeout(Some(READ_TIMEOUT)).ok();
     socket.set_write_timeout(Some(WRITE_TIMEOUT)).ok();
     // WR-02: socket2 0.5+ implements `From<Socket> for UnixStream` on Unix.
@@ -116,8 +110,36 @@ pub fn probe_daemon_alive(sock: &Path) -> Result<(), CliError> {
 pub fn register_root_with_daemon(sock: &Path, token: AuditToken) -> Result<(), CliError> {
     let mut stream = connect_with_timeout(sock)?;
     let msg = RegisterRoot::new(token);
-    write_frame(&mut stream, &msg)?;
-    let reply: Reply = read_frame(&mut stream)?;
+    send_register_root(&mut stream, msg)
+}
+
+pub fn register_root_for_run_with_daemon(
+    sock: &Path,
+    token: AuditToken,
+    run_uuid: &str,
+) -> Result<(), CliError> {
+    let mut stream = connect_with_timeout(sock)?;
+    let msg = RegisterRoot::new_for_run(token, run_uuid);
+    send_register_root(&mut stream, msg)
+}
+
+pub fn register_root_for_run_with_pm_env_with_daemon(
+    sock: &Path,
+    token: AuditToken,
+    run_uuid: &str,
+    pm_env: Vec<(String, String)>,
+) -> Result<(), CliError> {
+    let mut stream = connect_with_timeout(sock)?;
+    let msg = RegisterRoot::new_for_run_with_pm_env(token, run_uuid, pm_env);
+    send_register_root(&mut stream, msg)
+}
+
+fn send_register_root(
+    stream: &mut std::os::unix::net::UnixStream,
+    msg: RegisterRoot,
+) -> Result<(), CliError> {
+    write_frame(stream, &msg)?;
+    let reply: Reply = read_frame(stream)?;
     match reply {
         Reply::Ack { .. } => Ok(()),
         Reply::Err { message, .. } => {
@@ -132,11 +154,7 @@ pub fn register_root_with_daemon(sock: &Path, token: AuditToken) -> Result<(), C
 /// Wire shape symmetry with:
 ///   - daemon-side:  `crates/sentinel-daemon/src/ipc_server.rs::write_tagged`
 ///   - dylib-side:   `crates/sentinel-hook/src/ipc_client.rs::send_tagged_and_recv_ack`
-fn send_tagged_request<Req, ReplyT>(
-    sock: &Path,
-    tag: u8,
-    req: &Req,
-) -> Result<ReplyT, CliError>
+fn send_tagged_request<Req, ReplyT>(sock: &Path, tag: u8, req: &Req) -> Result<ReplyT, CliError>
 where
     Req: serde::Serialize,
     ReplyT: serde::de::DeserializeOwned,
@@ -301,7 +319,8 @@ pub fn insert_user_rule_request(
 /// Phase 3 tag 0x0C: read install artifacts from the daemon (D-62 preferred path).
 pub fn read_install_artifacts_request(sock: &Path) -> Result<Vec<InstallArtifact>, CliError> {
     let req = ReadInstallArtifacts::new();
-    let reply: ReadInstallArtifactsReply = send_tagged_request(sock, TAG_READ_INSTALL_ARTIFACTS, &req)?;
+    let reply: ReadInstallArtifactsReply =
+        send_tagged_request(sock, TAG_READ_INSTALL_ARTIFACTS, &req)?;
     match reply {
         ReadInstallArtifactsReply::Ok { artifacts, .. } => Ok(artifacts),
         ReadInstallArtifactsReply::Err { message, .. } => {
@@ -311,7 +330,10 @@ pub fn read_install_artifacts_request(sock: &Path) -> Result<Vec<InstallArtifact
 }
 
 /// Phase 3 tag 0x0D: commit a baseline run into proposed rules.
-pub fn baseline_commit_request(sock: &Path, run_uuid: &str) -> Result<BaselineCommitReply, CliError> {
+pub fn baseline_commit_request(
+    sock: &Path,
+    run_uuid: &str,
+) -> Result<BaselineCommitReply, CliError> {
     let req = BaselineCommit {
         schema_version: sentinel_ipc::IPC_SCHEMA_V3,
         run_uuid: run_uuid.into(),
@@ -344,10 +366,7 @@ pub fn trust_policy_request(sock: &Path, path: &str, sha256: &str) -> Result<(),
 ///
 /// Returns the row count removed by the daemon (sum of per-kind delete
 /// results).
-pub fn delete_install_artifacts_request(
-    sock: &Path,
-    kinds: Vec<String>,
-) -> Result<u64, CliError> {
+pub fn delete_install_artifacts_request(sock: &Path, kinds: Vec<String>) -> Result<u64, CliError> {
     let req = DeleteInstallArtifacts::new(kinds);
     let reply: DeleteInstallArtifactsReply =
         send_tagged_request(sock, TAG_DELETE_INSTALL_ARTIFACTS, &req)?;

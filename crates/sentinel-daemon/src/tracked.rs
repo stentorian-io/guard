@@ -38,16 +38,25 @@ pub struct ProcessNode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoverageGap {
     /// csops pre-check was hardened AND DylibLoaded never arrived (D-34).
-    ConfirmedHardened { binary_path: String, detected_at_ms: u64 },
+    ConfirmedHardened {
+        binary_path: String,
+        detected_at_ms: u64,
+    },
     /// csops pre-check was NOT hardened but DylibLoaded never arrived — DYLD
     /// env var was lost (e.g. via `setsid`+ explicit env-clearing posix_spawn).
-    UnknownInjectionFailure { binary_path: String, detected_at_ms: u64 },
+    UnknownInjectionFailure {
+        binary_path: String,
+        detected_at_ms: u64,
+    },
     /// TREE-06: parent's posix_spawn was called with envp missing one or
     /// more of {DYLD_INSERT_LIBRARIES, SENTINEL_DAEMON_SOCKET,
     /// SENTINEL_SNAPSHOT_MANIFEST}. The child cannot inherit dylib
     /// injection. Detected by the dylib's posix_spawn shadow PRE-SPAWN.
     /// Recorded on the PARENT's ProcessNode (gap-closure 02-09).
-    EnvNotPropagated { binary_path: String, detected_at_ms: u64 },
+    EnvNotPropagated {
+        binary_path: String,
+        detected_at_ms: u64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -91,7 +100,12 @@ impl ProcessTree {
     }
 
     /// Insert a tracked-root node. Idempotent: returns false if already present.
-    pub fn insert_root(&self, audit_token: AuditToken, run_uuid: String, binary_path: String) -> bool {
+    pub fn insert_root(
+        &self,
+        audit_token: AuditToken,
+        run_uuid: String,
+        binary_path: String,
+    ) -> bool {
         // WARNING-03: tolerate poison so a worker panic in one handler does
         // not poison the daemon-wide process tree forever.
         let mut g = self.nodes.write().unwrap_or_else(|p| p.into_inner());
@@ -168,7 +182,9 @@ impl ProcessTree {
     pub fn get_node(&self, audit_token: &AuditToken) -> Option<ProcessNode> {
         self.nodes
             .read()
-            .unwrap_or_else(|p| p.into_inner()).get(audit_token).cloned()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(audit_token)
+            .cloned()
     }
 
     // --- Phase 3 plan 03-04: pm_env snapshot ---
@@ -211,6 +227,22 @@ impl ProcessTree {
         }
     }
 
+    /// Bind a tracked root to an existing run after the CLI has spawned the
+    /// wrapped child and obtained its kernel audit token.
+    pub fn bind_run_root(&self, run_uuid: &str, tracked_root: AuditToken) {
+        {
+            let mut runs = self.runs.write().unwrap_or_else(|p| p.into_inner());
+            if let Some(rec) = runs.get_mut(run_uuid) {
+                rec.tracked_root = tracked_root;
+            }
+        }
+        let mut nodes = self.nodes.write().unwrap_or_else(|p| p.into_inner());
+        if let Some(node) = nodes.get_mut(&tracked_root) {
+            node.run_uuid = run_uuid.to_string();
+            node.tracked_root = tracked_root;
+        }
+    }
+
     /// Return all active RunRecords (used by StatusReply handler in plan 03-08).
     pub fn list_runs(&self) -> Vec<RunRecord> {
         let g = self.runs.read().unwrap_or_else(|p| p.into_inner());
@@ -222,14 +254,20 @@ impl ProcessTree {
     /// Register a long-lived prompt-channel Sender for the given run_uuid.
     /// Called by the PromptChannelInit handler (plan 03-12).
     pub fn set_prompt_channel(&self, run_uuid: &str, sender: Sender<PromptRequest>) {
-        let mut g = self.prompt_channels.write().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .prompt_channels
+            .write()
+            .unwrap_or_else(|p| p.into_inner());
         g.insert(run_uuid.to_string(), sender);
     }
 
     /// Remove and return the prompt-channel Sender for the given run_uuid.
     /// Called when the prompt channel connection closes or the run ends.
     pub fn take_prompt_channel(&self, run_uuid: &str) -> Option<Sender<PromptRequest>> {
-        let mut g = self.prompt_channels.write().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .prompt_channels
+            .write()
+            .unwrap_or_else(|p| p.into_inner());
         g.remove(run_uuid)
     }
 
@@ -237,14 +275,20 @@ impl ProcessTree {
     /// Returns None if no channel is registered for this run.
     /// Sender is cheap to clone (Arc internals).
     pub fn get_prompt_channel(&self, run_uuid: &str) -> Option<Sender<PromptRequest>> {
-        let g = self.prompt_channels.read().unwrap_or_else(|p| p.into_inner());
+        let g = self
+            .prompt_channels
+            .read()
+            .unwrap_or_else(|p| p.into_inner());
         g.get(run_uuid).cloned()
     }
 
     /// Return the number of active long-lived prompt channels.
     /// Used by ipc_server.rs's R-05 cap gate (plan 03-12).
     pub fn prompt_channels_len(&self) -> usize {
-        let g = self.prompt_channels.read().unwrap_or_else(|p| p.into_inner());
+        let g = self
+            .prompt_channels
+            .read()
+            .unwrap_or_else(|p| p.into_inner());
         g.len()
     }
 
@@ -263,9 +307,7 @@ impl ProcessTree {
     }
 
     pub fn nodes_len(&self) -> usize {
-        self.nodes
-            .read()
-            .unwrap_or_else(|p| p.into_inner()).len()
+        self.nodes.read().unwrap_or_else(|p| p.into_inner()).len()
     }
 
     /// Return the first node whose audit_token has val[5] == pid.

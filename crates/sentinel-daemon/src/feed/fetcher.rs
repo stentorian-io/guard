@@ -399,7 +399,7 @@ fn fetch_one_feed_impl(
         // CR-01 fix: atomic delete+insert in a single transaction so a
         // concurrent reader on a separate WAL connection cannot observe an
         // empty feed_iocs window between two writes. The previous two-step
-        // delete_feed + upsert_iocs sequence let a parallel `sentinel run`
+        // delete_feed + upsert_iocs sequence let a parallel `sentinel wrap`
         // land an empty FeedDeny set in its snapshot during the refresh
         // window — directly threatens project core value (compromised
         // package can slip past during refresh).

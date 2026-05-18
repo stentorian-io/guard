@@ -15,7 +15,7 @@ what happened.
 ## How it works
 
 ```sh
-sentinel npm install
+sentinel wrap npm install
 ```
 
 Sentinel wraps your command via DYLD library injection. Every outbound
@@ -42,10 +42,10 @@ cargo build --workspace --release
 sentinel setup
 
 # Protect a package install
-sentinel npm install
+sentinel wrap npm install
 
 # Learn mode — record what a clean install talks to
-sentinel --learn npm install
+sentinel wrap --learn npm install
 
 # Review blocked connections
 sentinel status denials <run-uuid>
@@ -59,9 +59,9 @@ See the [install guide](docs/INSTALL.md) for detailed setup instructions.
 ### Wrapping commands
 
 ```sh
-sentinel npm install                    # npm
-sentinel pip install -r requirements.txt  # pip
-sentinel cargo build                     # cargo
+sentinel wrap npm install                    # npm
+sentinel wrap pip install -r requirements.txt  # pip
+sentinel wrap cargo build                     # cargo
 ```
 
 Any command works — Sentinel wraps the entire process tree.
@@ -71,7 +71,7 @@ Any command works — Sentinel wraps the entire process tree.
 Build a baseline of expected network destinations for a known-clean project:
 
 ```sh
-sentinel --learn npm install
+sentinel wrap --learn npm install
 ```
 
 This records all contacted hosts to `.sentinel.toml` for future installs.
@@ -112,7 +112,7 @@ sentinel unwrap-all      # emergency: stop all enforcement
 ## Architecture
 
 ```text
-sentinel <cmd>        sentineld (LaunchAgent)         libsentinel_hook.dylib
+sentinel wrap <cmd>   sentineld (LaunchAgent)         libsentinel_hook.dylib
 ┌──────────┐          ┌───────────────────┐           ┌──────────────────────┐
 │ CLI      │          │ IPC server        │           │ DYLD-injected cdylib │
 │          │ ──IPC──→ │ (Unix socket)     │           │                      │

@@ -2,7 +2,7 @@
 
 **Sentinel**
 
-Sentinel is a free, open-source macOS supply-chain firewall that enforces default-deny on outbound network connections from package-install subtrees. The user runs `sentinel npm install …` (or `pip`, `cargo`, etc.) and Sentinel sandboxes that subtree's network egress — registries are allowed, anything else is denied or surfaces an interactive prompt. v1 is process-tree-only and uses DYLD library injection (no system extension, no kernel components). Whole-machine mode is deferred to v2.
+Sentinel is a free, open-source macOS supply-chain firewall that enforces default-deny on outbound network connections from package-install subtrees. The user runs `sentinel wrap npm install …` (or `pip`, `cargo`, etc.) and Sentinel sandboxes that subtree's network egress — registries are allowed, anything else is denied or surfaces an interactive prompt. v1 is process-tree-only and uses DYLD library injection (no system extension, no kernel components). Whole-machine mode is deferred to v2.
 
 **Core Value:** **When a compromised package tries to phone home during install, Sentinel blocks it cold and tells the user what happened.** That's the one thing that must work. Every other feature serves this.
 
@@ -27,7 +27,7 @@ Sentinel is a free, open-source macOS supply-chain firewall that enforces defaul
 | IPC | **Unix domain socket** + length-prefixed **CBOR** frames | Peer auth via `getsockopt(SOL_LOCAL, LOCAL_PEERTOKEN)` (kernel-sourced audit token) |
 | Daemon | **sentineld** — sync 32-thread worker pool, bounded queue (64) | LaunchAgent with KeepAlive=true; watchdog crate monitors liveness |
 | Persistence | **rusqlite** (bundled SQLite) | Migrations in `crates/sentinel-daemon/migrations/`; stores rules, feed IOCs, install artifacts |
-| CLI parsing | **clap 4.6** (derive) | Subcommands: run (external), setup, repair, unwrap-all, status |
+| CLI parsing | **clap 4.6** (derive) | Subcommands: wrap, setup, repair, unwrap-all, status |
 | Serialization | **ciborium** (CBOR), **serde** | Snapshot format, IPC wire protocol |
 | Logging | **tracing** + **tracing-subscriber** | Daemon logs; JSONL forensic log to `~/Library/Logs/Sentinel/` |
 | Threat-intel | **gix** (git2 in Rust) | Clones ossf/malicious-packages + github/advisory-database repos; OSV JSON parsing |
@@ -43,7 +43,7 @@ Sentinel is a free, open-source macOS supply-chain firewall that enforces defaul
 ## Architecture
 
 ```
-sentinel <cmd>        sentineld (LaunchAgent)         libsentinel_hook.dylib
+sentinel wrap <cmd>   sentineld (LaunchAgent)         libsentinel_hook.dylib
 ┌──────────┐          ┌───────────────────┐           ┌──────────────────────┐
 │ CLI      │          │ IPC server        │           │ DYLD-injected cdylib │
 │          │ ──IPC──→ │ (Unix socket)     │           │                      │
@@ -72,7 +72,7 @@ sentinel <cmd>        sentineld (LaunchAgent)         libsentinel_hook.dylib
 
 | Crate | Type | Purpose |
 |---|---|---|
-| `sentinel-cli` | bin | CLI entry point — `sentinel <cmd>`, `sentinel setup`, `sentinel status`, `sentinel repair` |
+| `sentinel-cli` | bin | CLI entry point — `sentinel wrap <cmd>`, `sentinel setup`, `sentinel status`, `sentinel repair` |
 | `sentinel-daemon` | bin | `sentineld serve` — IPC server, policy engine, feed fetcher, log writer |
 | `sentinel-hook` | cdylib | `libsentinel_hook.dylib` — DYLD-injected interposition library |
 | `sentinel-core` | lib | Domain types: ProcessIdentity, AllowlistEntry, Snapshot (CBOR), policy evaluator, lockfile parser |

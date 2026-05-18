@@ -161,11 +161,11 @@ pub(crate) fn render_minimal_to<W: std::io::Write>(w: &mut W, state: DaemonState
         DaemonStateKind::StaleFeeds => {
             let stale_names: Vec<&str> = feeds.iter().filter(|f| !f.fresh).map(|f| f.name.as_str()).collect();
             if stale_names.is_empty() {
-                let _ = writeln!(w, "sentinel: stale-feeds — threat-intel feeds older than 7 days. Run `sentinel run` to refresh.");
+                let _ = writeln!(w, "sentinel: stale-feeds — threat-intel feeds older than 7 days. Run `sentinel wrap` to refresh.");
             } else {
                 let _ = writeln!(
                     w,
-                    "sentinel: stale-feeds — {} older than 7 days. Run `sentinel run` to refresh.",
+                    "sentinel: stale-feeds — {} older than 7 days. Run `sentinel wrap` to refresh.",
                     stale_names.join(", ")
                 );
             }

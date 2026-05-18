@@ -9,8 +9,8 @@
 //!   bit 0 (value 1) = addr_a connect succeeded
 //!   bit 1 (value 2) = addr_b connect succeeded
 //! Expected outcomes:
-//!   - Without sentinel run: 3 (both succeed)
-//!   - Under sentinel run with addr_a allowlisted, addr_b not: 1 (only A)
+//!   - Without sentinel wrap: 3 (both succeed)
+//!   - Under sentinel wrap with addr_a allowlisted, addr_b not: 1 (only A)
 
 use std::net::TcpStream;
 use std::time::Duration;

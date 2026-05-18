@@ -1,6 +1,6 @@
 //! open/openat interpose for persistence-path monitoring (M003-S04).
 //!
-//! Detects when a process under `sentinel run` opens a file in a macOS
+//! Detects when a process under `sentinel wrap` opens a file in a macOS
 //! persistence location (LaunchAgents, cron tabs, login items) with write
 //! flags. The open is NOT blocked — a fire-and-forget PersistenceWrite IPC
 //! message is sent to the daemon for forensic logging, then the real open

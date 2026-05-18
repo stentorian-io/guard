@@ -2,7 +2,7 @@
 //
 // Phase 08 / VAL-03 live-wrap E2E benchmark.
 //
-// Wraps a real `node` child via `sentinel run`, loops `net.connect` against
+// Wraps a real `node` child via `sentinel wrap`, loops `net.connect` against
 // `registry.npmjs.org`, and prints a `LIVE_WRAP_NS p50=... p99=...` line on
 // stdout that scripts/bench-hot-path.sh (plan 08-05) parses for docs/BENCH.md.
 //
@@ -77,6 +77,7 @@ fn live_wrap_npmjs_loop_p99_context() {
     "#;
 
     let mut wrapped = Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg("-e")
         .arg(script)
@@ -88,7 +89,7 @@ fn live_wrap_npmjs_loop_p99_context() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn sentinel run");
+        .expect("spawn sentinel wrap");
 
     let stdout = wrapped.stdout.take().expect("stdout pipe");
     let mut reader = BufReader::new(stdout);

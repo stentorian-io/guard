@@ -48,6 +48,7 @@ fn pip_install_real_registry_succeeds_under_sentinel_run() {
     // pip download exercises the same libc connect path to pypi.org.
     let download_dir = tempfile::tempdir().expect("tempdir for pip download");
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg("pip3")
         .args([
             "download",
@@ -68,7 +69,7 @@ fn pip_install_real_registry_succeeds_under_sentinel_run() {
 
     assert!(
         output.status.success(),
-        "pip download requests must succeed under sentinel run\n\
+        "pip download requests must succeed under sentinel wrap\n\
          exit: {:?}\n\
          stderr: {}",
         output.status.code(),
@@ -77,7 +78,7 @@ fn pip_install_real_registry_succeeds_under_sentinel_run() {
 
     assert!(
         !stderr.contains("Verdict::Deny"),
-        "pypi.org must NOT be denied under sentinel run (ENF-07 closure)\n\
+        "pypi.org must NOT be denied under sentinel wrap (ENF-07 closure)\n\
          stderr: {}",
         stderr
     );
@@ -95,6 +96,7 @@ fn curl_get_real_registry_succeeds_under_sentinel_run() {
     let harness = DaemonHarness::start().expect("start daemon harness");
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg("/usr/bin/curl")
         .args([
             "--max-time",
@@ -119,7 +121,7 @@ fn curl_get_real_registry_succeeds_under_sentinel_run() {
 
     assert!(
         output.status.success(),
-        "curl to registry.npmjs.org must succeed under sentinel run\n\
+        "curl to registry.npmjs.org must succeed under sentinel wrap\n\
          exit: {:?}\n\
          stdout (http_code): {}\n\
          stderr: {}",
@@ -140,7 +142,7 @@ fn curl_get_real_registry_succeeds_under_sentinel_run() {
 
     assert!(
         !stderr.contains("Verdict::Deny"),
-        "registry.npmjs.org must NOT be denied under sentinel run (ENF-07 closure)\n\
+        "registry.npmjs.org must NOT be denied under sentinel wrap (ENF-07 closure)\n\
          stderr: {}",
         stderr
     );

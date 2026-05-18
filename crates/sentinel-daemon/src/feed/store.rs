@@ -154,7 +154,7 @@ impl FeedStore {
 
     /// CR-01 fix: Atomically replace ALL rows for `feed` with `rows` in a
     /// single SQLite transaction. Without this, a concurrent reader on a
-    /// separate WAL connection (e.g., another `sentinel run`'s
+    /// separate WAL connection (e.g., another `sentinel wrap`'s
     /// `build_feeddeny_entries`, or a log-enrichment `host_iocs()` call) can
     /// observe an empty `feed_iocs` window between a `delete_feed` commit
     /// and the subsequent `upsert_iocs` commit — landing an empty FeedDeny

@@ -66,7 +66,7 @@ pub fn _clear_daemon_socket_for_test() {
 #[derive(Debug)]
 pub enum IpcClientError {
     /// SENTINEL_DAEMON_SOCKET env var unset (e.g. unit tests, or dylib loaded
-    /// outside `sentinel run`). Caller treats this as "no IPC available".
+    /// outside `sentinel wrap`). Caller treats this as "no IPC available".
     NotConfigured,
     /// Connect / read / write timed out within the budget.
     Timeout,

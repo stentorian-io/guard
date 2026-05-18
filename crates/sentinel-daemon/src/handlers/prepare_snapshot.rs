@@ -1,6 +1,6 @@
 //! PrepareSnapshot handler (D-29).
 //!
-//! Flow per `sentinel run`:
+//! Flow per `sentinel wrap`:
 //!   1. CLI sends PrepareSnapshot { cwd } before posix_spawn
 //!   2. Daemon walks up cwd to find .sentinel.toml (plan 02-03)
 //!   3. If found and trusted (RuleStore::is_trusted), parses rules → ProjectAllow / ProjectDeny tier

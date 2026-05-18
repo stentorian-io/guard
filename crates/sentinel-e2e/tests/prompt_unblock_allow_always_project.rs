@@ -39,6 +39,7 @@ fn allow_always_project_appends_toml_and_trusts_policy() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
+    cmd.arg("wrap");
     cmd.arg(&node);
     cmd.arg(&script);
     cmd.env("HOME", harness.home.path().to_str().unwrap());

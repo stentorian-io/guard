@@ -70,7 +70,7 @@ fn init_sh_sets_ambient_env() {
     );
 }
 
-/// The npm wrapper calls `sentinel run npm install ...` for install subcommands.
+/// The npm wrapper calls `sentinel wrap npm install ...` for install subcommands.
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
 fn npm_install_is_wrapped() {
@@ -113,7 +113,7 @@ fn npm_install_is_wrapped() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("SENTINEL_CALLED: run npm install left-pad"),
+        stdout.contains("SENTINEL_CALLED: wrap npm install left-pad"),
         "npm install should be wrapped; stdout={stdout}"
     );
 }

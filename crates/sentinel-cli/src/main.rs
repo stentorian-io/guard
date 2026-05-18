@@ -29,34 +29,16 @@ fn real_main() -> Result<i32, CliError> {
         .unwrap_or_else(default_state_dir);
     let sock = socket_path(&state);
 
-    // CLI-10 / CR-01: --learn is only meaningful on the wrap path (Cmd::External).
-    // Reject it on any named verb (Setup / Status). Verb collisions with old v0.1
-    // names (install, uninstall, status, logs, approve, trust-policy, shell-setup)
-    // route to Cmd::External per D-11 silent fall-through; --learn there would
-    // try to learn while spawning /usr/bin/install or similar, which is wrong.
-    if cli.learn && !matches!(cli.cmd, Cmd::External(_)) {
-        eprintln!(
-            "sentinel: --learn is only valid when wrapping a command \
-             (e.g., `sentinel --learn npm install`); it cannot be combined \
-             with named verbs"
-        );
-        return Ok(64); // EX_USAGE
-    }
-
     match cli.cmd {
-        Cmd::External(argv) => {
-            if argv.is_empty() {
-                eprintln!("sentinel: missing command to wrap");
-                return Ok(64); // EX_USAGE
-            }
-            if cli.learn && !sentinel_cli::tty::stdin_is_tty() {
+        Cmd::Wrap { learn, argv } => {
+            if learn && !sentinel_cli::tty::stdin_is_tty() {
                 eprintln!(
                     "sentinel: --learn requires an interactive terminal \
                      (run on a developer machine, not in CI)"
                 );
                 return Ok(64); // EX_USAGE
             }
-            run_orchestrator::run(&sock, &state, argv, cli.learn)
+            run_orchestrator::run(&sock, &state, argv, learn)
         }
         Cmd::Setup { target, remove, reinstall, yes } => {
             sentinel_cli::setup::run_setup(&sock, &state, target, remove, reinstall, yes)

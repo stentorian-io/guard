@@ -21,6 +21,7 @@ fn schema_unknown_2_0_0_raises_degraded_and_emits_feed_error() {
     // fail the run (last-good-cache fallback) — /usr/bin/true succeeds.
     // The signal lives in feed_metadata + daemon_state + tracing events.
     let run_out = Command::new(&cli)
+        .arg("wrap")
         .arg("/usr/bin/true")
         .env_clear()
         .env("HOME", harness.home.path())
@@ -31,7 +32,7 @@ fn schema_unknown_2_0_0_raises_degraded_and_emits_feed_error() {
         .expect("run sentinel");
     assert!(
         run_out.status.success(),
-        "sentinel run /usr/bin/true succeeds even with schema_unknown feed (D-87 last-good-cache path)\n\
+        "sentinel wrap /usr/bin/true succeeds even with schema_unknown feed (D-87 last-good-cache path)\n\
          exit: {:?}\nstdout: {}\nstderr: {}",
         run_out.status.code(),
         String::from_utf8_lossy(&run_out.stdout),

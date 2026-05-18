@@ -41,6 +41,7 @@ fn allow_always_machine_persists_rule_and_allows_next_run() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
+    cmd.arg("wrap");
     cmd.arg(&node);
     cmd.arg(&script);
     cmd.env("HOME", harness.home.path().to_str().unwrap());
@@ -109,6 +110,7 @@ fn allow_always_machine_persists_rule_and_allows_next_run() {
 
     // ---- Second run: non-TTY (stdin=null) → must NOT prompt, rule should allow ----
     let second_run = std::process::Command::new(&cli)
+        .arg("wrap")
         .arg(&node)
         .arg(&script)
         .env_clear()
@@ -121,7 +123,7 @@ fn allow_always_machine_persists_rule_and_allows_next_run() {
         .env("PROBE_CONNECT_AFTER", "0")
         .stdin(std::process::Stdio::null())
         .output()
-        .expect("second sentinel run (non-TTY)");
+        .expect("second sentinel wrap (non-TTY)");
     // The second run should complete quickly (rule hit → allow → resolve OK).
     // It must NOT hang indefinitely waiting for a prompt.
     let _ = second_run.status.code();

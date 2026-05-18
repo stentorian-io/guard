@@ -25,6 +25,7 @@ fn open_hook_no_false_positive_on_normal_files() {
     let probe = resolve_probe();
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&probe)
         .arg(normal_file.to_str().unwrap())
         .env_clear()
@@ -77,6 +78,7 @@ fn lockfile_registries_appear_in_snapshot() {
     std::fs::write(project_dir.join("package-lock.json"), lockfile_content).unwrap();
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg("echo")
         .arg("lockfile-test")
         .env_clear()
@@ -143,6 +145,7 @@ source = "sparse+https://cargo.corp.example.com/index/"
     std::fs::write(project_dir.join("Cargo.lock"), cargo_lock_content).unwrap();
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg("echo")
         .arg("cargo-lockfile-test")
         .env_clear()
@@ -195,6 +198,7 @@ fn persistence_write_detected_in_log() {
     let probe = resolve_probe();
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&probe)
         .arg(target_plist.to_str().unwrap())
         .env_clear()
@@ -247,6 +251,7 @@ fn status_persistence_shows_events() {
     let probe = resolve_probe();
 
     let output = Command::new(&cli)
+        .arg("wrap")
         .arg(&probe)
         .arg(target_plist.to_str().unwrap())
         .env_clear()

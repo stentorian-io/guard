@@ -5,7 +5,7 @@
 //!
 //! Approach: write garbage bytes into a manifest+snapshot pair the test owns,
 //! then directly spawn `node -e "<probe>"` with `DYLD_INSERT_LIBRARIES=$dylib` +
-//! `SENTINEL_SNAPSHOT_MANIFEST=$corrupt_manifest`. We BYPASS `sentinel run`
+//! `SENTINEL_SNAPSHOT_MANIFEST=$corrupt_manifest`. We BYPASS `sentinel wrap`
 //! because `crates/sentinel-cli/src/spawn.rs:38` strips and re-sets the
 //! manifest envp unconditionally (RESEARCH §A1 verified at plan time). We use
 //! node (not curl) because curl is hardened-runtime on macos-14 and would
@@ -66,7 +66,7 @@ fn corrupt_snapshot_causes_dylib_to_fail_closed() {
     std::fs::write(&manifest_path, manifest_content).expect("write manifest");
 
     // Spawn node directly with DYLD_INSERT_LIBRARIES + manifest envp injected.
-    // BYPASS `sentinel run` per RESEARCH §A1 — spawn_wrapped strips and
+    // BYPASS `sentinel wrap` per RESEARCH §A1 — spawn_wrapped strips and
     // re-sets SENTINEL_SNAPSHOT_MANIFEST, so we cannot inject the corrupt
     // manifest through the CLI orchestrator.
     //

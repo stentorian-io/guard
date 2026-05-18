@@ -36,6 +36,7 @@ fn deny_choice_results_in_nonzero_exit_code() {
         .expect("openpty");
 
     let mut cmd = portable_pty::CommandBuilder::new(&cli);
+    cmd.arg("wrap");
     cmd.arg(&node);
     cmd.arg(&script);
     cmd.env("HOME", harness.home.path().to_str().unwrap());
@@ -46,7 +47,7 @@ fn deny_choice_results_in_nonzero_exit_code() {
     cmd.env("PROBE_PORT", DENY_PORT);
     cmd.env("PROBE_CONNECT_AFTER", "0");
 
-    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel run");
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel wrap");
     let reader = pair.master.try_clone_reader().expect("clone reader");
     let mut writer = pair.master.take_writer().expect("take writer");
     drop(pair.slave);
@@ -74,7 +75,7 @@ fn deny_choice_results_in_nonzero_exit_code() {
     drop(writer);
 
     // Wait for the wrapped child to exit and capture status.
-    let exit_status = child.wait().expect("wait for sentinel run");
+    let exit_status = child.wait().expect("wait for sentinel wrap");
     // portable_pty::ExitStatus has a `success()` method.
     assert!(
         !exit_status.success(),

@@ -2,7 +2,7 @@
 //! triggers EnvNotPropagatedGap; the daemon records it.
 //!
 //! HARD assertion (env_clear_posix_spawn_emits_gap_log_line):
-//!   - Runs env_clear_posix_spawn under `sentinel run`.
+//!   - Runs env_clear_posix_spawn under `sentinel wrap`.
 //!   - DaemonHarness::drain_stderr() captures the daemon child's stderr.
 //!   - Assert it contains BOTH `TREE-06` AND `env-not-propagated`
 //!     (case-insensitive) — both literals are emitted by
@@ -32,6 +32,7 @@ fn run_under_sentinel(harness: &DaemonHarness) -> std::process::Output {
     );
 
     let mut cmd = Command::new(&cli);
+    cmd.arg("wrap");
     cmd.arg(&harness_bin)
         .env_clear()
         .env("HOME", harness.home.path())
@@ -42,7 +43,7 @@ fn run_under_sentinel(harness: &DaemonHarness) -> std::process::Output {
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .output()
-        .expect("spawn sentinel run")
+        .expect("spawn sentinel wrap")
 }
 
 /// Soft structural smoke — the wrapped command exits 0 (best-effort discipline).

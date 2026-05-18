@@ -3,11 +3,11 @@
 //!
 //! Strategy: instrument the daemon's fetcher to emit
 //! `target = "sentinel.feed.fetch"` events on every network fetch attempt.
-//! Run a sentinel run lifecycle that exercises `sentinel run` AND `sentinel
+//! Run a sentinel wrap lifecycle that exercises `sentinel wrap` AND `sentinel
 //! status` and assert:
 //!
 //!   1. `op="fetch_start"` events appear in daemon stderr only at
-//!      PrepareSnapshot time (i.e. driven by `sentinel run`, NOT by `sentinel
+//!      PrepareSnapshot time (i.e. driven by `sentinel wrap`, NOT by `sentinel
 //!      status` queries).
 //!   2. No abuse.ch / osv.dev / api.github.com / threatfox / urlhaus
 //!      hostnames appear in daemon stderr at all (covers the deferred
@@ -44,6 +44,7 @@ fn block_decisions_do_not_trigger_per_query_online_lookups() {
     // instead. Total fetch_start count: 2 to 4 depending on TTL boundary.
     for i in 0..2 {
         let output = Command::new(&cli)
+            .arg("wrap")
             .arg("/usr/bin/true")
             .env_clear()
             .env("HOME", harness.home.path())

@@ -20,7 +20,7 @@ pub struct Snapshot {
     /// Pre-sorted by RuleTier at write time (daemon, plan 02-02). The dylib
     /// iterates this Vec linearly and returns at the FIRST matching entry.
     pub entries: Vec<AllowlistEntry>,
-    /// Per-`sentinel run` snapshot: Some(uuid) for runs/{uuid}.cbor; None for the
+    /// Per-`sentinel wrap` snapshot: Some(uuid) for runs/{uuid}.cbor; None for the
     /// daemon-startup snapshot (deprecated post-Phase-2 but kept for compat).
     pub run_uuid: Option<String>,
     /// Absolute path of the trusted .sentinel.toml that contributed project rules
@@ -45,7 +45,7 @@ impl Snapshot {
     }
 
     /// Phase 2 minimal allowlist — used by tests and as the daemon's startup
-    /// fallback before any `sentinel run` invocation. Real curated content is
+    /// fallback before any `sentinel wrap` invocation. Real curated content is
     /// loaded by plan 02-02 from `crates/sentinel-core/data/allowlist.yaml`.
     pub fn phase2_default() -> Self {
         Self {

@@ -37,6 +37,7 @@ fn double_fork_setsid_wrapped_command_completes() {
     // strips on hardened binaries — the wrapping sh itself may not be hooked,
     // but the test still verifies the CLI's spawn path doesn't fail-closed.
     let mut cmd = Command::new(&cli);
+    cmd.arg("wrap");
     cmd.arg("/bin/sh")
         .arg(&script)
         .env_clear()
@@ -52,7 +53,7 @@ fn double_fork_setsid_wrapped_command_completes() {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .expect("spawn sentinel run");
+        .expect("spawn sentinel wrap");
 
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let exit_status = loop {
@@ -63,7 +64,7 @@ fn double_fork_setsid_wrapped_command_completes() {
                     let _ = child.kill();
                     let _ = child.wait();
                     panic!(
-                        "wrapped sentinel run did not exit within 10s — \
+                        "wrapped sentinel wrap did not exit within 10s — \
                          dispatch path may be hung at fork"
                     );
                 }

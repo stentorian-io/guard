@@ -3,7 +3,7 @@
 //! `fetch_feeds_blocking` is the single public entry point for triggering a
 //! feed refresh. It serializes concurrent runs through `feed_fetch_mutex`
 //! AND short-circuits when a recent fetch result is still fresh (within
-//! `SHARED_RESULT_TTL`) — N concurrent `sentinel run` invocations within a
+//! `SHARED_RESULT_TTL`) — N concurrent `sentinel wrap` invocations within a
 //! 5-second window observe ONE underlying fetch and reuse its outcome.
 //!
 //! Per RESEARCH.md Code Example 1 (lines 690-732). Per D-85: any per-feed

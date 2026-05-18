@@ -1,6 +1,6 @@
 # managed by `sentinel setup` — sourced by shell rc-file marker block
 # Ambient shell wrapping: transparently runs package-install commands under
-# Sentinel so network egress is monitored without needing `sentinel run`.
+# Sentinel so network egress is monitored without `sentinel wrap`.
 
 # Resolve sentinel binary path once at shell startup.
 _sentinel_bin="$(command -v sentinel 2>/dev/null)"
@@ -13,7 +13,7 @@ if [ -n "$_sentinel_bin" ]; then
     local subcmd="${1:-}"
     case "$subcmd" in
       install|add|remove|uninstall|update|upgrade|ci|create|init|publish|exec|run)
-        "$_sentinel_bin" run "$pm" "$@"
+        "$_sentinel_bin" wrap "$pm" "$@"
         ;;
       *)
         command "$pm" "$@"

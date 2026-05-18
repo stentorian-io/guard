@@ -2,7 +2,7 @@
 //!
 //! Phase 3 plan 03-08 — BaselineCommit handler (POL-04 / D-58, D-59, D-60).
 //!
-//! Called by `sentinel run --baseline` on tracked-root exit. Consumes the
+//! Called by `sentinel wrap --baseline` on tracked-root exit. Consumes the
 //! per-run baseline_staging accumulator and returns it to the CLI together with
 //! the existing closest .sentinel.toml (path + raw content) so the CLI can
 //! render a unified diff and confirm with the user.

@@ -39,6 +39,7 @@ fn hardened_runtime_exec_surfaces_coverage_gap() {
     );
 
     let out = Command::new(&cli)
+        .arg("wrap")
         .arg(&probe)
         .arg("posix_spawn_env_delayed")
         .env_clear()

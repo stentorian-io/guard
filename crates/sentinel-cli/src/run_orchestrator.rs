@@ -23,8 +23,6 @@ pub fn run(
     let cwd = std::env::current_dir().map_err(|e| CliError::Other(format!("cwd: {e}")))?;
     let is_tty = std::io::stdin().is_terminal();
 
-    crate::ipc_client::probe_daemon_alive(sock)?;
-
     // Phase 4 plan 04-03: spawn a CR-overwrite progress thread on stderr while
     // the daemon does the synchronous feed fetch. The progress thread is
     // joined immediately after PrepareSnapshot returns; the line is cleared

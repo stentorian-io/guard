@@ -38,6 +38,7 @@ fn real_main() -> Result<i32, CliError> {
                 );
                 return Ok(64); // EX_USAGE
             }
+            sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
             run_orchestrator::run(&sock, &state, argv, learn)
         }
         Cmd::Status { sub, verbose, json } => {
@@ -49,21 +50,28 @@ fn real_main() -> Result<i32, CliError> {
                 return Ok(64); // EX_USAGE
             }
             match sub {
-                None => sentinel_cli::status::run_status(&sock, &state, verbose, json),
+                // Local-only commands: no daemon needed.
                 Some(sentinel_cli::cli::StatusSub::Logs { follow, json }) => {
                     sentinel_cli::logs::run_logs(follow, json)
-                }
-                Some(sentinel_cli::cli::StatusSub::Rules { all, json }) => {
-                    sentinel_cli::status::rules::run(&sock, all, json)
                 }
                 Some(sentinel_cli::cli::StatusSub::Denials { run_uuid, json }) => {
                     sentinel_cli::status::denials::run(&run_uuid, json)
                 }
-                Some(sentinel_cli::cli::StatusSub::Review { run_uuid }) => {
-                    sentinel_cli::status::review::run(&sock, run_uuid)
-                }
                 Some(sentinel_cli::cli::StatusSub::Persistence { run_uuid, json }) => {
                     sentinel_cli::status::persistence::run(run_uuid.as_deref(), json)
+                }
+                // IPC-dependent commands: ensure daemon first.
+                None => {
+                    sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
+                    sentinel_cli::status::run_status(&sock, &state, verbose, json)
+                }
+                Some(sentinel_cli::cli::StatusSub::Rules { all, json }) => {
+                    sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
+                    sentinel_cli::status::rules::run(&sock, all, json)
+                }
+                Some(sentinel_cli::cli::StatusSub::Review { run_uuid }) => {
+                    sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
+                    sentinel_cli::status::review::run(&sock, run_uuid)
                 }
             }
         },

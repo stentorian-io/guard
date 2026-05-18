@@ -610,10 +610,8 @@ impl Default for Status {
 /// Discriminant for daemon health state — used in StatusReply.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DaemonStateKind {
-    NotInstalled,
-    DaemonNotRunning,
     Degraded,
-    StaleFeeds, // reserved Phase 4 — Phase 3 never emits
+    StaleFeeds,
     Operational,
 }
 
@@ -639,6 +637,7 @@ pub struct GapInfo {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatusCounters {
     pub rules_user: u64,
+    #[serde(default)]
     pub rules_trusted_toml: u64,
     pub blocks_today: u64,
     pub allows_today: u64,

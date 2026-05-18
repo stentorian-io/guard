@@ -1,16 +1,28 @@
-//! Phase 3 plan 03-10 — --json output is jq-parseable.
+//! Verify that status render functions produce valid output.
 
-use sentinel_cli::status::run_status;
+use sentinel_ipc::{DaemonStateKind, StatusCounters};
 
 #[test]
-fn json_offline_state_emits_parseable_object() {
-    let dir = tempfile::tempdir().unwrap();
-    let sock = dir.path().join("nonexistent.sock");
-    let state_dir = dir.path().join("state");
-
-    // Capture stdout: redirect to a temp file via fork? Simpler: assert run_status returns 2
-    // and trust that the structural shape (serde_json::to_string output) is valid JSON.
-    // The actual jq parseability is asserted in plan 03-14 e2e.
-    let rc = run_status(&sock, &state_dir, false, true).unwrap();
-    assert_eq!(rc, 2);
+fn verbose_render_produces_output() {
+    let counters = StatusCounters {
+        rules_user: 3,
+        rules_trusted_toml: 0,
+        blocks_today: 1,
+        allows_today: 10,
+        gaps_today: 0,
+    };
+    let mut buf = Vec::new();
+    sentinel_cli::status::render_verbose_to(
+        &mut buf,
+        DaemonStateKind::Operational,
+        &[],
+        &[],
+        &counters,
+        &[],
+        None,
+    );
+    let s = String::from_utf8(buf).unwrap();
+    assert!(s.contains("State: operational"));
+    assert!(s.contains("rules_user:   3"));
+    assert!(s.contains("blocks_today: 1"));
 }

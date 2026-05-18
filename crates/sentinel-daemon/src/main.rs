@@ -4,7 +4,6 @@ use clap::{Parser, Subcommand};
 use sentinel_core::Snapshot;
 use sentinel_daemon::baseline_staging::BaselineStaging;
 use sentinel_daemon::curated::load_curated;
-use sentinel_daemon::dev_install;
 use sentinel_daemon::gap_detector::GapDetector;
 use sentinel_daemon::install_artifacts::InstallArtifactStore;
 use sentinel_daemon::ipc_server::{DaemonState, IpcServer};
@@ -35,13 +34,6 @@ enum Cmd {
         #[arg(long)]
         state_dir: Option<PathBuf>,
     },
-    /// Write the LaunchAgent plist and launchctl bootstrap it.
-    DevInstall {
-        #[arg(long)]
-        state_dir: Option<PathBuf>,
-        #[arg(long)]
-        skip_bootstrap: bool,
-    },
 }
 
 fn main() -> std::io::Result<()> {
@@ -59,10 +51,6 @@ fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Serve { state_dir } => serve(state_dir.unwrap_or_else(default_state_dir)),
-        Cmd::DevInstall {
-            state_dir,
-            skip_bootstrap,
-        } => dev_install_run(state_dir.unwrap_or_else(default_state_dir), skip_bootstrap),
     }
 }
 
@@ -209,18 +197,3 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     server.run_forever()
 }
 
-fn dev_install_run(state_dir: PathBuf, skip_bootstrap: bool) -> std::io::Result<()> {
-    let exe = std::env::current_exe()?;
-    let plist = dev_install::write(&exe, &state_dir)?;
-    info!(plist = %plist.display(), "wrote LaunchAgent plist");
-    if !skip_bootstrap {
-        dev_install::launchctl_bootstrap(&plist)?;
-        info!("launchctl bootstrap succeeded");
-    } else {
-        info!(
-            "--skip-bootstrap given; user must run `launchctl bootstrap gui/$UID {}` manually",
-            plist.display()
-        );
-    }
-    Ok(())
-}

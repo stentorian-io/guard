@@ -36,13 +36,11 @@ commit_parsers = [
     { message = "^feat", group = "<!-- 0 -->Features" },
     { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
     { message = "^perf", group = "<!-- 2 -->Performance" },
-    # User-facing docs — keep in changelog
+    # Shipped docs — appear in changelog (man pages, CLI --help, bundled install docs)
     { message = "^docs\\(man\\)", group = "<!-- 3 -->Documentation" },
+    { message = "^docs\\(help\\)", group = "<!-- 3 -->Documentation" },
     { message = "^docs\\(install\\)", group = "<!-- 3 -->Documentation" },
-    { message = "^docs\\(guide\\)", group = "<!-- 3 -->Documentation" },
-    { message = "^docs\\(changelog\\)", group = "<!-- 3 -->Documentation" },
-    { message = "^docs\\(readme\\)", group = "<!-- 3 -->Documentation" },
-    # All other docs — internal
+    # All other docs (readme, changelog, guide, bench, internal) — not shipped
     { message = "^docs", skip = true },
     { message = "^test", skip = true },
     { message = "^refactor", skip = true },

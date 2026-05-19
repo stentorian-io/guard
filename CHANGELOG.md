@@ -19,7 +19,6 @@ This changelog is generated from [conventional commits](https://www.conventional
 ### Documentation
 - **man:** Add man pages for sentinel(1) and sentineld(8)
 - **install:** Add install guide with build, setup, and troubleshooting
-- **readme:** Overhaul README to standard OSS structure, update roadmap
 
 ## [0.7] — 2026-05-13
 

@@ -16,8 +16,9 @@ USAGE:
   sentinel wrap --learn <cmd> [args...]      Record unknown destinations as user rules
                                              (TTY required; fails clear in non-TTY)
 
-  sentinel status [logs|rules|denials|review|persistence] [--follow|--all|--json]
+  sentinel status [logs|rules|denials|review|persistence|advisory] [--follow|--all|--json]
                                              Inspect daemon health, rules, denials
+  sentinel status advisory <ID>              Look up threat-intel advisory details
 "
 )]
 pub struct Cli {
@@ -79,6 +80,11 @@ pub enum StatusSub {
     Persistence {
         /// Filter to a specific run_uuid.
         run_uuid: Option<String>,
+        #[arg(long)] json: bool,
+    },
+    /// Look up details for a threat-intel advisory ID (e.g. MAL-2025-3008).
+    Advisory {
+        advisory_id: String,
         #[arg(long)] json: bool,
     },
 }

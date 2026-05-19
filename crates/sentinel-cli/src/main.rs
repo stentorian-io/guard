@@ -60,6 +60,9 @@ fn real_main() -> Result<i32, CliError> {
                 Some(sentinel_cli::cli::StatusSub::Persistence { run_uuid, json }) => {
                     sentinel_cli::status::persistence::run(run_uuid.as_deref(), json)
                 }
+                Some(sentinel_cli::cli::StatusSub::Advisory { advisory_id, json }) => {
+                    sentinel_cli::status::advisory::run(&advisory_id, json)
+                }
                 // IPC-dependent commands: ensure daemon first.
                 None => {
                     sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;

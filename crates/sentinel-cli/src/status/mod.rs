@@ -7,6 +7,7 @@
 //! with submodules for the new `sentinel status <noun>` verbs (`rules`,
 //! `trust`, `denials`, `review`).
 
+pub mod advisory;
 pub mod denials;
 pub mod persistence;
 pub mod review;

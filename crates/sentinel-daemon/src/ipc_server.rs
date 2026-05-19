@@ -780,7 +780,7 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
         dest_port: req.dest_port,
         dest_ip: req.dest_ip.clone(),
         run_uuid,
-        source_kind: "hook_deny".into(),
+        source_kind: if req.source_kind.is_empty() { "hook_deny".into() } else { req.source_kind.clone() },
         source_locator: Some(req.source_surface.clone()),
         process: process_ctx,
         parent: parent_ctx,

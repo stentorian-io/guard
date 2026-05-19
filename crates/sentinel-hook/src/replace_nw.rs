@@ -304,10 +304,9 @@ pub fn is_nw_object(ptr: *mut c_void) -> bool {
 /// missing NW symbols — the libc connect-level enforcement still catches
 /// the connection in those degraded paths.
 fn decide_for_nw_connection(connection: *mut c_void) -> bool {
+    use crate::log_buffer::LOG_RING;
     use sentinel_core::Verdict;
     if FAIL_CLOSED.load(Ordering::Acquire) {
-        // Don't try to allocate / decode in FAIL_CLOSED mode; libc connect
-        // returns EHOSTUNREACH for everything anyway.
         return false;
     }
     let host_bytes = match extract_endpoint_hostname(connection) {
@@ -315,8 +314,19 @@ fn decide_for_nw_connection(connection: *mut c_void) -> bool {
         None => return false,
     };
     let entries = ALLOWLIST.get().map(|v| v.as_slice()).unwrap_or(&[]);
-    let (verdict, _src) = sentinel_core::policy::evaluate_policy(&host_bytes, None, true, entries);
-    matches!(verdict, Verdict::Deny)
+    let (verdict, source) = sentinel_core::policy::evaluate_policy(&host_bytes, None, true, entries);
+    if matches!(verdict, Verdict::Deny) {
+        let host_str = core::str::from_utf8(&host_bytes).unwrap_or("<non-utf8>");
+        let msg = format!(
+            "[sentinel-hook] DENY nw_connection_start {} ({})",
+            host_str,
+            source.as_label()
+        );
+        LOG_RING.append(msg.as_bytes());
+        true
+    } else {
+        false
+    }
 }
 
 /// Extract the hostname from an NW connection's endpoint. Returns `None` on

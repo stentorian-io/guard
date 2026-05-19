@@ -1070,6 +1070,9 @@ pub struct DenyNotify {
     /// Which libc surface triggered the denial.
     pub source_surface: String, // "connect"|"connectx"|"sendto"|"sendmsg"
     pub denied_at_ms: u64,
+    /// Policy tier that caused the denial (e.g. "feed-deny", "default-deny").
+    #[serde(default)]
+    pub source_kind: String,
 }
 
 impl DenyNotify {
@@ -1080,6 +1083,7 @@ impl DenyNotify {
         dest_ip: Option<String>,
         source_surface: impl Into<String>,
         denied_at_ms: u64,
+        source_kind: impl Into<String>,
     ) -> Self {
         Self {
             schema_version: IPC_SCHEMA_V4,
@@ -1089,6 +1093,7 @@ impl DenyNotify {
             dest_ip,
             source_surface: source_surface.into(),
             denied_at_ms,
+            source_kind: source_kind.into(),
         }
     }
 }

@@ -76,7 +76,8 @@ pub fn _test_decide_for_sockaddr(
     // Ensure FAIL_CLOSED is false so entries_or_deny() returns Some.
     snapshot::FAIL_CLOSED.store(false, core::sync::atomic::Ordering::Release);
     // SAFETY: caller provides a valid sockaddr pointer with matching addrlen.
-    unsafe { crate::replace_libc::_decide_for_sockaddr_pub(addr, addrlen) }
+    let (verdict, _source) = unsafe { crate::replace_libc::_decide_for_sockaddr_pub(addr, addrlen) };
+    verdict
 }
 
 /// Constructor — runs when the library is loaded (both as dylib and in test rlib linkage).

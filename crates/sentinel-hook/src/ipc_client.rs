@@ -351,6 +351,7 @@ pub fn send_deny_notify(
     dest_port: u16,
     dest_ip: Option<&str>,
     source_surface: &str,
+    source_kind: &str,
 ) {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -364,6 +365,7 @@ pub fn send_deny_notify(
         dest_ip: dest_ip.map(|s| s.to_string()),
         source_surface: source_surface.to_string(),
         denied_at_ms: now_ms,
+        source_kind: source_kind.to_string(),
     };
     let _ = send_tagged_and_recv_ack::<DenyNotify, DenyNotifyAck>(TAG_DENY_NOTIFY, &ev, 50);
 }

@@ -2,7 +2,7 @@
 //!
 //! Sends a DenyNotify tagged frame (tag 0x12) to the daemon and verifies:
 //!   1. DenyNotifyAck::Ok received
-//!   2. JSONL log contains a "block" row with source_kind="hook_deny"
+//!   2. JSONL log contains a "block" row with the correct source_kind
 //!   3. LogWriter blocks_today counter incremented
 
 use sentinel_core::AuditToken;
@@ -89,6 +89,7 @@ fn deny_notify_round_trip_logs_block_row() {
         Some("93.184.216.34".into()),
         "connect",
         1_700_000_000_000,
+        "default-deny",
     );
 
     let mut stream = UnixStream::connect(&sock).expect("connect DenyNotify");
@@ -125,7 +126,7 @@ fn deny_notify_round_trip_logs_block_row() {
     assert_eq!(row["dest_host"], "evil.example.com");
     assert_eq!(row["dest_port"], 443);
     assert_eq!(row["dest_ip"], "93.184.216.34");
-    assert_eq!(row["source_kind"], "hook_deny");
+    assert_eq!(row["source_kind"], "default-deny");
     assert_eq!(row["source_locator"], "connect");
 }
 
@@ -163,6 +164,7 @@ fn deny_notify_wrong_schema_version_returns_err() {
         None,
         "sendto",
         0,
+        "default-deny",
     );
     deny.schema_version = 9999; // wrong
 
@@ -221,6 +223,7 @@ fn deny_notify_untracked_sender_still_logs() {
         None,
         "sendmsg",
         1_700_000_000_000,
+        "feed-deny",
     );
 
     let mut stream = UnixStream::connect(&sock).expect("connect");
@@ -241,7 +244,7 @@ fn deny_notify_untracked_sender_still_logs() {
         serde_json::from_str(contents.lines().next().expect("at least one line"))
             .expect("parse JSONL");
     assert_eq!(row["event"], "block");
-    assert_eq!(row["source_kind"], "hook_deny");
+    assert_eq!(row["source_kind"], "feed-deny");
     assert_eq!(row["dest_host"], "unknown-sender.example.com");
     // Untracked sender: run_uuid should be empty.
     assert_eq!(row["run_uuid"], "");

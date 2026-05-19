@@ -77,10 +77,11 @@ pub unsafe extern "C" fn sentinel_syscall(
             // syscall(SYS_CONNECT, fd, addr, addrlen)
             let addr = a2 as *const sockaddr;
             let addrlen = a3 as socklen_t;
-            let verdict = unsafe { _decide_for_sockaddr_pub(addr, addrlen) };
+            let (verdict, source) = unsafe { _decide_for_sockaddr_pub(addr, addrlen) };
             if matches!(verdict, Verdict::Deny) {
                 unsafe { *libc::__error() = libc::EHOSTUNREACH; }
-                LOG_RING.append(b"[sentinel-hook] DENY syscall(SYS_CONNECT)");
+                let msg = format!("[sentinel-hook] DENY syscall(SYS_CONNECT) ({})", source.as_label());
+                LOG_RING.append(msg.as_bytes());
                 return -1;
             }
             unsafe { raw_syscall::raw_connect(a1 as c_int, addr, addrlen) as i64 }
@@ -99,10 +100,11 @@ pub unsafe extern "C" fn sentinel_syscall(
                 return -1;
             }
             let ep = unsafe { &*(endpoints as *const crate::replace_libc::SaEndpoints) };
-            let verdict = unsafe { _decide_for_sockaddr_pub(ep.sae_dstaddr, ep.sae_dstaddrlen) };
+            let (verdict, source) = unsafe { _decide_for_sockaddr_pub(ep.sae_dstaddr, ep.sae_dstaddrlen) };
             if matches!(verdict, Verdict::Deny) {
                 unsafe { *libc::__error() = libc::EHOSTUNREACH; }
-                LOG_RING.append(b"[sentinel-hook] DENY syscall(SYS_CONNECTX)");
+                let msg = format!("[sentinel-hook] DENY syscall(SYS_CONNECTX) ({})", source.as_label());
+                LOG_RING.append(msg.as_bytes());
                 return -1;
             }
             // Pass through all args — use raw_syscall_passthrough for 6 args,
@@ -117,10 +119,11 @@ pub unsafe extern "C" fn sentinel_syscall(
                 // Connected socket send — destination already permitted.
                 return unsafe { raw_syscall::raw_syscall_passthrough(num, a1, a2, a3, a4, a5, a6) };
             }
-            let verdict = unsafe { _decide_for_sockaddr_pub(to, tolen) };
+            let (verdict, source) = unsafe { _decide_for_sockaddr_pub(to, tolen) };
             if matches!(verdict, Verdict::Deny) {
                 unsafe { *libc::__error() = libc::EHOSTUNREACH; }
-                LOG_RING.append(b"[sentinel-hook] DENY syscall(SYS_SENDTO)");
+                let msg = format!("[sentinel-hook] DENY syscall(SYS_SENDTO) ({})", source.as_label());
+                LOG_RING.append(msg.as_bytes());
                 return -1;
             }
             unsafe { raw_syscall::raw_syscall_passthrough(num, a1, a2, a3, a4, a5, a6) }
@@ -138,10 +141,11 @@ pub unsafe extern "C" fn sentinel_syscall(
                 // Connected socket send — pass through.
                 return unsafe { raw_syscall::raw_syscall_passthrough(num, a1, a2, a3, a4, a5, a6) };
             }
-            let verdict = unsafe { _decide_for_sockaddr_pub(m.msg_name as *const sockaddr, m.msg_namelen) };
+            let (verdict, source) = unsafe { _decide_for_sockaddr_pub(m.msg_name as *const sockaddr, m.msg_namelen) };
             if matches!(verdict, Verdict::Deny) {
                 unsafe { *libc::__error() = libc::EHOSTUNREACH; }
-                LOG_RING.append(b"[sentinel-hook] DENY syscall(SYS_SENDMSG)");
+                let log_msg = format!("[sentinel-hook] DENY syscall(SYS_SENDMSG) ({})", source.as_label());
+                LOG_RING.append(log_msg.as_bytes());
                 return -1;
             }
             unsafe { raw_syscall::raw_syscall_passthrough(num, a1, a2, a3, a4, a5, a6) }

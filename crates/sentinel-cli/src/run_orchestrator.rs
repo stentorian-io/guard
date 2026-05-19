@@ -55,7 +55,7 @@ pub fn run(
 
     // Spawn the wrapped child; capture pgid for SIGINT propagation.
     let (mut child, pgid) =
-        crate::spawn::spawn_wrapped_with_pgid(&command, sock, &manifest_path, &run_uuid)?;
+        crate::spawn::spawn_wrapped_with_pgid(&command, &manifest_path, &run_uuid)?;
 
     // Restore the RegisterRoot delegation that was lost in the v0.3
     // refactor (commit d020752 — extracted run_orchestrator from main.rs and

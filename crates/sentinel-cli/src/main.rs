@@ -4,7 +4,6 @@ use clap::Parser;
 use sentinel_cli::cli::{Cli, Cmd};
 use sentinel_cli::{run_orchestrator, CliError};
 use sentinel_daemon::state_dir::{default_state_dir, socket_path};
-use std::path::PathBuf;
 
 fn main() {
     tracing_subscriber::fmt()
@@ -24,9 +23,7 @@ fn main() {
 
 fn real_main() -> Result<i32, CliError> {
     let cli = Cli::parse();
-    let state = std::env::var_os("SENTINEL_STATE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_state_dir);
+    let state = default_state_dir();
     let sock = socket_path(&state);
 
     match cli.cmd {

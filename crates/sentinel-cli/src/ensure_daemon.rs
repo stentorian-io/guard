@@ -21,17 +21,6 @@ const RETRY_DELAYS: &[Duration] = &[
 ];
 
 fn find_sentineld() -> Result<PathBuf, CliError> {
-    if let Some(p) = std::env::var_os("SENTINEL_DAEMON_BIN") {
-        let p = PathBuf::from(p);
-        if p.exists() {
-            return Ok(p);
-        }
-        return Err(CliError::Other(format!(
-            "SENTINEL_DAEMON_BIN={} does not exist",
-            p.display()
-        )));
-    }
-
     let exe = std::env::current_exe().map_err(|e| CliError::Other(format!("current_exe: {e}")))?;
     if let Some(parent) = exe.parent() {
         let candidate = parent.join(SENTINELD_BIN);
@@ -46,7 +35,7 @@ fn find_sentineld() -> Result<PathBuf, CliError> {
     }
 
     Err(CliError::Other(format!(
-        "could not find {SENTINELD_BIN}: tried SENTINEL_DAEMON_BIN, sibling-of-CLI, and {HOMEBREW_SENTINELD}"
+        "could not find {SENTINELD_BIN}: tried sibling-of-CLI and {HOMEBREW_SENTINELD}"
     )))
 }
 

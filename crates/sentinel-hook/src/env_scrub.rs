@@ -10,7 +10,6 @@
 //!
 //! Hidden from application code (after ctor):
 //!   - SENTINEL_SNAPSHOT_MANIFEST
-//!   - SENTINEL_DAEMON_SOCKET
 //!   - SENTINEL_STATE_DIR
 //!   - SENTINEL_TEST_MARKER
 //!   - DYLD_INSERT_LIBRARIES (hides our dylib path)
@@ -72,7 +71,6 @@ unsafe fn raw_getenv(name: *const libc::c_char) -> *mut libc::c_char {
 
 const HIDDEN_NAMES: &[&CStr] = &[
     c"SENTINEL_SNAPSHOT_MANIFEST",
-    c"SENTINEL_DAEMON_SOCKET",
     c"SENTINEL_STATE_DIR",
     c"SENTINEL_TEST_MARKER",
     c"DYLD_INSERT_LIBRARIES",
@@ -107,7 +105,6 @@ mod tests {
     #[test]
     fn hidden_keys_detected() {
         assert!(is_hidden_key(c"SENTINEL_SNAPSHOT_MANIFEST".as_ptr()));
-        assert!(is_hidden_key(c"SENTINEL_DAEMON_SOCKET".as_ptr()));
         assert!(is_hidden_key(c"SENTINEL_STATE_DIR".as_ptr()));
         assert!(is_hidden_key(c"SENTINEL_TEST_MARKER".as_ptr()));
         assert!(is_hidden_key(c"DYLD_INSERT_LIBRARIES".as_ptr()));

@@ -27,7 +27,7 @@ const SIGTERM_GRACE: Duration = Duration::from_millis(200);
 #[derive(Parser)]
 #[command(name = "sentinel-watchdog", about = "Sentinel daemon watchdog")]
 struct Cli {
-    #[arg(long)]
+    #[arg(long, hide = true)]
     state_dir: Option<PathBuf>,
 }
 

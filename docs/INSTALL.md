@@ -211,8 +211,6 @@ protection.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `SENTINEL_STATE_DIR` | Override state directory | `~/Library/Application Support/Sentinel/` |
-| `SENTINEL_LOG_DIR` | Override log directory (daemon) | `~/Library/Logs/Sentinel/` |
 | `RUST_LOG` | Logging verbosity | `warn` (CLI), `info` (daemon) |
 
 ## Further reading

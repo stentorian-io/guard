@@ -1,14 +1,6 @@
-//! posix_spawnp wrapper that injects DYLD_INSERT_LIBRARIES,
-//! SENTINEL_SNAPSHOT_MANIFEST, and SENTINEL_DAEMON_SOCKET into the child's envp.
-//!
-//! v0.2 — SENTINEL_DAEMON_SOCKET added so the dylib's
-//! `cache_daemon_socket_from_env` finds the daemon socket and
-//! can send ForkEvent / ExecEvent / DylibLoaded events.
-//!
-//! v0.3 — `spawn_wrapped_with_pgid` added — uses
-//! `std::process::Command` to return a `Child` handle (so the orchestrator can
-//! wait AFTER installing the SIGINT handler). POSIX_SPAWN_SETPGROUP is applied
-//! so the child becomes its own pgid leader; pgid = child.id() as i32.
+//! posix_spawnp wrapper that injects DYLD_INSERT_LIBRARIES and
+//! SENTINEL_SNAPSHOT_MANIFEST into the child's envp. The hook derives the
+//! daemon socket path from SENTINEL_STATE_DIR at ctor time.
 
 use std::ffi::{CString, OsStr};
 use std::ffi::OsString;
@@ -17,37 +9,30 @@ use std::path::Path;
 
 const ENV_DYLD: &str = "DYLD_INSERT_LIBRARIES";
 const ENV_MANIFEST: &str = "SENTINEL_SNAPSHOT_MANIFEST";
-const ENV_DAEMON_SOCKET: &str = "SENTINEL_DAEMON_SOCKET";
 
 pub fn spawn_wrapped(
     program: &Path,
     args: &[&OsStr],
     dylib_path: &Path,
     manifest_path: &Path,
-    socket_path: &Path,
 ) -> std::io::Result<libc::pid_t> {
-    // Build envp: inherit current environment minus the three we manage.
+    // Build envp: inherit current environment minus the vars we manage.
     let mut env: Vec<CString> = std::env::vars_os()
         .filter_map(|(k, v)| {
             let k_bytes = k.as_bytes();
-            // Strip our managed vars — we'll re-add them with proper values below.
             if k_bytes == ENV_DYLD.as_bytes()
                 || k_bytes == ENV_MANIFEST.as_bytes()
-                || k_bytes == ENV_DAEMON_SOCKET.as_bytes()
             {
                 return None;
             }
             let mut s = k_bytes.to_vec();
             s.push(b'=');
             s.extend_from_slice(v.as_bytes());
-            // Skip env vars with embedded NUL bytes (should not exist but be defensive).
             CString::new(s).ok()
         })
         .collect();
 
-    // DYLD_INSERT_LIBRARIES: prepend our dylib so dyld processes it first;
-    // append any prior value (separated by ':') so other interposers still load.
-    // T-01-08-01: our dylib is left-most so we get first chance at interpose records.
+    // DYLD_INSERT_LIBRARIES: prepend our dylib so dyld processes it first.
     let prior = std::env::var_os(ENV_DYLD).unwrap_or_default();
     let mut dyld_value = dylib_path.as_os_str().as_bytes().to_vec();
     if !prior.is_empty() {
@@ -69,19 +54,6 @@ pub fn spawn_wrapped(
     env.push(
         CString::new(entry2)
             .map_err(|e| std::io::Error::other(format!("MANIFEST env contains NUL: {e}")))?,
-    );
-
-    // SENTINEL_DAEMON_SOCKET: absolute path the dylib uses to talk back to the
-    // daemon (ipc_client::cache_daemon_socket_from_env reads this at ctor time).
-    // Without it the dylib's send_*_sync calls return NotConfigured and the
-    // fork/exec/dylib_loaded events never reach the daemon — v0.2 IPC is a no-op.
-    let mut entry3 = ENV_DAEMON_SOCKET.as_bytes().to_vec();
-    entry3.push(b'=');
-    entry3.extend_from_slice(socket_path.as_os_str().as_bytes());
-    env.push(
-        CString::new(entry3).map_err(|e| {
-            std::io::Error::other(format!("DAEMON_SOCKET env contains NUL: {e}"))
-        })?,
     );
 
     // Build argv[0] = program name.
@@ -133,12 +105,10 @@ pub fn spawn_wrapped(
 /// which internally calls `setpgid(0,0)` in the child before exec — equivalent to
 /// POSIX_SPAWN_SETPGROUP. The returned pgid is `child.id() as i32`.
 ///
-/// Environment setup mirrors `spawn_wrapped`: inherits current env, strips the
-/// three managed vars, then adds DYLD_INSERT_LIBRARIES, SENTINEL_SNAPSHOT_MANIFEST,
-/// and SENTINEL_DAEMON_SOCKET.
+/// Environment setup mirrors `spawn_wrapped`: inherits current env, strips
+/// managed vars, then adds DYLD_INSERT_LIBRARIES and SENTINEL_SNAPSHOT_MANIFEST.
 pub fn spawn_wrapped_with_pgid(
     command: &[OsString],
-    sock: &Path,
     manifest_path: &Path,
     _run_uuid: &str,
 ) -> Result<(std::process::Child, i32), crate::CliError> {
@@ -151,7 +121,6 @@ pub fn spawn_wrapped_with_pgid(
     let dylib = crate::locate::find_dylib()
         .map_err(|e| crate::CliError::DylibNotFound(e.to_string()))?;
 
-    // Build the environment: inherit current env minus the three managed vars.
     let prior_dyld = std::env::var_os(ENV_DYLD).unwrap_or_default();
     let mut dyld_value = dylib.as_os_str().to_os_string();
     if !prior_dyld.is_empty() {
@@ -163,22 +132,18 @@ pub fn spawn_wrapped_with_pgid(
     let mut cmd = std::process::Command::new(&command[0]);
     cmd.args(&command[1..]);
 
-    // Inherit current environment, stripping our managed vars.
     for (k, v) in std::env::vars_os() {
         let kb = k.as_bytes();
         if kb == ENV_DYLD.as_bytes()
             || kb == ENV_MANIFEST.as_bytes()
-            || kb == ENV_DAEMON_SOCKET.as_bytes()
         {
             continue;
         }
         cmd.env(k, v);
     }
 
-    // Inject managed vars.
     cmd.env(ENV_DYLD, &dyld_value);
     cmd.env(ENV_MANIFEST, manifest_path);
-    cmd.env(ENV_DAEMON_SOCKET, sock);
 
     // Make the child its own pgid leader (POSIX_SPAWN_SETPGROUP equivalent).
     // process_group(0) calls setpgid(0,0) in the child, making it its own leader.

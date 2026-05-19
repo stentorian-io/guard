@@ -12,13 +12,13 @@
 // companion test in deny.rs additionally exercises a loopback (allowlisted)
 // host -- the differential proves Sentinel discriminated.
 //
-// SENTINEL_DENY_HOST env var lets the test override the host.
-// SENTINEL_DENY_PORT env var lets the test override the port.
+// SENTINEL_TEST_DENY_HOST env var lets the test override the host.
+// SENTINEL_TEST_DENY_PORT env var lets the test override the port.
 
 const net = require('net');
 
-const host = process.env.SENTINEL_DENY_HOST || 'discord.com';
-const port = parseInt(process.env.SENTINEL_DENY_PORT || '443', 10);
+const host = process.env.SENTINEL_TEST_DENY_HOST || 'discord.com';
+const port = parseInt(process.env.SENTINEL_TEST_DENY_PORT || '443', 10);
 
 const sock = net.connect({ host, port }, () => {
   // We should NEVER reach here under Sentinel. If we do, exit 0 to surface

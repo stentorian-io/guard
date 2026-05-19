@@ -75,6 +75,13 @@ jobs:
       - uses: actions/checkout@v4
       - run: npx markdownlint-cli2 "**/*.md" "#target" "#.gsd"
 
+  lint-test-env-vars:
+    name: Lint test env var hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/lint-test-env-vars.sh
+
   validation:
     name: Validation suite
     runs-on: macos-14

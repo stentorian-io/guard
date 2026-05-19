@@ -20,8 +20,8 @@ fn main() {
         std::process::exit(4);
     }
 
-    let deny_host = std::env::var("SENTINEL_DENY_HOST").unwrap_or_else(|_| "discord.com".into());
-    let deny_port: u16 = std::env::var("SENTINEL_DENY_PORT")
+    let deny_host = std::env::var("SENTINEL_TEST_DENY_HOST").unwrap_or_else(|_| "discord.com".into());
+    let deny_port: u16 = std::env::var("SENTINEL_TEST_DENY_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(443);

@@ -106,7 +106,7 @@ if [ -n "$CURRENT_TYPE" ]; then
   if [ "$CURRENT_TYPE" = "docs" ]; then
     SCOPE=$(echo "$FIRST_LINE" | sed -nE 's/^docs\(([^)]+)\).*/\1/p')
     case "$SCOPE" in
-      man|install|guide|changelog|readme) ;; # user-facing, keep
+      man|help|install) ;; # shipped in release, keep
       bench|code|internal)
         # These will be skipped by cliff anyway, but note it
         ;;
@@ -129,7 +129,7 @@ if [ "$MSG_SOURCE" != "message" ] || [ -z "$CURRENT_TYPE" ]; then
     "test"|"ci"|"chore or build")
       CHANGELOG_NOTE="(will NOT appear in changelog)" ;;
     "docs")
-      CHANGELOG_NOTE="(only docs(man|install|guide|changelog|readme) appear in changelog)" ;;
+      CHANGELOG_NOTE="(only docs(man|help|install) appear in changelog)" ;;
     *)
       CHANGELOG_NOTE="(will appear in changelog)" ;;
   esac
@@ -139,14 +139,14 @@ if [ "$MSG_SOURCE" != "message" ] || [ -z "$CURRENT_TYPE" ]; then
     echo "# ── Commit type guidance ──────────────────────────────────────"
     echo "# Staged files suggest: ${INFERRED} ${CHANGELOG_NOTE}"
     echo "#"
-    echo "# Changelog types: feat, fix, perf, docs(man|install|guide|changelog|readme)"
+    echo "# Changelog types: feat, fix, perf, docs(man|help|install)"
     echo "# Internal types:  test, refactor, chore, build, ci, docs(*)"
     echo "#"
     echo "# Rules enforced by commit-msg hook:"
     echo "#   feat/fix → must change source code (.rs), not just docs/tests/CI"
     echo "#   test     → must change test files"
     echo "#   ci       → must change .github/ files"
-    echo "#   docs     → only (man|install|guide|changelog|readme) scopes reach changelog"
+    echo "#   docs     → only (man|help|install) scopes reach changelog"
     echo "# ──────────────────────────────────────────────────────────────"
   } >> "$MSG_FILE"
 fi

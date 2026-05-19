@@ -110,11 +110,11 @@ esac
 
 if [ "$TYPE" = "docs" ] && [ -n "$SCOPE" ]; then
   case "$SCOPE" in
-    man|install|guide|changelog|readme)
-      ;; # user-facing, will appear in changelog
+    man|help|install)
+      ;; # shipped in release, will appear in changelog
     *)
       warn "docs(${SCOPE}) will be skipped in the changelog.
-Only docs(man|install|guide|changelog|readme) are user-facing.
+Only docs(man|help|install) are shipped in the release artifact.
 If this is intentional, proceed. Otherwise consider 'chore' type."
       ;;
   esac

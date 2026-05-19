@@ -201,3 +201,11 @@ fn verdict_for(entry: &AllowlistEntry) -> (Verdict, SourceKind) {
     };
     (v, SourceKind::from_tier(entry.tier))
 }
+
+/// Check if a UserAllow entry exists for the given host. Used on the deny
+/// path (not hot path) to detect "previously approved, now suspended" cases.
+pub fn has_user_allow(host: &[u8], entries: &[AllowlistEntry]) -> bool {
+    entries.iter().any(|e| {
+        matches!(e.tier, crate::allowlist::RuleTier::UserAllow) && e.matches(host)
+    })
+}

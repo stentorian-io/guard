@@ -221,6 +221,16 @@ impl RuleStore {
 
         Ok(out)
     }
+
+    pub fn has_user_allow_for(&self, pattern: &str) -> SqlResult<bool> {
+        let conn = self.reader.lock().expect("rule store reader mutex");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM rules WHERE kind = 'allow' AND pattern = ?1",
+            params![pattern],
+            |r| r.get(0),
+        )?;
+        Ok(count > 0)
+    }
 }
 
 pub fn unix_ms_now() -> i64 {

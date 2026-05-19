@@ -1,6 +1,7 @@
 use sentinel_core::{
     AllowlistEntry, MatchType, RuleKind, RuleTier, SourceKind, Verdict, evaluate_policy,
-    is_cloud_metadata_host, is_cloud_metadata_ip, is_loopback_host, is_loopback_ip,
+    has_user_allow, is_cloud_metadata_host, is_cloud_metadata_ip, is_loopback_host,
+    is_loopback_ip,
 };
 
 fn entry(kind: RuleKind, tier: RuleTier, mt: MatchType, pattern: &str) -> AllowlistEntry {
@@ -275,4 +276,27 @@ fn source_kind_as_label_covers_all_variants() {
     assert_eq!(SourceKind::SuspectDeny.as_label(), "suspect-deny");
     assert_eq!(SourceKind::UserAllow.as_label(), "user-allow");
     assert_eq!(SourceKind::DefaultDeny.as_label(), "default-deny");
+}
+
+#[test]
+fn has_user_allow_detects_overlap() {
+    let entries = [
+        entry(RuleKind::Deny, RuleTier::ConfirmedDeny, MatchType::Exact, "evil.com"),
+        entry(RuleKind::Allow, RuleTier::UserAllow, MatchType::Exact, "evil.com"),
+    ];
+    assert!(has_user_allow(b"evil.com", &entries));
+    assert!(!has_user_allow(b"other.com", &entries));
+}
+
+#[test]
+fn confirmed_deny_overrides_user_allow() {
+    let mut entries = vec![
+        entry(RuleKind::Allow, RuleTier::UserAllow, MatchType::Exact, "evil.com"),
+        entry(RuleKind::Deny, RuleTier::ConfirmedDeny, MatchType::Exact, "evil.com"),
+    ];
+    entries.sort_by_key(|e| e.tier);
+    let (v, src) = evaluate_policy(b"evil.com", None, true, &entries);
+    assert_eq!(v, Verdict::Deny);
+    assert_eq!(src, SourceKind::ConfirmedDeny);
+    assert!(has_user_allow(b"evil.com", &entries));
 }

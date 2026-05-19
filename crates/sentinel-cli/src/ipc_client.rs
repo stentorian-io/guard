@@ -304,6 +304,7 @@ pub fn status_request(sock: &Path) -> Result<sentinel_ipc::StatusReply, CliError
 }
 
 /// v0.3 tag 0x0B: insert a user rule into the daemon's rule store.
+/// Requires biometric authentication (Touch ID / password) before sending.
 pub fn insert_user_rule_request(
     sock: &Path,
     kind: &str,
@@ -311,6 +312,12 @@ pub fn insert_user_rule_request(
     pattern: &str,
     reason: &str,
 ) -> Result<i64, CliError> {
+    let bio_reason = format!("Sentinel: {kind} rule for {pattern}");
+    if !crate::biometric::authenticate(&bio_reason) {
+        return Err(CliError::Other(
+            "biometric authentication required to modify rules".into(),
+        ));
+    }
     let req = InsertUserRule {
         schema_version: sentinel_ipc::IPC_SCHEMA_V3,
         kind: kind.into(),

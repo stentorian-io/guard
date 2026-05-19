@@ -30,11 +30,3 @@ portable-pty = "0.9"
 sha2 = { workspace = true }   # plan 05-05: corrupt-snapshot test computes manifest digest
 socket2 = { workspace = true }  # M004-S01: watchdog ping in E2E tests
 sentinel-hook = { path = "../sentinel-hook" }  # M004-S06: resilience integration tests
-
-[features]
-# Opt-in feature for tests that require a real launchd user session
-# (macOS GUI session). Enable with:
-#   cargo test -p sentinel-e2e --features ci-launchd
-# CI workflows that run on real macOS runners can enable this; default
-# `cargo test` invocations do NOT.
-ci-launchd = []

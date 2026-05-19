@@ -169,11 +169,8 @@ pub fn verify_peer_signature(token: &AuditToken) -> CodesignVerdict {
 /// Check peer codesign and apply policy. Returns `true` if the peer should
 /// be accepted, `false` if it should be rejected.
 ///
-/// Policy:
-///   - Release builds: reject Invalid peers (LookupFailed and CfError are
-///     accepted with a warning — the process may have exited between
-///     connect and check).
-///   - Debug builds: always accept, warn on Invalid.
+/// Policy: strict — Valid is accepted, Invalid and CfError are rejected.
+/// LookupFailed is accepted (peer may have exited between connect and check).
 pub fn should_accept_peer(token: &AuditToken) -> bool {
     let verdict = verify_peer_signature(token);
     let pid = token.pid();
@@ -187,14 +184,9 @@ pub fn should_accept_peer(token: &AuditToken) -> bool {
             warn!(
                 peer_pid = pid,
                 os_status = status,
-                "codesign: peer has invalid/tampered signature"
+                "codesign: peer has invalid/tampered signature — rejecting"
             );
-            if cfg!(debug_assertions) {
-                warn!(peer_pid = pid, "codesign: accepting in debug build (warn-only)");
-                true
-            } else {
-                false
-            }
+            false
         }
         CodesignVerdict::LookupFailed(status) => {
             debug!(
@@ -208,9 +200,9 @@ pub fn should_accept_peer(token: &AuditToken) -> bool {
             warn!(
                 peer_pid = pid,
                 error = msg,
-                "codesign: CoreFoundation error during verification"
+                "codesign: CoreFoundation error during verification — rejecting"
             );
-            true
+            false
         }
     }
 }
@@ -223,7 +215,7 @@ mod tests {
     fn verify_own_process_succeeds() {
         // Our own process should have a valid (or at least lookup-able) signature.
         // In test mode (unsigned dev build), we may get Invalid — that's fine,
-        // should_accept_peer will accept it in debug mode.
+        // Our own pid should produce Valid or LookupFailed.
         let pid = unsafe { libc::getpid() } as u32;
         let token = AuditToken::synthetic([0, 0, 0, 0, 0, pid, 0, 0]);
         let verdict = verify_peer_signature(&token);
@@ -239,10 +231,9 @@ mod tests {
     }
 
     #[test]
-    fn should_accept_peer_accepts_in_debug_mode() {
+    fn should_accept_peer_accepts_own_process() {
         let pid = unsafe { libc::getpid() } as u32;
         let token = AuditToken::synthetic([0, 0, 0, 0, 0, pid, 0, 0]);
-        // In debug/test builds, should always accept.
         assert!(should_accept_peer(&token));
     }
 

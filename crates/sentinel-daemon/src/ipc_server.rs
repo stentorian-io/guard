@@ -799,7 +799,13 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
     // Enrich confirmed/suspect denials with intel from curated rules.
     if matches!(req.source_kind.as_str(), "confirmed-deny" | "suspect-deny") {
         if let Some(host) = &req.dest_host {
-            let curated = crate::curated::load_curated().unwrap_or_default();
+            let curated = match crate::curated::load_curated() {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!(error = %e, "failed to load curated rules for intel enrichment");
+                    Vec::new()
+                }
+            };
             let intel = crate::log_writer::enrich_from_entries(host.as_bytes(), &curated);
             if !intel.is_empty() {
                 decision.intel = Some(intel);
@@ -2017,7 +2023,13 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
                             sentinel_core::Verdict::Allow => false,
                         }
                     }
-                    None => false,
+                    None => {
+                        warn!(
+                            snapshot_path = %run.snapshot_path.display(),
+                            "snapshot unreadable — denying resolve (fail-closed)"
+                        );
+                        true
+                    }
                 }
             }
             _ => false,

@@ -1,6 +1,6 @@
-# Nightly feed update — extracts host IOCs from ossf/malicious-packages and
-# writes crates/sentinel-core/data/deny/ossf-malicious-packages.yaml. If the
-# file changed, opens a PR so the diff is reviewable before merge.
+# Nightly feed update — downloads the combined OSV.dev bulk archive (all
+# ecosystems), extracts host IOCs from MAL-* advisories, and writes them to
+# the deny rules file. If the file changed, opens a PR for review.
 
 name: feed-update
 
@@ -23,29 +23,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cache ossf/malicious-packages clone
-        uses: actions/cache@v4
-        with:
-          path: /tmp/malicious-packages
-          key: ossf-malicious-packages
-
-      - name: Clone or update ossf/malicious-packages
-        run: |
-          set -euo pipefail
-          if [ -d /tmp/malicious-packages/.git ]; then
-            echo "Cache hit — fetching latest"
-            git -C /tmp/malicious-packages fetch --depth 1 origin main
-            git -C /tmp/malicious-packages reset --hard origin/main
-          else
-            echo "Cache miss — shallow cloning"
-            rm -rf /tmp/malicious-packages
-            git clone --depth 1 --single-branch --branch main \
-              https://github.com/ossf/malicious-packages.git \
-              /tmp/malicious-packages
-          fi
-
-      - name: Extract OSSF IOCs
-        run: scripts/update-feed-rules.sh --repo-dir /tmp/malicious-packages
+      - name: Extract OSV.dev IOCs
+        run: scripts/update-feed-rules.sh
 
       - name: Check for changes
         id: diff
@@ -67,10 +46,10 @@ jobs:
           git add crates/sentinel-core/data/deny/ossf-malicious-packages.yaml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore(core): update threat-intel feed IOCs from ossf/malicious-packages"
+          git commit -m "chore(core): update threat-intel feed IOCs from OSV.dev"
           git push -u origin "$branch"
           gh pr create \
             --title "chore(core): update threat-intel feed IOCs" \
-            --body "Automated nightly update of \`crates/sentinel-core/data/deny/ossf-malicious-packages.yaml\` with host IOCs extracted from [ossf/malicious-packages](https://github.com/ossf/malicious-packages)." \
+            --body "Automated nightly update of \`crates/sentinel-core/data/deny/ossf-malicious-packages.yaml\` with host IOCs extracted from [OSV.dev](https://osv.dev) malicious-package advisories (MAL-*)." \
             --base main \
             --head "$branch"

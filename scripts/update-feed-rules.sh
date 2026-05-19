@@ -1,27 +1,18 @@
 #!/usr/bin/env zsh
 #
-# Extract host IOCs from ossf/malicious-packages OSV records and write them
-# to crates/sentinel-core/data/deny/ossf-malicious-packages.yaml.
+# Extract host IOCs from OSV.dev malicious-package advisories (MAL-*) and
+# write them to crates/sentinel-core/data/deny/ossf-malicious-packages.yaml.
 #
-# Requires: jq, git, shasum
-# Usage: scripts/update-feed-rules.sh [--repo-dir /path/to/existing/clone]
+# Downloads the combined all-ecosystem bulk ZIP from the public OSV.dev GCS
+# bucket — every advisory across every ecosystem in a single archive.
+# No git, no auth, no rate limits.
 #
-# Without --repo-dir the script shallow-clones ossf/malicious-packages into a
-# temporary directory (cleaned up on exit). With --repo-dir it does a fetch
-# against an existing clone (CI caches the clone across runs).
+# Requires: curl, jq, unzip, shasum
 
 set -euo pipefail
 
-REPO_URL="https://github.com/ossf/malicious-packages.git"
+OSV_ALL_ZIP="https://osv-vulnerabilities.storage.googleapis.com/all.zip"
 OUTPUT_FILE="crates/sentinel-core/data/deny/ossf-malicious-packages.yaml"
-
-repo_dir=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --repo-dir) repo_dir="$2"; shift 2 ;;
-    *) echo "Unknown arg: $1" >&2; exit 1 ;;
-  esac
-done
 
 cleanup() {
   if [[ -n "${tmpdir:-}" ]]; then
@@ -30,56 +21,77 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ -z "$repo_dir" ]]; then
-  tmpdir=$(mktemp -d)
-  repo_dir="$tmpdir/malicious-packages"
-  echo "Shallow-cloning ossf/malicious-packages …"
-  git clone --depth 1 --single-branch --branch main \
-    "$REPO_URL" "$repo_dir" 2>&1 | tail -1
-else
-  echo "Using existing clone at $repo_dir"
-fi
+tmpdir=$(mktemp -d)
 
-echo "Extracting host IOCs …"
+echo "Downloading OSV.dev combined bulk archive …"
+curl -fsSL --retry 3 --retry-delay 5 -o "${tmpdir}/all.zip" "$OSV_ALL_ZIP"
+echo "Extracting MAL-* advisories …"
+unzip -q -o "${tmpdir}/all.zip" 'MAL-*.json' -d "${tmpdir}/advisories" 2>/dev/null || true
+rm "${tmpdir}/all.zip"
 
-# Build a sorted, deduplicated list of (match_type, pattern) pairs from all
-# OSV JSON files. jq does the heavy lifting per-file; we collect everything
-# then dedup at the shell level.
+mal_count=$(find "${tmpdir}/advisories" -name 'MAL-*.json' 2>/dev/null | wc -l | tr -d ' ')
+echo "Found ${mal_count} MAL-* advisories across all ecosystems."
+
+echo "Filtering MAL-* advisories and extracting host IOCs …"
+
+# Collect only MAL-* (confirmed malware) advisories across all downloaded
+# ecosystems. Extract structured IOCs from database_specific.iocs first
+# (highest signal), then supplement with EVIDENCE/REPORT reference URL hosts.
 #
-# Per the old Rust parser:
-#   PRIMARY:   .database_specific.iocs.domains[]   → match: exact
-#              .database_specific.iocs.ips[]        → match: ip
-#   SECONDARY: .references[] | select(.type == "EVIDENCE" or .type == "REPORT")
-#              → extract hostname from .url          → match: exact
+# We skip reference hosts that are known-benign analysis platforms to avoid
+# false-positive denies (e.g. github.com, virustotal.com).
 
-raw_iocs=$(find "$repo_dir" -name '*.json' -not -path '*/.git/*' -print0 \
+raw_iocs=$(find "${tmpdir}/advisories" -name 'MAL-*.json' -print0 \
   | xargs -0 jq -r '
     def safe_str_array: if type == "array" then .[] | select(type == "string") else empty end;
 
-    # Advisory ID for the reason field
+    # Known-benign hosts that appear in reference URLs but are not C2/exfil
+    def benign_ref_host:
+      . as $h |
+      ($h == "github.com" or $h == "www.github.com" or
+       $h == "gitlab.com" or
+       $h == "www.virustotal.com" or $h == "virustotal.com" or
+       $h == "www.zscaler.com" or $h == "zscaler.com" or
+       $h == "blog.phylum.io" or $h == "phylum.io" or
+       $h == "research.jfrog.com" or
+       $h == "snyk.io" or
+       $h == "socket.dev" or
+       $h == "www.npmjs.com" or $h == "npmjs.com" or
+       $h == "pypi.org" or $h == "www.pypi.org" or
+       $h == "rubygems.org" or
+       $h == "crates.io" or
+       $h == "pkg.go.dev" or
+       $h == "hex.pm" or
+       $h == "nuget.org" or $h == "www.nuget.org" or
+       $h == "packagist.org" or
+       $h == "osv.dev" or $h == "api.osv.dev" or
+       $h == "nvd.nist.gov" or
+       $h == "security.snyk.io" or
+       $h == "deps.dev");
+
     (.id // "unknown") as $id |
 
-    # Primary: domains
+    # Primary: structured domains
     ((.database_specific.iocs.domains // []) | safe_str_array
       | select(length > 0 and length <= 256)
       | "exact\t" + . + "\t" + $id),
 
-    # Primary: IPs
+    # Primary: structured IPs
     ((.database_specific.iocs.ips // []) | safe_str_array
       | select(length > 0 and length <= 256)
       | "ip\t" + . + "\t" + $id),
 
-    # Secondary: EVIDENCE/REPORT reference URL hosts
+    # Secondary: EVIDENCE/REPORT reference URL hosts (filtered)
     ((.references // [])[]
       | select(.type == "EVIDENCE" or .type == "REPORT")
       | .url // empty
       | capture("^https?://(?<host>[^/:]+)") | .host
       | select(length > 0 and length <= 256)
+      | select(benign_ref_host | not)
       | "exact\t" + . + "\t" + $id)
   ' 2>/dev/null || true)
 
 # Deduplicate by (match_type, pattern), keeping the first advisory ID seen.
-# Sort for stable diffs.
 declare -A seen
 declare -a entries
 while IFS=$'\t' read -r match_type pattern advisory_id; do
@@ -93,15 +105,15 @@ done <<< "$raw_iocs"
 
 # Sort entries by pattern for stable output.
 sorted_entries=("${(@f)$(printf '%s\n' "${entries[@]}" | sort -t$'\t' -k2,2)}")
-# Handle empty array: if no IOCs found, sorted_entries may have one empty element
 [[ ${#sorted_entries[@]} -eq 1 && -z "${sorted_entries[1]}" ]] && sorted_entries=()
 
 ioc_count=${#sorted_entries[@]}
 echo "Found $ioc_count unique host IOCs."
 
-# Write the output file (full replace, not append).
+# Write the output file (full replace).
 {
-  echo "# Auto-generated from ossf/malicious-packages OSV records."
+  echo "# Auto-generated from OSV.dev malicious-package advisories (MAL-*)."
+  echo "# Source: ${OSV_ALL_ZIP}"
   echo "# Managed by scripts/update-feed-rules.sh — do not edit manually."
   for entry in "${sorted_entries[@]}"; do
     IFS=$'\t' read -r match_type pattern advisory_id <<< "$entry"
@@ -115,6 +127,4 @@ YAML
 } > "$OUTPUT_FILE"
 
 echo "Wrote $ioc_count feed IOC entries to $OUTPUT_FILE."
-
-# Print a SHA-256 of the output file for CI audit logs.
 shasum -a 256 "$OUTPUT_FILE"

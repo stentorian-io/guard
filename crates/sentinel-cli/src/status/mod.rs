@@ -71,6 +71,7 @@ pub fn run_status(sock: &Path, state_dir: &Path, verbose: bool, json: bool) -> R
 
             if verbose {
                 render_verbose(daemon_state, &tracked_roots, &recent_gaps, &counters, &feeds, install_info.as_ref());
+                render_risk_exposure(sock);
                 if let Some(wd) = read_watchdog_health(state_dir) {
                     render_watchdog_health(&wd);
                 }
@@ -195,6 +196,58 @@ pub fn render_verbose_to<W: std::io::Write>(
             g.run_uuid,
             g.binary_path.as_deref().unwrap_or("-")
         );
+    }
+}
+
+pub fn render_risk_exposure(sock: &Path) {
+    render_risk_exposure_to(&mut std::io::stdout().lock(), sock);
+}
+
+pub fn render_risk_exposure_to<W: std::io::Write>(w: &mut W, sock: &Path) {
+    use sentinel_core::RuleTier;
+
+    let curated = match sentinel_daemon::curated::load_curated() {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+    let user_rules = match crate::ipc_client::list_rules_request(sock, false) {
+        Ok(rules) => rules,
+        Err(_) => return,
+    };
+
+    let user_allows: Vec<_> = user_rules
+        .iter()
+        .filter(|r| r.kind == "allow")
+        .collect();
+
+    if user_allows.is_empty() {
+        return;
+    }
+
+    let mut exposed = Vec::new();
+    for ua in &user_allows {
+        for ce in &curated {
+            if !matches!(ce.tier, RuleTier::ConfirmedDeny | RuleTier::SuspectDeny) {
+                continue;
+            }
+            if ce.pattern == ua.pattern {
+                let confidence = match ce.tier {
+                    RuleTier::ConfirmedDeny => "CONFIRMED",
+                    RuleTier::SuspectDeny => "suspect",
+                    _ => "unknown",
+                };
+                exposed.push((ua.pattern.clone(), confidence, ce.reason.clone()));
+            }
+        }
+    }
+
+    if exposed.is_empty() {
+        return;
+    }
+
+    let _ = writeln!(w, "\n\x1b[33mRisk exposure ({} user-approved rule(s) overlap with threat intel):\x1b[0m", exposed.len());
+    for (pattern, confidence, reason) in &exposed {
+        let _ = writeln!(w, "  {pattern} [{confidence}] — {reason}");
     }
 }
 

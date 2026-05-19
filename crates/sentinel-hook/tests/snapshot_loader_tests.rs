@@ -79,12 +79,12 @@ fn with_fake_home<F: FnOnce(&std::path::Path)>(f: F) -> tempfile::TempDir {
 }
 
 #[test]
-fn happy_path_loads_phase2_default_snapshot() {
+fn happy_path_loads_v2_default_snapshot() {
     let _t = with_fake_home(|state_dir| {
-        // Plan 02-06a migration: was phase1_default. Snapshot::decode now rejects
-        // SCHEMA_V1 (plan 02-01 made decode fail-closed); phase2_default produces
+        // Migration: was v1_default. Snapshot::decode now rejects
+        // SCHEMA_V1 (v0.2 made decode fail-closed); v2_default produces
         // a SCHEMA_V2 snapshot with non-empty entries (loopback v4/v6 + npmjs).
-        let snap = Snapshot::phase2_default();
+        let snap = Snapshot::v2_default();
         let pub_ = publish(state_dir, &snap, 0xCAFE_BABE).unwrap();
         manifest::write(state_dir, &pub_).unwrap();
         unsafe {
@@ -130,9 +130,9 @@ fn fail_closed_when_manifest_path_outside_state_dir() {
 #[test]
 fn fail_closed_on_digest_mismatch() {
     let _t = with_fake_home(|state_dir| {
-        // Plan 02-06a migration: was phase1_default. SCHEMA_V2 fixture so the
+        // Migration: was v1_default. SCHEMA_V2 fixture so the
         // decoder doesn't short-circuit before reaching the digest check.
-        let snap = Snapshot::phase2_default();
+        let snap = Snapshot::v2_default();
         let pub_ = publish(state_dir, &snap, 1).unwrap();
         // Tamper with the snapshot file AFTER manifest is written → digest mismatch.
         manifest::write(state_dir, &pub_).unwrap();
@@ -161,7 +161,7 @@ fn hmac_happy_path_with_signed_manifest() {
         ensure_runs_dir(state_dir).unwrap();
         hmac_key::generate_and_store(state_dir).unwrap();
 
-        let snap = Snapshot::phase2_default();
+        let snap = Snapshot::v2_default();
         let uuid = "hmac-test-0001";
         let pub_ = publish_run(state_dir, &snap, uuid).expect("publish_run");
         assert!(pub_.hmac_hex.is_some(), "publish_run must produce hmac when key present");
@@ -186,7 +186,7 @@ fn hmac_fail_closed_on_tampered_hmac() {
         ensure_runs_dir(state_dir).unwrap();
         hmac_key::generate_and_store(state_dir).unwrap();
 
-        let snap = Snapshot::phase2_default();
+        let snap = Snapshot::v2_default();
         let uuid = "hmac-test-0002";
         let _pub = publish_run(state_dir, &snap, uuid).expect("publish_run");
 
@@ -211,7 +211,7 @@ fn hmac_fail_closed_when_key_exists_but_manifest_has_no_hmac() {
         hmac_key::generate_and_store(state_dir).unwrap();
 
         // Publish WITHOUT key (simulate old-format manifest)
-        let snap = Snapshot::phase2_default();
+        let snap = Snapshot::v2_default();
         let pub_ = publish(state_dir, &snap, 0xDEAD).unwrap();
         // Write legacy manifest (no hmac line)
         manifest::write(state_dir, &pub_).unwrap();
@@ -232,7 +232,7 @@ fn hmac_fail_closed_when_key_exists_but_manifest_has_no_hmac() {
 fn no_hmac_key_skips_verification() {
     let _t = with_fake_home(|state_dir| {
         // No key generated — legacy mode, HMAC check should be skipped
-        let snap = Snapshot::phase2_default();
+        let snap = Snapshot::v2_default();
         let pub_ = publish(state_dir, &snap, 0xBEEF).unwrap();
         manifest::write(state_dir, &pub_).unwrap();
 

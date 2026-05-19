@@ -1,19 +1,18 @@
 //! crates/sentinel-cli/src/status/review.rs
 //!
-//! Phase 07 plan 03 — `sentinel status review [<run_uuid>]`
-//! (CLI-19, CLI-20, D-26..D-30). TTY-required interactive walk-through
-//! of the previously-blocked hosts in a given run; refactor target of
-//! the v0.1 `approve.rs::run_approve_from_log`.
+//! v0.7 — `sentinel status review [<run_uuid>]`.
+//! TTY-required interactive walk-through of the previously-blocked hosts in a
+//! given run; refactor target of the v0.1 `approve.rs::run_approve_from_log`.
 //!
-//! Behavior (D-26..D-30):
-//!   - CLI-20: non-TTY stdin → exit 64 (EX_USAGE) with stderr message.
-//!   - D-26: when no `<run_uuid>` is given, use
+//! Behavior:
+//!   - non-TTY stdin → exit 64 (EX_USAGE) with stderr message.
+//!   - when no `<run_uuid>` is given, use
 //!     `denial_log::most_recent_run_with_denials`.
-//!   - D-27: per-host options are (a)/(d)/(s)/(q); single-letter,
+//!   - per-host options are (a)/(d)/(s)/(q); single-letter,
 //!     case-insensitive; bare Enter defaults to 's' (skip).
-//!   - D-28/D-29: BOTH allow AND deny rules go to machine-wide SQLite
+//!   - BOTH allow AND deny rules go to machine-wide SQLite
 //!     via `insert_user_rule_request` (no project flag here).
-//!   - D-30: WR-05 host caps come from `denial_log` constants —
+//!   - host caps come from `denial_log` constants —
 //!     bounded memory regardless of log size.
 
 use std::path::Path;
@@ -25,7 +24,7 @@ use crate::tty;
 use crate::CliError;
 
 pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
-    // CLI-20: TTY-required gate. Refuse to run from a non-interactive
+    // TTY-required gate. Refuse to run from a non-interactive
     // stdin so a CI pipeline can't accidentally answer prompts and
     // silently insert allow/deny rules.
     if !tty::stdin_is_tty() {
@@ -38,7 +37,7 @@ pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
 
     let log_path = launchagent::logs_dir().join("sentinel.log");
 
-    // D-26: default uuid = most recent run with denials.
+    // Default uuid = most recent run with denials.
     let uuid = match run_uuid {
         Some(u) => u,
         None => match denial_log::most_recent_run_with_denials(&log_path)? {
@@ -69,7 +68,7 @@ pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
 
     for b in &blocks {
         loop {
-            // D-27: order is (a)/(d)/(s)/(q) — destructive options first
+            // Order is (a)/(d)/(s)/(q) — destructive options first
             // so users can't fat-finger 'q' when they meant to confirm.
             print!(
                 "  {} (port {}) — [a]llow / [d]eny / [s]kip / [q]uit > ",
@@ -79,7 +78,7 @@ pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
             let mut line = String::new();
             let bytes_read = std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut line)
                 .map_err(|e| CliError::Other(format!("stdin: {e}")))?;
-            // BL-01: detect zero-byte reads as EOF (stdin closed mid-session,
+            // Detect zero-byte reads as EOF (stdin closed mid-session,
             // e.g. TTY redirected to /dev/null after the initial gate). Without
             // this guard, the inner `loop` reprints the prompt at full CPU
             // speed for each remaining host because read_line returns Ok(0)
@@ -87,7 +86,7 @@ pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
             // with skipped+=1, only for the outer for-loop to enter the next
             // host's inner loop with the same EOF state. Treat as user
             // cancellation; report partial tally and exit cleanly.
-            // D-27 contract: bare Enter (single '\n') reads 1 byte (the
+            // Bare Enter (single '\n') reads 1 byte (the
             // newline), so the existing "Enter = skip" UX is unaffected.
             if bytes_read == 0 {
                 println!(
@@ -96,18 +95,18 @@ pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
                 );
                 return Ok(0);
             }
-            // D-27: bare Enter defaults to 's' (skip).
+            // Bare Enter defaults to 's' (skip).
             let c = line.trim().to_lowercase().chars().next().unwrap_or('s');
             match c {
                 'a' => {
-                    // D-29: allow rules also go to machine-wide SQLite.
+                    // Allow rules also go to machine-wide SQLite.
                     let reason = format!("user-approved from review of run {uuid}");
                     ipc_client::insert_user_rule_request(sock, "allow", "exact", &b.host, &reason)?;
                     allowed += 1;
                     break;
                 }
                 'd' => {
-                    // D-28: deny rules ALWAYS go to machine-wide.
+                    // Deny rules ALWAYS go to machine-wide.
                     let reason = format!("user-denied from review of run {uuid}");
                     ipc_client::insert_user_rule_request(sock, "deny", "exact", &b.host, &reason)?;
                     denied += 1;

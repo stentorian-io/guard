@@ -48,7 +48,7 @@ fn all_user_rules_maps_kind_to_user_tier() {
     let tmp = TempDir::new().unwrap();
     let p = tmp.path().join("sentinel.db");
     let _store = RuleStore::open(&p).expect("init schema");
-    // Manually insert rows via direct sqlite (Phase 3's CLI-04 will do this in production).
+    // Manually insert rows via direct sqlite (the CLI will do this in production).
     {
         let conn = Connection::open(&p).unwrap();
         conn.execute(

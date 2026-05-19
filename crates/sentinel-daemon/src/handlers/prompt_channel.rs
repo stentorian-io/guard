@@ -1,11 +1,11 @@
 //! crates/sentinel-daemon/src/handlers/prompt_channel.rs
 //!
-//! Phase 3 plan 03-12 — long-lived prompt channel handler.
+//! v0.3 — long-lived prompt channel handler.
 //!
 //! After PromptChannelInit ACK, this thread owns the stream until EOF or run exit.
-//! Pitfall 4 / R-05: must run in a dedicated thread (not a worker pool slot).
+//! Pitfall 4: must run in a dedicated thread (not a worker pool slot).
 //!
-//! BLOCKER #3 / D-45 / D-78: PromptResponse dispatch resolves the parked oneshot
+//! BLOCKER: PromptResponse dispatch resolves the parked oneshot
 //! in DeferredResolveTable; the dylib's blocked Resolve IPC handler thread wakes
 //! and replies with the user-chosen verdict.
 
@@ -29,7 +29,7 @@ pub enum ClientChannelFrame {
     Cancel(PromptCancel),
 }
 
-/// R-05 cap. Beyond this many concurrent prompt channels, the dispatch arm in
+/// Cap. Beyond this many concurrent prompt channels, the dispatch arm in
 /// ipc_server.rs Err-Acks instead of spawning a new handler thread.
 pub const MAX_CONCURRENT_CHANNELS: usize = 64;
 
@@ -185,7 +185,7 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
             return;
         }
     };
-    // BLOCKER #3 / WR-11: peek the deferred entry to recover the (host, port)
+    // BLOCKER / WR-11: peek the deferred entry to recover the (host, port)
     // tuple for the row we're about to emit. We must NOT call take_full here
     // because the verdict signal (sender.send) needs to fire AFTER the
     // decision row is written. Look up via take_full at the end and recover
@@ -201,7 +201,7 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
         .map(|e| e.host.clone())
         .unwrap_or_default();
     let dest_port = entry_opt.as_ref().map(|e| e.port).unwrap_or(0);
-    // Phase 5 plan 05-03 / CONTEXT C-01: pull the package_context that the
+    // v0.5 / CONTEXT C-01: pull the package_context that the
     // Resolve handler stashed on the DeferredEntry at park-time, so the JSONL
     // Decision row emitted below carries it. Cloned because entry_opt is
     // consumed by the entry.sender.send(...) path further down.
@@ -300,15 +300,15 @@ fn dispatch_cancel(state: &DaemonState, run_uuid: &str, cancel: PromptCancel) {
 
 /// Emit a Decision row to the log writer.
 ///
-/// Phase 4 plan 04-03 (D-90 + D-93): the helper now takes `dest_host` and an
+/// v0.4: the helper now takes `dest_host` and an
 /// optional `package_context` so the IPC handler context (which knows both)
 /// can drive log_writer enrichment caller-side, NOT in the writer thread
-/// (Phase 3 D-54 contention discipline).
+/// (v0.3 caller-side contention discipline).
 ///
 /// `intel` is computed by combining package-source matches (when
 /// package_context is provided) with host-source matches (always probed when
 /// the source_kind looks like a feed-deny verdict, since FeedDeny is the
-/// principal D-90 path that a host_ioc-derived row produces).
+/// principal path that a host_ioc-derived row produces).
 #[allow(clippy::too_many_arguments)]
 fn emit_decision_row(
     state: &DaemonState,
@@ -320,7 +320,7 @@ fn emit_decision_row(
     dest_port: u16,
     package_context: Option<&PackageContext>,
 ) {
-    // Phase 4 D-93: combine package-source enrichment (when we have package
+    // v0.4: combine package-source enrichment (when we have package
     // context) with host-source enrichment (when the verdict source looks
     // like a feed-deny match OR the dest_host is non-empty and we want to
     // attribute any feed signals on it). Caller-side (NOT writer thread).
@@ -378,7 +378,7 @@ fn emit_decision_row(
 
 #[cfg(test)]
 mod plan_05_03_tests {
-    //! Phase 5 plan 05-03 — pin the entry_pkg extraction shape used by
+    //! v0.5 — pin the entry_pkg extraction shape used by
     //! handle_prompt_response. The HARD wiring test (entire daemon under
     //! `npm install` → JSONL row carries package_context.package="ua-parser-js")
     //! lives in Plan 05-04 (VAL-01). This test only pins the local-binding

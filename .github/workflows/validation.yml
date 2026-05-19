@@ -1,4 +1,4 @@
-# Phase 5 validation workflow — runs the six VAL-01/VAL-02/VAL-04 e2e tests on
+# Validation workflow — runs the six VAL-01/VAL-02/VAL-04 e2e tests on
 # every PR. Per CONTEXT D-15 the workflow run IS the release evidence; release
 # notes for v0.1 link to a green run of this workflow on the release commit.
 #
@@ -76,7 +76,7 @@ jobs:
       - run: npx markdownlint-cli2 "**/*.md" "#target" "#.gsd"
 
   validation:
-    name: Phase 5 validation suite
+    name: Validation suite
     runs-on: macos-14
     timeout-minutes: 25
 
@@ -99,7 +99,7 @@ jobs:
         with:
           # Key by Cargo.lock so a dep change invalidates only that PR's cache.
           # Default behavior already keys on Cargo.lock; this comment makes it explicit.
-          shared-key: phase-5-validation
+          shared-key: validation
 
       # Verify the sanitized fixture is present and matches the pinned hash.
       # If a PR accidentally drops the .tgz or replaces it with un-sanitized

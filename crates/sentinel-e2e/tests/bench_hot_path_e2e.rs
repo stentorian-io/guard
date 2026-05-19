@@ -1,10 +1,10 @@
 // crates/sentinel-e2e/tests/bench_hot_path_e2e.rs
 //
-// Phase 08 / VAL-03 live-wrap E2E benchmark.
+// v0.7 live-wrap E2E benchmark.
 //
 // Wraps a real `node` child via `sentinel wrap`, loops `net.connect` against
 // `registry.npmjs.org`, and prints a `LIVE_WRAP_NS p50=... p99=...` line on
-// stdout that scripts/bench-hot-path.sh (plan 08-05) parses for docs/BENCH.md.
+// stdout that scripts/bench-hot-path.sh parses for docs/BENCH.md.
 //
 // This is the *context* number per CONTEXT D-32 — captures cache-hit +
 // occasional Resolve-IPC cache-miss + TCP handshake against the real host.
@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use sentinel_e2e::{resolve_cli, resolve_dylib, resolve_node, DaemonHarness};
 
 #[cfg_attr(not(target_os = "macos"), ignore)]
-#[ignore = "VAL-03 live-wrap bench — opt-in via scripts/bench-hot-path.sh"]
+#[ignore = "live-wrap bench — opt-in via scripts/bench-hot-path.sh"]
 #[test]
 fn live_wrap_npmjs_loop_p99_context() {
     let cli = resolve_cli();
@@ -111,7 +111,7 @@ fn live_wrap_npmjs_loop_p99_context() {
                     break;
                 }
                 if trimmed.starts_with("LIVE_WRAP_ERROR ") {
-                    eprintln!("[VAL-03 live-wrap] node reported error: {trimmed}");
+                    eprintln!("[live-wrap] node reported error: {trimmed}");
                     eprintln!("full stdout:\n{all_stdout}");
                     let _ = wrapped.kill();
                     let _ = wrapped.wait();
@@ -120,7 +120,7 @@ fn live_wrap_npmjs_loop_p99_context() {
                 }
             }
             Err(e) => {
-                eprintln!("[VAL-03 live-wrap] stdout read error: {e}");
+                eprintln!("[live-wrap] stdout read error: {e}");
                 break;
             }
         }
@@ -134,7 +134,7 @@ fn live_wrap_npmjs_loop_p99_context() {
         Some(line) => {
             // Echo the summary to stderr in the structured shape the runner script greps.
             // (--nocapture forwards this to the user.)
-            eprintln!("[VAL-03 live-wrap] {line}");
+            eprintln!("[live-wrap] {line}");
             // Truncate at a UTF-8 char boundary — `&all_stdout[..4096]` would
             // panic ("byte index N is not a char boundary") if byte 4096 lands
             // inside a multi-byte codepoint. The injected node script emits
@@ -146,11 +146,11 @@ fn live_wrap_npmjs_loop_p99_context() {
                 .rev()
                 .find(|&i| all_stdout.is_char_boundary(i))
                 .unwrap_or(0);
-            eprintln!("[VAL-03 live-wrap] full stdout dump (first 4 KiB):\n{}",
+            eprintln!("[live-wrap] full stdout dump (first 4 KiB):\n{}",
                       &all_stdout[..dump_end]);
         }
         None => {
-            eprintln!("[VAL-03 live-wrap] no LIVE_WRAP_NS summary observed before deadline");
+            eprintln!("[live-wrap] no LIVE_WRAP_NS summary observed before deadline");
             eprintln!("full stdout:\n{all_stdout}");
             panic!("live-wrap bench timed out before producing summary line");
         }

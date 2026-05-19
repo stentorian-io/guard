@@ -98,20 +98,20 @@ fn prepare_snapshot_includes_curated_entries_sorted_by_tier() {
 }
 
 // ============================================================================
-// Phase 4 plan 04-03 — V4 entry-point tests (D-83 fetch-pre-flight + D-90
-// FeedDeny merge). These exercise `handle_prepare_snapshot_v4_full` against a
-// hand-rolled DaemonState whose `feed_store` is in-memory and whose
+// v0.4 — V4 entry-point tests (fetch-pre-flight + FeedDeny merge). These
+// exercise `handle_prepare_snapshot_v4_full` against a hand-rolled
+// DaemonState whose `feed_store` is in-memory and whose
 // `feed_fetch_mutex` / `last_fetch_result` are fresh (no concurrent fetch
 // pressure). The real `fetch_feeds_blocking` would attempt to clone the OSV
 // + GHSA repos against the network — these tests bypass that by hard-coding
 // `SENTINEL_FEED_URL_OVERRIDE_*` to a file:// fixture URL when needed.
 //
 // For tests that don't need actual fetching, they assert deterministic
-// behaviors (FeedDeny merge, POL-06 ordering) by pre-populating the
-// in-memory feed store and exercising the per-handler logic surface that
-// isn't dependent on network. The fetch step requires a cloneable git URL;
-// when tests don't provide one they expect the daemon to surface the fetch
-// error per D-85.
+// behaviors (FeedDeny merge, tier ordering) by pre-populating the in-memory
+// feed store and exercising the per-handler logic surface that isn't
+// dependent on network. The fetch step requires a cloneable git URL; when
+// tests don't provide one they expect the daemon to surface the fetch error
+// as a strict-fail.
 // ============================================================================
 
 use sentinel_daemon::baseline_staging::BaselineStaging;
@@ -163,7 +163,7 @@ fn build_daemon_state(state_dir: &std::path::Path) -> Arc<DaemonState> {
 }
 
 /// Pre-prime `last_fetch_result` with a fresh "Ok" outcome so the next call to
-/// `fetch_feeds_blocking` short-circuits via the D-86 shared-result path
+/// `fetch_feeds_blocking` short-circuits via the shared-result path
 /// (avoids the real network fetch in tests).
 fn prime_shared_result_ok(state: &Arc<DaemonState>) {
     let mut w = state.last_fetch_result.write().unwrap();
@@ -174,7 +174,7 @@ fn prime_shared_result_ok(state: &Arc<DaemonState>) {
 }
 
 /// Pre-prime `last_fetch_result` with a fresh "Err" outcome to exercise the
-/// D-85 strict-fail path without involving the network.
+/// strict-fail path without involving the network.
 fn prime_shared_result_err(state: &Arc<DaemonState>) {
     let mut w = state.last_fetch_result.write().unwrap();
     *w = Some(sentinel_daemon::feed::concurrency::LastFetchResult {
@@ -215,7 +215,7 @@ fn prepare_snapshot_v4_strict_fails_when_fetch_errors() {
         sentinel_ipc::SnapshotReply::Err { message, .. } => {
             assert!(
                 message.starts_with("feed fetch:"),
-                "expected D-85 strict-fail message prefix; got {message}"
+                "expected strict-fail message prefix; got {message}"
             );
         }
         sentinel_ipc::SnapshotReply::Ok { .. } => {
@@ -291,7 +291,7 @@ fn prepare_snapshot_v4_merges_feeddeny_after_successful_fetch() {
 fn prepare_snapshot_v4_curated_allow_beats_feeddeny_in_sorted_snapshot() {
     let tmp = TempDir::new().unwrap();
     let state = build_daemon_state(tmp.path());
-    // The structural POL-06 invariant: a feed-derived FeedDeny for
+    // The structural tier-ordering invariant: a feed-derived FeedDeny for
     // registry.npmjs.org must NOT come before the curated allow.
     state
         .feed_store
@@ -347,7 +347,7 @@ fn prepare_snapshot_v4_curated_allow_beats_feeddeny_in_sorted_snapshot() {
         .expect("feed deny for registry.npmjs.org");
     assert!(
         curated_idx < feed_idx,
-        "POL-06: curated allow must come before feed deny in sorted snapshot \
+        "curated allow must come before feed deny in sorted snapshot \
          (curated_idx={curated_idx}, feed_idx={feed_idx})"
     );
 }

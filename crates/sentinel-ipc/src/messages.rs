@@ -105,7 +105,7 @@ impl Reply {
 }
 
 // ============================================================================
-// Phase 2 message types (D-30 / D-35 / D-38 / D-42).
+// v0.2 message types.
 //
 // Existing `RegisterRoot` + `Reply` are FROZEN at IPC_SCHEMA_V1=1 and unchanged.
 // Every new message has `schema_version: u16` as its FIRST field (or first
@@ -118,7 +118,7 @@ pub const IPC_SCHEMA_V3: u16 = 3;
 pub const IPC_SCHEMA_V4: u16 = 4;
 
 // ============================================================
-// Phase 4 (D-93) — Threat-intel match record + non-fatal feed warning.
+// v0.4 — Threat-intel match record + non-fatal feed warning.
 // ============================================================
 
 /// Per-feed match record attached to JSONL block-log entries via the `intel`
@@ -136,7 +136,7 @@ pub struct IntelMatch {
 }
 
 /// Non-fatal post-fetch parse problem surfaced inline to the CLI via
-/// SnapshotReply::Ok.feed_warnings. Hard fetch failure (D-85) returns
+/// SnapshotReply::Ok.feed_warnings. Hard fetch failure returns
 /// SnapshotReply::Err instead.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FeedWarning {
@@ -145,22 +145,22 @@ pub struct FeedWarning {
     pub message: String,
 }
 
-// --- PrepareSnapshot / SnapshotReply (D-29, D-30) --------------------------
+// --- PrepareSnapshot / SnapshotReply ----------------------------------------
 
 /// CLI → daemon: sent BEFORE posix_spawn. Daemon merges curated YAML + SQLite
 /// rules, writes per-run snapshot, returns the manifest path the CLI will set
 /// as SENTINEL_SNAPSHOT_MANIFEST.
 ///
-/// V3 additions: `is_tty` (D-73) and `baseline_mode` (D-58). Both are
+/// V3 additions: `is_tty` and `baseline_mode`. Both are
 /// `#[serde(default)]` so V2-encoded messages decode cleanly with false.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PrepareSnapshot {
-    pub schema_version: u16, // V2 or V3 — daemon accepts both (D-73, D-58)
+    pub schema_version: u16, // V2 or V3 — daemon accepts both
     pub cwd: String,
     #[serde(default)]
-    pub is_tty: bool, // NEW V3 (D-73). Default false on V2 decode.
+    pub is_tty: bool, // V3 addition. Default false on V2 decode.
     #[serde(default)]
-    pub baseline_mode: bool, // NEW V3 (D-58). Default false on V2 decode.
+    pub baseline_mode: bool, // V3 addition. Default false on V2 decode.
 }
 
 impl PrepareSnapshot {
@@ -192,7 +192,7 @@ pub enum SnapshotReply {
         schema_version: u16,
         manifest_path: String,
         run_uuid: String,
-        /// Phase 4 (V4 addition): non-fatal post-fetch warnings the CLI surfaces
+        /// V4 addition: non-fatal post-fetch warnings the CLI surfaces
         /// inline (e.g. `schema_version unknown` records skipped). Empty by
         /// default; `#[serde(default)]` ensures V2/V3 senders decode cleanly.
         #[serde(default)]
@@ -206,7 +206,7 @@ pub enum SnapshotReply {
 
 impl SnapshotReply {
     /// V2-compatible constructor — emits V2 schema_version with empty
-    /// feed_warnings (so existing Phase 2/3 callers don't break).
+    /// feed_warnings (so existing v0.2/v0.3 callers don't break).
     pub fn ok(manifest_path: impl Into<String>, run_uuid: impl Into<String>) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V2,
@@ -216,7 +216,7 @@ impl SnapshotReply {
         }
     }
 
-    /// V4 constructor — opt-in to feed_warnings (Phase 4 D-Discretion).
+    /// V4 constructor — opt-in to feed_warnings.
     pub fn ok_v4(
         manifest_path: impl Into<String>,
         run_uuid: impl Into<String>,
@@ -238,10 +238,10 @@ impl SnapshotReply {
     }
 }
 
-// --- ForkEvent / ForkAck (D-31, D-32) --------------------------------------
+// --- ForkEvent / ForkAck ----------------------------------------------------
 
 /// Dylib → daemon: a fork(2) / vfork(2) / posix_spawn completed in a tracked
-/// process. Sent SYNCHRONOUSLY (D-31): the dylib blocks until ForkAck.
+/// process. Sent synchronously: the dylib blocks until ForkAck.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ForkEvent {
     pub schema_version: u16,
@@ -286,18 +286,18 @@ impl ForkAck {
     }
 }
 
-// --- ExecEvent / ExecAck (D-31, D-32) --------------------------------------
+// --- ExecEvent / ExecAck ----------------------------------------------------
 
 /// Dylib → daemon: an execve / posix_spawn / exec* call is being made.
 /// `target_path` is the binary the calling process is about to load. The
-/// daemon uses this in D-34 Phase A: csops(CS_OPS_STATUS) on the calling
-/// process's pid to decide if exec into target will strip DYLD env vars.
+/// daemon uses csops(CS_OPS_STATUS) on the calling process's pid to decide
+/// if exec into target will strip DYLD env vars.
 ///
-/// SECURITY (T-02-01-06): the wire allows arbitrary length but the daemon
+/// SECURITY: the wire allows arbitrary length but the daemon
 /// handler MUST reject `target_path.len() > 1024`. The dylib MUST cap copy
 /// at 1024 bytes before sending.
 ///
-/// V3 addition: `pm_env` (D-55) carries package-manager environment variables
+/// V3 addition: `pm_env` carries package-manager environment variables
 /// captured at exec time (e.g. npm_package_name, npm_lifecycle_event).
 /// `#[serde(default)]` ensures V2-encoded messages decode with empty pm_env.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -307,15 +307,15 @@ pub struct ExecEvent {
     #[serde(with = "serde_bytes")]
     pub target_path: Vec<u8>,
     #[serde(default)]
-    pub pm_env: Vec<(String, String)>, // NEW V3 (D-55). Cap MAX_PM_ENV_BYTES total wire bytes.
+    pub pm_env: Vec<(String, String)>, // V3 addition. Cap MAX_PM_ENV_BYTES total wire bytes.
 }
 
 impl ExecEvent {
-    /// Maximum acceptable target_path length (T-02-01-06). Senders MUST cap;
+    /// Maximum acceptable target_path length. Senders MUST cap;
     /// receivers MUST reject longer payloads.
     pub const MAX_TARGET_PATH: usize = 1024;
 
-    /// Maximum total wire bytes for pm_env key+value pairs (T-03-02-04).
+    /// Maximum total wire bytes for pm_env key+value pairs.
     pub const MAX_PM_ENV_BYTES: usize = 4096;
 
     /// V2-compatible constructor — emits V2 schema_version; pm_env defaults to empty.
@@ -368,10 +368,10 @@ impl ExecAck {
     }
 }
 
-// --- DylibLoaded / DylibLoadedAck (D-35) -----------------------------------
+// --- DylibLoaded / DylibLoadedAck -------------------------------------------
 
 /// Dylib → daemon: dylib ctor reached the end successfully. Confirms injection
-/// for D-34's two-phase gap detection (closes the post-exec timeout window).
+/// for two-step gap detection (closes the post-exec timeout window).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DylibLoaded {
     pub schema_version: u16,
@@ -412,10 +412,10 @@ impl DylibLoadedAck {
     }
 }
 
-// --- Resolve / ResolveReply (D-42 — getaddrinfo daemon-proxy) --------------
+// --- Resolve / ResolveReply (getaddrinfo daemon-proxy) ---------------------
 
 /// Dylib → daemon: resolve `host:port` via the daemon's un-interposed libc.
-/// D-42: replaces the dropped Phase 1 getaddrinfo interpose. Result cached in
+/// Replaces the dropped v0.1 getaddrinfo interpose. Result cached in
 /// the dylib's per-process getaddrinfo-cache.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Resolve {
@@ -475,7 +475,7 @@ impl ResolveReply {
     }
 }
 
-// --- EnvNotPropagatedGap / Ack (TREE-06 — gap-closure 02-09) -----------------
+// --- EnvNotPropagatedGap / Ack -----------------------------------------------
 
 /// Dylib → daemon: parent process detected pre-spawn that the envp passed to
 /// libc::posix_spawn is missing one or more required Sentinel env vars
@@ -537,7 +537,7 @@ impl EnvNotPropagatedGapAck {
 }
 
 // ============================================================
-// Phase 3 — Status IPC (tag 0x09)
+// v0.3 — Status IPC (tag 0x09)
 // ============================================================
 
 /// CLI → daemon: request daemon state and counters.
@@ -595,7 +595,7 @@ pub struct StatusCounters {
     pub gaps_today: u64,
 }
 
-/// Threat-feed freshness info (Phase 4 populated; Phase 3 emits empty vec).
+/// Threat-feed freshness info (v0.4 populated; v0.3 emits empty vec).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FeedInfo {
     pub name: String,
@@ -630,7 +630,7 @@ pub enum StatusReply {
         tracked_roots: Vec<TrackedRootInfo>,
         recent_gaps: Vec<GapInfo>,
         counters: StatusCounters,
-        feeds: Vec<FeedInfo>, // empty in Phase 3 (Phase 4 reserved)
+        feeds: Vec<FeedInfo>, // empty in v0.3 (v0.4 reserved)
         install_info: Option<InstallInfo>,
     },
     Err {
@@ -668,7 +668,7 @@ impl StatusReply {
 }
 
 // ============================================================
-// Phase 3 — Prompt channel init (tag 0x0A; LONG-LIVED)
+// v0.3 — Prompt channel init (tag 0x0A; LONG-LIVED)
 // After init+ack, channel-internal frames are un-tagged length-prefixed CBOR.
 // ============================================================
 
@@ -706,7 +706,7 @@ impl PromptChannelInitAck {
 }
 
 // ============================================================
-// Phase 3 — Prompt request/response/cancel (channel-internal; no tag byte)
+// v0.3 — Prompt request/response/cancel (channel-internal; no tag byte)
 // ============================================================
 
 /// Package-manager context for a prompt — identifies which package triggered the connection.
@@ -743,15 +743,14 @@ pub struct PromptRequest {
     pub dest_host: String,
     pub dest_port: u16,
     pub dest_ip: Option<String>,
-    pub source_kind: String, // Phase 2 D-27 enum string repr
+    pub source_kind: String, // v0.2 enum string repr
     pub source_locator: Option<String>,
     pub package_context: Option<PackageContext>,
     pub process: ProcessCtx,
-    /// Phase 4 (D-93) type unification: changed from `Option<()>` placeholder
-    /// to `Option<Vec<IntelMatch>>`. Always `None` in plan 04-02 — populating
-    /// the prompt-time enrichment is a v2 hookpoint per 04-CONTEXT.md (no TI-*
-    /// requirement covers it in v1). Existing `intel: None` callers remain
-    /// valid since `None` is still a valid value for the new type.
+    /// v0.4 type unification: changed from `Option<()>` placeholder
+    /// to `Option<Vec<IntelMatch>>`. Populating prompt-time enrichment is
+    /// deferred to v2. Existing `intel: None` callers remain valid since
+    /// `None` is still a valid value for the new type.
     pub intel: Option<Vec<IntelMatch>>,
     pub suggested_rules: Vec<SuggestedRule>,
 }
@@ -788,7 +787,7 @@ pub struct PromptCancel {
 }
 
 // ============================================================
-// Phase 3 — InsertUserRule (tag 0x0B; sentinel approve)
+// v0.3 — InsertUserRule (tag 0x0B; sentinel approve)
 // ============================================================
 
 /// CLI → daemon: insert a user-authored rule into the SQLite rule store.
@@ -798,7 +797,7 @@ pub struct InsertUserRule {
     pub kind: String,        // "allow"|"deny"
     pub match_type: String,  // "exact"|"suffix"|"ip"
     pub pattern: String,
-    pub reason: String, // non-empty (D-39)
+    pub reason: String, // non-empty
 }
 
 /// Daemon → CLI: response to InsertUserRule.
@@ -830,7 +829,7 @@ impl InsertUserRuleReply {
 }
 
 // ============================================================
-// Phase 3 — ReadInstallArtifacts (tag 0x0C; sentinel uninstall)
+// v0.3 — ReadInstallArtifacts (tag 0x0C; sentinel uninstall)
 // ============================================================
 
 /// CLI → daemon: read the install artifacts manifest (for uninstall).
@@ -882,7 +881,7 @@ impl ReadInstallArtifactsReply {
 }
 
 // ============================================================
-// Phase 3 — BaselineCommit (tag 0x0D; sentinel wrap --baseline exit)
+// v0.3 — BaselineCommit (tag 0x0D; sentinel wrap --baseline exit)
 // ============================================================
 
 /// CLI → daemon: commit an accumulated baseline run into proposed rules.
@@ -929,15 +928,15 @@ impl BaselineCommitReply {
 }
 
 // ============================================================
-// Phase 07 — ListRules (tag 0x0E; sentinel status rules)
+// v0.7 — ListRules (tag 0x0E; sentinel status rules)
 // ============================================================
 
 /// CLI → daemon: enumerate rules visible to the daemon.
 ///
-/// Additive at IPC_SCHEMA_V3 (RESEARCH.md §"IPC schema bump"). The phase-07
-/// management-IPC family lives at the V3 schema level — new tag, new wire
-/// shape, no schema bump because this neither modifies an existing message
-/// body nor breaks an existing discriminator.
+/// Additive at IPC_SCHEMA_V3. The management-IPC family lives at the V3
+/// schema level — new tag, new wire shape, no schema bump because this
+/// neither modifies an existing message body nor breaks an existing
+/// discriminator.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ListRules {
     pub schema_version: u16, // V3
@@ -1000,11 +999,11 @@ impl ListRulesReply {
 }
 
 // ============================================================
-// Phase 07 — DeleteInstallArtifacts (tag 0x11; per-target
+// v0.7 — DeleteInstallArtifacts (tag 0x11; per-target
 // remove of install_artifacts rows). Symmetric of the existing
 // ReadInstallArtifacts handler. Used by `setup [target] --remove`
 // so the install_artifacts table reflects on-disk reality after
-// a per-target wipe (D-15 + WARNING-5 fix).
+// a per-target wipe.
 // ============================================================
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1055,7 +1054,7 @@ impl DeleteInstallArtifactsReply {
 }
 
 // ============================================================
-// v0.3 — DenyNotify (tag 0x12; D-39 deny-notify IPC)
+// v0.3 — DenyNotify (tag 0x12; deny-notify IPC)
 // ============================================================
 
 /// Dylib → daemon: a libc-level denial just happened. Fire-and-forget with
@@ -1120,7 +1119,7 @@ impl DenyNotifyAck {
 }
 
 // ============================================================
-// v0.4 — ExecBlocked (tag 0x13; M003-S02 hardened-runtime exec blocking)
+// v0.4 — ExecBlocked (tag 0x13; hardened-runtime exec blocking)
 // ============================================================
 
 /// Dylib → daemon: a hardened-runtime exec was blocked. Fire-and-forget.
@@ -1182,7 +1181,7 @@ impl ExecBlockedAck {
 }
 
 // ============================================================================
-// v0.4 M003-S04 — PersistenceWrite (tag 0x14)
+// v0.4 — PersistenceWrite (tag 0x14)
 // ============================================================================
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1241,7 +1240,7 @@ impl PersistenceWriteAck {
 }
 
 // ============================================================================
-// v0.5 M004-S01 — Ping (tag 0x15; watchdog liveness check)
+// v0.5 — Ping (tag 0x15; watchdog liveness check)
 // ============================================================================
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

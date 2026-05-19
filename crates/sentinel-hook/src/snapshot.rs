@@ -49,7 +49,7 @@ impl std::fmt::Debug for LoadedSnapshot {
     }
 }
 
-/// Phase 1 well-known state_dir for path validation. Must match plan 05.
+/// v0.1 well-known state_dir for path validation.
 ///
 /// ISS-07/ISS-12 remediation: honor SENTINEL_STATE_DIR env var override if set.
 /// This lets the e2e test harness use a short /tmp-based state dir (required to
@@ -191,7 +191,7 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
     // independent of the file position (position was consumed by read_to_end
     // but mmap works at the inode level, not the cursor).
     //
-    // Phase 1: mmap kept alive so future phases (Phase 2 zero-copy) inherit a
+    // v0.1: mmap kept alive so future versions (v0.2 zero-copy) inherit a
     // working mmap path. The decoded Vec is used for matching.
     let mmap = unsafe { Mmap::map(&snap_file).map_err(LoadError::Io)? };
 

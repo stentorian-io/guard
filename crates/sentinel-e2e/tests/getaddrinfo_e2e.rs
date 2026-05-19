@@ -27,7 +27,7 @@
 //!   - Live-network tests are #[ignore]'d — opt-in via `--ignored`.
 //!   - Differential assertions: we confirm the deny target resolves outside
 //!     Sentinel so the denial inside Sentinel is unambiguous Sentinel-caused
-//!     (ISS-03 pattern).
+//!     (differential pattern).
 
 use sentinel_e2e::{cargo_workspace_root, resolve_cli, resolve_dylib, resolve_node, DaemonHarness};
 use std::process::Command;
@@ -35,7 +35,7 @@ use std::process::Command;
 const DENY_HOST: &str = "discord.com";
 const DENY_PORT: &str = "443";
 
-/// Allowlisted registry host — in D-18 Phase 1 allowlist.
+/// Allowlisted registry host — in D-18 v0.1 allowlist.
 const ALLOW_HOST: &str = "registry.npmjs.org";
 const ALLOW_PORT: &str = "443";
 
@@ -70,7 +70,7 @@ fn getaddrinfo_proxied_then_connect_denied_for_non_allowlisted_host() {
     if !deny_target_resolves() {
         eprintln!(
             "SKIP: {DENY_HOST}:{DENY_PORT} does not resolve outside Sentinel \
-             (ISS-03 sanity gate)"
+             (sanity gate)"
         );
         return;
     }
@@ -158,7 +158,7 @@ fn getaddrinfo_resolve_only_succeeds_for_non_allowlisted_host() {
     if !deny_target_resolves() {
         eprintln!(
             "SKIP: {DENY_HOST}:{DENY_PORT} does not resolve outside Sentinel \
-             (ISS-03 sanity gate)"
+             (sanity gate)"
         );
         return;
     }
@@ -298,7 +298,7 @@ fn getaddrinfo_differential_deny_vs_loopback_allow() {
     if !deny_target_resolves() {
         eprintln!(
             "SKIP: {DENY_HOST}:{DENY_PORT} does not resolve outside Sentinel \
-             (ISS-03 sanity gate)"
+             (sanity gate)"
         );
         return;
     }
@@ -399,7 +399,7 @@ fn getaddrinfo_non_tty_denies_without_prompt() {
     if !deny_target_resolves() {
         eprintln!(
             "SKIP: {DENY_HOST}:{DENY_PORT} does not resolve outside Sentinel \
-             (ISS-03 sanity gate)"
+             (sanity gate)"
         );
         return;
     }
@@ -470,7 +470,7 @@ fn dns_cache_enables_hostname_based_connect_deny() {
     if !deny_target_resolves() {
         eprintln!(
             "SKIP: {DENY_HOST}:{DENY_PORT} does not resolve outside Sentinel \
-             (ISS-03 sanity gate)"
+             (sanity gate)"
         );
         return;
     }

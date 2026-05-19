@@ -1,21 +1,21 @@
 //! crates/sentinel-daemon/src/handlers/list_rules.rs
 //!
-//! Phase 07 plan 01 — ListRules handler (CLI-16 sentinel status rules).
+//! v0.7 — ListRules handler (sentinel status rules).
 //!
 //! Reads user rules from the SQLite store and returns them as wire-friendly
-//! RuleRow records. CLI is a dumb client (D-21).
+//! RuleRow records. CLI is a dumb client.
 
 use sentinel_core::{AllowlistEntry, MatchType, RuleKind};
 use sentinel_ipc::{ListRules, ListRulesReply, RuleRow};
 
 use crate::rule_store::{RuleStore, StoredRule};
 
-/// Phase 07 plan 01 — handle ListRules.
+/// v0.7 — handle ListRules.
 ///
 /// Sources merged into the reply:
 ///   1. User rules — SQLite `rules` table via `RuleStore::all_rules_with_source`,
 ///      emitted with `source = "user"`.
-///   2. Built-in / curated rules (when `req.include_builtins == true`, D-20 `--all`):
+///   2. Built-in / curated rules (when `req.include_builtins == true`, `--all`):
 ///      sourced from the in-memory `curated: Arc<Vec<AllowlistEntry>>` on
 ///      `DaemonState`. The slice is loaded once at daemon startup by
 ///      `crates/sentinel-daemon/src/curated.rs::load_curated()` from the

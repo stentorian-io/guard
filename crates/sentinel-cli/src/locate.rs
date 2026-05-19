@@ -1,9 +1,9 @@
 //! Resolve the absolute path to libsentinel_hook.dylib.
 //!
-//! Phase 1 dev-mode order:
+//! v0.1 dev-mode order:
 //!   1. SENTINEL_HOOK_DYLIB env var (highest priority — used by tests)
 //!   2. Sibling of CLI binary at `target/{debug,release}/libsentinel_hook.dylib`
-//!   3. Hardcoded Homebrew Cellar path (Phase 5 release-mode default)
+//!   3. Hardcoded Homebrew Cellar path (v0.5 release-mode default)
 
 use std::path::PathBuf;
 
@@ -32,7 +32,7 @@ pub fn find_dylib() -> std::io::Result<PathBuf> {
         }
     }
 
-    // 3. Homebrew Cellar path (Phase 5 release-mode default).
+    // 3. Homebrew Cellar path (v0.5 release-mode default).
     let release = PathBuf::from(HOMEBREW_RELEASE_PATH);
     if release.exists() {
         return release.canonicalize();

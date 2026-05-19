@@ -1,10 +1,10 @@
-//! Phase 4 (D-90): convert FeedStore host_iocs into AllowlistEntry FeedDeny entries
+//! v0.4: convert FeedStore host_iocs into AllowlistEntry FeedDeny entries
 //! for the per-run snapshot. Pure transform — no I/O state, no shared mutable state —
 //! so testable in isolation.
 //!
 //! Match-type heuristic (`classify_host`):
 //!   - Pattern starts with `*.` → MatchType::Suffix (with the leading `*` stripped to `.`,
-//!     producing the leading-dot pattern AllowlistEntry::matches expects per D-16)
+//!     producing the leading-dot pattern AllowlistEntry::matches expects)
 //!   - Pattern parses as `IpAddr` → MatchType::Ip
 //!   - Else → MatchType::Exact
 
@@ -40,7 +40,7 @@ pub fn build_feeddeny_entries(
 
 /// Classify a host_ioc string into (MatchType, normalized pattern).
 ///
-/// - `*.workers.dev` → (Suffix, `.workers.dev`) — leading `*` stripped per D-16
+/// - `*.workers.dev` → (Suffix, `.workers.dev`) — leading `*` stripped per
 ///   suffix-pattern invariant (AllowlistEntry::matches treats Suffix patterns
 ///   as requiring a leading `.` to avoid `notworkers.dev` false-positives).
 /// - `192.0.2.1` → (Ip, `192.0.2.1`)
@@ -86,7 +86,7 @@ mod tests {
     fn classify_host_suffix_for_wildcard_with_leading_dot_normalized() {
         let (mt, p) = classify_host("*.workers.dev");
         assert_eq!(mt, MatchType::Suffix);
-        assert_eq!(p, ".workers.dev", "leading-dot pattern per D-16");
+        assert_eq!(p, ".workers.dev", "leading-dot pattern for suffix match");
     }
 
     #[test]

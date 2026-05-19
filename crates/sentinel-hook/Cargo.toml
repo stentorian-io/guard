@@ -23,10 +23,8 @@ sentinel-ipc = { workspace = true }
 socket2 = { workspace = true }
 sha2 = "0.10"
 hmac = { workspace = true }
-# Phase 2 plan 02-05 lifts the original "no crossbeam" exclusion: crossbeam-queue
-# (lock-free MPMC) is the BL-03 / D-43 fix for the racy SpscRing log buffer. The
-# remaining exclusions (tokio, async-std, mio, serde_json, reqwest, tracing) still
-# stand — see .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md.
+# crossbeam-queue (lock-free MPMC) is the BL-03 / D-43 fix for the racy
+# SpscRing log buffer.
 
 [dev-dependencies]
 tempfile = { workspace = true }

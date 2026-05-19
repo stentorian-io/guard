@@ -83,7 +83,6 @@ This changelog is generated from [conventional commits](https://www.conventional
 
 ### Features
 - **cli:** Root-default-wrap parser surface (Cmd::External + --learn)
-- **e2e:** Add scripts/phase06-codemod.sh — two-pass ripgrep+sed codemod
 - **daemon,ipc:** Add ListRules/ListTrust/IsTrusted/DeleteInstallArtifacts wire types
 - **daemon,ipc:** Add daemon handlers for ListRules/ListTrust/IsTrusted/DeleteInstallArtifacts
 - **daemon,ipc:** Wire MessageTag 0x0E/0x0F/0x10/0x11 dispatch arms

@@ -1,4 +1,4 @@
-//! Filesystem layout for the Phase 1 daemon.
+//! Filesystem layout for the v0.1 daemon.
 //!
 //! All paths derive from `default_state_dir()`. The dylib (plan 06) MUST
 //! validate that the env-var-supplied manifest path canonicalizes to live
@@ -51,7 +51,7 @@ pub fn ensure_state_dir(state_dir: &Path) -> std::io::Result<()> {
         .create(state_dir)
 }
 
-// --- Per-run snapshot path helpers (Phase 2 D-29) ----------------------------
+// --- Per-run snapshot path helpers (v0.2) -------------------------------------
 
 pub fn runs_dir(state_dir: &Path) -> PathBuf {
     state_dir.join("runs")
@@ -86,7 +86,7 @@ pub fn ensure_runs_dir(state_dir: &Path) -> std::io::Result<()> {
         .create(dir)
 }
 
-// --- Per-feed cache directory helpers (Phase 4 plan 04-02) -------------------
+// --- Per-feed cache directory helpers (v0.4) ----------------------------------
 //
 // Layout: $state_dir/feeds/{osv,ghsa}/ holds the shallow-cloned working trees
 // for the two production feeds. The directories are created with mode 0700

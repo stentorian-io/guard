@@ -1,6 +1,6 @@
-//! Run plan 06's criterion microbench and verify it compiles and runs.
+//! Run the criterion microbench and verify it compiles and runs.
 //! ENF-06 success criterion #4: formal benchmark on real hardware lands in
-//! Phase 5 (VAL-03); this Phase 1 test is a regression detector.
+//! v0.5; this v0.1 test is a regression detector.
 
 use std::process::Command;
 
@@ -27,8 +27,8 @@ fn hot_path_microbench_compiles_and_runs() {
         out.status.success(),
         "cargo bench must succeed; stdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    // We don't enforce a numerical latency ceiling here -- that's Phase 5's
-    // job (VAL-03 formal benchmark). Phase 1 just verifies the bench compiles
+    // We don't enforce a numerical latency ceiling here -- that's v0.5's
+    // job (formal benchmark). v0.1 just verifies the bench compiles
     // and runs on the build machine; the criterion HTML report under
     // target/criterion/ is the deliverable for ENF-06.
 }

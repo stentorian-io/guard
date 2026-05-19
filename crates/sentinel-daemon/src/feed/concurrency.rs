@@ -1,4 +1,4 @@
-//! Phase 4 plan 04-02 — fetch coordination + shared-result optimization (D-86).
+//! v0.4 — fetch coordination + shared-result optimization.
 //!
 //! `fetch_feeds_blocking` is the single public entry point for triggering a
 //! feed refresh. It serializes concurrent runs through `feed_fetch_mutex`
@@ -6,7 +6,7 @@
 //! `SHARED_RESULT_TTL`) — N concurrent `sentinel wrap` invocations within a
 //! 5-second window observe ONE underlying fetch and reuse its outcome.
 //!
-//! Per RESEARCH.md Code Example 1 (lines 690-732). Per D-85: any per-feed
+//! Per RESEARCH.md Code Example 1 (lines 690-732). Any per-feed
 //! error fails the whole run; the last_result cache stores the snapshotted
 //! error so concurrent waiters surface the same error.
 
@@ -141,10 +141,10 @@ pub fn fetch_feeds_blocking_with(
     // Production callers (sentineld release binary): the env var is a
     // no-op — feeds are always fetched.
     //
-    // Test callers (Phase 2/3 in-process IPC tests, sentinel-e2e
+    // Test callers (v0.2/v0.3 in-process IPC tests, sentinel-e2e
     // DaemonHarness): cargo test runs in debug mode by default which
     // enables `debug_assertions`, so the seam works for them. Hermetic
-    // Phase 4 e2e tests (plan 04-04) explicitly OPT OUT of the skip and
+    // v0.4 e2e tests explicitly OPT OUT of the skip and
     // point at a `file://` fixture via `SENTINEL_FEED_URL_OVERRIDE_*`.
     #[cfg(any(test, debug_assertions))]
     {
@@ -154,7 +154,7 @@ pub fn fetch_feeds_blocking_with(
         }
     }
 
-    // Shared-result reuse (D-86): if a previous run completed within
+    // Shared-result reuse: if a previous run completed within
     // SHARED_RESULT_TTL, return its snapshotted outcome. Concurrent waiters
     // unblock as soon as the lock above is released and observe the cached
     // result without firing another fetch.
@@ -164,7 +164,7 @@ pub fn fetch_feeds_blocking_with(
             if lr.completed_at.elapsed() < SHARED_RESULT_TTL {
                 // TI-08 observability: emit a fetch_cached_share event so the
                 // feed_no_per_query.rs e2e test can distinguish "actually
-                // fetched" from "served from D-86 shared-result cache". Both
+                // fetched" from "served from shared-result cache". Both
                 // share `target = "sentinel.feed.fetch"` but only fetch_start
                 // represents an outbound fetch attempt.
                 tracing::info!(

@@ -1,5 +1,5 @@
 //! Concurrent-writer correctness for the new ArrayQueue-backed LogRing
-//! (BL-03 / D-43 fix). Phase 1's racy SpscRing is replaced with a lock-free
+//! (BL-03 / D-43 fix). v0.1's racy SpscRing is replaced with a lock-free
 //! MPMC `crossbeam_queue::ArrayQueue<Box<[u8]>>` whose append/dump APIs are
 //! safe under concurrent writers.
 

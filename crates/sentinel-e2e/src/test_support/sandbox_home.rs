@@ -1,6 +1,6 @@
-//! Phase 5 plan 05-02: sandboxed HOME helper for validation tests.
+//! Sandboxed HOME helper for v0.5 validation tests.
 //!
-//! Per CONTEXT D-02 triple-defense (3): every Phase 5 test sets HOME to a
+//! Per CONTEXT D-02 triple-defense (3): every v0.5 test sets HOME to a
 //! tempdir with empty .ssh/, .aws/, .npmrc and uses Command::new(...).env_clear()
 //! so no real secrets exist on the test process or its descendants. Even a
 //! complete Sentinel enforcement failure would find nothing to exfiltrate.

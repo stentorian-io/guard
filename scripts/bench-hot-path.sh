@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/bench-hot-path.sh — Phase 08 / VAL-03 one-command bench runner.
+# scripts/bench-hot-path.sh — one-command bench runner for docs/BENCH.md.
 #
 # Reproduces docs/BENCH.md numbers on any M-series Apple Silicon Mac.
 #

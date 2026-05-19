@@ -1,10 +1,10 @@
-//! SQLite rule store (POL-01 + D-37).
+//! SQLite rule store.
 //!
 //! Owned by the daemon. The dylib never reads SQLite directly — instead, the
 //! daemon merges SQLite rules into the per-run snapshot at PrepareSnapshot
-//! time (plan 02-06).
+//! time.
 //!
-//! WARNING-08 fix (Phase 2 review): the original implementation wrapped a
+//! WARNING fix (v0.2 review): the original implementation wrapped a
 //! single `Connection` in a process-global `Mutex`, serializing ALL
 //! rule-store reads (`all_user_rules`) and ALL writes through one lock.
 //! Under heavy fork load the daemon's 16 worker threads contended on this
@@ -34,7 +34,7 @@ pub enum RuleStoreError {
     Migrate(String),
 }
 
-/// Phase 07 plan 01 — storage-side row for ListRules. String discriminators
+/// v0.7 — storage-side row for ListRules. String discriminators
 /// match the wire shape exactly so the handler does no enum mapping.
 #[derive(Debug, Clone)]
 pub struct StoredRule {
@@ -84,7 +84,7 @@ impl RuleStore {
             .to_latest(&mut conn)
             .map_err(|e| RuleStoreError::Migrate(e.to_string()))?;
 
-        // Phase 4 (D-89, plan 04-02): WAL applied at runtime per
+        // v0.4: WAL applied at runtime per
         // 04-SPIKE-RESULTS.md A3 outcome. A PRAGMA-only M::up step silently
         // leaves journal_mode = delete (rusqlite_migration wraps each step in a
         // transaction; WAL change is rolled back). The runtime pragma_update
@@ -114,13 +114,13 @@ impl RuleStore {
         })
     }
 
-    /// Insert a user-approved rule (called by `sentinel approve` IPC handler in plan 03-11).
-    /// Validates kind/match_type at the boundary; reason must be non-empty (D-39).
+    /// Insert a user-approved rule (called by `sentinel approve` IPC handler).
+    /// Validates kind/match_type at the boundary; reason must be non-empty.
     /// Returns the new row id.
     pub fn insert_user_rule(&self, kind: &str, match_type: &str, pattern: &str, reason: &str) -> SqlResult<i64> {
         debug_assert!(matches!(kind, "allow" | "deny"));
         debug_assert!(matches!(match_type, "exact" | "suffix" | "ip"));
-        debug_assert!(!reason.trim().is_empty(), "D-39: reason must be non-empty");
+        debug_assert!(!reason.trim().is_empty(), "reason must be non-empty");
         let conn = self.conn.lock().expect("rule store mutex");
         let now = unix_ms_now();
         conn.execute(
@@ -131,7 +131,7 @@ impl RuleStore {
     }
 
     /// Count all rows in the rules table (user-approved rules added via `sentinel approve`).
-    /// Used by StatusReply handler in plan 03-08.
+    /// Used by StatusReply handler.
     pub fn count_user_rules(&self) -> SqlResult<u64> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         conn.query_row("SELECT COUNT(*) FROM rules", [], |r| r.get::<_, i64>(0))
@@ -139,7 +139,7 @@ impl RuleStore {
     }
 
     /// Read all user rules; map each row to an AllowlistEntry with tier
-    /// UserDeny / UserAllow. Used by plan 02-06's PrepareSnapshot handler.
+    /// UserDeny / UserAllow. Used by the PrepareSnapshot handler.
     pub fn all_user_rules(&self) -> SqlResult<Vec<AllowlistEntry>> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         let mut stmt = conn.prepare(
@@ -192,7 +192,7 @@ impl RuleStore {
         Ok(out)
     }
 
-    /// Phase 07 plan 01 — enumerate user rules for ListRules.
+    /// v0.7 — enumerate user rules for ListRules.
     ///
     /// Built-in / curated rules are NOT a parameter here: they live on
     /// `DaemonState.curated: Arc<Vec<AllowlistEntry>>` (loaded from

@@ -12,7 +12,7 @@
 //! covers the hard data-structure-level TREE-05 invariant directly. This e2e
 //! test only confirms the dispatch path doesn't crash under the double-fork
 //! + setsid pattern — full daemon-introspection of the tree state is a
-//! Phase 3 polish (`sentinel status` will surface this).
+//! v0.3 polish (`sentinel status` will surface this).
 
 use sentinel_e2e::{cargo_workspace_root, resolve_cli, resolve_dylib, DaemonHarness};
 use std::process::Command;
@@ -98,7 +98,7 @@ fn double_fork_setsid_wrapped_command_completes() {
         "wrapped double-fork+setsid sh produced unexpected output\n\
          exit: {exit_status:?}\n\
          stderr: {stderr}\n\
-         (TREE-05 data-structure-level invariant is covered by plan 02-04's \
+         (TREE-05 data-structure-level invariant is covered by \
          process_tree_tests::tree_05_grandchild_inherits_original_root)"
     );
 }

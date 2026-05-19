@@ -1,7 +1,7 @@
-//! Phase 2 IPC handlers — PrepareSnapshot, Resolve.
-//! Phase 3 plan 03-08 additions — Status, InsertUserRule, ReadInstallArtifacts, BaselineCommit.
+//! v0.2 IPC handlers — PrepareSnapshot, Resolve.
+//! v0.3 additions — Status, InsertUserRule, ReadInstallArtifacts, BaselineCommit.
 //!
-//! Plan 02-04 owns the Phase 2 fork/exec/dylib_loaded handlers (which live
+//! The v0.2 fork/exec/dylib_loaded handlers live
 //! inline in ipc_server.rs because they're small and tightly coupled to
 //! peer-auth). The handlers in this submodule are larger and have
 //! independent unit tests, so they live as separate modules.

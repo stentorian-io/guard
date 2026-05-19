@@ -1,9 +1,8 @@
 //! crates/sentinel-cli/src/status/denials.rs
 //!
-//! Phase 07 plan 03 — `sentinel status denials <run_uuid> [--json]`
-//! (CLI-18, D-22). Reads the JSONL log directly via the `denial_log`
-//! parser (no IPC needed: the log is the authoritative source for
-//! blocked-host events per D-22).
+//! v0.7 — `sentinel status denials <run_uuid> [--json]`.
+//! Reads the JSONL log directly via the `denial_log` parser (no IPC needed:
+//! the log is the authoritative source for blocked-host events).
 
 use crate::denial_log;
 use crate::install::launchagent;

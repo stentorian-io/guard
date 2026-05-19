@@ -1,6 +1,6 @@
 //! crates/sentinel-daemon/src/daemon_state.rs
 //!
-//! Phase 3 plan 03-12 — DeferredResolveTable re-exports.
+//! v0.3 — DeferredResolveTable re-exports.
 //!
 //! DaemonState itself lives in ipc_server.rs (where all the IPC handler
 //! infrastructure is). This module provides public re-exports under the

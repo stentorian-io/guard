@@ -1,6 +1,6 @@
 //! crates/sentinel-daemon/src/prompt/mod.rs
 //!
-//! Phase 3 — daemon-side prompt support helpers.
+//! v0.3 — daemon-side prompt support helpers.
 
 pub mod dedup;
 pub mod suggested_rules;

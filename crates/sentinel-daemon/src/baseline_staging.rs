@@ -1,11 +1,11 @@
 //! crates/sentinel-daemon/src/baseline_staging.rs
 //!
-//! Phase 3 plan 03-07 — per-run baseline accumulator (POL-04 / D-58).
+//! v0.3 — per-run baseline accumulator.
 //!
 //! In `sentinel wrap --baseline` mode, every allow-and-log decision is recorded
 //! into a per-run-uuid Vec<ProposedRule>. On tracked-root exit, the BaselineCommit
 //! IPC handler `take()`s the entries and returns them to the CLI for diff-confirm.
-//! Curated denies and hard rules (D-25/D-26) still fire and are NOT staged.
+//! Curated denies and hard rules still fire and are NOT staged.
 
 use std::collections::HashMap;
 use std::sync::Mutex;

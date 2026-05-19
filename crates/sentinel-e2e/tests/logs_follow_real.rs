@@ -1,4 +1,4 @@
-//! Phase 3 plan 03-14 — sentinel logs --follow stays connected across rotation.
+//! v0.3 — sentinel logs --follow stays connected across rotation.
 //!
 //! R-02 mitigation verification: the notify-based tail in logs_follow.rs
 //! reopens the file handle when a rename (rotation) is detected, so --follow
@@ -35,7 +35,7 @@ fn follow_streams_across_rotation() {
     .expect("write seed row");
 
     // Spawn `sentinel status logs --follow` (was: `sentinel logs --follow`).
-    // Phase 07 plan 05 (D-09, D-10): `logs --follow` → `status logs --follow`.
+    // v0.7: `logs --follow` → `status logs --follow`.
     let mut follow = std::process::Command::new(&cli)
         .arg("status")
         .arg("logs")

@@ -1,4 +1,4 @@
-//! Phase 4 D-94 POL-06 regression: planted FeedDeny for registry.npmjs.org should
+//! v0.4 POL-06 regression: planted FeedDeny for registry.npmjs.org should
 //! be overridden by the curated allowlist. Confirms the curated-allow-beats-feed-deny
 //! invariant flows through the daemon's snapshot-build path correctly.
 //!

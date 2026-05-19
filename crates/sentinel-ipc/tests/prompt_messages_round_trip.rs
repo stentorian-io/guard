@@ -1,4 +1,4 @@
-//! Phase 3 plan 03-02: round-trip Serialize+Deserialize tests for new IPC types.
+//! v0.3: round-trip Serialize+Deserialize tests for new IPC types.
 use sentinel_ipc::*;
 
 fn round_trip<T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(

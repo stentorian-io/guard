@@ -1,5 +1,4 @@
-//! Phase 3 plan 03-12 — channel frame round-trip + R-05 cap unit smoke.
-//! Full integration in plan 03-14 e2e (concurrent_prompt_channels_load.rs).
+//! v0.3 — channel frame round-trip + cap unit smoke.
 
 use crossbeam_channel::bounded;
 use sentinel_daemon::handlers::prompt_channel::{ClientChannelFrame, MAX_CONCURRENT_CHANNELS};
@@ -54,7 +53,7 @@ fn process_tree_prompt_channels_len_tracks_inserts() {
 
 #[test]
 fn r05_cap_constant_is_64() {
-    // Locks the cap value for the integration test in plan 03-14 (it asserts the
+    // Locks the cap value for the integration test (it asserts the
     // 65th PromptChannelInit Err-Acks with this exact reason format).
     assert_eq!(MAX_CONCURRENT_CHANNELS, 64);
 }

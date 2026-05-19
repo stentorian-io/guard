@@ -1,12 +1,10 @@
--- Phase 2 plan 02-03 — initial schema.
+-- v0.2 — initial schema.
 --
--- POL-01: persistent rule store. Phase 2 ships the schema + read path.
--- The `sentinel approve` CLI (CLI-04, Phase 3) will write to `rules`.
--- The `sentinel trust-policy` CLI (D-38, plan 02-06) writes to
--- `trusted_policy_files`.
+-- Persistent rule store. v0.2 ships the schema + read path.
+-- The `sentinel approve` CLI (v0.3) will write to `rules`.
 --
--- D-28: machine-wide rules only — no `scope` column.
--- D-37: first-encounter trust model — PRIMARY KEY includes sha256 so
+-- Machine-wide rules only — no `scope` column.
+-- First-encounter trust model — PRIMARY KEY includes sha256 so
 -- modifying the file requires re-trust.
 
 CREATE TABLE IF NOT EXISTS rules (

@@ -1,13 +1,12 @@
-//! Phase 3 plan 03-08: smoke test that ipc_server dispatches new tags 0x09..0x0D.
-//! Full IPC integration coverage in plan 03-14 e2e.
+//! v0.3 — smoke test that ipc_server dispatches new tags 0x09..0x0D.
 //!
-//! Tag bytes 0x09..0x0D were added in plan 03-02 (MessageTag enum).
+//! Tag bytes 0x09..0x0D were added in v0.3 (MessageTag enum).
 //! This test verifies they resolve correctly via MessageTag::from_byte.
 
 use sentinel_daemon::ipc_dispatch::MessageTag;
 
 #[test]
-fn all_phase3_tags_resolve() {
+fn all_v3_tags_resolve() {
     assert!(matches!(
         MessageTag::from_byte(0x09),
         Some(MessageTag::Status)

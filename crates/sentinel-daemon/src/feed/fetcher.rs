@@ -1,4 +1,4 @@
-//! Phase 4 plan 04-02 — gix shallow-clone + fetch loop with deadline +
+//! v0.4 — gix shallow-clone + fetch loop with deadline +
 //! panic isolation + parse-on-fetch + metadata recording.
 //!
 //! Per 04-SPIKE-RESULTS.md A1: the gix call chains for first-clone and
@@ -9,7 +9,7 @@
 //! Per 04-SPIKE-RESULTS.md A2: `panic = "unwind"` is REJECTED by cargo
 //! (workspace stays at `panic = "abort"`). `std::panic::catch_unwind` is
 //! therefore a NO-OP at runtime in the production daemon binary — gix
-//! panics SIGABRT the daemon, and Phase 3's launchd LaunchAgent KeepAlive
+//! panics SIGABRT the daemon, and v0.3's launchd LaunchAgent KeepAlive
 //! restarts it. The `catch_unwind` wrapper IS retained here so:
 //!   1. the code is compile-time correct AND useful under `cargo test`
 //!      (test runner forces `panic = unwind` regardless of profile);
@@ -41,7 +41,7 @@ use crate::feed::store::{FeedIocRow, FeedMetadataRow, FeedStore, FeedStoreError,
 pub const FETCH_DEADLINE_FIRST_RUN: Duration = Duration::from_secs(120);
 pub const FETCH_DEADLINE_INCREMENTAL: Duration = Duration::from_secs(60);
 
-/// Production feed sources (D-80). Override per-feed for hermetic e2e tests
+/// Production feed sources. Override per-feed for hermetic e2e tests
 /// via `SENTINEL_FEED_URL_OVERRIDE_OSV` / `SENTINEL_FEED_URL_OVERRIDE_GHSA`
 /// — see `url_override_for`.
 pub const FEEDS: &[(&str, &str)] = &[
@@ -51,7 +51,7 @@ pub const FEEDS: &[(&str, &str)] = &[
 
 /// Threshold above which a fetch is treated as too-many-malformed; if the
 /// failure rate is at-or-above this AND there is at least one parse error,
-/// the fetcher SKIPS the store-write step (D-87 last-good-cache path).
+/// the fetcher SKIPS the store-write step (last-good-cache path).
 pub const PARSE_FAILURE_RATIO_THRESHOLD: f64 = 0.5;
 
 /// WR-09 fix: cap on per-feed `feed_warnings` returned in the
@@ -93,7 +93,7 @@ pub struct FetchOutcome {
     pub warnings: Vec<FeedWarning>,
 }
 
-/// Per-feed env-var override (D-94 hermetic e2e fixture path). Returns
+/// Per-feed env-var override (hermetic e2e fixture path). Returns
 /// `Some(url)` when set, `None` otherwise — the fetcher then falls back to
 /// the production URL in `FEEDS`.
 pub fn url_override_for(feed: &str) -> Option<String> {
@@ -365,7 +365,7 @@ fn fetch_one_feed_impl(
         }
     }
 
-    // D-87: if more than half of records failed parse, keep last-good cache
+    // Last-good-cache: if more than half of records failed parse, keep last-good cache
     // (skip delete+upsert) but still update metadata so StatusReply surfaces
     // the failure mode. Strict `>` so that an even 50/50 split still writes
     // the good rows.
@@ -438,7 +438,7 @@ fn fetch_one_feed_impl(
     })?;
 
     // TI-08 observability: pair the fetch_start event above with a fetch_done
-    // event on the success path. The plan 04-04 task 4 feed_no_per_query.rs
+    // event on the success path. The feed_no_per_query.rs e2e test
     // counts `op="fetch_start"` ONLY (not fetch_done) so the two events stay
     // distinguishable.
     tracing::info!(
@@ -580,8 +580,8 @@ fn handle_parse_error(feed_name: &str, e: &FeedParseError, warnings: &mut Vec<Fe
     // still produces a complete audit trail in the unified log.
     match e {
         FeedParseError::SchemaUnknown { observed } => {
-            // W-9 structured tracing event — load-bearing for plan 04-04
-            // task 3 (feed_schema_unknown_loud.rs) and `log show`-via-tracing
+            // W-9 structured tracing event — load-bearing for
+            // feed_schema_unknown_loud.rs e2e test and `log show`-via-tracing
             // observability. The string fields `event = "feed_error"` and
             // `kind = "schema_unknown"` are pinned by acceptance criteria.
             tracing::warn!(
@@ -1138,7 +1138,7 @@ mod tests {
 
         // Pre-existing row remains.
         let rows = store.query_by_pkg("npm", "pre-existing").expect("query");
-        assert_eq!(rows.len(), 1, "last-good cache must be retained per D-87");
+        assert_eq!(rows.len(), 1, "last-good cache must be retained");
 
         let md = store.read_metadata("OSV").expect("read").expect("present");
         assert_eq!(md.last_pull_outcome, "parse_error");

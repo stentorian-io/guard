@@ -1,7 +1,7 @@
 //! Tests for the `is_nw_object` safe object-type gate (D-41) in
-//! `replace_nw.rs`. Plan 02-06b — closes the Phase 1 carry-over crash where
-//! libuv passed non-NW opaque pointers through `nw_connection_start` and the
-//! verdict path called `nw_connection_copy_endpoint` on them.
+//! `replace_nw.rs`. Closes the v0.1 carry-over crash where libuv passed
+//! non-NW opaque pointers through `nw_connection_start` and the verdict
+//! path called `nw_connection_copy_endpoint` on them.
 
 use sentinel_hook::replace_nw::is_nw_object;
 use std::ffi::c_void;

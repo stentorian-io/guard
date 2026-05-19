@@ -1,9 +1,9 @@
 //! Snapshot publication: const allowlist → CBOR file with O_EXCL + fsync + rename.
-//! Pattern 4 from .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md.
+//! Snapshot publication: const allowlist -> CBOR file with O_EXCL + fsync + rename.
 //!
-//! Phase 2 (D-29) adds `publish_run` for per-run snapshot lifecycle: writes to
+//! v0.2 adds `publish_run` for per-run snapshot lifecycle: writes to
 //! `${state_dir}/runs/{run-uuid}.cbor` plus a matching `{run-uuid}.manifest`
-//! atomically (tmp + fsync + rename). The Phase 1 `publish` function remains for
+//! atomically (tmp + fsync + rename). The v0.1 `publish` function remains for
 //! the daemon-startup snapshot at the legacy path scheme.
 
 use crate::state_dir::{
@@ -63,8 +63,8 @@ fn hex_lower(bytes: &[u8]) -> String {
     s
 }
 
-/// Per-run snapshot publish (D-29). Writes to runs/{uuid}.cbor + runs/{uuid}.manifest
-/// atomically (tmp + fsync + rename). Distinct from Phase 1's `publish` which writes
+/// Per-run snapshot publish. Writes to runs/{uuid}.cbor + runs/{uuid}.manifest
+/// atomically (tmp + fsync + rename). Distinct from v0.1's `publish` which writes
 /// the daemon-startup snapshot at a different path scheme.
 ///
 /// Manifest format:

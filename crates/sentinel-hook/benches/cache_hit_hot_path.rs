@@ -1,9 +1,9 @@
 //! Cache-hit microbench against `replace_libc::decide_for_sockaddr` — the
 //! ACTUAL libc hot path. This is the LOAD-BEARING measurement for the D-03
-//! / VAL-03 < 100µs hot-path budget (Phase 08).
+//! / VAL-03 < 100µs hot-path budget (v0.7).
 //!
 //! The matcher-only bench at `crates/sentinel-hook/benches/hot_path.rs` stays
-//! as a regression tripwire for `sentinel_core::evaluate_rule` per Phase 08
+//! as a regression tripwire for `sentinel_core::evaluate_rule` per v0.7
 //! D-37 and is NOT load-bearing for VAL-03. This file is the cross-reference
 //! counterpart pointed at from `hot_path.rs`'s header.
 //!
@@ -12,7 +12,7 @@
 //!    We use `b.iter_custom(...)` and record per-iteration `Instant::now()`-bracketed
 //!    deltas into an `hdrhistogram::Histogram::<u64>::new(3)`, then `eprintln!`
 //!    p50/p95/p99/p99.9/max as a separate stderr line that
-//!    `scripts/bench-hot-path.sh` (plan 08-05) parses for `docs/BENCH.md`.
+//!    `scripts/bench-hot-path.sh` parses for `docs/BENCH.md`.
 //!  * `ALLOWLIST` is a process-global `OnceLock` (sentinel-hook/src/lib.rs:50);
 //!    set it ONCE before the bench loop or the bench measures a noise floor
 //!    (RESEARCH §Pitfall 6). We do this via a single warm-up call to
@@ -37,8 +37,6 @@
 //! See:
 //!   * `crates/sentinel-hook/src/replace_libc.rs::decide_for_sockaddr` — function under measurement
 //!   * `crates/sentinel-hook/src/lib.rs::_test_decide_for_sockaddr` — test seam used to drive it
-//!   * `.planning/phases/08-perf-reliability-hardening/08-RESEARCH.md` §Pattern 1
-//!   * `.planning/phases/08-perf-reliability-hardening/08-PATTERNS.md` §NEW cache_hit_hot_path.rs
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
@@ -154,7 +152,7 @@ fn cache_hit_bench(c: &mut Criterion) {
         })
     });
 
-    // Print percentile line — `scripts/bench-hot-path.sh` (plan 08-05)
+    // Print percentile line — `scripts/bench-hot-path.sh`
     // greps for `p99=` from this. Intentionally NO assertion against a
     // hard p99 threshold (D-33: no CI gate; binding number lives in
     // `docs/BENCH.md`).

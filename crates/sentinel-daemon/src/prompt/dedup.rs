@@ -1,9 +1,9 @@
 //! crates/sentinel-daemon/src/prompt/dedup.rs
 //!
-//! Phase 3 plan 03-06 — prompt dedup window (D-46).
+//! v0.3 — prompt dedup window.
 //!
 //! Coalesces identical (run_uuid, host, port) PromptRequest tuples within a 5-second
-//! window. Mirrors Phase 2's gap_detector.rs Mutex<HashMap> + Instant-TTL pattern.
+//! window. Mirrors v0.2's gap_detector.rs Mutex<HashMap> + Instant-TTL pattern.
 
 use std::collections::HashMap;
 use std::sync::Mutex;

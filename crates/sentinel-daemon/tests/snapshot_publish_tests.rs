@@ -1,11 +1,10 @@
-//! Phase 1 fixture tests for snapshot::publish + manifest::write.
+//! v0.1 fixture tests for snapshot::publish + manifest::write.
 //!
-//! Migrated to SCHEMA_V2 in plan 02-06a (per phase deferred-items.md): the
-//! Phase 1 round-trip test used Snapshot::phase1_default() + Snapshot::decode
-//! which now rejects SCHEMA_V1 (plan 02-01 made decode fail-closed). Switching
-//! to phase2_default() preserves the original test intent — verify that the
-//! same bytes round-trip publish → file → decode → equal — under the V2
-//! schema discipline.
+//! Migrated to SCHEMA_V2 in v0.2: the v0.1 round-trip test used
+//! Snapshot::v1_default() + Snapshot::decode which now rejects SCHEMA_V1
+//! (v0.2 made decode fail-closed). Switching to v2_default() preserves the
+//! original test intent — verify that the same bytes round-trip
+//! publish → file → decode → equal — under the V2 schema discipline.
 
 use sentinel_core::{SCHEMA_V2, Snapshot};
 use sentinel_daemon::manifest::{self, ParsedManifest};
@@ -22,7 +21,7 @@ fn publish_then_read_back_with_digest_verification() {
     let state_dir = tmp.path();
     ensure_state_dir(state_dir).unwrap();
 
-    let snap = Snapshot::phase2_default();
+    let snap = Snapshot::v2_default();
     let published = publish(state_dir, &snap, 0xCAFEBABE_DEADBEEF).expect("publish");
 
     // Verify file mode 0600
@@ -73,7 +72,7 @@ fn second_publish_writes_distinct_snapshot_file() {
     let tmp = tempfile::tempdir().unwrap();
     let state_dir = tmp.path();
     ensure_state_dir(state_dir).unwrap();
-    let snap = Snapshot::phase2_default();
+    let snap = Snapshot::v2_default();
     let p1 = publish(state_dir, &snap, 1).unwrap();
     let p2 = publish(state_dir, &snap, 2).unwrap();
     assert_ne!(p1.path, p2.path);
@@ -90,7 +89,7 @@ fn publish_run_writes_per_run_files_with_manifest() {
     ensure_state_dir(state_dir).unwrap();
     ensure_runs_dir(state_dir).unwrap();
 
-    let snap = Snapshot::phase2_default();
+    let snap = Snapshot::v2_default();
     let uuid = "00000000-0000-0000-0000-000000000001";
     let pub_ = publish_run(state_dir, &snap, uuid).expect("publish_run");
 

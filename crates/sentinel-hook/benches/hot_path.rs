@@ -12,7 +12,7 @@
 //! criterion's `iter_custom` + an `hdrhistogram` to surface a real p99 line.
 //!
 //! Both benches run together via `cargo bench -p sentinel-hook`. This file is
-//! preserved per Phase 08 D-37 as a regression tripwire for `evaluate_rule`.
+//! preserved per v0.7 D-37 as a regression tripwire for `evaluate_rule`.
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use sentinel_core::{evaluate_rule, AllowlistEntry, MatchType, RuleKind, RuleTier, Verdict};

@@ -1,6 +1,6 @@
 //! crates/sentinel-daemon/src/handlers/baseline_commit.rs
 //!
-//! Phase 3 plan 03-08 — BaselineCommit handler (POL-04 / D-58, D-59, D-60).
+//! v0.3 — BaselineCommit handler.
 //!
 //! Called by `sentinel wrap --baseline` on tracked-root exit. Consumes the
 //! per-run baseline_staging accumulator and returns it to the CLI.

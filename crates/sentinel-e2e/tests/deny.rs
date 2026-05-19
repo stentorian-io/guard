@@ -3,7 +3,7 @@
 //! connect()/getaddrinfo() against the hand-coded allowlist) and the
 //! wrapped command exits non-zero.
 //!
-//! ISS-03 REMEDIATION -- DIFFERENTIAL ASSERTION:
+//! DIFFERENTIAL ASSERTION:
 //! The original test against `evil.example.com` could not distinguish
 //! Sentinel-deny from offline-DNS-NXDOMAIN: any real resolver returns
 //! NXDOMAIN for that subdomain, surfacing in Node as ENOTFOUND -- exactly
@@ -12,7 +12,7 @@
 //!
 //!   - `node_connect_to_non_allowlisted_host_is_denied`: connects to
 //!     `discord.com:443`. discord.com resolves successfully outside
-//!     Sentinel (real A records). NOT in D-18's Phase 1 allowlist. The
+//!     Sentinel (real A records). NOT in D-18's v0.1 allowlist. The
 //!     ONLY failure path is Sentinel-induced. We assert the connect-time
 //!     errno class is one of Sentinel's deny errnos (EHOSTUNREACH from
 //!     libc connect deny, EAI_FAIL from getaddrinfo deny -- surfaced by
@@ -42,10 +42,9 @@
 use sentinel_e2e::{cargo_workspace_root, resolve_cli, resolve_dylib, resolve_node, DaemonHarness};
 use std::process::Command;
 
-/// Phase 1 deny target: resolves successfully outside Sentinel (real DNS
-/// records), NOT in D-18's allowlist. ISS-03 remediation: must NOT be a
-/// non-existent host -- that would make Sentinel-deny indistinguishable from
-/// NXDOMAIN.
+/// v0.1 deny target: resolves successfully outside Sentinel (real DNS
+/// records), NOT in D-18's allowlist. Must NOT be a non-existent host -- that
+/// would make Sentinel-deny indistinguishable from NXDOMAIN.
 const DENY_HOST: &str = "discord.com";
 const DENY_PORT: &str = "443";
 
@@ -67,8 +66,7 @@ fn node_connect_to_non_allowlisted_host_is_denied() {
     if !deny_target_resolves_outside_sentinel() {
         eprintln!(
             "SKIP: {}:{} did not resolve outside Sentinel -- cannot \
-                   discriminate Sentinel-deny from offline-DNS (ISS-03 \
-                   sanity gate)",
+                   discriminate Sentinel-deny from offline-DNS (sanity gate)",
             DENY_HOST, DENY_PORT
         );
         return;
@@ -134,7 +132,7 @@ fn node_connect_to_non_allowlisted_host_is_denied() {
         "expected CONNECT-FAILED in script stdout; got: {stdout}"
     );
 
-    // CRITICAL ISS-03 ASSERTION:
+    // CRITICAL ASSERTION:
     // - Sentinel-deny at libc connect: errno = EHOSTUNREACH (D-10).
     // - Sentinel-deny at getaddrinfo: errno = EAI_FAIL (D-10) -- Node's
     //   dns layer surfaces this as ENOTFOUND (because EAI_FAIL is
@@ -165,7 +163,7 @@ fn node_connect_to_non_allowlisted_host_is_denied() {
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
 fn node_connect_to_loopback_is_allowed() {
-    // ISS-03 differential companion: 127.0.0.1 IS in the Phase 1 allowlist
+    // Differential companion: 127.0.0.1 IS in the v0.1 allowlist
     // (D-18). A Node connect to 127.0.0.1:9 (discard service) should NOT be
     // blocked by Sentinel; it'll fail with ECONNREFUSED (no service
     // listening on port 9) -- which is a NETWORK-level failure, NOT Sentinel
@@ -223,7 +221,7 @@ fn node_connect_to_loopback_is_allowed() {
     // critical bug (D-18 explicitly allowlists loopback).
     assert!(
         !stdout.contains("EHOSTUNREACH"),
-        "Sentinel denied loopback! D-18 says 127.0.0.1 IS in the Phase 1 \
+        "Sentinel denied loopback! D-18 says 127.0.0.1 IS in the v0.1 \
          allowlist; this is a critical regression. Got: {stdout}"
     );
 }

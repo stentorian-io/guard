@@ -1,4 +1,4 @@
-//! Phase 3 plan 03-14 — CLI-07 / D-74: non-TTY sentinel wrap → no prompt → deny-with-log.
+//! v0.3 — non-TTY sentinel wrap → no prompt → deny-with-log.
 //!
 //! AC-NTTY-02 / D-74: When stdin is not a TTY, sentinel wrap sets is_tty=false;
 //! the daemon's Resolve handler fires deny immediately (no prompt park). The

@@ -1,11 +1,11 @@
 //! Sentinel IPC: length-prefixed CBOR framing + Unix socket transport with
 //! macOS-native peer audit-token authentication.
 //!
-//! Phase 1 protocol: a single request-reply (CLI sends RegisterRoot; daemon
+//! v0.1 protocol: a single request-reply (CLI sends RegisterRoot; daemon
 //! sends Reply::Ack or Reply::Err).
 //!
-//! Phase 2 adds new message types under IPC_SCHEMA_V2 — RegisterRoot/Reply
-//! are FROZEN at IPC_SCHEMA_V1 (D-30 contract preservation).
+//! v0.2 adds new message types under IPC_SCHEMA_V2 — RegisterRoot/Reply
+//! are FROZEN at IPC_SCHEMA_V1.
 
 pub mod error;
 pub mod frame;
@@ -14,9 +14,9 @@ pub mod transport;
 
 pub use error::IpcError;
 pub use messages::{
-    // Phase 1 (FROZEN)
+    // v0.1 (FROZEN)
     AuditTokenWire,
-    // Phase 2
+    // v0.2
     DylibLoaded,
     DylibLoadedAck,
     EnvNotPropagatedGap,
@@ -34,9 +34,9 @@ pub use messages::{
     ResolveReply,
     SOCKADDR_WIRE_LEN,
     SnapshotReply,
-    // Phase 3
+    // v0.3
     IPC_SCHEMA_V3,
-    // Phase 3 — Status (tag 0x09)
+    // v0.3 — Status (tag 0x09)
     DaemonStateKind,
     FeedInfo,
     GapInfo,
@@ -46,10 +46,10 @@ pub use messages::{
     StatusCounters,
     StatusReply,
     TrackedRootInfo,
-    // Phase 3 — Prompt channel (tag 0x0A)
+    // v0.3 — Prompt channel (tag 0x0A)
     PromptChannelInit,
     PromptChannelInitAck,
-    // Phase 3 — Prompt request/response/cancel (channel-internal)
+    // v0.3 — Prompt request/response/cancel (channel-internal)
     PackageContext,
     ProcessCtx,
     PromptCancel,
@@ -58,37 +58,37 @@ pub use messages::{
     PromptVerdict,
     RulePattern,
     SuggestedRule,
-    // Phase 3 — InsertUserRule (tag 0x0B)
+    // v0.3 — InsertUserRule (tag 0x0B)
     InsertUserRule,
     InsertUserRuleReply,
-    // Phase 3 — ReadInstallArtifacts (tag 0x0C)
+    // v0.3 — ReadInstallArtifacts (tag 0x0C)
     ReadInstallArtifacts,
     ReadInstallArtifactsReply,
-    // Phase 3 — BaselineCommit (tag 0x0D)
+    // v0.3 — BaselineCommit (tag 0x0D)
     BaselineCommit,
     BaselineCommitReply,
     ProposedRule,
-    // Phase 4 — Threat-intel (D-93) and SnapshotReply::Ok V4 schema bump
+    // v0.4 — Threat-intel and SnapshotReply::Ok V4 schema bump
     IPC_SCHEMA_V4,
     IntelMatch,
     FeedWarning,
-    // Phase 07 — ListRules (tag 0x0E)
+    // v0.7 — ListRules (tag 0x0E)
     ListRules,
     ListRulesReply,
     RuleRow,
-    // Phase 07 — DeleteInstallArtifacts (tag 0x11; D-15 WARNING-5 fix)
+    // v0.7 — DeleteInstallArtifacts (tag 0x11)
     DeleteInstallArtifacts,
     DeleteInstallArtifactsReply,
-    // v0.3 — DenyNotify (tag 0x12; D-39)
+    // v0.3 — DenyNotify (tag 0x12)
     DenyNotify,
     DenyNotifyAck,
-    // v0.4 — ExecBlocked (tag 0x13; M003-S02)
+    // v0.4 — ExecBlocked (tag 0x13)
     ExecBlocked,
     ExecBlockedAck,
-    // v0.4 — PersistenceWrite (tag 0x14; M003-S04)
+    // v0.4 — PersistenceWrite (tag 0x14)
     PersistenceWrite,
     PersistenceWriteAck,
-    // v0.5 — Ping (tag 0x15; M004-S01 watchdog liveness)
+    // v0.5 — Ping (tag 0x15; watchdog liveness)
     Ping,
     PingReply,
 };

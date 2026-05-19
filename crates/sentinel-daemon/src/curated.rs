@@ -1,10 +1,10 @@
 //! Curated default allowlist + abuse-pattern denies.
 //!
-//! Source: `crates/sentinel-core/data/allowlist.yaml` (D-23 — in-tree YAML
+//! Source: `crates/sentinel-core/data/allowlist.yaml` (in-tree YAML
 //! compiled into the daemon at build time via include_str!). Loaded once at
 //! daemon startup. Entries are tagged with the appropriate RuleTier
 //! (BuiltinDeny for kind:deny, CuratedAllow for kind:allow) and the daemon
-//! merges them with project/user rules at PrepareSnapshot time (plan 02-06).
+//! merges them with project/user rules at PrepareSnapshot time.
 
 use sentinel_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
 use serde::Deserialize;
@@ -16,7 +16,7 @@ pub const CURATED_YAML_PATH: &str = "crates/sentinel-core/data/allowlist.yaml";
 /// `crates/sentinel-daemon/src/curated.rs` to the in-tree YAML.
 const CURATED_YAML: &str = include_str!("../../sentinel-core/data/allowlist.yaml");
 
-/// Minimum length for a suffix pattern. WARNING-11 fix (Phase 2 review):
+/// Minimum length for a suffix pattern. WARNING fix (v0.2 review):
 /// raised from 4 → 6 so single-TLD suffixes like `.com`, `.org`, `.net`,
 /// `.dev`, `.app` (all 4 bytes) are rejected at load time. Real curated
 /// patterns like `.co.uk` (6), `.bar.io` (7), `.npmjs.org` (10) all pass.
@@ -48,8 +48,8 @@ struct YamlEntry {
 }
 
 /// Parse the embedded YAML. Tier is assigned from `kind`:
-///   - kind: deny  → tier: BuiltinDeny  (non-overridable per D-26)
-///   - kind: allow → tier: CuratedAllow (beats feed-deny per POL-06)
+///   - kind: deny  → tier: BuiltinDeny  (non-overridable)
+///   - kind: allow → tier: CuratedAllow (beats feed-deny by tier ordering)
 pub fn load_curated() -> Result<Vec<AllowlistEntry>, CuratedError> {
     parse_yaml(CURATED_YAML)
 }

@@ -1,13 +1,10 @@
 //! Unix socket transport with macOS-native peer audit-token authentication.
 //!
-//! Phase 1 is request-reply only — synchronous blocking I/O is the right shape
-//! per .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md line 156
+//! v0.1 is request-reply only — synchronous blocking I/O is the right shape
 //! (defer tokio-util until event-stream IPC is needed).
 //!
 //! Peer authentication uses `getsockopt(SOL_LOCAL, LOCAL_PEERTOKEN, ...)` —
 //! never `SO_PEERCRED` (that's a Linux idiom and does not return audit tokens).
-//! See Anti-Pattern at .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md
-//! line 556.
 
 use crate::error::IpcError;
 use core::ffi::c_void;
@@ -54,6 +51,6 @@ pub fn peer_audit_token(stream: &UnixStream) -> Result<AuditToken, IpcError> {
 pub fn peer_identity(stream: &UnixStream) -> Result<ProcessIdentity, IpcError> {
     let token = peer_audit_token(stream)?;
     // SAFETY: `token` came from getsockopt(SOL_LOCAL, LOCAL_PEERTOKEN, ...) which
-    // is a kernel-blessed source per ENF-08 / D-04.
+    // is a kernel-blessed source.
     Ok(unsafe { ProcessIdentity::from_kernel_token(token) })
 }

@@ -1,6 +1,6 @@
-//! Resolve handler (D-42).
+//! Resolve handler.
 //!
-//! Daemon-side getaddrinfo proxy. Phase 1 dropped the dylib's getaddrinfo
+//! Daemon-side getaddrinfo proxy. v0.1 dropped the dylib's getaddrinfo
 //! interpose because DYLD_INSERT_LIBRARIES patched dlsym(RTLD_NEXT) too,
 //! creating infinite recursion. Daemon-side resolution uses the daemon's
 //! own libc which is NOT under DYLD interpose — clean.

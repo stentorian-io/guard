@@ -1,9 +1,8 @@
 //! Network.framework hooks (D-07, D-09, D-19, D-20).
 //!
-//! Pattern 2 from .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md
-//! lines 421-459: at constructor time, `dlopen` Network.framework, dlsym
-//! the seven symbols into atomic pointers, export shadow `nw_*` symbols so
-//! that consumers see ours first.
+//! At constructor time, `dlopen` Network.framework, dlsym the seven symbols
+//! into atomic pointers, export shadow `nw_*` symbols so that consumers see
+//! ours first.
 //!
 //! On any of: dlopen fails / individual dlsym null → log a coverage-gap
 //! line and fall back to libc-only enforcement for the affected symbol (D-20).
@@ -39,8 +38,8 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 // Objective-C runtime — used by `is_nw_object` to gate calls to NW APIs on
 // pointers that may or may not be NW objects (libuv passes opaque non-NW
-// pointers through `nw_connection_start`; see Phase 1 plan 07's "Phase 2
-// will add proper verdict extraction" note).
+// pointers through `nw_connection_start`; v0.1 left this as a pass-through,
+// v0.2 added proper verdict extraction).
 //
 // Resolved via dlsym at runtime instead of a static link to libobjc —
 // explicitly linking libobjc changes dyld's init order and contributes to
@@ -65,7 +64,6 @@ fn resolve_object_get_class_name() -> Option<unsafe extern "C" fn(*mut c_void) -
 
 pub static REAL_NW_CONNECTION_CREATE: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
 /// Kept null (symbol absent on macOS 26); D-20 gap logged at init.
-/// Retained for plan 07 must_haves artifact compliance.
 pub static REAL_NW_CONNECTION_CREATE_WITH_ENDPOINT: AtomicPtr<c_void> =
     AtomicPtr::new(core::ptr::null_mut());
 pub static REAL_NW_CONNECTION_START: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
@@ -92,7 +90,7 @@ const NW_FRAMEWORK_PATH: &[u8] =
     b"/System/Library/Frameworks/Network.framework/Network\0";
 
 /// Symbol table: (null-terminated name bytes, slot, whether to log gap on null).
-/// All seven plan-07 names are present; the three absent on macOS 26 will produce
+/// All seven v0.1 names are present; the three absent on macOS 26 will produce
 /// null ptrs → gap-logged.
 struct NwSym {
     name_z: &'static [u8],
@@ -104,7 +102,7 @@ const NW_SYMBOLS: &[NwSym] = &[
         name_z: b"nw_connection_create\0",
         slot: &REAL_NW_CONNECTION_CREATE,
     },
-    // Plan-07 name; absent on macOS 26 → null + gap-log.
+    // v0.1 name; absent on macOS 26 → null + gap-log.
     NwSym {
         name_z: b"nw_connection_create_with_endpoint\0",
         slot: &REAL_NW_CONNECTION_CREATE_WITH_ENDPOINT,
@@ -117,13 +115,13 @@ const NW_SYMBOLS: &[NwSym] = &[
         name_z: b"nw_connection_cancel\0",
         slot: &REAL_NW_CONNECTION_CANCEL,
     },
-    // `nw_endpoint_get_hostname` replaces plan-07's `nw_endpoint_copy_hostname`
+    // `nw_endpoint_get_hostname` replaces v0.1's `nw_endpoint_copy_hostname`
     // (non-owning; available on macOS 26+).
     NwSym {
         name_z: b"nw_endpoint_get_hostname\0",
         slot: &REAL_NW_ENDPOINT_COPY_HOSTNAME,
     },
-    // Plan-07 names; absent on macOS 26 → null + gap-log.
+    // v0.1 names; absent on macOS 26 → null + gap-log.
     NwSym {
         name_z: b"nw_resolver_create\0",
         slot: &REAL_NW_RESOLVER_CREATE,
@@ -254,12 +252,12 @@ fn do_cancel(connection: *mut c_void) {
 
 // ---- D-41 closure: safe object-type detection ------------------------------
 //
-// Phase 1 plan 01-07 left `nw_connection_start` as a pass-through because
-// calling `nw_connection_copy_endpoint` on a libuv-internal opaque pointer
-// crashes the wrapped process (libuv's nw_connection_t-shaped pointer is NOT
-// an actual NW object — node's I/O subsystem reuses NW symbols for its own
-// handles). T-02-06b-03 mitigation: gate every NW API call on a class-name
-// check via the Objective-C runtime.
+// v0.1 left `nw_connection_start` as a pass-through because calling
+// `nw_connection_copy_endpoint` on a libuv-internal opaque pointer crashes
+// the wrapped process (libuv's nw_connection_t-shaped pointer is NOT an
+// actual NW object — node's I/O subsystem reuses NW symbols for its own
+// handles). Mitigation: gate every NW API call on a class-name check via
+// the Objective-C runtime.
 //
 // `object_getClassName` is the documented runtime API for retrieving the class
 // name of an Objective-C instance. NW.framework objects all have class names
@@ -279,7 +277,7 @@ fn do_cancel(connection: *mut c_void) {
 
 /// Returns true if `ptr` points to an Objective-C object whose class name
 /// starts with `OS_nw_`. Used to gate calls to `nw_endpoint_get_hostname` and
-/// related NW APIs in the verdict path. Phase 1 saw crashes when libuv passed
+/// related NW APIs in the verdict path. v0.1 saw crashes when libuv passed
 /// opaque non-NW pointers through `nw_connection_start`; this gate replaces
 /// the pass-through with a safe class-name check (D-41).
 #[inline]
@@ -323,14 +321,14 @@ fn decide_for_nw_connection(connection: *mut c_void) -> bool {
 
 /// Extract the hostname from an NW connection's endpoint. Returns `None` on
 /// any failure path; the caller treats `None` as pass-through (fail-open) to
-/// preserve Phase 1 no-crash semantics on partial NW symbol availability.
+/// preserve v0.1 no-crash semantics on partial NW symbol availability.
 ///
 /// Implementation: `nw_connection_copy_endpoint` → `nw_endpoint_get_hostname`
 /// (cached at ctor time; D-20 logs gaps). Both calls are gated by
 /// `is_nw_object` on the caller side (`nw_connection_start` shadow), so we
 /// can call NW APIs without the libuv-pointer crash risk.
 ///
-/// NOTE on the Phase 2-vs-Phase 3 split: this function returns `None` if
+/// NOTE on the v0.2-vs-v0.3 split: this function returns `None` if
 /// either `nw_connection_copy_endpoint` or `nw_endpoint_get_hostname` is
 /// absent on the running OS (D-20 gap). On macOS 26.x both ARE present per
 /// `replace_nw::init`, so the typical path yields a real hostname. The
@@ -375,7 +373,6 @@ fn extract_endpoint_hostname(connection: *mut c_void) -> Option<Vec<u8>> {
 // real Network.framework and confirm non-null resolution.
 
 /// Shadow `nw_connection_create` — observe endpoint+params; pass through.
-/// Phase 2 will extract the hostname here and pre-populate the verdict cache.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_connection_create(
     endpoint: *mut c_void,
@@ -405,14 +402,14 @@ pub unsafe extern "C" fn nw_connection_create(
     r
 }
 
-/// Shadow `nw_connection_start` — Phase 2 verdict path with safe is_nw_object
-/// gate (D-41 closure).
+/// Shadow `nw_connection_start` — verdict path with safe is_nw_object gate
+/// (D-41 closure).
 ///
-/// Phase 1 left this as a pass-through after observing SIGSEGV on libuv's
+/// v0.1 left this as a pass-through after observing SIGSEGV on libuv's
 /// internal opaque pointers (node's I/O subsystem reuses `nw_connection_start`
-/// for non-NW handles). Phase 2 D-41 closure: gate every NW API call on
+/// for non-NW handles). v0.2 D-41 closure: gate every NW API call on
 /// `is_nw_object` so non-NW pointers fall through to the real symbol
-/// unchanged (preserving Phase 1's no-crash semantics) while real NW
+/// unchanged (preserving v0.1's no-crash semantics) while real NW
 /// connections render through `evaluate_policy`.
 ///
 /// On Deny, calls `do_cancel(connection)` and RETURNS without invoking the
@@ -437,7 +434,7 @@ pub unsafe extern "C" fn nw_connection_start(connection: *mut c_void) {
 
     // D-41: safe object-type detection BEFORE calling NW APIs. If `connection`
     // is not an OS_nw_* Objective-C object (libuv opaque pointer or similar),
-    // pass through unchanged. Preserves Phase 1's no-crash behavior on
+    // pass through unchanged. Preserves v0.1's no-crash behavior on
     // non-NW callers.
     if !is_nw_object(connection) {
         let real = REAL_NW_CONNECTION_START.load(Ordering::Relaxed);
@@ -549,5 +546,5 @@ pub unsafe extern "C" fn nw_connection_copy_endpoint(connection: *mut c_void) ->
 }
 
 // `get_hostname_from_endpoint`, `copy_to_stack`, `do_cancel`, and
-// `allowlist_or_deny` are all reachable from the Phase 2 verdict path —
+// `allowlist_or_deny` are all reachable from the v0.2 verdict path —
 // `decide_for_nw_connection` and `extract_endpoint_hostname` invoke them.

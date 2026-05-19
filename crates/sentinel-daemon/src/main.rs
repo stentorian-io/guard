@@ -69,13 +69,13 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         .map_err(|e| std::io::Error::other(format!("open rule_store: {e}")))?;
     let rule_store = Arc::new(rule_store);
 
-    // Initial daemon-startup snapshot — Phase 1 path scheme. Phase 2 per-run
+    // Initial daemon-startup snapshot — v0.1 path scheme. v0.2 per-run
     // snapshots come via PrepareSnapshot but the startup snapshot is preserved
-    // so any pre-Phase-2-CLI caller (or post-install smoke probe) still sees
-    // a SCHEMA_V2 snapshot at the legacy path. Use phase2_default rather than
-    // phase1_default so the published bytes round-trip Snapshot::decode.
+    // so any pre-v0.2 CLI caller (or post-install smoke probe) still sees
+    // a SCHEMA_V2 snapshot at the legacy path. Use v2_default rather than
+    // v1_default so the published bytes round-trip Snapshot::decode.
     let nonce: u64 = rand::random();
-    let snap = Snapshot::phase2_default();
+    let snap = Snapshot::v2_default();
     let pub_ = publish(&state_dir, &snap, nonce)?;
     manifest::write(&state_dir, &pub_)?;
     info!(
@@ -84,7 +84,7 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         "daemon-startup snapshot published"
     );
 
-    // Phase 3: log directory + writer (D-50).
+    // v0.3: log directory + writer.
     let log_dir = match std::env::var_os("SENTINEL_LOG_DIR") {
         Some(p) => PathBuf::from(p),
         None => {
@@ -107,23 +107,23 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         .map_err(|e| std::io::Error::other(format!("spawn log_writer: {e}")))?;
     info!(path = %log_dir.join("sentinel.log").display(), "log_writer spawned");
 
-    // Phase 3: install_artifacts store opens against the same sentinel.db
+    // v0.3: install_artifacts store opens against the same sentinel.db
     // that RuleStore already migrated above.
     let install_artifact_store = Arc::new(
         InstallArtifactStore::open(&db_path(&state_dir))
             .map_err(|e| std::io::Error::other(format!("open install_artifact_store: {e}")))?,
     );
 
-    // Phase 3: prompt + baseline subsystems.
+    // v0.3: prompt + baseline subsystems.
     let prompt_dedup = Arc::new(PromptDedup::new());
     let recent_gaps = Arc::new(RecentGapsRing::new());
     let baseline_staging = Arc::new(BaselineStaging::new());
 
-    // Phase 4 plan 04-03: feed_store opens against the same sentinel.db that
+    // v0.4: feed_store opens against the same sentinel.db that
     // RuleStore::open migrated (migration 003 added feed_iocs/feed_metadata
     // and applied WAL via runtime pragma). feed_fetch_mutex serializes
     // PrepareSnapshot fetch calls; last_fetch_result holds the most recent
-    // outcome for D-86 shared-result optimization across concurrent runs.
+    // outcome for shared-result optimization across concurrent runs.
     let feed_store = Arc::new(
         sentinel_daemon::feed::store::FeedStore::open(&db_path(&state_dir))
             .map_err(|e| std::io::Error::other(format!("open feed_store: {e}")))?,
@@ -152,7 +152,7 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         startup_instant: std::time::Instant::now(),
     });
 
-    // Spawn the per-run snapshot GC sweeper (D-29 / plan 02-07).
+    // Spawn the per-run snapshot GC sweeper (v0.2).
     // The handle is intentionally dropped — the GC thread runs as long as the
     // daemon process; on daemon exit the OS reaps the thread.
     let _gc_handle = sentinel_daemon::snapshot_gc::spawn_gc_thread(
@@ -179,9 +179,9 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         state.last_fetch_result.clone(),
     );
 
-    // TODO(03-08): wire gap_detector → log_writer + recent_gaps when the gap fires.
-    //   - hardened-runtime gap (csops): plan 03-08 extends gap_detector closure
-    //   - env-not-propagated gap (TREE-06): plan 03-08 extends EnvNotPropagatedGap handler
+    // TODO: wire gap_detector -> log_writer + recent_gaps when the gap fires.
+    //   - hardened-runtime gap (csops): extends gap_detector closure
+    //   - env-not-propagated gap (TREE-06): extends EnvNotPropagatedGap handler
     let server = IpcServer::bind(&socket_path(&state_dir), state)?;
     let pid = unsafe { libc::getpid() };
     let now = std::time::SystemTime::now()

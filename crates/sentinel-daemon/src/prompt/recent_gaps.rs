@@ -1,6 +1,6 @@
 //! crates/sentinel-daemon/src/prompt/recent_gaps.rs
 //!
-//! Phase 3 plan 03-06 — bounded ring of recent coverage gaps for StatusReply
+//! v0.3 — bounded ring of recent coverage gaps for StatusReply
 //! (RESEARCH.md Open Question §9). Capacity 100 newest-wins.
 
 use std::collections::VecDeque;

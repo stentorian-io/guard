@@ -1,4 +1,4 @@
-//! Phase 3 plan 03-03: InstallArtifactStore CRUD tests (D-62).
+//! v0.3 — InstallArtifactStore CRUD tests.
 
 use sentinel_daemon::install_artifacts::{read_via_db, InstallArtifactStore};
 use sentinel_daemon::rule_store::RuleStore;

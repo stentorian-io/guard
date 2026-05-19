@@ -1,4 +1,4 @@
--- Phase 4 plan 04-02 — feed_iocs + feed_metadata tables (D-88 + D-89).
+-- v0.4 — feed_iocs + feed_metadata tables.
 --
 -- WAL mode is online-safe in SQLite. Per 04-SPIKE-RESULTS.md A3 (empirically
 -- verified Wave 0): a `M::up("PRAGMA journal_mode = WAL;")` migration step

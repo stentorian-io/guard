@@ -1,17 +1,16 @@
-// Phase 1 success criterion #2: this script attempts to connect to a host
-// that resolves successfully via DNS but is NOT in the Phase 1 allowlist.
-// The Sentinel hook must intercept (at getaddrinfo or connect) and deny.
+// This script attempts to connect to a host that resolves successfully via
+// DNS but is NOT in the curated allowlist. The Sentinel hook must intercept
+// (at getaddrinfo or connect) and deny.
 //
-// ISS-03 remediation: we use `discord.com` instead of `evil.example.com`
-// because `evil.example.com` is a non-existent subdomain of RFC-2606
-// reserved `example.com` and a real DNS resolver returns NXDOMAIN for it
-// (Node surfaces as ENOTFOUND). That made the original assertion
-// indistinguishable from "Sentinel didn't fire -- the host just doesn't
-// resolve". `discord.com` (a) resolves successfully outside Sentinel, (b)
-// is NOT in D-18's Phase 1 allowlist, so the only failure path is
-// Sentinel-induced. The companion test in deny.rs additionally exercises
-// a loopback (allowlisted) host -- the differential proves Sentinel
-// discriminated.
+// We use `discord.com` instead of `evil.example.com` because
+// `evil.example.com` is a non-existent subdomain of RFC-2606 reserved
+// `example.com` and a real DNS resolver returns NXDOMAIN for it (Node
+// surfaces as ENOTFOUND). That made the original assertion indistinguishable
+// from "Sentinel didn't fire -- the host just doesn't resolve".
+// `discord.com` (a) resolves successfully outside Sentinel, (b) is NOT in
+// the curated allowlist, so the only failure path is Sentinel-induced. The
+// companion test in deny.rs additionally exercises a loopback (allowlisted)
+// host -- the differential proves Sentinel discriminated.
 //
 // SENTINEL_DENY_HOST env var lets the test override the host.
 // SENTINEL_DENY_PORT env var lets the test override the port.

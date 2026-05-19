@@ -30,7 +30,7 @@ fn hmac_key_roundtrip_and_snapshot_signing() {
     assert_eq!(key, loaded, "round-trip key must match");
 
     // Publish a snapshot (publish_run reads the key from state_dir)
-    let snap = Snapshot::phase2_default();
+    let snap = Snapshot::v2_default();
     let uuid = "m004-integ-001";
     let pub_ = publish_run(state_dir, &snap, uuid).unwrap();
 
@@ -93,7 +93,7 @@ fn hmac_no_key_means_no_hmac_in_manifest() {
     ensure_runs_dir(state_dir).unwrap();
 
     // Publish WITHOUT generating a key
-    let snap = Snapshot::phase2_default();
+    let snap = Snapshot::v2_default();
     let uuid = "m004-integ-nokey";
     let pub_ = publish_run(state_dir, &snap, uuid).unwrap();
 

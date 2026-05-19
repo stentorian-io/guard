@@ -1,9 +1,9 @@
-//! Phase 3 plan 03-13 BLOCKER #1 — SIGINT handler unit test.
+//! v0.3 — SIGINT handler unit test.
 //!
 //! Note: we cannot test killpg() in a unit test (would kill the test runner).
 //! We test ONLY the in-flight prompt_id snapshot semantics. The cancel-emission
-//! over a live PromptChannel + the killpg propagation are observed in plan 03-14
-//! e2e (prompt_cancel_via_sigint).
+//! over a live PromptChannel + the killpg propagation are observed in e2e
+//! (prompt_cancel_via_sigint).
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};

@@ -108,7 +108,7 @@ entries:
     }
 }
 
-/// WARNING-11 (Phase 2 review): single-TLD suffixes like `.com` (4 bytes)
+/// WARNING (v0.2 review): single-TLD suffixes like `.com` (4 bytes)
 /// are catastrophically over-broad — `.com` matches every `.com` host on
 /// the internet. The previous `MIN_SUFFIX_LEN = 4` accepted these. The
 /// fix raised the limit to 6 so all the canonical mistakes are rejected.
@@ -122,7 +122,7 @@ fn parse_yaml_rejects_top_level_tld_suffix() {
         let res = parse_yaml(&yaml);
         assert!(
             matches!(res, Err(CuratedError::InvalidPattern { .. })),
-            "WARNING-11: pattern {} must be rejected as too short; got {:?}",
+            "WARNING: pattern {} must be rejected as too short; got {:?}",
             bad_tld,
             res
         );
@@ -179,7 +179,7 @@ fn parse_yaml_rejects_malformed() {
 
 #[test]
 fn min_suffix_len_const_is_6() {
-    // WARNING-11: raised from 4 to 6 to reject single-TLD suffixes like
+    // WARNING: raised from 4 to 6 to reject single-TLD suffixes like
     // ".com" / ".org" / ".net" / ".dev" / ".app" / ".io".
     assert_eq!(MIN_SUFFIX_LEN, 6);
 }

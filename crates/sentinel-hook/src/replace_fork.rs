@@ -41,7 +41,7 @@ fn is_untracked_peer(err: &IpcClientError) -> bool {
 
 use crate::raw_syscall;
 
-/// RAII guard — same shape as Phase 1 InHookGuard in replace_libc.rs. Holds
+/// RAII guard — same shape as v0.1 InHookGuard in replace_libc.rs. Holds
 /// IN_HOOK=true for the entire shadow scope; releases on drop.
 struct InHookGuard {
     _priv: (),
@@ -153,10 +153,9 @@ fn child_pidversion(child_pid: libc::pid_t) -> u32 {
 
 /// Best-effort current process audit token for use as `parent_audit_token`.
 /// The daemon trusts kernel peer-auth (LOCAL_PEERTOKEN) over wire-claimed
-/// values (ENF-08 invariant from Phase 1 plan 04, carried forward by plan
-/// 02-04 handlers).
+/// values (ENF-08 invariant from v0.1, carried forward by v0.2 handlers).
 ///
-/// BLOCKER-07 fix (Phase 2 review): we now populate `val[5] = getpid()` and
+/// BLOCKER-07 fix (v0.2 review): we now populate `val[5] = getpid()` and
 /// `val[6] = getppid()` so the wire field carries USEFUL information for
 /// the daemon to consult as a fallback hint when the peer-auth pid alone
 /// does not place the peer in the tracked tree (e.g. a process re-execing
@@ -296,7 +295,7 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
         // Continue regardless — best-effort.
     }
 
-    // BLOCKER-05 assumption (Phase 2 review): we hold IN_HOOK=true across
+    // BLOCKER-05 assumption (v0.2 review): we hold IN_HOOK=true across
     // the libc::posix_spawn call. Apple's posix_spawn(2) implementation
     // atomically fork+execs without invoking user-visible interpose records
     // during the in-flight window — the child's image is replaced before

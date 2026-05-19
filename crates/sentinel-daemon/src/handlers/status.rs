@@ -1,10 +1,10 @@
 //! crates/sentinel-daemon/src/handlers/status.rs
 //!
-//! Phase 3 plan 03-08 — Status IPC handler (CLI-02 / D-69..D-72).
+//! v0.3 — Status IPC handler.
 //!
-//! Phase 4 plan 04-03 — populates `StatusReply.feeds[]` from `feed_metadata`
-//! per D-95 and promotes `daemon_state` to `Degraded` when any feed has
-//! `last_pull_outcome != "ok"` (TI-06 surfacing). `StaleFeeds` is reserved
+//! v0.4 — populates `StatusReply.feeds[]` from `feed_metadata`
+//! and promotes `daemon_state` to `Degraded` when any feed has
+//! `last_pull_outcome != "ok"`. `StaleFeeds` is reserved
 //! for the informational case (any feed `!fresh` but no outright failure)
 //! and emitted only when no Degraded condition fires.
 
@@ -19,7 +19,7 @@ use crate::ipc_server::DaemonState;
 
 const ONE_DAY_MS: u64 = 24 * 60 * 60 * 1000;
 
-/// D-95 freshness threshold: a feed is `fresh` iff its last pull was within
+/// Freshness threshold: a feed is `fresh` iff its last pull was within
 /// the last 7 days AND outcome was "ok". Outside the window OR a non-ok
 /// outcome → `fresh = false`.
 pub const FRESH_THRESHOLD_MS: u64 = 7 * 24 * 60 * 60 * 1000;
@@ -40,8 +40,8 @@ pub fn handle_status(state: &DaemonState) -> StatusReply {
         .map(|run| TrackedRootInfo {
             run_uuid: run.run_uuid,
             audit_token: sentinel_ipc::AuditTokenWire::from(run.tracked_root),
-            argv: vec![],      // argv not stored on RunRecord in Phase 3; CLI renders as "unknown"
-            started_at_ms: 0,  // not stored on RunRecord in Phase 3
+            argv: vec![],      // argv not stored on RunRecord in v0.3; CLI renders as "unknown"
+            started_at_ms: 0,  // not stored on RunRecord in v0.3
         })
         .collect();
 
@@ -61,12 +61,12 @@ pub fn handle_status(state: &DaemonState) -> StatusReply {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
 
-    // Phase 4 plan 04-03 (D-95): populate feeds[] from feed_metadata. The
+    // v0.4: populate feeds[] from feed_metadata. The
     // build_feeds_info helper iterates FEED_NAMES so absent rows produce a
     // FeedInfo with last_pulled_at_ms=None / fresh=false rather than being
     // silently dropped.
     let feeds = build_feeds_info(&state.feed_store, now_ms);
-    // Phase 4 plan 04-03 (TI-06 surfacing): also pull raw metadata rows so
+    // v0.4: also pull raw metadata rows so
     // compute_daemon_state can read last_pull_outcome — a row with outcome
     // other than "ok" promotes daemon_state to Degraded.
     let feed_metadata_states = state
@@ -88,7 +88,7 @@ pub fn handle_status(state: &DaemonState) -> StatusReply {
     };
 
     // WARNING #6 fix: daemon-computed daemon_state.
-    // Phase 4 plan 04-03 (TI-06): also Degraded on any feed_metadata row with
+    // v0.4: also Degraded on any feed_metadata row with
     // last_pull_outcome != "ok"; StaleFeeds emitted only as a softer signal
     // when no Degraded condition fires.
     let snapshot_failed = state
@@ -102,7 +102,7 @@ pub fn handle_status(state: &DaemonState) -> StatusReply {
 
 /// Pure function for unit testing the Degraded-determination logic.
 ///
-/// Phase 4 plan 04-03 — extended signature: also takes `feeds: &[FeedInfo]`
+/// v0.4 — extended signature: also takes `feeds: &[FeedInfo]`
 /// (to read `fresh` for the StaleFeeds path) and `feed_metadata_states:
 /// &[FeedMetadataRow]` (to read `last_pull_outcome` for the Degraded path).
 ///
@@ -133,7 +133,7 @@ pub fn compute_daemon_state(
     }
     // StaleFeeds is meaningful only after at least one successful pull has
     // been recorded. A never-pulled daemon (no feed_metadata rows) is NOT
-    // stale — it's fresh-install. The Phase 3 e2e tests rely on this:
+    // stale — it's fresh-install. The v0.3 e2e tests rely on this:
     // status_state_transitions runs against a fresh daemon harness with
     // SENTINEL_SKIP_FEED_FETCH=1, so no feed_metadata rows exist; the
     // expected state is Operational.
@@ -145,7 +145,7 @@ pub fn compute_daemon_state(
     DaemonStateKind::Operational
 }
 
-/// D-95: enumerate FEED_NAMES and produce a FeedInfo per feed. Absent rows
+/// Enumerate FEED_NAMES and produce a FeedInfo per feed. Absent rows
 /// are surfaced with `last_pulled_at_ms = None` and `fresh = false` rather
 /// than being dropped.
 pub fn build_feeds_info(feed_store: &FeedStore, now_ms: u64) -> Vec<FeedInfo> {

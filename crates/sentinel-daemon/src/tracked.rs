@@ -1,13 +1,13 @@
 //! Process-tree supervisor (TREE-03/04/05/06).
 //!
-//! Phase 1 used `TrackedRoots` (HashSet of AuditToken) for the simple
-//! "is this process a tracked root?" question. Phase 2 grows into a full
+//! v0.1 used `TrackedRoots` (HashSet of AuditToken) for the simple
+//! "is this process a tracked root?" question. v0.2 grows into a full
 //! tree: nodes are keyed by AuditToken (NOT pid — TREE-05 reparenting
 //! requires a stable identity), each carries a parent link + a copied
 //! `tracked_root` field set at fork time and immutable thereafter.
 //!
 //! Migration: ipc_server.rs (Task 4) is updated to call `insert_root`
-//! instead of `insert`. The Phase 1 `TrackedRoots` type is removed.
+//! instead of `insert`. The v0.1 `TrackedRoots` type is removed.
 
 use crossbeam_channel::Sender;
 use sentinel_core::AuditToken;
@@ -30,14 +30,14 @@ pub struct ProcessNode {
     pub run_uuid: String,
     pub binary_path: String,
     pub coverage_gap: Option<CoverageGap>,
-    /// Phase 3 plan 03-04 (D-55): PM env subset captured from ExecEvent V3.
+    /// v0.3: PM env subset captured from ExecEvent V3.
     /// None until an ExecEvent V3 with non-empty pm_env arrives for this node.
     pub pm_env_snapshot: Option<Vec<(String, String)>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoverageGap {
-    /// csops pre-check was hardened AND DylibLoaded never arrived (D-34).
+    /// csops pre-check was hardened AND DylibLoaded never arrived.
     ConfirmedHardened {
         binary_path: String,
         detected_at_ms: u64,
@@ -65,10 +65,10 @@ pub struct RunRecord {
     pub tracked_root: AuditToken,
     pub snapshot_path: PathBuf,
     pub manifest_path: PathBuf,
-    /// Phase 3 plan 03-04: true if the CLI that initiated this run is connected
+    /// v0.3: true if the CLI that initiated this run is connected
     /// to a TTY (affects interactive prompt display).
     pub is_tty: bool,
-    /// Phase 3 plan 03-04: true if this run was started with --baseline-mode
+    /// v0.3: true if this run was started with --baseline-mode
     /// (learn-mode: observe and record, but don't block).
     pub baseline_mode: bool,
 }
@@ -77,7 +77,7 @@ pub struct RunRecord {
 pub struct ProcessTree {
     nodes: RwLock<HashMap<AuditToken, ProcessNode>>,
     runs: RwLock<HashMap<String, RunRecord>>,
-    /// Phase 3 plan 03-04: long-lived prompt-channel senders keyed by run_uuid.
+    /// v0.3: long-lived prompt-channel senders keyed by run_uuid.
     /// Sender<PromptRequest> does not implement Clone cleanly into RunRecord
     /// (it would require RunRecord to become non-Clone), so it lives in a
     /// parallel registry — per RESEARCH.md guidance.
@@ -185,7 +185,7 @@ impl ProcessTree {
             .cloned()
     }
 
-    // --- Phase 3 plan 03-04: pm_env snapshot ---
+    // --- v0.3: pm_env snapshot ---
 
     /// Store the filtered PM env snapshot on a ProcessNode identified by audit_token.
     /// No-op if the audit_token is not in the tree (untracked peer race — safe to ignore).
@@ -196,7 +196,7 @@ impl ProcessTree {
         }
     }
 
-    // --- Phase 3 plan 03-04: run field setters ---
+    // --- v0.3: run field setters ---
 
     /// Update is_tty on a RunRecord identified by run_uuid.
     /// No-op if the run_uuid is not in the map.
@@ -232,16 +232,16 @@ impl ProcessTree {
         }
     }
 
-    /// Return all active RunRecords (used by StatusReply handler in plan 03-08).
+    /// Return all active RunRecords (used by StatusReply handler).
     pub fn list_runs(&self) -> Vec<RunRecord> {
         let g = self.runs.read().unwrap_or_else(|p| p.into_inner());
         g.values().cloned().collect()
     }
 
-    // --- Phase 3 plan 03-04: prompt-channel registry ---
+    // --- v0.3: prompt-channel registry ---
 
     /// Register a long-lived prompt-channel Sender for the given run_uuid.
-    /// Called by the PromptChannelInit handler (plan 03-12).
+    /// Called by the PromptChannelInit handler.
     pub fn set_prompt_channel(&self, run_uuid: &str, sender: Sender<PromptRequest>) {
         let mut g = self
             .prompt_channels
@@ -272,7 +272,7 @@ impl ProcessTree {
     }
 
     /// Return the number of active long-lived prompt channels.
-    /// Used by ipc_server.rs's R-05 cap gate (plan 03-12).
+    /// Used by ipc_server.rs's R-05 cap gate.
     pub fn prompt_channels_len(&self) -> usize {
         let g = self
             .prompt_channels

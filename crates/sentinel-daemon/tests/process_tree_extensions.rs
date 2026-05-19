@@ -1,4 +1,4 @@
-//! Phase 3 plan 03-04: ProcessTree extensions for is_tty/baseline_mode/prompt_channel.
+//! v0.3 — ProcessTree extensions for is_tty/baseline_mode/prompt_channel.
 
 use crossbeam_channel::bounded;
 use sentinel_daemon::tracked::ProcessTree;
@@ -23,4 +23,4 @@ fn set_run_fields_no_op_when_run_unknown() {
     tree.set_run_baseline_mode("nonexistent", true);
 }
 
-// Note: full set_run_*_mode happy-path tests live in plan 03-07 once PrepareSnapshot wires the V3 fields.
+// Note: full set_run_*_mode happy-path tests live in the PrepareSnapshot V3 field wiring.

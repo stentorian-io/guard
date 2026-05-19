@@ -135,6 +135,7 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         last_snapshot_publish_failed: std::sync::atomic::AtomicBool::new(false),
         deferred_resolve: std::sync::Arc::new(sentinel_daemon::ipc_server::DeferredResolveTable::new()),
         startup_instant: std::time::Instant::now(),
+        ipc_hmac_key: sentinel_daemon::hmac_key::load(&state_dir),
     });
 
     // Spawn the per-run snapshot GC sweeper (v0.2).

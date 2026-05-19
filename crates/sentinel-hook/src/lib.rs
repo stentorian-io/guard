@@ -109,6 +109,7 @@ unsafe fn sentinel_hook_init() {
     //      the same fail-mode as v0.1 (no fork/exec tracking, but the verdict
     //      path still works against the snapshot).
     crate::ipc_client::cache_daemon_socket_from_env();
+    crate::ipc_client::cache_ipc_hmac_key();
 
     // 2. Load snapshot (manifest + digest verify + mmap).
     match snapshot::load_from_env() {

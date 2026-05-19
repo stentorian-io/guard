@@ -30,15 +30,15 @@ Sentinel is a free, open-source macOS supply-chain firewall that enforces defaul
 | CLI parsing | **clap 4.6** (derive) | Subcommands: wrap, status |
 | Serialization | **ciborium** (CBOR), **serde** | Snapshot format, IPC wire protocol |
 | Logging | **tracing** + **tracing-subscriber** | Daemon logs; JSONL forensic log to `~/Library/Logs/Sentinel/` |
-| Threat-intel | **gix** (git2 in Rust) | Clones ossf/malicious-packages + github/advisory-database repos; OSV JSON parsing |
-| Integrity | **HMAC-SHA256** snapshot signing | Hook verifies snapshot integrity at load time; self-check of hook binary hash |
+| Threat-intel | **Build-time embedded** (nightly CI) | OSV.dev bulk archive → `scripts/update-feed-rules.sh` → YAML deny rules baked in at compile time |
+| Integrity | **HMAC-SHA256** snapshot + IPC signing | Snapshot integrity at load time; per-message HMAC + nonce on IPC frames; self-check of hook binary hash |
 | Process tracking | **audit_token** + **pidversion** | Fork/exec IPC events; PID-reuse guard via TASK_AUDIT_TOKEN |
 
 ### Key Dependencies
 
-**Production:** libc, ciborium, serde, nix, clap, rusqlite, uuid, signal-hook, memmap2, socket2, tracing, plist, ctor, gix, notify, flate2, semver, url, walkdir
+**Production:** libc, ciborium, serde, nix, clap, rusqlite, uuid, signal-hook, memmap2, socket2, tracing, plist, ctor, notify, flate2, semver, url, sha2, hmac, rand
 
-**Dev/Test:** criterion, tempfile, assert_cmd, predicates, sha2, hmac, rand
+**Dev/Test:** criterion, tempfile, assert_cmd, predicates
 
 ## Architecture
 
@@ -149,7 +149,8 @@ Conventional commits scoped by subsystem: `feat(hook):`, `fix(daemon):`, `test(e
 ### IPC Protocol
 
 - Schema versions: V1 (RegisterRoot — frozen), V2 (PrepareSnapshot/Prompt), V3 (Resolve/Status), V4 (ForkEvent/ExecEvent/DylibLoaded)
-- Frame format: 4-byte big-endian length prefix + CBOR payload
+- Frame format: `[1-byte tag][8-byte nonce LE][32-byte HMAC-SHA256][4-byte length BE][CBOR payload]` (signed); unsigned fallback when no HMAC key
+- Per-message signing: HMAC-SHA256 covers tag + nonce + length prefix + payload; reuses snapshot HMAC key from `state_dir/hmac.key`
 - Auth: kernel-sourced audit token via `LOCAL_PEERTOKEN` socket option
 
 ### User Rules

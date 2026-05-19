@@ -36,6 +36,11 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
+fn load_ipc_hmac_key(sock: &Path) -> Option<[u8; 32]> {
+    let state_dir = sock.parent()?;
+    sentinel_daemon::hmac_key::load(state_dir)
+}
+
 /// WR-11 fix: PrepareSnapshot's read timeout must EXCEED the daemon's
 /// `fetch_feeds_blocking` worst-case deadline. The daemon allows up to
 /// 120s for first-run shallow clones (`FETCH_DEADLINE_FIRST_RUN`) +
@@ -169,31 +174,49 @@ where
     ReplyT: serde::de::DeserializeOwned,
 {
     let mut stream = connect_with_timeout(sock)?;
-    // Override the per-stream read timeout if it differs from the default
-    // already set by `connect_with_timeout`. `set_read_timeout` is a
-    // best-effort; if it fails the request still proceeds (the CLI just
-    // uses the previously-set 5s default).
     if read_timeout != READ_TIMEOUT {
         let _ = stream.set_read_timeout(Some(read_timeout));
     }
     stream
         .write_all(&[tag])
         .map_err(|e| CliError::DaemonUnreachable(format!("tag write: {e}")))?;
-    write_frame(&mut stream, req)
-        .map_err(|e| CliError::DaemonUnreachable(format!("write frame: {e}")))?;
-    let mut tag_back = [0u8; 1];
-    stream
-        .read_exact(&mut tag_back)
-        .map_err(|e| CliError::DaemonUnreachable(format!("read tag echo: {e}")))?;
-    if tag_back[0] != tag {
-        return Err(CliError::DaemonUnreachable(format!(
-            "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
-            tag_back[0]
-        )));
+
+    if let Some(key) = load_ipc_hmac_key(sock) {
+        let mut signer = sentinel_ipc::signed_frame::FrameSigner::new(key);
+        signer
+            .write_signed(&mut stream, tag, req)
+            .map_err(|e| CliError::DaemonUnreachable(format!("write signed: {e}")))?;
+        let mut tag_back = [0u8; 1];
+        stream
+            .read_exact(&mut tag_back)
+            .map_err(|e| CliError::DaemonUnreachable(format!("read tag echo: {e}")))?;
+        if tag_back[0] != tag {
+            return Err(CliError::DaemonUnreachable(format!(
+                "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
+                tag_back[0]
+            )));
+        }
+        let reply: ReplyT = signer
+            .read_signed(&mut stream, tag)
+            .map_err(|e| CliError::DaemonUnreachable(format!("read signed reply: {e}")))?;
+        Ok(reply)
+    } else {
+        write_frame(&mut stream, req)
+            .map_err(|e| CliError::DaemonUnreachable(format!("write frame: {e}")))?;
+        let mut tag_back = [0u8; 1];
+        stream
+            .read_exact(&mut tag_back)
+            .map_err(|e| CliError::DaemonUnreachable(format!("read tag echo: {e}")))?;
+        if tag_back[0] != tag {
+            return Err(CliError::DaemonUnreachable(format!(
+                "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
+                tag_back[0]
+            )));
+        }
+        let reply: ReplyT = read_frame(&mut stream)
+            .map_err(|e| CliError::DaemonUnreachable(format!("read reply: {e}")))?;
+        Ok(reply)
     }
-    let reply: ReplyT = read_frame(&mut stream)
-        .map_err(|e| CliError::DaemonUnreachable(format!("read reply: {e}")))?;
-    Ok(reply)
 }
 
 /// Send `PrepareSnapshot { cwd }` BEFORE posix_spawn so the daemon merges

@@ -13,5 +13,5 @@ if [ "${SKIP_PREPUSH:-0}" = "1" ]; then
   exit 0
 fi
 
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
 exec "$REPO_ROOT/scripts/ci-local.sh"

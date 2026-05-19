@@ -5,6 +5,9 @@
 #
 set -euo pipefail
 
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+source "$REPO_ROOT/scripts/check-cache.sh"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BOLD='\033[1m'
@@ -19,6 +22,12 @@ pass() {
   echo -e "${GREEN}✓${RESET} $1"
 }
 
+skip() {
+  echo -e "${GREEN}✓${RESET} $1 ${BOLD}(cached)${RESET}"
+}
+
+cache_prune
+
 # ── 1. Reject Co-Authored-By lines ──────────────────────────────────────────
 #
 # Check the staged diff for Co-Authored-By trailers. The commit message isn't
@@ -30,25 +39,41 @@ pass() {
 
 # ── 2. Markdown lint ────────────────────────────────────────────────────────
 if command -v npx &>/dev/null; then
-  # Only lint staged .md files
   MD_FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.md' || true)
   if [ -n "$MD_FILES" ]; then
-    echo "$MD_FILES" | xargs npx --yes markdownlint-cli2 \
-      || fail "markdown lint failed"
-    pass "markdown lint"
+    fp=$(staged_md_fingerprint)
+    if cache_hit "pre-commit:mdlint" "$fp"; then
+      skip "markdown lint"
+    else
+      echo "$MD_FILES" | xargs npx --yes markdownlint-cli2 \
+        || fail "markdown lint failed"
+      cache_mark "pre-commit:mdlint" "$fp"
+      pass "markdown lint"
+    fi
   fi
 else
   echo "⚠ npx not found — skipping markdown lint"
 fi
 
 # ── 3. Cargo check (fast type/borrow check, no codegen) ─────────────────────
-cargo check --workspace --quiet \
-  || fail "cargo check failed"
-pass "cargo check"
+fp=$(rust_fingerprint)
+if cache_hit "pre-commit:cargo-check" "$fp"; then
+  skip "cargo check"
+else
+  cargo check --workspace --quiet \
+    || fail "cargo check failed"
+  cache_mark "pre-commit:cargo-check" "$fp"
+  pass "cargo check"
+fi
 
 # ── 4. Cargo test — unit + integration tests (excludes E2E) ─────────────────
-cargo test --workspace --exclude sentinel-e2e --quiet \
-  || fail "cargo test failed"
-pass "cargo test (unit + integration, E2E skipped)"
+if cache_hit "pre-commit:cargo-test" "$fp"; then
+  skip "cargo test (unit + integration, E2E skipped)"
+else
+  cargo test --workspace --exclude sentinel-e2e --quiet \
+    || fail "cargo test failed"
+  cache_mark "pre-commit:cargo-test" "$fp"
+  pass "cargo test (unit + integration, E2E skipped)"
+fi
 
 echo -e "\n${GREEN}${BOLD}All pre-commit checks passed.${RESET}"

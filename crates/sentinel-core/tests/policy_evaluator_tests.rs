@@ -204,8 +204,7 @@ fn builtin_deny_blocks_workers_dev() {
 // --- POL-06 regression -----------------------------------------------
 
 #[test]
-fn pol_06_curated_allow_beats_feed_deny() {
-    // Entries pre-sorted by tier — curated_allow at index 0, feed_deny at 1.
+fn pol_06_curated_allow_beats_confirmed_deny() {
     let entries = [
         entry(
             RuleKind::Allow,
@@ -215,7 +214,7 @@ fn pol_06_curated_allow_beats_feed_deny() {
         ),
         entry(
             RuleKind::Deny,
-            RuleTier::FeedDeny,
+            RuleTier::ConfirmedDeny,
             MatchType::Exact,
             "registry.npmjs.org",
         ),
@@ -272,7 +271,8 @@ fn source_kind_as_label_covers_all_variants() {
     assert_eq!(SourceKind::BuiltinDeny.as_label(), "builtin-deny");
     assert_eq!(SourceKind::CuratedAllow.as_label(), "curated-allow");
     assert_eq!(SourceKind::UserDeny.as_label(), "user-deny");
-    assert_eq!(SourceKind::FeedDeny.as_label(), "feed-deny");
+    assert_eq!(SourceKind::ConfirmedDeny.as_label(), "confirmed-deny");
+    assert_eq!(SourceKind::SuspectDeny.as_label(), "suspect-deny");
     assert_eq!(SourceKind::UserAllow.as_label(), "user-allow");
     assert_eq!(SourceKind::DefaultDeny.as_label(), "default-deny");
 }

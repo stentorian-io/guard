@@ -15,9 +15,10 @@ pub enum SourceKind {
     HardRule(&'static str),
     BuiltinDeny,
     CuratedAllow,
+    ConfirmedDeny,
     UserDeny,
-    FeedDeny,
     UserAllow,
+    SuspectDeny,
     DefaultDeny,
 }
 
@@ -26,9 +27,10 @@ impl SourceKind {
         match tier {
             RuleTier::BuiltinDeny => SourceKind::BuiltinDeny,
             RuleTier::CuratedAllow => SourceKind::CuratedAllow,
+            RuleTier::ConfirmedDeny => SourceKind::ConfirmedDeny,
             RuleTier::UserDeny => SourceKind::UserDeny,
-            RuleTier::FeedDeny => SourceKind::FeedDeny,
             RuleTier::UserAllow => SourceKind::UserAllow,
+            RuleTier::SuspectDeny => SourceKind::SuspectDeny,
         }
     }
 
@@ -41,9 +43,10 @@ impl SourceKind {
             SourceKind::HardRule(_) => "hard-rule",
             SourceKind::BuiltinDeny => "builtin-deny",
             SourceKind::CuratedAllow => "curated-allow",
+            SourceKind::ConfirmedDeny => "confirmed-deny",
             SourceKind::UserDeny => "user-deny",
-            SourceKind::FeedDeny => "feed-deny",
             SourceKind::UserAllow => "user-allow",
+            SourceKind::SuspectDeny => "suspect-deny",
             SourceKind::DefaultDeny => "default-deny",
         }
     }

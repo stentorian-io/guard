@@ -307,8 +307,9 @@ fn dispatch_cancel(state: &DaemonState, run_uuid: &str, cancel: PromptCancel) {
 ///
 /// `intel` is computed by combining package-source matches (when
 /// package_context is provided) with host-source matches (always probed when
-/// the source_kind looks like a feed-deny verdict, since FeedDeny is the
-/// principal path that a host_ioc-derived row produces).
+/// the source_kind looks like a feed-derived verdict (confirmed-deny or
+/// suspect-deny), since those are the principal paths that host_ioc-derived
+/// rows produce).
 #[allow(clippy::too_many_arguments)]
 fn emit_decision_row(
     state: &DaemonState,
@@ -324,7 +325,7 @@ fn emit_decision_row(
     if let Some(pkg) = package_context {
         intel_combined.extend(log_writer::enrich(pkg));
     }
-    if matches!(source_kind, "FeedDeny" | "feed-deny" | "feed_deny") {
+    if matches!(source_kind, "confirmed-deny" | "suspect-deny") {
         intel_combined.extend(log_writer::enrich_for_host(dest_host));
     }
     let intel = if intel_combined.is_empty() {

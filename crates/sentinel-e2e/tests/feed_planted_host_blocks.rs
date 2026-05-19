@@ -1,4 +1,4 @@
-//! v0.4: a planted FeedDeny for an unallowlisted exfil host blocks a
+//! v0.4: a planted ConfirmedDeny for an unallowlisted exfil host blocks a
 //! wrapped connection AND (where the dylib's deny path emits log rows) the
 //! JSONL block-row carries an `intel` field referencing the planted
 //! advisory_id.
@@ -6,7 +6,7 @@
 //! Test scope:
 //! - HARD: feed_iocs row exists for evil-fixture.example.com (fetch +
 //!   storage layer wired)
-//! - HARD: per-run snapshot contains a FeedDeny entry for the planted host
+//! - HARD: per-run snapshot contains a ConfirmedDeny entry for the planted host
 //!   (indicators flow into the snapshot pipeline)
 //! - HARD: a wrapped `net.connect(443, 'evil-fixture.example.com')` exits
 //!   non-zero (the dylib's libc-deny path fires; connect never reaches the
@@ -33,7 +33,7 @@ fn planted_host_ioc_blocks_with_intel_attribution() {
     .expect("start daemon");
 
     // First sentinel wrap: trigger PrepareSnapshot which fetches the fixture
-    // and merges FeedDeny entries into the per-run snapshot. /usr/bin/true
+    // and merges ConfirmedDeny entries into the per-run snapshot. /usr/bin/true
     // exits 0; we only need PrepareSnapshot to fire.
     let primer = Command::new(&cli)
         .arg("wrap")
@@ -75,7 +75,7 @@ fn planted_host_ioc_blocks_with_intel_attribution() {
         "feed_iocs row must reference the planted advisory_id"
     );
 
-    // HARD: per-run snapshot CBOR carries a FeedDeny entry for the planted
+    // HARD: per-run snapshot CBOR carries a ConfirmedDeny entry for the planted
     // host — proves the D-90 snapshot-merge path (build_feeddeny_entries) is
     // wired and the host_ioc is reachable from the dylib's snapshot lookup.
     let runs_dir = harness.state_dir.join("runs");
@@ -90,12 +90,12 @@ fn planted_host_ioc_blocks_with_intel_attribution() {
     let bytes = std::fs::read(cbor.path()).expect("read snapshot");
     let snap = sentinel_core::Snapshot::decode(&bytes).expect("decode snapshot");
     let has_feed_deny = snap.entries.iter().any(|e| {
-        matches!(e.tier, sentinel_core::RuleTier::FeedDeny)
+        matches!(e.tier, sentinel_core::RuleTier::ConfirmedDeny)
             && e.pattern == "evil-fixture.example.com"
     });
     assert!(
         has_feed_deny,
-        "per-run snapshot must contain FeedDeny for evil-fixture.example.com\n\
+        "per-run snapshot must contain ConfirmedDeny for evil-fixture.example.com\n\
          entries: {:?}",
         snap.entries
             .iter()

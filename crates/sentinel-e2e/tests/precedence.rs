@@ -1,14 +1,14 @@
 //! POL-06 unit-level regression: curated allow beats feed deny.
 //!
 //! Structural proof — no daemon, no spawn. Confirms that the tier ordering
-//! in evaluate_policy returns CuratedAllow's verdict before the FeedDeny
+//! in evaluate_policy returns CuratedAllow's verdict before the ConfirmedDeny
 //! tier is examined.
 //!
 //! POL-06 is enforced STRUCTURALLY by the AllowlistEntry type's RuleTier
-//! field: CuratedAllow=1 < FeedDeny=4. The daemon's PrepareSnapshot handler
-//! sorts entries by tier (verified in plan 02-06a's prepare_snapshot_tests);
-//! the dylib's hot path iterates the pre-sorted slice and returns at the
-//! first match. So a CuratedAllow entry encountered first wins.
+//! field: CuratedAllow=1 < ConfirmedDeny=2. The daemon's PrepareSnapshot
+//! handler sorts entries by tier; the dylib's hot path iterates the
+//! pre-sorted slice and returns at the first match. So a CuratedAllow
+//! entry encountered first wins.
 //!
 //! These tests live in sentinel-e2e (not sentinel-core) because they assert
 //! a CROSS-LAYER invariant: the daemon's tier-sort discipline + the dylib's
@@ -30,9 +30,9 @@ fn entry(kind: RuleKind, tier: RuleTier, mt: MatchType, pattern: &str) -> Allowl
 }
 
 #[test]
-fn pol_06_curated_allow_beats_feed_deny() {
-    // POL-06 invariant: a CuratedAllow entry at Tier 1 must beat a FeedDeny
-    // entry at Tier 4 for the same hostname. Pre-sorted by tier ASC.
+fn pol_06_curated_allow_beats_confirmed_deny() {
+    // POL-06 invariant: a CuratedAllow entry at Tier 1 must beat a
+    // ConfirmedDeny entry at Tier 2 for the same hostname.
     let entries = vec![
         entry(
             RuleKind::Allow,
@@ -42,7 +42,7 @@ fn pol_06_curated_allow_beats_feed_deny() {
         ),
         entry(
             RuleKind::Deny,
-            RuleTier::FeedDeny,
+            RuleTier::ConfirmedDeny,
             MatchType::Exact,
             "registry.npmjs.org",
         ),
@@ -58,16 +58,12 @@ fn pol_06_curated_allow_beats_feed_deny() {
 
 #[test]
 fn pol_06_holds_when_entries_supplied_in_arbitrary_order() {
-    // Even if entries arrive unsorted from upstream, the daemon's prepare-snapshot
-    // path is REQUIRED to sort by tier. This test mirrors what the daemon does:
-    // sort_by_key(|e| e.tier) before evaluation. Sorting is the structural
-    // guarantee — we explicitly demonstrate it here so a regression in the
-    // daemon's sort step would surface a test failure (the sorted slice yields
-    // the same answer regardless of input order).
+    // Even if entries arrive unsorted from upstream, the daemon's
+    // prepare-snapshot path sorts by tier. Sorting is the structural guarantee.
     let mut entries = vec![
         entry(
             RuleKind::Deny,
-            RuleTier::FeedDeny,
+            RuleTier::ConfirmedDeny,
             MatchType::Exact,
             "registry.npmjs.org",
         ),

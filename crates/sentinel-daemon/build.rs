@@ -42,6 +42,8 @@ fn main() {
                 if line.starts_with("- ") {
                     combined.push_str(&format!("  - kind: {kind}\n"));
                     let rest = line.trim_start_matches("- ");
+                    // Pass through confidence field if present in the
+                    // entry's first line (e.g. "- match: exact")
                     combined.push_str(&format!("    {rest}\n"));
                 } else if line.starts_with("  ") {
                     combined.push_str(&format!("  {line}\n"));

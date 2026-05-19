@@ -1,4 +1,4 @@
-//! Phase 5 plan 05-05 — VAL-04 D-12: corrupt-snapshot failure mode.
+//! v0.5 — corrupt-snapshot failure mode.
 //!
 //! Verifies the dylib's "fail closed for tracked subtrees on snapshot decode
 //! failure" contract.
@@ -39,7 +39,7 @@ fn corrupt_snapshot_causes_dylib_to_fail_closed() {
     let harness = DaemonHarness::start().expect("start daemon");
 
     // Build the corrupt manifest+snapshot pair under harness.state_dir/runs/
-    // (the canonical per-run snapshot location). Per Phase 02-06a layout:
+    // (the canonical per-run snapshot location). Layout:
     //   runs/<uuid>.cbor
     //   runs/<uuid>.manifest   (line 1 = abs path; line 2 = digest=<hex>)
     let runs_dir = harness.state_dir.join("runs");
@@ -121,7 +121,7 @@ fn corrupt_snapshot_causes_dylib_to_fail_closed() {
     //       fail-closed evidence — they indicate retry-able DNS errors.
     assert!(
         !out.status.success() && stdout.contains("DENIED"),
-        "VAL-04 D-12 HARD assertion failed: node did NOT fail-closed under corrupt snapshot.\n\
+        "HARD assertion failed: node did NOT fail-closed under corrupt snapshot.\n\
          exit: {:?}\n\
          stdout: {stdout}\n\
          stderr: {stderr}",
@@ -151,7 +151,7 @@ fn corrupt_snapshot_causes_dylib_to_fail_closed() {
     let is_transient_dns = dns_transient_codes.iter().any(|c| denied_line.contains(c));
     assert!(
         is_fail_closed && !is_transient_dns,
-        "VAL-04 D-12 WR-06 HARD assertion failed: node printed DENIED but the error \
+        "HARD assertion failed: node printed DENIED but the error \
          code does not match a fail-closed shape (connect-layer or getaddrinfo-layer). \
          Could be unrelated network failure rather than the dylib's interceptor.\n\
          denied line: {denied_line}\n\

@@ -44,7 +44,7 @@ fn deep_subdomain_exact_plus_suffix_on_parent() {
 
 #[test]
 fn workers_dev_not_in_shared_cdn_list() {
-    // workers.dev is on Phase 2 ALLOW-06 denylist; should NOT generate the
+    // workers.dev is on the v0.2 ALLOW-06 denylist; should NOT generate the
     // shared-CDN exact-SLD suggestion (only exact host + suffix).
     let s = generate_suggested_rules("foo.workers.dev");
     assert_eq!(s.len(), 2);

@@ -1,4 +1,4 @@
-//! E2E test harness for Phase 1 success criteria.
+//! E2E test harness for v0.1 success criteria.
 //!
 //! Provides:
 //!   - DaemonHarness: spawns sentineld serve in a tempdir; waits for ready;
@@ -49,17 +49,17 @@ impl DaemonHarness {
     /// (e.g. /tmp/se2e_XXXXXXXX/sentineld.sock — around 36 bytes) and a
     /// SEPARATE home dir (which does not need to hold the socket).
     pub fn start() -> std::io::Result<Self> {
-        // Phase 4 plan 04-03: e2e tests must NOT trigger real OSV/GHSA git
-        // fetches against github.com (offline CI flakes; per-run network
-        // cost). The default `start()` keeps Phase 1/2/3 e2e tests hermetic
-        // by setting SENTINEL_SKIP_FEED_FETCH=1. Hermetic Phase 4 e2e tests
-        // (plan 04-04) opt out via `start_with_env` and point at file://
-        // fixtures via SENTINEL_FEED_URL_OVERRIDE_*.
+        // e2e tests must NOT trigger real OSV/GHSA git fetches against
+        // github.com (offline CI flakes; per-run network cost). The default
+        // `start()` keeps v0.1/v0.2/v0.3 e2e tests hermetic by setting
+        // SENTINEL_SKIP_FEED_FETCH=1. Hermetic v0.4 e2e tests opt out via
+        // `start_with_env` and point at file:// fixtures via
+        // SENTINEL_FEED_URL_OVERRIDE_*.
         Self::start_with_env(&[("SENTINEL_SKIP_FEED_FETCH", "1")])
     }
 
-    /// Phase 4 plan 04-04: env-aware variant. Replaces (does NOT augment) the
-    /// default SENTINEL_SKIP_FEED_FETCH baseline so callers can opt out of
+    /// Env-aware variant. Replaces (does NOT augment) the default
+    /// SENTINEL_SKIP_FEED_FETCH baseline so callers can opt out of
     /// fetch-skipping by NOT including it in `extra` AND opt INTO real git
     /// fetches against `file://` fixtures via `SENTINEL_FEED_URL_OVERRIDE_*`.
     ///
@@ -68,7 +68,7 @@ impl DaemonHarness {
     ///
     /// Important: callers that want feeds OFF should pass
     /// `("SENTINEL_SKIP_FEED_FETCH", "1")` in `extra`. Callers that want feeds
-    /// ON (Phase 4 hermetic e2e against file:// fixtures) should pass the
+    /// ON (v0.4 hermetic e2e against file:// fixtures) should pass the
     /// `SENTINEL_FEED_URL_OVERRIDE_OSV` + `SENTINEL_FEED_URL_OVERRIDE_GHSA`
     /// env vars in `extra` and OMIT `SENTINEL_SKIP_FEED_FETCH`.
     pub fn start_with_env(extra: &[(&str, &str)]) -> std::io::Result<Self> {
@@ -381,7 +381,7 @@ pub fn resolve_probe() -> PathBuf {
     p
 }
 
-/// Phase 4 plan 04-04 — prepare a feed fixture as a real git repo.
+/// Prepare a feed fixture as a real git repo.
 ///
 /// The source tree carries plain JSON + an `init.sh`; this helper copies the
 /// fixture into a `tempfile::TempDir`, runs `init.sh` to produce a real
@@ -440,9 +440,9 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Phase 5 plan 05-02: shared spawn helper used by both
-/// `DaemonHarness::start_with_env` (initial start, owns fresh tempdirs) and
-/// `StoppedHarness::restart_with_env` (re-spawn against preserved tempdirs).
+/// Shared spawn helper used by both `DaemonHarness::start_with_env` (initial
+/// start, owns fresh tempdirs) and `StoppedHarness::restart_with_env`
+/// (re-spawn against preserved tempdirs).
 ///
 /// Ensures both code paths use identical spawn semantics — the env baseline
 /// (env_clear + HOME + PATH + RUST_LOG=info), the SIGTERM-on-Drop chain
@@ -521,7 +521,7 @@ impl DaemonHarness {
     /// holds the dirs alive; call `restart_with_env(...)` to spawn a fresh
     /// daemon over the same state.
     ///
-    /// Used by Plan 05-07's stale-feed test: start daemon to create the
+    /// Used by the stale-feed test: start daemon to create the
     /// `feed_metadata` schema, stop it, write a stale row via direct
     /// rusqlite, then restart so `compute_daemon_state` sees the stale row.
     pub fn stop_preserving_state(mut self) -> std::io::Result<StoppedHarness> {

@@ -1,4 +1,4 @@
-//! Phase 4: Threat-intelligence feed ingestion (D-78..D-95).
+//! v0.4: Threat-intelligence feed ingestion.
 //!
 //! Plan 04-01 (Wave 0): cfg(test)-gated spike modules validated gix
 //! shallow-clone API, panic-isolation viability, rusqlite_migration PRAGMA

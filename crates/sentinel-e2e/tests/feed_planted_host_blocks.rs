@@ -1,13 +1,13 @@
-//! Phase 4 TI-05: a planted FeedDeny for an unallowlisted exfil host blocks a
+//! v0.4: a planted FeedDeny for an unallowlisted exfil host blocks a
 //! wrapped connection AND (where the dylib's deny path emits log rows) the
 //! JSONL block-row carries an `intel` field referencing the planted
 //! advisory_id.
 //!
 //! Test scope:
-//! - HARD: feed_iocs row exists for evil-fixture.example.com (TI-01/02 fetch +
-//!   TI-08 storage layer wired)
+//! - HARD: feed_iocs row exists for evil-fixture.example.com (fetch +
+//!   storage layer wired)
 //! - HARD: per-run snapshot contains a FeedDeny entry for the planted host
-//!   (TI-05 — indicators flow into the snapshot pipeline)
+//!   (indicators flow into the snapshot pipeline)
 //! - HARD: a wrapped `net.connect(443, 'evil-fixture.example.com')` exits
 //!   non-zero (the dylib's libc-deny path fires; connect never reaches the
 //!   network)
@@ -15,8 +15,7 @@
 //!   currently a v1 limitation: the dylib's libc connect-deny path does not
 //!   route through log_writer (same caveat as `non_tty_deny_with_log.rs`).
 //!   The hard assertions above prove the data flows are wired; this soft
-//!   check will tighten when the libc-deny → log_writer path lands (out of
-//!   scope for plan 04-04 per the executor scope-boundary rule).
+//!   check will tighten when the libc-deny → log_writer path lands.
 
 use sentinel_e2e::{prepare_feed_fixture, resolve_cli, resolve_dylib, DaemonHarness};
 use std::process::Command;
@@ -109,7 +108,7 @@ fn planted_host_ioc_blocks_with_intel_attribution() {
     // doesn't resolve) or via the dylib's libc-deny path. Both produce
     // exit != 0 from the script's error handler.
     //
-    // (The exact mechanism doesn't matter for TI-05 success: TI-05 is "the
+    // (The exact mechanism doesn't matter for success: the assertion is "the
     // indicator influences the dylib's snapshot" — the snapshot assertion
     // above proves that. The connect-attempt assertion confirms nothing
     // accidentally allows the planted host.)
@@ -150,7 +149,7 @@ fn planted_host_ioc_blocks_with_intel_attribution() {
         connect_out.status.code(),
         Some(2),
         "node connect must NOT see 'connect' event (exit code 2 means an \
-         unexpected allow — TI-05 violation)\nstdout: {}\nstderr: {}",
+         unexpected allow — feed-deny violation)\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&connect_out.stdout),
         String::from_utf8_lossy(&connect_out.stderr),
     );

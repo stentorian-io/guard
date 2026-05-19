@@ -1,14 +1,14 @@
 //! crates/sentinel-daemon/src/handlers/insert_user_rule.rs
 //!
-//! Phase 3 plan 03-08 — InsertUserRule handler (CLI-04 sentinel approve).
+//! v0.3 — InsertUserRule handler (sentinel approve).
 //!
 //! Validates kind/match_type/non-empty-reason/non-empty-pattern before calling
 //! RuleStore::insert_user_rule. Returns InsertUserRuleReply::Ok { rule_id } on
 //! success or InsertUserRuleReply::Err { message } on validation/storage failure.
 //!
-//! T-03-08-01 (Tampering): validation happens HERE before any SQL call.
+//! Tampering mitigation: validation happens HERE before any SQL call.
 //! RuleStore::insert_user_rule uses parameterized queries; debug_asserts
-//! provide defense-in-depth at the store boundary (plan 03-04).
+//! provide defense-in-depth at the store boundary.
 
 use sentinel_ipc::{InsertUserRule, InsertUserRuleReply};
 

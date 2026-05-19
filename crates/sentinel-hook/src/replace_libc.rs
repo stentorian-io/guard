@@ -1,4 +1,4 @@
-//! Seven replacement functions for the Phase 1 libc hook surface (D-08).
+//! Seven replacement functions for the v0.1 libc hook surface (D-08).
 //!
 //! Hot-path discipline (D-03): no heap allocation; bytewise hostname matching;
 //! cache lookups against fixed-size storage; reentrancy-guard set/clear.
@@ -28,10 +28,10 @@ const MAX_RESOLVE_ATTEMPTS: usize = 4;
 /// Per-Resolve-IPC timeout in milliseconds. One-time cost per (host, port) pair;
 /// subsequent connects to the same sockaddr are cache-hit-only (sub-100µs).
 /// This deviates from the CLAUDE.md <100µs per-intercepted-call budget for
-/// the cache-miss warm-up path — documented in plan 02-08's threat model (T-02-08-02).
+/// the cache-miss warm-up path — documented in the threat model (T-02-08-02).
 const RESOLVE_TIMEOUT_MS: u64 = 100;
 
-/// BLOCKER-01 fix (Phase 2 review): the libc hot path now delegates to the
+/// BLOCKER-01 fix (v0.2 review): the libc hot path now delegates to the
 /// V2 tier-walk evaluator (`sentinel_core::policy::evaluate_policy`) — the
 /// SAME chokepoint used by `replace_nw.rs::decide_for_nw_connection`.
 ///
@@ -41,7 +41,7 @@ const RESOLVE_TIMEOUT_MS: u64 = 100;
 /// enforced on the libc connect/sendto/sendmsg/connectx path — even when a
 /// a user-approved AllowlistEntry tries to allow IMDS. The tier-walk
 /// also produces correct `SourceKind` attribution for the daemon's block-log
-/// (Phase 3 surfacing).
+/// (v0.3 surfacing).
 ///
 /// Inputs:
 ///   - `host`: the cache-resolved hostname bytes, OR empty if connect-by-IP
@@ -115,15 +115,15 @@ unsafe fn raw_sendmsg(s: c_int, msg: *const msghdr, flags: c_int) -> ssize_t {
 }
 
 // ISS-06 disposition: ENF-06 verification scope is documented as MATCHER-ONLY
-// in Phase 1. The `with_cache` helper takes a process-global Mutex on every
+// in v0.1. The `with_cache` helper takes a process-global Mutex on every
 // hot-path call (decide_for_sockaddr → cache.lookup), and `std::sync::Mutex`
 // on macOS is a `pthread_mutex` that may heap-allocate on first lock and has
 // unbounded contention behaviour. The criterion bench in benches/hot_path.rs
 // exercises `match_hostname` ONLY — it does NOT load the cache + Mutex path,
-// so the Phase 1 ENF-06 microbench is not load-bearing for the full hot-path
-// budget. The formal benchmark on real hardware lands in Phase 5 (VAL-03).
+// so the v0.1 ENF-06 microbench is not load-bearing for the full hot-path
+// budget. The formal benchmark on real hardware lands in v0.5 (VAL-03).
 //
-// D-17 locks the cache as "per-process". A future Phase 5 polish can convert
+// D-17 locks the cache as "per-process". A future v0.5 polish can convert
 // this to a `thread_local!` per-thread cache.
 fn with_cache<R>(f: impl FnOnce(&mut Cache) -> R) -> R {
     use std::sync::Mutex;
@@ -188,7 +188,7 @@ pub unsafe extern "C" fn sentinel_connect(
 // `connectx(2)` takes an `sa_endpoints_t` describing the source and destination
 // endpoints. ISS-09 remediation: extract the destination sockaddr (sae_dstaddr)
 // and route it through the same `decide_for_sockaddr` path as `connect`. D-08
-// locks connectx in Phase 1.
+// locks connectx in v0.1.
 //
 // `sa_endpoints_t` layout from `<sys/socket.h>` (Darwin):
 //     typedef struct sa_endpoints {
@@ -485,7 +485,7 @@ unsafe extern "C" fn sentinel_sendto(
         Some(g) => g,
         None => return unsafe { raw_sendto(s, buf, len, flags, to, tolen) },
     };
-    // Phase 1 policy for sendto:
+    // v0.1 policy for sendto:
     // - to null or tolen=0 → Allow (connected socket send; the destination
     //   address was already permitted at connect() time). Denying connected
     //   sends would break all established TCP data flows.
@@ -518,7 +518,7 @@ unsafe extern "C" fn sentinel_sendmsg(
         Some(g) => g,
         None => return unsafe { raw_sendmsg(s, msg, flags) },
     };
-    // Phase 1 policy for sendmsg:
+    // v0.1 policy for sendmsg:
     // - null msg → Deny (invalid call).
     // - msg_name null or msg_namelen=0 → Allow (connected socket send; no
     //   destination address means the kernel uses the connected address,
@@ -623,7 +623,7 @@ unsafe fn notify_deny_for_sockaddr(
 }
 
 fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
-    // Phase 1 policy: Unix domain sockets (AF_UNIX) are always allowed.
+    // v0.1 policy: Unix domain sockets (AF_UNIX) are always allowed.
     // They are local IPC — not network egress. Denying them breaks Node's
     // internal libuv event loop (it uses a Unix socketpair for signaling),
     // the daemon's own socket, and any other local IPC. (Rule 1 auto-fix.)

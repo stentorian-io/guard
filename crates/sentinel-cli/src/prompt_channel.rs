@@ -1,6 +1,6 @@
 //! crates/sentinel-cli/src/prompt_channel.rs
 //!
-//! Phase 3 plan 03-12 — long-lived channel client with in-flight prompt tracking.
+//! v0.3 — long-lived channel client with in-flight prompt tracking.
 //!
 //! CR-02: the channel is split into a Mutex-free reader half (owned by the
 //! render thread) and a Mutex-protected writer half (shared between the render
@@ -36,7 +36,7 @@ pub enum ClientChannelFrame {
 }
 
 /// In-flight prompt-id registry shared between the render-loop thread and the
-/// SIGINT handler (plan 03-13 BLOCKER #1).
+/// SIGINT handler.
 #[derive(Clone, Default)]
 pub struct InflightPrompts(pub Arc<Mutex<HashSet<String>>>);
 
@@ -105,7 +105,7 @@ impl PromptChannel {
                 return Err(CliError::Other(format!("PromptChannelInit Err: {message}")));
             }
         }
-        // Remove timeouts — the channel is long-lived (D-47).
+        // Remove timeouts — the channel is long-lived.
         let _ = stream.set_read_timeout(None);
         let _ = stream.set_write_timeout(None);
         // CR-02: split the stream so the blocking read half doesn't hold a lock
@@ -124,8 +124,8 @@ impl PromptChannel {
     }
 
     /// Returns a clone of the shared in-flight prompt-id registry. The SIGINT
-    /// handler (plan 03-13) takes a snapshot of this set on Ctrl-C and sends
-    /// a PromptCancel frame for each.
+    /// handler takes a snapshot of this set on Ctrl-C and sends a PromptCancel
+    /// frame for each.
     pub fn inflight_handle(&self) -> InflightPrompts {
         self.inflight.clone()
     }

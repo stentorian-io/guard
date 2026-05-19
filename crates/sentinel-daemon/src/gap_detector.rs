@@ -1,4 +1,4 @@
-//! Two-phase coverage-gap detector (D-34).
+//! Two-step coverage-gap detector.
 //!
 //! When the daemon receives an ExecEvent and the calling process's csops
 //! flags indicate hardened-runtime, this module schedules a 500 ms timer
@@ -11,8 +11,8 @@
 //! Threads are short-lived (≤ 500 ms) so peak thread count is bounded
 //! by ExecEvent rate × 500 ms.
 //!
-//! Phase 3 plan 03-08: on gap fire, ALSO push to `recent_gaps` ring and
-//! emit a `LogRow::Gap` to `log_writer` (T-03-08-05 repudiation mitigation).
+//! v0.3: on gap fire, ALSO push to `recent_gaps` ring and
+//! emit a `LogRow::Gap` to `log_writer` (repudiation mitigation).
 
 use crate::log_writer::{GapRecord, LogRow, LogWriter, JSONL_SCHEMA_VERSION, now_rfc3339};
 use crate::prompt::RecentGapsRing;
@@ -40,8 +40,8 @@ impl GapDetector {
     /// GAP_TIMEOUT_MS, sets `pending_gap` on the node in `tree`.
     /// Re-arming the same token cancels the prior timer.
     ///
-    /// Phase 3 plan 03-08: on timeout, ALSO push to `recent_gaps` + `log_writer`
-    /// (T-03-08-05: two independent forensic records of every gap).
+    /// v0.3: on timeout, ALSO push to `recent_gaps` + `log_writer`
+    /// (two independent forensic records of every gap).
     pub fn arm(
         &self,
         audit_token: AuditToken,
@@ -52,7 +52,7 @@ impl GapDetector {
     }
 
     /// Extended arm that also records the gap in `recent_gaps` and `log_writer`
-    /// when provided. Called from ipc_server.rs after Phase 3 plan 03-08 wires
+    /// when provided. Called from ipc_server.rs after v0.3 wires
     /// the forensic sinks into the ExecEvent / ForkEvent handlers.
     pub fn arm_with_forensics(
         &self,
@@ -79,7 +79,7 @@ impl GapDetector {
                     // No DylibLoaded within window → record the gap.
                     let _ = tree.set_coverage_gap(audit_token, pending_gap.clone());
 
-                    // Phase 3 plan 03-08 (T-03-08-05): forensic publication.
+                    // v0.3: forensic publication.
                     // Look up run_uuid from the node for GapInfo + LogRow.
                     let (run_uuid, binary_path) = match &pending_gap {
                         CoverageGap::ConfirmedHardened { binary_path, .. } => {

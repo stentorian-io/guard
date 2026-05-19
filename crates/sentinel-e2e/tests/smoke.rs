@@ -2,13 +2,13 @@
 //! wrapped process's (pid, pidversion) with the daemon AND the wrapped command
 //! exits 0.
 //!
-//! In Phase 1, the simplest reproducer is `sentinel wrap echo hello`. echo on
+//! In v0.1, the simplest reproducer is `sentinel wrap echo hello`. echo on
 //! macOS 26 is hardened, but for THIS test we don't need the dylib to fire —
 //! we only need to verify (a) the daemon received a RegisterRoot and (b) the
 //! wrapped command exited 0. The full dylib-injection verification is in
 //! deny.rs (Roadmap criterion #2) which uses Homebrew/nvm node.
 //!
-//! SC1 amendment (gap-closure plan 01-10): `smoke_dylib_loaded` proves that
+//! SC1 amendment: `smoke_dylib_loaded` proves that
 //! DYLD_INSERT_LIBRARIES actually loaded our dylib on the success path by
 //! using a NON-hardened Homebrew node binary (which does not strip DYLD_*
 //! on exec) and checking for a deterministic dylib ctor side-effect — a
@@ -60,13 +60,13 @@ fn sentinel_run_echo_hello_registers_with_daemon_and_exits_zero() {
 
     // Verify the daemon's stdout/stderr mentions the registered tracked root.
     // (We use the daemon's stderr log via tracing's info-level emission of the
-    // "registered tracked root" line from plan 05's ipc_server.rs.)
+    // "registered tracked root" line from ipc_server.rs.)
     //
     // Pull a small slice of the daemon's stderr by killing the harness Drop'd
     // in scope-end; instead, check the daemon's stderr is emitting on a separate
-    // thread. For Phase 1 simplicity, just verify the connect was made and
+    // thread. For v0.1 simplicity, just verify the connect was made and
     // daemon survived (the round-trip Ack already happened or we wouldn't
-    // have a 0 exit). This is sufficient evidence for criterion #1 in Phase 1.
+    // have a 0 exit). This is sufficient evidence for criterion #1 in v0.1.
     drop(harness);
 }
 
@@ -100,7 +100,7 @@ fn sentinel_run_propagates_child_exit_code() {
     );
 }
 
-/// SC1 amendment (gap-closure plan 01-10, BL-SC1):
+/// SC1 amendment:
 ///
 /// Prove that `DYLD_INSERT_LIBRARIES` successfully loaded `libsentinel_hook.dylib`
 /// into a non-hardened Homebrew node binary.

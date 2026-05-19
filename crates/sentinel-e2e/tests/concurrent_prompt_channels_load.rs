@@ -1,4 +1,4 @@
-//! Phase 3 plan 03-14 — R-05: 32 concurrent sentinel wrap invocations don't
+//! v0.3: 32 concurrent sentinel wrap invocations don't
 //! starve the daemon's worker pool.
 //!
 //! Each `sentinel wrap -- /bin/sleep 3` causes the CLI to call PrepareSnapshot
@@ -41,7 +41,7 @@ fn thirty_two_concurrent_sentinel_runs_succeed() {
         let status = child.wait().unwrap_or_else(|e| panic!("wait child {i}: {e}"));
         assert!(
             status.success(),
-            "child {i} failed: {status:?} — daemon may have exhausted worker pool (R-05)"
+            "child {i} failed: {status:?} — daemon may have exhausted worker pool"
         );
     }
 }

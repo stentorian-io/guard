@@ -7,7 +7,7 @@
 
 use crate::allowlist::{AllowlistEntry, RuleKind, RuleTier, Verdict};
 
-/// Source attribution. Stored by the daemon's block-log for Phase 3 surfacing.
+/// Source attribution. Stored by the daemon's block-log for v0.3 surfacing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceKind {
     /// Hard rule encoded in this file. The &'static str names the rule —
@@ -54,7 +54,7 @@ pub fn is_loopback_ip(ip: &[u8]) -> bool {
 /// Cloud-metadata host test. AWS/Azure/GCP all use 169.254.169.254 (IPv4)
 /// or fe80::a9fe:a9fe (IPv6 link-local) — D-25b.
 ///
-/// WARNING-05 fix (Phase 2 review): the previous implementation byte-compared
+/// WARNING-05 fix (v0.2 review): the previous implementation byte-compared
 /// against `b"fe80::a9fe:a9fe"` only. The IPv6 link-local form has many
 /// equivalent textual representations:
 ///   - `fe80::a9fe:a9fe`            (canonical lowercase, double-colon)

@@ -5,7 +5,7 @@
 //! XNU public source tree (`bsd/sys/codesign.h`).
 //!
 //! This module ONLY queries flags; it never modifies code-signing state. The
-//! returned bits are used by the gap detector (D-34) to decide whether a
+//! returned bits are used by the gap detector to decide whether a
 //! pending exec into a hardened-runtime binary will strip DYLD env vars.
 //!
 //! UNSUPPORTED-API CAVEAT: a future macOS may change CS_OPS_STATUS layout or
@@ -56,7 +56,7 @@ pub fn csops_status(pid: libc::pid_t) -> Result<u32, std::io::Error> {
 }
 
 /// True if the process at `pid` will strip DYLD_INSERT_LIBRARIES on exec.
-/// Used by the D-34 Phase A pre-check. Conservative on syscall failure
+/// Used by the step A pre-check. Conservative on syscall failure
 /// (returns false → assumes not hardened so we don't false-positive a gap).
 pub fn is_hardened_runtime(pid: libc::pid_t) -> bool {
     match csops_status(pid) {

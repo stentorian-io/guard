@@ -4,11 +4,11 @@
 //! D-33: fail-closed-on-timeout for fork events (caller kills child + EAGAIN).
 //!
 //! Socket path: read once at ctor time from SENTINEL_DAEMON_SOCKET env var via
-//! libc::getenv (matches Phase 1 snapshot.rs pattern — keeps ctor allocation
+//! libc::getenv (matches v0.1 snapshot.rs pattern — keeps ctor allocation
 //! minimal and avoids std::env::var which allocates per call).
 //!
 //! Wire shape: each message is a `tag byte (0x03..=0x05) + length-prefixed CBOR
-//! body`. The daemon's first-byte-peek dispatcher (plan 02-04) routes the tag
+//! body`. The daemon's first-byte-peek dispatcher routes the tag
 //! to the matching handler. The handler responds with the same tag echoed
 //! followed by a length-prefixed CBOR ack body.
 
@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-// Tag bytes — must match plan 02-04's MessageTag values exactly.
+// Tag bytes — must match the daemon's MessageTag values exactly.
 pub(crate) const TAG_FORK_EVENT: u8 = 0x03;
 pub(crate) const TAG_EXEC_EVENT: u8 = 0x04;
 pub(crate) const TAG_DYLIB_LOADED: u8 = 0x05;

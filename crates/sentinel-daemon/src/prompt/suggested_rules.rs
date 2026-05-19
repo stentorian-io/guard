@@ -1,12 +1,12 @@
 //! crates/sentinel-daemon/src/prompt/suggested_rules.rs
 //!
-//! Phase 3 plan 03-06 — host-pattern → SuggestedRule generator (D-77).
+//! v0.3 — host-pattern -> SuggestedRule generator.
 
 use sentinel_ipc::SuggestedRule;
 
 /// Well-known shared-CDN second-level domains where a "exact match this SLD"
 /// rule is a sensible suggestion. Excludes deny-list patterns (workers.dev,
-/// pages.dev, etc. — see Phase 2 ALLOW-06).
+/// pages.dev, etc. — see v0.2 ALLOW-06).
 const SHARED_CDN_SLDS: &[&str] = &[
     "s3.amazonaws.com",
     "cloudfront.net",

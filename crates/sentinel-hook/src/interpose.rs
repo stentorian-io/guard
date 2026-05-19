@@ -16,7 +16,7 @@ pub static REAL_SYSCALL: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut(
 
 /// Capture original libc symbol pointers.
 ///
-/// IMPORTANT NOTE (Phase 1 deviation, Rule 1 - Bug):
+/// IMPORTANT NOTE (v0.1 deviation, Rule 1 - Bug):
 ///
 /// When libsentinel_hook.dylib is injected via DYLD_INSERT_LIBRARIES, dyld applies the
 /// __DATA,__interpose records GLOBALLY — including patching the exported symbol table
@@ -29,14 +29,14 @@ pub static REAL_SYSCALL: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut(
 /// All three approaches create an infinite recursion loop because REAL_CONNECT
 /// points back to sentinel_connect itself.
 ///
-/// THE FIX (Phase 1): Use direct kernel syscalls instead of function pointers.
+/// THE FIX (v0.1): Use direct kernel syscalls instead of function pointers.
 /// The hot-path replacement functions (sentinel_connect, sentinel_sendto, etc.)
 /// now call libc::syscall(SYS_*, ...) directly in their allow/reentrancy paths.
 /// libc::syscall itself is NOT interposed, so it correctly calls the kernel.
 ///
-/// These AtomicPtrs remain for compatibility with probe_self_test and future phases
+/// These AtomicPtrs remain for compatibility with probe_self_test and future versions
 /// that may find a way to store the real function pointers (e.g., Mach-O TEXT parsing).
-/// They are NOT used in the hot path in Phase 1.
+/// They are NOT used in the hot path in v0.1.
 pub unsafe fn capture_originals() {
     // NOTE: The values stored here will all equal our replacement functions
     // (sentinel_connect etc.) due to dyld's global interpose patching. They are
@@ -79,7 +79,7 @@ pub unsafe fn capture_originals() {
     REAL_SYSCALL.store(real_sym!(libsystem, c"syscall"), Ordering::Relaxed);
 
     crate::log_buffer::LOG_RING
-        .append(b"[sentinel-hook] capture_originals: raw-syscall mode (Phase 1)");
+        .append(b"[sentinel-hook] capture_originals: raw-syscall mode (v0.1)");
 }
 
 /// Mark the page containing the AtomicPtrs read-only (T-01-06-04 mitigation).
@@ -99,9 +99,9 @@ pub fn lock_originals_page() {
 }
 
 // ============================================================================
-// Phase 2 plan 02-05 fork/exec interpose records (D-32) — 7 new
-// __DATA,__interpose entries appended to Phase 1's existing 4 records (in
-// replace_libc.rs). Each record is a [shadow_fn, real_fn] pair; dyld swaps
+// v0.2 fork/exec interpose records (D-32) — 7 new __DATA,__interpose
+// entries appended to v0.1's existing 4 records (in replace_libc.rs).
+// Each record is a [shadow_fn, real_fn] pair; dyld swaps
 // every load-time call to real_fn with shadow_fn process-wide.
 //
 // Why 7, not 10: execl/execlp/execle are intentionally OMITTED from the

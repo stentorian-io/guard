@@ -1,4 +1,4 @@
-//! Phase 3 plan 03-19 (gap closure for UAT item #4) — real 16 MiB-driven
+//! v0.3 (gap closure for UAT item #4) — real 16 MiB-driven
 //! rotation produces a .log.gz archive AND `sentinel logs --follow` keeps
 //! streaming after the rotation event.
 //!
@@ -85,7 +85,7 @@ fn real_rotation_produces_gz_archive_and_follow_continues() {
     }
 
     // Spawn `sentinel status logs --follow` (was: `sentinel logs --follow`).
-    // Phase 07 plan 05 (D-09, D-10): `logs --follow` → `status logs --follow`.
+    // v0.7: `logs --follow` → `status logs --follow`.
     // Note: --follow seeks to EOF at startup, so it will not stream pre-seed
     // rows. It will stream rows written AFTER it subscribes.
     let cli = resolve_cli();
@@ -105,7 +105,7 @@ fn real_rotation_produces_gz_archive_and_follow_continues() {
 
     // Trigger a Block via non-TTY sentinel wrap against TEST-NET-1.
     // 192.0.2.123 is TEST-NET-1 (RFC 5737), not in any allowlist.
-    // stdin=null → non-TTY → daemon denies-with-log, no prompt (CLI-07).
+    // stdin=null → non-TTY → daemon denies-with-log, no prompt.
     let dylib = sentinel_e2e::resolve_dylib();
     let run_out = Command::new(&cli)
         .arg("wrap")

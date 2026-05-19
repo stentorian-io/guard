@@ -5,7 +5,7 @@
 //!
 //! # Symbol set adaptation for macOS 26
 //!
-//! Three of the original plan-07 symbols are absent on macOS 26.3.1:
+//! Three of the original v0.1 symbols are absent on macOS 26.3.1:
 //!   - `nw_connection_create_with_endpoint` — never in the public SDK;
 //!     D-20 gap (null ptr, logged at init).
 //!   - `nw_endpoint_copy_hostname` — replaced by `nw_endpoint_get_hostname`
@@ -13,7 +13,7 @@
 //!   - `nw_resolver_create` / `nw_resolver_resolve` — private API removed from
 //!     macOS 26; D-20 gaps.
 //!
-//! The `all_phase1_nw_symbols_resolvable` test asserts only the AVAILABLE
+//! The `all_v1_nw_symbols_resolvable` test asserts only the AVAILABLE
 //! symbols on macOS 26+. The D-20 gap symbols are tested separately in
 //! `gap_symbols_are_null_on_macos26`.
 
@@ -42,9 +42,9 @@ fn nw_connection_cancel_resolves_via_dlsym() {
     assert!(!sym.is_null(), "nw_connection_cancel must resolve on macOS 15+ (A6 verification)");
 }
 
-/// Verifies that the AVAILABLE Phase 1 nw_* symbols resolve on the build machine.
+/// Verifies that the AVAILABLE v0.1 nw_* symbols resolve on the build machine.
 ///
-/// On macOS 26+, three original plan-07 symbols are absent (D-20 coverage-gap
+/// On macOS 26+, three original v0.1 symbols are absent (D-20 coverage-gap
 /// fallback activates for them at runtime). This test validates the five
 /// symbols that ARE available and that our shadow exports are backed by real
 /// originals.
@@ -52,14 +52,14 @@ fn nw_connection_cancel_resolves_via_dlsym() {
 /// D-20 gap symbols (null on macOS 26, not tested here) are:
 ///   `nw_connection_create_with_endpoint`, `nw_resolver_create`, `nw_resolver_resolve`.
 #[test]
-fn all_phase1_nw_symbols_resolvable() {
+fn all_v1_nw_symbols_resolvable() {
     let h = dlopen_nw().expect("dlopen");
     // Core symbols that must resolve on macOS 26+ per D-12 floor.
     let names: &[&[u8]] = &[
         b"nw_connection_create\0",
         b"nw_connection_start\0",
         b"nw_connection_cancel\0",
-        // `nw_endpoint_get_hostname` replaces plan-07's `nw_endpoint_copy_hostname`
+        // `nw_endpoint_get_hostname` replaces v0.1's `nw_endpoint_copy_hostname`
         b"nw_endpoint_get_hostname\0",
         // Used in the verdict path to retrieve the endpoint from a connection.
         b"nw_connection_copy_endpoint\0",
@@ -82,7 +82,7 @@ fn all_phase1_nw_symbols_resolvable() {
 #[test]
 fn gap_symbols_are_null_on_macos26() {
     let h = dlopen_nw().expect("dlopen");
-    // These three symbols were in the original plan-07 set but are absent on
+    // These three symbols were in the original v0.1 set but are absent on
     // macOS 26.3.1. Confirm null so our init() gap-log is exercised.
     let gap_names: &[&[u8]] = &[
         b"nw_connection_create_with_endpoint\0",

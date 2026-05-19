@@ -22,7 +22,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-// Tag bytes — must match plan 02-04's MessageTag values exactly. The dylib
+// Tag bytes — must match the v0.2 MessageTag values exactly. The dylib
 // uses the same values in `sentinel_hook::ipc_client`.
 const TAG_PREPARE_SNAPSHOT: u8 = 0x02;
 const TAG_STATUS: u8 = 0x09;
@@ -80,13 +80,12 @@ pub(crate) fn connect_with_timeout(sock: &Path) -> Result<UnixStream, CliError> 
 /// without having forked an unprotected child — keeping T-01-08-06's promise.
 ///
 /// Why connect-only (no frame sent):
-///   - The socket file at `sock` is bound by the daemon (`UnixListener::bind`
-///     in plan 05 task 2). A non-running daemon yields ECONNREFUSED or ENOENT,
-///     so a successful `connect_timeout` IS sufficient liveness evidence.
+///   - The socket file at `sock` is bound by the daemon (`UnixListener::bind`).
+///     A non-running daemon yields ECONNREFUSED or ENOENT, so a successful
+///     `connect_timeout` IS sufficient liveness evidence.
 ///   - Sending a frame would require defining a new wire message type
-///     (avoided: keeps the IPC schema minimal and forward-compatible — no new
-///     enum variants in plan 04's messages.rs are needed).
-///   - Plan 05 task 2's `ipc_server::handle` tolerates the resulting EOF on
+///     (avoided: keeps the IPC schema minimal and forward-compatible).
+///   - The daemon's `ipc_server::handle` tolerates the resulting EOF on
 ///     `read_frame` as a benign liveness probe (no state change, no panic,
 ///     idle log line at debug level).
 ///
@@ -95,7 +94,7 @@ pub(crate) fn connect_with_timeout(sock: &Path) -> Result<UnixStream, CliError> 
 pub fn probe_daemon_alive(sock: &Path) -> Result<(), CliError> {
     let _stream = connect_with_timeout(sock)?;
     // Stream dropped here; the daemon will see EOF on its first read_frame
-    // and treat it as a benign liveness check (plan 05 task 2 contract).
+    // and treat it as a benign liveness check.
     Ok(())
 }
 
@@ -140,7 +139,7 @@ fn send_register_root(
     }
 }
 
-/// Send a Phase 2 tagged frame: `[1-byte tag][4-byte BE length][CBOR body]`,
+/// Send a v0.2 tagged frame: `[1-byte tag][4-byte BE length][CBOR body]`,
 /// then read the daemon's tag-echoed reply: `[1-byte tag][4-byte BE length][CBOR body]`.
 ///
 /// Wire shape symmetry with:
@@ -224,9 +223,9 @@ pub fn prepare_snapshot(sock: &Path, cwd: &Path) -> Result<(PathBuf, String), Cl
     }
 }
 
-/// Outcome of a PrepareSnapshot v3 call. Phase 4 plan 04-03 added the
-/// `feed_warnings` field so callers (run_orchestrator) can surface non-fatal
-/// post-fetch parse problems inline on stderr after the reply.
+/// Outcome of a PrepareSnapshot v3 call. v0.4 added the `feed_warnings`
+/// field so callers (run_orchestrator) can surface non-fatal post-fetch parse
+/// problems inline on stderr after the reply.
 #[derive(Debug, Clone)]
 pub struct PrepareSnapshotOutcome {
     pub manifest_path: PathBuf,
@@ -275,13 +274,13 @@ pub fn prepare_snapshot_v3(
     }
 }
 
-/// Phase 3 tag 0x09: request daemon status.
+/// v0.3 tag 0x09: request daemon status.
 pub fn status_request(sock: &Path) -> Result<sentinel_ipc::StatusReply, CliError> {
     let req = sentinel_ipc::Status::new();
     send_tagged_request(sock, TAG_STATUS, &req)
 }
 
-/// Phase 3 tag 0x0B: insert a user rule into the daemon's rule store.
+/// v0.3 tag 0x0B: insert a user rule into the daemon's rule store.
 pub fn insert_user_rule_request(
     sock: &Path,
     kind: &str,
@@ -305,7 +304,7 @@ pub fn insert_user_rule_request(
     }
 }
 
-/// Phase 3 tag 0x0C: read install artifacts from the daemon (D-62 preferred path).
+/// v0.3 tag 0x0C: read install artifacts from the daemon.
 pub fn read_install_artifacts_request(sock: &Path) -> Result<Vec<InstallArtifact>, CliError> {
     let req = ReadInstallArtifacts::new();
     let reply: ReadInstallArtifactsReply =

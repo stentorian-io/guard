@@ -1,15 +1,15 @@
 //! crates/sentinel-daemon/src/log_writer/jsonl_row.rs
 //!
-//! Phase 3 plan 03-05 — JSONL row serde shapes (D-49). One JSON object per file line.
+//! v0.3 — JSONL row serde shapes. One JSON object per file line.
 
 use serde::Serialize;
 use sentinel_ipc::{IntelMatch, PackageContext};
 
-/// JSONL row schema version. Phase 3 shipped V1; Phase 4 plan 04-03 bumps to
+/// JSONL row schema version. v0.3 shipped V1; v0.4 bumps to
 /// V2 because the `Decision.intel` field type changed from `Option<()>` (a
 /// reserved placeholder) to `Option<Vec<IntelMatch>>` (the real shape).
 /// Downstream consumers that decode against the old type need to know to
-/// re-skip the field — a schema bump is the right discipline per Phase 2 D-30.
+/// re-skip the field — a schema bump is the right discipline per v0.2 convention.
 pub const JSONL_SCHEMA_VERSION: u16 = 2;
 pub const MAX_ARGV_BYTES: usize = 1024;
 
@@ -36,16 +36,16 @@ pub struct Decision {
     pub dest_port: u16,
     pub dest_ip: Option<String>,
     pub run_uuid: String,
-    pub source_kind: String,                         // Phase 2 D-27 enum string
+    pub source_kind: String,                         // v0.2 enum string
     pub source_locator: Option<String>,
     pub process: ProcessCtxLog,
     pub parent: ProcessCtxLog,
     pub root: RootCtxLog,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub package_context: Option<PackageContext>,
-    /// Phase 4 (D-93): array of feed-derived match records. Type-changed
+    /// v0.4: array of feed-derived match records. Type-changed
     /// from `Option<()>` placeholder to `Option<Vec<IntelMatch>>` at JSONL
-    /// schema_version 2. Per Phase 3 D-56 omit-when-empty, callers MUST set
+    /// schema_version 2. Per v0.3 omit-when-empty convention, callers MUST set
     /// `None` (not `Some(vec![])`) when no matches were found so the field
     /// is omitted from the on-disk row.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -146,7 +146,7 @@ mod tests {
         let s = serde_json::to_string(&row).unwrap();
         assert!(s.starts_with("{\"event\":\"block\""), "got: {s}");
         assert!(s.contains("\"verdict\":\"Deny\""));
-        // Phase 3 D-56 + Phase 4 D-93 omit-when-empty: intel field must NOT
+        // v0.3 + v0.4 omit-when-empty: intel field must NOT
         // appear when it's None (skip_serializing_if). Same for package_context.
         assert!(!s.contains("\"intel\""), "intel field should be omitted when None: {s}");
         assert!(
@@ -156,10 +156,10 @@ mod tests {
     }
 
     #[test]
-    fn jsonl_schema_version_is_2_for_phase_4() {
+    fn jsonl_schema_version_is_2_for_v4() {
         assert_eq!(
             JSONL_SCHEMA_VERSION, 2,
-            "Phase 4 plan 04-03 bumps JSONL_SCHEMA_VERSION to 2 for the intel field type change"
+            "v0.4 bumps JSONL_SCHEMA_VERSION to 2 for the intel field type change"
         );
     }
 

@@ -102,7 +102,7 @@ fn evaluate_cloud_metadata_denies_unconditionally() {
 
 #[test]
 fn blocker_01_regression_libc_hot_path_contract() {
-    // BLOCKER-01 (Phase 2 review): the libc hot path
+    // BLOCKER-01 (v0.2 review): the libc hot path
     // (`replace_libc.rs::decide_for_sockaddr`) now delegates to
     // `evaluate_policy`. This test pins the contract for the exact inputs the
     // libc path passes:
@@ -113,10 +113,10 @@ fn blocker_01_regression_libc_hot_path_contract() {
     //      resolved=false → raw-IP cache-miss-deny fires unless loopback or
     //      cloud-metadata short-circuits first.
     //
-    // The previous Phase 1 `match_hostname_compat` walker did NOT enforce
+    // The previous v0.1 `match_hostname_compat` walker did NOT enforce
     // these hard rules — a UserAllow for IMDS would have allowed
     // AWS/Azure/GCP cloud-metadata exfil. Closing that gap is the single most
-    // important behaviour change of the Phase 2 review fix pass.
+    // important behaviour change of the v0.2 review fix pass.
 
     // Case 1: cache-hit on cloud-metadata host with a user allow override —
     // the hard rule MUST win even though host+ip+entries+resolved matches a
@@ -152,7 +152,7 @@ fn blocker_01_regression_libc_hot_path_contract() {
 
     // Case 4: cache-miss connect to a loopback IP — loopback hard rule wins
     // over cache-miss-deny (Tier 0a before 0c). The libc path's previous
-    // `node_connect_to_loopback_is_allowed` plan-02-07 fix must not regress.
+    // `node_connect_to_loopback_is_allowed` fix must not regress.
     let (v4, src4) = evaluate_policy(b"", Some(b"127.0.0.1"), false, &[]);
     assert_eq!(v4, Verdict::Allow);
     assert_eq!(src4, SourceKind::HardRule("loopback"));

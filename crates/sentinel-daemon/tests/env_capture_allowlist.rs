@@ -1,4 +1,4 @@
-//! Phase 3 plan 03-04: PM env-allowlist + R-08 secret-denylist tests.
+//! v0.3 — PM env-allowlist + secret-denylist tests.
 use sentinel_daemon::env_capture::extract_pm_env;
 
 fn pair(k: &str, v: &str) -> (String, String) { (k.to_string(), v.to_string()) }

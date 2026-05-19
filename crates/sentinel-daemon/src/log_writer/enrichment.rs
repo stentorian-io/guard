@@ -1,17 +1,17 @@
-//! Phase 4 plan 04-03 (D-91 + D-93): enrich block-log Decision rows with
+//! v0.4: enrich block-log Decision rows with
 //! IntelMatch entries by querying `feed_iocs` at log-write time.
 //!
 //! Mirrors `package_context.rs` shape — pure function called from IPC handler
-//! context, NOT the writer thread (Phase 3 D-54 caller-side discipline). The
+//! context, NOT the writer thread (v0.3 caller-side discipline). The
 //! caller passes the result to `Decision { intel: Some(matches), ... }` (or
-//! `intel: None` when the returned vec is empty, per Phase 3 D-56
+//! `intel: None` when the returned vec is empty, per v0.3
 //! omit-when-empty convention).
 //!
 //! Two entry points:
-//!   - `enrich(feed_store, package_context)` — the primary D-91 path. Looks
-//!     up rows by (ecosystem, package), then filters by `versions_json` via
+//!   - `enrich(feed_store, package_context)` — the primary package-source path.
+//!     Looks up rows by (ecosystem, package), then filters by `versions_json` via
 //!     `osv_match::version_in_affected_block`. Each match is `source: "package"`.
-//!   - `enrich_for_host(feed_store, host)` — the D-90 host-source path. Used
+//!   - `enrich_for_host(feed_store, host)` — the host-source path. Used
 //!     when a block fired because the destination host matched a feed
 //!     `host_ioc` row. Each match is `source: "host"`.
 
@@ -98,7 +98,7 @@ pub fn enrich(feed_store: &FeedStore, pkg: &PackageContext) -> Vec<IntelMatch> {
     out
 }
 
-/// D-90 / D-93 variant: when a block fired because the destination host
+/// Host-source variant: when a block fired because the destination host
 /// equals a feed `host_ioc`, populate the host-source intel even when the
 /// package_context is None. Returns an empty Vec when (a) host is empty or
 /// (b) the SQLite query fails.
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn enrich_versionless_pkg_context_falls_back_to_match() {
-        // When pkg.version is empty (rare — Phase 3 D-53 guarantees it's
+        // When pkg.version is empty (rare — v0.3 guarantees it's
         // populated when ecosystem+package are), we currently return all
         // package rows for that (ecosystem, package). Regression-pin the
         // behavior: empty version is permissive, NOT exclusive.

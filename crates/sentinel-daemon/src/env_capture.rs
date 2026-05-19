@@ -1,14 +1,14 @@
 //! crates/sentinel-daemon/src/env_capture.rs
 //!
-//! Phase 3 plan 03-04 — PM env subset extraction (D-55).
+//! v0.3 — PM env subset extraction.
 //!
-//! Strict allowlist by prefix + exact-match denylist for known-secret keys (R-08
-//! mitigation per RESEARCH.md). Per-value truncation at 512 bytes; total wire-size
+//! Strict allowlist by prefix + exact-match denylist for known-secret keys.
+//! Per-value truncation at 512 bytes; total wire-size
 //! cap at sentinel_ipc::ExecEvent::MAX_PM_ENV_BYTES (4 KiB).
 
 use sentinel_ipc::ExecEvent;
 
-/// Per CONTEXT.md "Claude's Discretion > PM env-key allowlist contents (D-55)".
+/// PM env-key allowlist contents.
 pub const PM_ENV_PREFIXES: &[&str] = &[
     "npm_",
     "PIP_",

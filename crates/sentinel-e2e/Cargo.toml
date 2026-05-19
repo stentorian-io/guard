@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
-description = "End-to-end smoke harness for Sentinel Phase 1 success criteria."
+description = "End-to-end smoke harness for Sentinel."
 
 [lib]
 path = "src/lib.rs"

@@ -1,4 +1,4 @@
-//! Phase 4 plan 04-02 — FeedStore CRUD against `feed_iocs` and `feed_metadata`
+//! v0.4 — FeedStore CRUD against `feed_iocs` and `feed_metadata`
 //! tables. Migrations are owned by `RuleStore` (the SQL_003_FEED_IOCS_AND_WAL
 //! step is registered there); `FeedStore::open` opens against an
 //! already-migrated `sentinel.db`, mirroring `install_artifacts.rs`.
@@ -141,7 +141,7 @@ impl FeedStore {
     }
 
     /// Delete all rows for `feed`. Used by parse-on-fetch idempotency
-    /// (D-88: each fetch fully replaces the prior parse).
+    /// (each fetch fully replaces the prior parse).
     pub fn delete_feed(&self, feed: &str) -> Result<usize, FeedStoreError> {
         debug_assert!(
             matches!(feed, "OSV" | "GHSA"),
@@ -337,7 +337,7 @@ impl FeedStore {
     }
 
     /// Read every row of `feed_metadata` (typically 0..2 rows: OSV + GHSA).
-    /// Used by `compute_daemon_state` (plan 04-03) to inspect per-feed
+    /// Used by `compute_daemon_state` to inspect per-feed
     /// `last_pull_outcome` so the daemon can promote to `Degraded` on parse
     /// failures (TI-06 surfacing).
     pub fn read_all_metadata(&self) -> Result<Vec<FeedMetadataRow>, FeedStoreError> {

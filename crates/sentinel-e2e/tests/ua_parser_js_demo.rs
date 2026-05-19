@@ -1,4 +1,4 @@
-//! Phase 5 plan 05-04 — VAL-01: ua-parser-js@0.7.29 supply-chain CVE reproduction.
+//! v0.5 — ua-parser-js@0.7.29 supply-chain CVE reproduction.
 //!
 //! Drives `sentinel wrap npm install ./fixtures/ua-parser-js-0.7.29-sanitized.tgz`
 //! through a PTY so the daemon's prompt path fires (CONTEXT C-01: libc-deny path
@@ -6,11 +6,11 @@
 //! Decision rows for outbound denies). Pre-scripts a Deny via writer.write_all,
 //! then HARD-asserts on the JSONL Decision row.
 //!
-//! NOTE: per plan 05-01 (Rule 4 pivot under CONTEXT D-06 escape hatch), the
+//! NOTE: the
 //! committed fixture is a SYNTHETIC MOCK — there are no real malicious bytes
 //! in `ua-parser-js-0.7.29-sanitized.tgz`. The synthetic `preinstall.js`
 //! unconditionally opens `net.createConnection({host: 'c2-sink.test.invalid',
-//! port: 443})`, which is the only behavior VAL-01 asserts on. The C-01
+//! port: 443})`, which is the only behavior this test asserts on. The
 //! HARD-assertion contract (verdict=Deny + source_kind=prompt_deny +
 //! package_context.package="ua-parser-js") is preserved against this
 //! synthetic shape since the .tgz still declares
@@ -84,7 +84,7 @@ fn ua_parser_js_postinstall_blocked_with_package_context() {
         .join("ua-parser-js-0.7.29-sanitized.tgz");
     assert!(
         fixture.exists(),
-        "VAL-01 fixture missing — run tools/vendor-ua-parser-js.sh first: {}",
+        "fixture missing — run tools/vendor-ua-parser-js.sh first: {}",
         fixture.display()
     );
     let fixture_dir = tempfile::tempdir().expect("extract fixture tempdir");
@@ -156,7 +156,7 @@ fn ua_parser_js_postinstall_blocked_with_package_context() {
     // (per prompt_unblock_deny.rs note); we don't HARD-assert on exit code.
     let _ = child.wait();
 
-    // Allow log_writer mpsc to drain (Phase 3/4 e2e canon — 500ms margin).
+    // Allow log_writer mpsc to drain (v0.3/v0.4 e2e canon — 500ms margin).
     std::thread::sleep(Duration::from_millis(500));
 
     // -----------------------------------------------------------------------
@@ -182,7 +182,7 @@ fn ua_parser_js_postinstall_blocked_with_package_context() {
     });
     assert!(
         matched,
-        "VAL-01 HARD assertion failed: no JSONL row matching verdict=Deny + \
+        "HARD assertion failed: no JSONL row matching verdict=Deny + \
          source_kind=prompt_deny + package_context.package=ua-parser-js;\n\
          log file: {}\n\
          contents:\n{content}\n\
@@ -215,7 +215,7 @@ fn ua_parser_js_postinstall_blocked_with_package_context() {
     });
     if !intel_attributed {
         eprintln!(
-            "[VAL-01 note] no intel.feed=OSV attribution on the ua-parser-js row; \
+            "[note] no intel.feed=OSV attribution on the ua-parser-js row; \
              OSV freshness drift acceptable per CONTEXT C-01 SOFT assert"
         );
     }

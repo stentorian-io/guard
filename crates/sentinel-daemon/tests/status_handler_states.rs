@@ -1,9 +1,8 @@
 //! Smoke test: handle_status returns StatusReply::Ok with daemon-computed daemon_state.
-//! Full state-transition coverage in plan 03-14 e2e (status_states.rs).
 //!
-//! Phase 4 plan 04-03: compute_daemon_state takes two new slice parameters
+//! v0.4: compute_daemon_state takes two new slice parameters
 //! (`feeds: &[FeedInfo]` and `feed_metadata_states: &[FeedMetadataRow]`).
-//! These tests pass empty slices to preserve Phase 3 behavior; new feed-aware
+//! These tests pass empty slices to preserve v0.3 behavior; new feed-aware
 //! tests live in the unit-test block in `handlers/status.rs`.
 
 #[test]

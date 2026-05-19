@@ -1,16 +1,16 @@
 //! Allowlist entry types and per-entry evaluator.
 //!
-//! Phase 2 redesign per D-24 + RESEARCH.md §2 / §5 tier ordering. Replaces the
-//! Phase 1 enum (Exact|Suffix|Ip variants) with a single struct carrying:
-//!   - kind: allow | deny       (D-24 — both directions in one type)
-//!   - tier: priority class     (D-25/D-26/D-27 — non-overridable builtin denies + POL-06)
+//! v0.2 redesign: tier ordering. Replaces the v0.1 enum (Exact|Suffix|Ip
+//! variants) with a single struct carrying:
+//!   - kind: allow | deny       (both directions in one type)
+//!   - tier: priority class     (non-overridable builtin denies + POL-06)
 //!   - match_type: exact | suffix | ip
 //!   - pattern: the host or IP literal
 //!   - reason: required, surfaced in block-log attribution
 //!
 //! Suffix matching is byte-wise and REQUIRES patterns to start with `.` —
 //! a pattern `.workers.dev` matches `foo.workers.dev` but NOT `workers.dev`
-//! and NOT `notworkers.dev`. This is the D-16 invariant carried forward.
+//! and NOT `notworkers.dev`.
 
 use serde::{Deserialize, Serialize};
 
@@ -82,7 +82,6 @@ impl AllowlistEntry {
 }
 
 /// Single-entry evaluator. Returns Some(Verdict) on match, None on no-match.
-/// Plan 02-02 builds the multi-entry tier-walk evaluator on top of this.
 pub fn evaluate_rule(entry: &AllowlistEntry, host: &[u8]) -> Option<Verdict> {
     if entry.matches(host) {
         Some(match entry.kind {

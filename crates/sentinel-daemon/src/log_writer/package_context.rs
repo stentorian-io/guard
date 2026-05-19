@@ -1,11 +1,11 @@
 //! crates/sentinel-daemon/src/log_writer/package_context.rs
 //!
-//! Phase 3 plan 03-05 — package-context inference (D-54).
+//! v0.3 — package-context inference.
 //!
 //! Walks the existing ProcessTree from a given audit_token along parent links
 //! until finding a ProcessNode with a non-None `pm_env_snapshot` (populated by
-//! Phase 2's ExecEvent + Phase 3's pm_env extension — plan 03-04). Maps the
-//! captured env subset to PackageContext per D-56.
+//! v0.2's ExecEvent + v0.3's pm_env extension). Maps the
+//! captured env subset to PackageContext.
 
 use sentinel_core::AuditToken;
 use sentinel_ipc::PackageContext;

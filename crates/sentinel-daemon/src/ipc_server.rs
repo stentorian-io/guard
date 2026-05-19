@@ -1,16 +1,16 @@
 //! Sync UnixListener accept loop with bounded thread pool dispatch.
 //!
-//! Phase 2 D-33: synchronous fork/exec IPC volume requires real concurrency.
+//! v0.2: synchronous fork/exec IPC volume requires real concurrency.
 //! 16 worker threads consume from a bounded channel; accept never blocks on
 //! a worker. Under sustained flood the channel fills, accept's try_send
 //! returns Err, the new connection is dropped, the dylib's IPC times out
 //! at 250ms, and the dylib fails-closed at fork — the safe outcome.
 //!
-//! Backward compat: Phase 1 RegisterRoot frames (length-prefixed CBOR) are
+//! Backward compat: v0.1 RegisterRoot frames (length-prefixed CBOR) are
 //! detected by classify_frame and dispatched to the legacy register handler.
-//! The Phase 1 contract is preserved — see plan 02-01 for the FROZEN status.
+//! The v0.1 contract is preserved (FROZEN status).
 //!
-//! BENIGN-EOF CONTRACT (T-01-05-09): plan 08's `probe_daemon_alive` is a
+//! BENIGN-EOF CONTRACT: `probe_daemon_alive` is a
 //! connect-only liveness probe — it opens a stream and drops it immediately,
 //! sending no frame. From this side, classify_frame returns
 //! `DispatchError::Io(e)` where `e.kind() == ErrorKind::UnexpectedEof`. We
@@ -50,7 +50,7 @@ use std::time::SystemTime;
 use tracing::{debug, error, info, warn};
 
 // ============================================================================
-// Phase 3 plan 03-12 — DeferredResolveTable (D-45 / BLOCKER #3)
+// v0.3 — DeferredResolveTable
 // ============================================================================
 
 /// An entry parked in the DeferredResolveTable waiting for a user prompt response.
@@ -59,7 +59,7 @@ pub struct DeferredEntry {
     pub host: String,
     pub port: u16,
     pub sender: crossbeam_channel::Sender<sentinel_core::Verdict>,
-    /// Phase 5 plan 05-03: package context resolved at prompt-build time, replayed
+    /// v0.5: package context resolved at prompt-build time, replayed
     /// when emit_decision_row fires from the response handler. None if the peer
     /// process tree has no PM ancestor (no npm_/CARGO_/PIP_ env signal).
     pub package_context: Option<sentinel_ipc::PackageContext>,
@@ -175,40 +175,40 @@ impl DeferredResolveTable {
     }
 }
 
-// raised from 16 → 32 in Phase 3 plan 03-12 — D-45 deferred-resolve mechanism blocks worker
-// threads on user prompts (D-47 indefinite hold).
+// raised from 16 -> 32 in v0.3 — deferred-resolve mechanism blocks worker
+// threads on user prompts (indefinite hold).
 pub const WORKER_THREADS: usize = 32;
 pub const ACCEPT_QUEUE_DEPTH: usize = 64;
 
 /// Shared daemon state passed to every worker handler.
 ///
-/// Phase 3 plan 03-07: extended with log_writer, install_artifact_store,
-/// prompt_dedup, recent_gaps, baseline_staging. All Phase 3 handlers access
+/// v0.3: extended with log_writer, install_artifact_store,
+/// prompt_dedup, recent_gaps, baseline_staging. All v0.3 handlers access
 /// these via an Arc<DaemonState> clone.
 pub struct DaemonState {
-    // Phase 2 fields (preserved)
+    // v0.2 fields (preserved)
     pub process_tree: Arc<ProcessTree>,
     pub gap_detector: Arc<GapDetector>,
     pub rule_store: Arc<crate::rule_store::RuleStore>,
     pub curated: Arc<Vec<sentinel_core::AllowlistEntry>>,
     pub state_dir: std::path::PathBuf,
-    // Phase 3 plan 03-07 additions
+    // v0.3 additions
     pub install_artifact_store: Arc<InstallArtifactStore>,
     pub log_writer: LogWriter, // already Clone (backed by Arc<channel>)
     pub prompt_dedup: Arc<PromptDedup>,
     pub recent_gaps: Arc<RecentGapsRing>,
     pub baseline_staging: Arc<BaselineStaging>,
-    // Phase 3 plan 03-08 (WARNING #6 fix): snapshot-publication failure flag.
+    // v0.3 (WARNING #6 fix): snapshot-publication failure flag.
     // Flipped to true on Err from publish_run; back to false on Ok.
     // Feeds compute_daemon_state → StatusReply.daemon_state = Degraded on failure.
     pub last_snapshot_publish_failed: AtomicBool,
-    // Phase 3 plan 03-12 (D-45 / BLOCKER #3): deferred-resolve table for
+    // v0.3: deferred-resolve table for
     // park-pending-prompt mechanism in the Resolve handler.
     pub deferred_resolve: Arc<DeferredResolveTable>,
-    // Phase 4 plan 04-03 — feed-store + per-fetch concurrency primitives.
+    // v0.4 — feed-store + per-fetch concurrency primitives.
     // `feed_store` opens against the same `sentinel.db` migrated by
-    // `RuleStore::open` (plan 04-02 wired migration 003 there). The mutex
-    // serializes `fetch_feeds_blocking` calls (D-86); the rwlock holds the
+    // `RuleStore::open` (migration 003). The mutex
+    // serializes `fetch_feeds_blocking` calls; the rwlock holds the
     // last fetch's outcome+timestamp so concurrent runs share a single
     // underlying fetch when they arrive within `SHARED_RESULT_TTL`.
     pub feed_store: Arc<crate::feed::store::FeedStore>,
@@ -227,8 +227,8 @@ impl DaemonState {
         curated: Arc<Vec<sentinel_core::AllowlistEntry>>,
         state_dir: std::path::PathBuf,
     ) -> Self {
-        // Phase 2 constructor preserved for backward compat with tests.
-        // Phase 3 subsystems are stubbed with no-op defaults here so existing
+        // v0.2 constructor preserved for backward compat with tests.
+        // v0.3 subsystems are stubbed with no-op defaults here so existing
         // ipc_server tests compile without changes. main.rs uses `DaemonState { .. }`
         // struct literal with all fields when constructing the live daemon.
         let install_artifact_store = Arc::new(
@@ -238,7 +238,7 @@ impl DaemonState {
         let prompt_dedup = Arc::new(PromptDedup::new());
         let recent_gaps = Arc::new(RecentGapsRing::new());
         let baseline_staging = Arc::new(BaselineStaging::new());
-        // Phase 4 plan 04-03 — in-memory feed store + fresh mutex/rwlock.
+        // v0.4 — in-memory feed store + fresh mutex/rwlock.
         let feed_store = Arc::new(
             crate::feed::store::FeedStore::open_in_memory().expect("in-memory feed_store"),
         );
@@ -297,7 +297,7 @@ impl IpcServer {
     /// Takes self by value because the listener and channel senders move into
     /// long-lived workers.
     ///
-    /// WARNING-03 fix (Phase 2 review): each worker is wrapped in a panic
+    /// WARNING fix (v0.2 review): each worker is wrapped in a panic
     /// catcher so a single panicked handler does NOT silently shrink the
     /// worker pool. On panic, the worker is respawned with a fresh `state`
     /// clone and the same channel receiver. Without this, a poisoned RwLock
@@ -312,7 +312,7 @@ impl IpcServer {
         loop {
             let (stream, _) = self.listener.accept()?;
             // Backpressure: try_send drops the connection on a full queue.
-            // The dylib's IPC times out → fork fails-closed (D-33).
+            // The dylib's IPC times out → fork fails-closed.
             match tx.try_send(stream) {
                 Ok(()) => {}
                 Err(TrySendError::Full(_)) => {
@@ -330,7 +330,7 @@ impl IpcServer {
     }
 }
 
-/// WARNING-03: spawn a worker that catches panics and respawns itself.
+/// WARNING: spawn a worker that catches panics and respawns itself.
 /// Lives outside the `IpcServer` impl so the recursive respawn cleanly
 /// captures a fresh `Arc<DaemonState>` clone and the same `Receiver`.
 fn spawn_worker(
@@ -401,7 +401,7 @@ impl IpcServer {
         let kind = match classify_frame(&mut stream) {
             Ok(k) => k,
             Err(DispatchError::Io(e)) if e.kind() == ErrorKind::UnexpectedEof => {
-                // Connect-only liveness probe (Phase 1 plan 08 semantics) —
+                // Connect-only liveness probe (v0.1 semantics) —
                 // benign; no state change, no Reply written.
                 debug!(
                     peer_pid = peer_token.val[5],
@@ -438,7 +438,7 @@ impl IpcServer {
             FrameKind::Tagged(MessageTag::EnvNotPropagatedGap) => {
                 handle_env_not_propagated_frame(&mut stream, peer_token, state);
             }
-            // Phase 3 plan 03-08: request-reply handlers for the CLI surface.
+            // v0.3: request-reply handlers for the CLI surface.
             FrameKind::Tagged(MessageTag::Status) => {
                 handle_status_frame(&mut stream, state);
             }
@@ -451,13 +451,13 @@ impl IpcServer {
             FrameKind::Tagged(MessageTag::BaselineCommit) => {
                 handle_baseline_commit_frame(&mut stream, state);
             }
-            // Phase 3 plan 03-12 — long-lived prompt channel handler (POL-02 / D-76).
+            // v0.3 — long-lived prompt channel handler.
             FrameKind::Tagged(MessageTag::PromptChannelInit) => {
                 handle_prompt_channel_init_frame(stream, state);
                 // NB: return here — the stream is now owned by the prompt-channel thread.
                 return;
             }
-            // Phase 07 plan 01 — management-IPC family.
+            // v0.7 — management-IPC family.
             FrameKind::Tagged(MessageTag::ListRules) => {
                 handle_list_rules_frame(&mut stream, state);
             }
@@ -481,7 +481,7 @@ impl IpcServer {
 }
 
 // ============================================================================
-// Phase 3 plan 03-08: request-reply frame handlers for CLI IPC surface
+// v0.3 — request-reply frame handlers for CLI IPC surface
 // ============================================================================
 
 fn handle_status_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
@@ -607,7 +607,7 @@ fn handle_baseline_commit_frame(stream: &mut UnixStream, state: &Arc<DaemonState
 }
 
 // ============================================================================
-// Phase 07 plan 01 — management-IPC frame handlers (ListRules /
+// v0.7 — management-IPC frame handlers (ListRules /
 // DeleteInstallArtifacts). Each is a verbatim copy of the
 // `handle_read_install_artifacts_frame` shape with type names swapped.
 // Both enforce `schema_version == IPC_SCHEMA_V3`.
@@ -681,7 +681,7 @@ fn handle_delete_install_artifacts_frame(stream: &mut UnixStream, state: &Arc<Da
 }
 
 // ============================================================================
-// v0.3 D-39 — DenyNotify frame handler
+// v0.3 — DenyNotify frame handler
 // ============================================================================
 
 fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
@@ -1019,7 +1019,7 @@ fn handle_ping_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
 }
 
 // ============================================================================
-// Phase 3 plan 03-12 — PromptChannelInit frame handler (spawn-and-detach)
+// v0.3 — PromptChannelInit frame handler (spawn-and-detach)
 // ============================================================================
 
 /// Handle a PromptChannelInit tagged frame.
@@ -1027,7 +1027,7 @@ fn handle_ping_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
 /// Takes `stream` BY VALUE (moved out of the `handle` dispatch loop via `return`
 /// so the dispatch loop does NOT drop it).  The function:
 ///   1. Reads the PromptChannelInit body.
-///   2. Validates schema_version + run_uuid + R-05 cap.
+///   2. Validates schema_version + run_uuid + cap.
 ///   3. Writes Ok/Err Ack.
 ///   4. On Ok: spawns a dedicated "sentineld-prompt-{uuid8}" thread that calls
 ///      `handlers::prompt_channel::run(stream, state, run_uuid)`.
@@ -1060,7 +1060,7 @@ fn handle_prompt_channel_init_frame(mut stream: UnixStream, state: &Arc<DaemonSt
         );
         return;
     }
-    // BLOCKER #4 — R-05 cap gate.
+    // BLOCKER — cap gate.
     let current = state.process_tree.prompt_channels_len();
     if current >= crate::handlers::prompt_channel::MAX_CONCURRENT_CHANNELS {
         let _ = write_tagged(
@@ -1126,7 +1126,7 @@ fn handle_prompt_channel_init_frame(mut stream: UnixStream, state: &Arc<DaemonSt
     }
 }
 
-/// Write a Phase 1 Reply::Err frame as a fallback for diagnostic responses
+/// Write a v0.1 Reply::Err frame as a fallback for diagnostic responses
 /// when we don't yet know which message type the peer was sending.
 fn write_legacy_err(stream: &mut UnixStream, msg: impl Into<String>) -> Result<(), IpcError> {
     write_frame(stream, &Reply::err(msg))
@@ -1222,7 +1222,7 @@ fn handle_legacy_register_root(
     } else {
         peer_token
     };
-    // Phase 2: insert_root replaces TrackedRoots::insert. Modern CLIs include
+    // v0.2: insert_root replaces TrackedRoots::insert. Modern CLIs include
     // the run_uuid from PrepareSnapshot so prompt/status paths can associate
     // the child root with the interactive run. Older V1 clients omit it and
     // keep the historical empty-run placeholder behavior.
@@ -1440,7 +1440,7 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     // Construct child audit token from wire pid + pidversion.
     // The kernel-sourced peer token tells us the parent; the wire tells us the
     // child's identity (which must be obtained by the dylib via proc_pidinfo
-    // before sending — see plan 02-05).
+    // before sending).
     let child = AuditToken {
         val: [0, 0, 0, 0, 0, ev.child_pid as u32, 0, ev.child_pidversion],
     };
@@ -1471,8 +1471,8 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
                 binary_path: String::new(), // filled by ExecEvent if/when it arrives
                 detected_at_ms: unix_ms_now(),
             };
-            // Phase 3 plan 03-08: pass forensic sinks so the gap fire also
-            // updates recent_gaps + log_writer (T-03-08-05).
+            // v0.3: pass forensic sinks so the gap fire also
+            // updates recent_gaps + log_writer.
             state.gap_detector.arm_with_forensics(
                 child,
                 gap,
@@ -1500,7 +1500,7 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
             return;
         }
     };
-    // Phase 3 plan 03-04: accept V2 (pm_env defaults to empty via #[serde(default)])
+    // v0.3: accept V2 (pm_env defaults to empty via #[serde(default)])
     // and V3 (carries pm_env). Reject anything else.
     if !matches!(ev.schema_version, IPC_SCHEMA_V2 | IPC_SCHEMA_V3) {
         let _ = write_tagged(
@@ -1543,7 +1543,7 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     }
     // The exec'ing process is the peer (peer_token); record_exec updates its binary_path.
     //
-    // WARNING-10 (Phase 2 review): `from_utf8_lossy` silently replaces
+    // WARNING (v0.2 review): `from_utf8_lossy` silently replaces
     // invalid UTF-8 bytes with U+FFFD. Filesystem paths can technically
     // contain arbitrary bytes; a path with invalid UTF-8 will be mangled
     // in storage and incorrect in subsequent forensic logs. Storing the
@@ -1565,11 +1565,11 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
         .process_tree
         .record_exec(peer_token, target_path.clone());
 
-    // Phase 3 plan 03-04 (D-55): capture PM env subset onto ProcessNode for log enrichment.
-    // extract_pm_env applies the prefix allowlist + R-08 secret denylist + wire-size cap.
+    // v0.3: capture PM env subset onto ProcessNode for log enrichment.
+    // extract_pm_env applies the prefix allowlist + secret denylist + wire-size cap.
     // V2 messages decode with pm_env=[] (via #[serde(default)]) → captured is empty → no-op.
     let captured = crate::env_capture::extract_pm_env(&ev.pm_env);
-    // quick-260508-et9 (BLOCKER #1): emit a forensic tracing line so e2e
+    // BLOCKER: emit a forensic tracing line so e2e
     // tests can drain_stderr() and HARD-assert that pm_env capture
     // landed without depending on JSONL log timing. Privacy-safe:
     // we log the COUNT of captured pairs and the COUNT of pairs the
@@ -1582,7 +1582,7 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     // target like `sentinel.exec.pm_env` would NOT match
     // `sentinel_daemon=info` (RUST_LOG matches against the event's target,
     // which defaults to the module path). Discovered the hard way during
-    // the BLOCKER #1 e2e wiring — see git log on this file.
+    // the BLOCKER e2e wiring — see git log on this file.
     //
     // Emitted unconditionally (even when captured.is_empty()) so the test
     // can distinguish "ExecEvent never reached the handler" (no log line
@@ -1601,7 +1601,7 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
             .set_pm_env_snapshot(&peer_token, captured);
     }
 
-    // D-34 Phase A: csops pre-check on the calling process.
+    // step A: csops pre-check on the calling process.
     let kernel_pid = peer_token.val[5] as libc::pid_t;
     if is_hardened_runtime(kernel_pid) {
         // Arm a 500 ms gap timer; cancelled by DylibLoaded if the new image
@@ -1610,8 +1610,8 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
             binary_path: target_path,
             detected_at_ms: unix_ms_now(),
         };
-        // Phase 3 plan 03-08: pass forensic sinks so the gap fire also
-        // updates recent_gaps + log_writer (T-03-08-05).
+        // v0.3: pass forensic sinks so the gap fire also
+        // updates recent_gaps + log_writer.
         state.gap_detector.arm_with_forensics(
             peer_token,
             gap,
@@ -1700,7 +1700,7 @@ fn handle_prepare_snapshot_frame(
             return;
         }
     };
-    // Phase 3 plan 03-07: accept V2 OR V3. V3 carries is_tty + baseline_mode
+    // v0.3: accept V2 OR V3. V3 carries is_tty + baseline_mode
     // (#[serde(default)] on those fields → false on V2 decode, so no branch needed).
     if !matches!(req.schema_version, IPC_SCHEMA_V2 | IPC_SCHEMA_V3) {
         let _ = write_tagged(
@@ -1714,9 +1714,9 @@ fn handle_prepare_snapshot_frame(
         return;
     }
     let cwd = std::path::PathBuf::from(req.cwd);
-    // Phase 4 plan 04-03: use the V4 entry point so the handler pre-flights
-    // `fetch_feeds_blocking` (D-83) and merges feed-derived FeedDeny entries
-    // (D-90). The reply is `SnapshotReply::ok_v4(..., feed_warnings)`.
+    // v0.4: use the V4 entry point so the handler pre-flights
+    // `fetch_feeds_blocking` and merges feed-derived FeedDeny entries.
+    // The reply is `SnapshotReply::ok_v4(..., feed_warnings)`.
     let reply = crate::handlers::prepare_snapshot::handle_prepare_snapshot_v4_full(
         state,
         &cwd,
@@ -1753,7 +1753,7 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
         return;
     }
 
-    // Phase 3 plan 03-12 / D-45: park-pending-prompt path.
+    // v0.3: park-pending-prompt path.
     // On cache-miss in TTY-mode tracked subtree with an open prompt channel,
     // ask the user instead of immediately returning default-deny.
     //
@@ -1821,10 +1821,10 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
             crate::prompt::CoalesceOutcome::Fresh => prompt_id.clone(),
             crate::prompt::CoalesceOutcome::Existing(other_id) => other_id,
         };
-        // Phase 5 plan 05-03: resolve package_context at prompt-build time so the
+        // v0.5: resolve package_context at prompt-build time so the
         // user's TTY prompt UI can display it AND the JSONL Decision row emitted
-        // from the response handler carries it (CONTEXT C-01). The dylib never
-        // sends package_context over the wire (T-05-12 mitigation) — it is
+        // from the response handler carries it. The dylib never
+        // sends package_context over the wire — it is
         // daemon-resolved here from the kernel-sourced peer_token (ENF-08).
         //
         // root_command best-effort: infer_package_context only uses this input
@@ -1886,7 +1886,7 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
                 }
                 return;
             }
-            // D-47: block on user response with a deadline. The hook's
+            // Block on user response with a deadline. The hook's
             // getaddrinfo timeout is 30s; we allow 35s here so the hook
             // times out first (clean EAI_AGAIN) rather than the daemon
             // silently dropping the prompt. If the CLI disconnects or the
@@ -2045,7 +2045,7 @@ fn handle_env_not_propagated_frame(
                 "TREE-06 env-not-propagated gap recorded"
             );
 
-            // Phase 3 plan 03-08 (T-03-08-05): also publish to recent_gaps + log_writer.
+            // v0.3: also publish to recent_gaps + log_writer.
             // Use the run_uuid from the node for forensic correlation.
             let run_uuid = state
                 .process_tree

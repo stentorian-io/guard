@@ -1,4 +1,4 @@
-//! Phase 5 plan 05-02: C2 sink redirect helper for validation tests.
+//! C2 sink redirect helper for v0.5 validation tests.
 //!
 //! Two variants, exposed via `start_or_hosts(...)`:
 //!

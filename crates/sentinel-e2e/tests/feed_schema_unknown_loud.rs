@@ -1,4 +1,4 @@
-//! Phase 4 TI-06: a feed record with schema_version 2.0.0 must trigger D-87's
+//! v0.4: a feed record with schema_version 2.0.0 must trigger D-87's
 //! "fail loudly" path: feed_metadata.last_pull_outcome = 'schema_unknown',
 //! daemon_state Degraded, and a feed_error tracing event.
 

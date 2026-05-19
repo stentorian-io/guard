@@ -1,5 +1,5 @@
-//! Wave-0 spike (Phase 3 plan 03-01): verifies A2 from RESEARCH.md.
-//! notify 8.2 detects file rename events on macOS within 2 seconds.
+//! v0.3 spike: verifies notify 8.2 detects file rename events on macOS
+//! within 2 seconds.
 
 use std::path::PathBuf;
 use std::sync::mpsc::channel;

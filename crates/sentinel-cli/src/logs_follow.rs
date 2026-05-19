@@ -1,8 +1,7 @@
 //! crates/sentinel-cli/src/logs_follow.rs
 //!
-//! Phase 3 plan 03-10 — file-tail with rotation rename-detection (D-51).
-//! Uses notify 8.2; A2 verified by plan 03-01 spike.
-//! Pitfall 2: single non-recursive watch (RecursiveMode::NonRecursive).
+//! v0.3 — file-tail with rotation rename-detection.
+//! Uses notify 8.2; single non-recursive watch (RecursiveMode::NonRecursive).
 
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;

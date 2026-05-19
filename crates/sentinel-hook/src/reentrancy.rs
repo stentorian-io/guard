@@ -13,13 +13,13 @@
 //!
 //! # BL-04 fix (canonical reference) — RAII guard pattern
 //!
-//! WARNING-02 (Phase 2 review): the BL-04 explanation moved here from
+//! WARNING-02 (v0.2 review): the BL-04 explanation moved here from
 //! `replace_libc.rs` so all hooks (`replace_libc`, `replace_fork`,
 //! `replace_exec`, `replace_nw`) reference the SAME canonical
 //! description. Each hook file's `InHookGuard` struct is a copy of the
 //! pattern below; if you change one, change them all.
 //!
-//! ## The bug (original Phase 1 BL-04)
+//! ## The bug (original v0.1 BL-04)
 //!
 //! The previous pattern cleared `IN_HOOK` BEFORE dispatching the real
 //! syscall:
@@ -65,7 +65,7 @@
 //! the parent's thread-local cell across the fork; the RAII guard alone
 //! cannot recover from that. `posix_spawn` does NOT need that reset
 //! because the libc atomic forks-and-execs in a single call (see
-//! BLOCKER-05 in the Phase 2 review for the explicit assumption).
+//! BLOCKER-05 in the v0.2 review for the explicit assumption).
 
 use core::cell::Cell;
 

@@ -1,27 +1,26 @@
-//! Phase 5 plan 05-04 — VAL-02: allowlist-bleed via *.workers.dev.
+//! v0.5 — allowlist-bleed via *.workers.dev.
 //!
-//! Sibling test to Phase 2's curated_deny.rs (CONTEXT C-04: do NOT extend that
-//! file — the existing test must remain untouched to preserve the Phase 2
+//! Sibling test to v0.2's curated_deny.rs (do NOT extend that
+//! file — the existing test must remain untouched to preserve the v0.2
 //! enforcement contract assertion shape). Reuses the same harness script
 //! (crates/sentinel-e2e/harness/connect_workers_dev.js) but drives through the
 //! prompt path (PTY, pre-scripted Deny) so JSONL emits via
 //! prompt_channel::emit_decision_row.
 //!
-//! HARD assertion (CONTEXT C-04 intent, codebase-aligned shape — see
-//! plan 05-04 objective for the "source_kind" rationale):
+//! HARD assertion (codebase-aligned shape):
 //!   - verdict = "Deny"
 //!   - source_kind = "prompt_deny"   (the literal daemon emits — see 05-03 plumbing)
 //!   - intel = None or absent        (the deny is from abuse-pattern, NOT a feed)
 //!   - dest_host ends with ".workers.dev"
 //!
-//! Why these four together encode C-04's intent: a curated-allow override is
+//! Why these four together encode the intent: a curated-allow override is
 //! impossible per D-26 invariant (BuiltinDeny tier 0 always wins); a
 //! feed-deny would have intel populated; only a workers.dev abuse-pattern
-//! deny matches all four predicates simultaneously. The literal C-04 string
+//! deny matches all four predicates simultaneously. The literal
 //! "builtin_deny" is never emitted by the daemon's prompt path
 //! (prompt_channel.rs hardcodes "prompt_deny" for every prompt-Deny outcome
-//! regardless of underlying tier), so we honor C-04 by intent rather than
-//! by literal-string match.
+//! regardless of underlying tier), so we honor the intent rather than a
+//! literal-string match.
 
 use std::io::Write as _;
 use std::time::Duration;
@@ -57,12 +56,12 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
     ])
     .expect("start daemon");
 
-    // Reuse the Phase 2 harness script — DO NOT MODIFY IT (curated_deny.rs
+    // Reuse the v0.2 harness script — DO NOT MODIFY IT (curated_deny.rs
     // depends on it remaining stable).
     let script = cargo_workspace_root().join("crates/sentinel-e2e/harness/connect_workers_dev.js");
     assert!(
         script.exists(),
-        "harness script missing at {} — Phase 2 plan 02-07 should have created it",
+        "harness script missing at {} — v0.2 should have created it",
         script.display()
     );
 
@@ -106,7 +105,7 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
     std::thread::sleep(Duration::from_millis(500)); // log_writer mpsc drain margin
 
     // -----------------------------------------------------------------------
-    // HARD assertion (per C-04 intent).
+    // HARD assertion.
     // -----------------------------------------------------------------------
     let log = harness
         .home
@@ -123,7 +122,7 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
         let host = v.get("dest_host").and_then(|x| x.as_str()).unwrap_or("");
         // intel: either field absent (None at serialization via
         // skip_serializing_if) or explicit JSON null. Both indicate "no feed
-        // attribution" which is what C-04 calls for.
+        // attribution" which is what the intent calls for.
         let intel_field = v.get("intel");
         let intel_is_none = match intel_field {
             None => true,
@@ -137,7 +136,7 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
     });
     assert!(
         matched,
-        "VAL-02 HARD assertion failed: no JSONL row matching verdict=Deny + \
+        "HARD assertion failed: no JSONL row matching verdict=Deny + \
          source_kind=prompt_deny + intel=None + dest_host=*.workers.dev;\n\
          log file: {}\n\
          contents:\n{content}\n\

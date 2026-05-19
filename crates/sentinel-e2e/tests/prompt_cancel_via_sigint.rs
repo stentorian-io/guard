@@ -1,7 +1,7 @@
-//! Phase 3 plan 03-14 BLOCKER #1 / D-79 acceptance — SIGINT cancels parked prompt.
+//! v0.3 — SIGINT cancels parked prompt.
 //!
 //! Test: SIGINT is sent to the sentinel wrap process while a prompt is parked.
-//! The SIGINT handler (sigint_handler.rs, plan 03-13) calls PromptCancel for
+//! The SIGINT handler (sigint_handler.rs) calls PromptCancel for
 //! all in-flight prompt IDs, then propagates SIGINT to the wrapped process group.
 //! Expected outcomes:
 //!   - PromptCancel sent → daemon emits a GapRecord with gap_kind="prompt-cancelled"

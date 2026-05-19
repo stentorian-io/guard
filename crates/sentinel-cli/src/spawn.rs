@@ -1,14 +1,11 @@
 //! posix_spawnp wrapper that injects DYLD_INSERT_LIBRARIES,
 //! SENTINEL_SNAPSHOT_MANIFEST, and SENTINEL_DAEMON_SOCKET into the child's envp.
 //!
-//! Pattern: .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md
-//! lines 671-739 (Example 1).
-//!
-//! Phase 2 plan 02-06b: SENTINEL_DAEMON_SOCKET added so the dylib's
-//! `cache_daemon_socket_from_env` (plan 02-05) finds the daemon socket and
+//! v0.2 — SENTINEL_DAEMON_SOCKET added so the dylib's
+//! `cache_daemon_socket_from_env` finds the daemon socket and
 //! can send ForkEvent / ExecEvent / DylibLoaded events.
 //!
-//! Phase 3 plan 03-13: `spawn_wrapped_with_pgid` added — uses
+//! v0.3 — `spawn_wrapped_with_pgid` added — uses
 //! `std::process::Command` to return a `Child` handle (so the orchestrator can
 //! wait AFTER installing the SIGINT handler). POSIX_SPAWN_SETPGROUP is applied
 //! so the child becomes its own pgid leader; pgid = child.id() as i32.
@@ -75,10 +72,9 @@ pub fn spawn_wrapped(
     );
 
     // SENTINEL_DAEMON_SOCKET: absolute path the dylib uses to talk back to the
-    // daemon (plan 02-05's ipc_client::cache_daemon_socket_from_env reads this
-    // at ctor time). Without it the dylib's send_*_sync calls return
-    // NotConfigured and the fork/exec/dylib_loaded events never reach the
-    // daemon — Phase 2 IPC is a no-op.
+    // daemon (ipc_client::cache_daemon_socket_from_env reads this at ctor time).
+    // Without it the dylib's send_*_sync calls return NotConfigured and the
+    // fork/exec/dylib_loaded events never reach the daemon — v0.2 IPC is a no-op.
     let mut entry3 = ENV_DAEMON_SOCKET.as_bytes().to_vec();
     entry3.push(b'=');
     entry3.extend_from_slice(socket_path.as_os_str().as_bytes());
@@ -126,7 +122,7 @@ pub fn spawn_wrapped(
     Ok(pid)
 }
 
-/// Phase 3 plan 03-13: Spawn the wrapped command and return (`Child`, `pgid`).
+/// v0.3 — Spawn the wrapped command and return (`Child`, `pgid`).
 ///
 /// Unlike `spawn_wrapped` (which uses raw `posix_spawnp` and returns a bare pid),
 /// this variant uses `std::process::Command` so the orchestrator can:

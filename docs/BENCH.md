@@ -1,7 +1,7 @@
 # Sentinel Hot-Path Benchmark
 
 Methodology and reference numbers for Sentinel's `< 100µs` cache-hit hot-path
-budget (VAL-03 / Phase 08).
+budget.
 
 The < 100µs claim defends Sentinel's architectural promise: **in-process snapshot
 lookup, no IPC on the hot path**. Cache hits go through `decide_for_sockaddr →
@@ -21,7 +21,7 @@ The reference numbers below were measured on:
 
 > Run `./scripts/bench-hot-path.sh` to populate these fields and the table
 > below from your own machine. The first time the project measures on a new
-> SKU, append a new row to the table rather than overwriting — Phase 08 D-35.
+> SKU, append a new row to the table rather than overwriting.
 
 ## Capture Procedure
 
@@ -80,7 +80,7 @@ Paste the row below into docs/BENCH.md under the numbers table.
 **Cross-check:** the cache-hit p99 must be < 100,000 ns (i.e., < 100 µs)
 for the v0.1 / v0.2 hot-path budget claim to hold. If the captured number
 exceeds 100,000 ns, do NOT update the Numbers table; instead, surface the
-regression as a phase-level concern — the methodology shipped in v0.2 is
+regression — the methodology shipped in v0.2 is
 sound, but the architectural claim would need re-evaluation.
 
 ## Numbers
@@ -96,12 +96,12 @@ sound, but the architectural claim would need re-evaluation.
 call to TCP `'connect'` event for a wrapped node child looping
 `net.connect(443, 'registry.npmjs.org')`. Includes Sentinel hook + cache-hit +
 occasional Resolve-IPC cache-miss + TCP handshake to the real host. No fixed
-budget; reported for transparency. (Phase 08 CONTEXT D-32.)
+budget; reported for transparency.
 
 ## Methodology
 
 - **Bench harness:** [`criterion`](https://docs.rs/criterion) 0.8.2 (already a workspace dep).
-- **Per-iteration latency:** [`hdrhistogram`](https://docs.rs/hdrhistogram) 7.5.4 (added as a `sentinel-hook` dev-dep in Phase 08).
+- **Per-iteration latency:** [`hdrhistogram`](https://docs.rs/hdrhistogram) 7.5.4.
 - **Sample size:** criterion default (100 samples).
 - **Warm-up:** criterion default (3 s warm-up; the bench function additionally calls `decide_for_sockaddr` once before the measure loop to populate the per-process cache).
 - **Measurement time:** criterion default (5 s).
@@ -122,18 +122,18 @@ budget is comfortable; measurement noise is well under 1 % of the budget.
 
 ## What this does NOT measure
 
-- Cache-miss / Resolve-IPC RTT (reported as the live-wrap context number; no fixed budget in v0.2 — Phase 08 CONTEXT D-32).
+- Cache-miss / Resolve-IPC RTT (reported as the live-wrap context number; no fixed budget in v0.2).
 - Per-symbol bench tables (`connect` vs `nw_*` vs `getaddrinfo`).
 - Comparative bench against an unsecured baseline.
 - Soak / long-running / leak benches.
 
-These are explicitly out of scope for v0.2 (Phase 08 CONTEXT, Deferred Ideas).
+These are explicitly out of scope for v0.2.
 
 ## Other benches in the repo
 
 - [`crates/sentinel-hook/benches/hot_path.rs`](../crates/sentinel-hook/benches/hot_path.rs)
   is the matcher-only microbench against `sentinel_core::evaluate_rule`. It is
-  preserved per Phase 08 D-37 as a regression tripwire for the rule-matching
+  preserved as a regression tripwire for the rule-matching
   tier of the hot path. It is **not** load-bearing for the < 100 µs claim — see
   its header comment for details.
 - [`crates/sentinel-hook/benches/cache_hit_hot_path.rs`](../crates/sentinel-hook/benches/cache_hit_hot_path.rs)
@@ -165,10 +165,4 @@ each row is auditable.
 
 1. Run `./scripts/bench-hot-path.sh` on the new machine.
 2. Open a PR that appends one row to the **Numbers** table — do not overwrite
-   existing rows. Phase 08 commits one reference-machine row; future SKUs land
-   as PR appendices (D-35).
-
----
-
-*Phase 08 / VAL-03 — see `.planning/phases/08-perf-reliability-hardening/` for the
-full plan trail.*
+   existing rows; future SKUs land as PR appendices.

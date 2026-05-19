@@ -1,9 +1,8 @@
 //! crates/sentinel-cli/src/denial_log.rs
 //!
-//! Phase 07 plan 02 — JSONL denial-log parser, refactored from approve.rs
-//! per D-22. Consumed by `status denials <uuid>` and `status review [<uuid>]`
-//! (Plan 03). WR-05 caps preserved verbatim (D-30): max 10 000 unique
-//! hosts, max 256-char host length.
+//! v0.7 — JSONL denial-log parser, refactored from approve.rs.
+//! Consumed by `status denials <uuid>` and `status review [<uuid>]`.
+//! Caps: max 10 000 unique hosts, max 256-char host length.
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -65,7 +64,7 @@ pub fn filter_block_destinations(log_path: &Path, run_uuid: &str)
     Ok(out)
 }
 
-/// D-26: walk the log and return the run_uuid of the most recent line
+/// Walk the log and return the run_uuid of the most recent line
 /// whose event == "block". Returns None if no block events exist.
 /// Implementation: read the file once, accumulate the LAST seen block
 /// run_uuid (later lines overwrite earlier ones). v1 reads the whole

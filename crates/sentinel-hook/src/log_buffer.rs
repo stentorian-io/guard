@@ -1,11 +1,11 @@
 //! Concurrent-writer-safe log ring (BL-03 / D-43 fix).
 //!
-//! Phase 1's SpscRing was a single-producer-single-consumer approximation
+//! v0.1's SpscRing was a single-producer-single-consumer approximation
 //! that accepted writes from multiple threads (replace_libc.rs hot paths) —
-//! racy by design. Phase 2 replaces it with `crossbeam_queue::ArrayQueue<Box<[u8]>>`,
+//! racy by design. v0.2 replaces it with `crossbeam_queue::ArrayQueue<Box<[u8]>>`,
 //! a lock-free MPMC queue with proven correctness.
 //!
-//! The append API takes `&[u8]` (unchanged from Phase 1) and copies into an
+//! The append API takes `&[u8]` (unchanged from v0.1) and copies into an
 //! owned `Box<[u8]>` — this allocates, which would normally violate D-03's
 //! no-alloc-on-the-hot-path rule, BUT the log ring is NOT on the verdict hot
 //! path (the hot path is connect/sendto, which decides allow/deny without
@@ -27,7 +27,7 @@ fn ring() -> &'static ArrayQueue<Box<[u8]>> {
     LOG_RING_INNER.get_or_init(|| ArrayQueue::new(CAPACITY))
 }
 
-/// Process-global log ring. Phase 1 callers wrote `LOG_RING.append(...)`.
+/// Process-global log ring. v0.1 callers wrote `LOG_RING.append(...)`.
 /// The static is a unit struct delegating to the OnceLock-backed inner queue;
 /// this preserves the call-site syntax exactly while routing all writes
 /// through the lock-free MPMC ArrayQueue.

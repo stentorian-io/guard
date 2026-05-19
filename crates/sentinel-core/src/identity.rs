@@ -1,9 +1,8 @@
 //! ProcessIdentity — provenance-typed wrapper around audit_token_t.
-//! Per D-04 and ENF-08: bare pid_t cannot construct Verified; only kernel-sourced
-//! AuditToken values can, and only via the `unsafe` constructor.
+//! Bare pid_t cannot construct Verified; only kernel-sourced AuditToken values
+//! can, and only via the `unsafe` constructor.
 //!
-//! Hand-rolled FFI per .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md
-//! lines 131-138 (rejected mach2 / bsm-sys / endpoint-sec-sys).
+//! Hand-rolled FFI (rejected mach2 / bsm-sys / endpoint-sec-sys).
 
 /// 8 × 32-bit fields per Apple's libbsm.h. Layout is stable and kernel-blessed
 /// per knight.sc; val[5]=pid, val[7]=pidversion.

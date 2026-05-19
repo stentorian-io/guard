@@ -1,6 +1,6 @@
 //! crates/sentinel-daemon/src/log_writer/rotation.rs
 //!
-//! Phase 3 plan 03-05 — size-based rotation with detached gzip + retention pruning.
+//! v0.3 — size-based rotation with detached gzip + retention pruning.
 
 use std::fs;
 use std::io::{self, Read, Write};

@@ -1,9 +1,9 @@
 //! End-to-end test: spin up an IpcServer on a tempdir socket, connect a client
-//! UnixStream, send a Phase 1 (legacy length-prefixed) RegisterRoot, assert
+//! UnixStream, send a v0.1 (legacy length-prefixed) RegisterRoot, assert
 //! Ack received and ProcessTree contains the test process's kernel-sourced
 //! AuditToken as a tracked root.
 //!
-//! This test exercises the Phase 1 backward-compat path through Phase 2's
+//! This test exercises the v0.1 backward-compat path through v0.2's
 //! tagged-frame dispatcher. The dispatcher peeks the first byte: 0x00 (high
 //! byte of a small length prefix) → LegacyUntagged → handle_legacy_register_root.
 //! The integration test must continue to pass against the rewired ipc_server.
@@ -285,11 +285,11 @@ fn idempotent_register_root_for_same_token() {
     );
 }
 
-/// T-01-05-09 / plan 08 contract: a peer that connects then closes without
-/// sending a frame (the connect-only liveness probe shape that plan 08's
-/// `probe_daemon_alive` produces) MUST be handled benignly by the daemon —
-/// no state change, no Reply written, no panic. This locks the plan 04
-/// schema (RegisterRoot + Reply) — no new wire variant needed for liveness.
+/// A peer that connects then closes without sending a frame (the connect-only
+/// liveness probe shape that `probe_daemon_alive` produces) MUST be handled
+/// benignly by the daemon — no state change, no Reply written, no panic.
+/// This locks the schema (RegisterRoot + Reply) — no new wire variant needed
+/// for liveness.
 #[test]
 fn connect_close_no_frame_is_benign() {
     let tmp = tempfile::tempdir().unwrap();

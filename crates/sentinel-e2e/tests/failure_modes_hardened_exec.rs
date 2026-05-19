@@ -1,4 +1,4 @@
-//! Phase 5 plan 05-06 — VAL-04 D-10 + CONTEXT C-05: hardened-binary failure mode.
+//! v0.5 — hardened-binary failure mode.
 //!
 //! Verifies that when a wrapped command exec's into an Apple-signed
 //! hardened-runtime binary, DYLD env vars are stripped and Sentinel detects
@@ -51,9 +51,9 @@ fn hardened_runtime_exec_surfaces_coverage_gap() {
         .expect("run sentinel");
     // /usr/bin/env is allowed by policy and may succeed; the assertion is that
     // the daemon sees the child coverage gap after DYLD is stripped on spawn.
-    eprintln!("[VAL-04 D-10] target exit: {:?}", out.status.code());
+    eprintln!("[hardened-exec] target exit: {:?}", out.status.code());
     eprintln!(
-        "[VAL-04 D-10] target stderr: {}",
+        "[hardened-exec] target stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 

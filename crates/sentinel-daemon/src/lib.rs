@@ -24,7 +24,7 @@ pub mod feed_refresh;
 pub mod persistence_watcher;
 pub mod rule_store;
 
-// Convenience re-exports for integration tests (plan 03-12).
+// Convenience re-exports for integration tests.
 pub use ipc_server::DaemonState;
 /// Re-export Verdict under `sentinel_daemon::policy::Verdict` for test ergonomics.
 pub mod policy {

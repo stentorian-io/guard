@@ -1,4 +1,4 @@
-//! Phase 3 plan 03-19 (gap closure for UAT item #4) — `sentinel logs --follow`
+//! v0.3 (gap closure for UAT item #4) — `sentinel logs --follow`
 //! survives a 6-second idle period without dying. The watcher's
 //! recv_timeout(1s) heartbeat keeps the process responsive indefinitely.
 
@@ -18,7 +18,7 @@ fn follow_survives_6s_idle_then_resumes_streaming() {
     // Touch sentinel.log so --follow has something to subscribe to.
     std::fs::write(&log_path, b"").expect("touch log");
 
-    // Phase 07 plan 05 (D-09, D-10): `logs --follow` → `status logs --follow`.
+    // v0.7: `logs --follow` → `status logs --follow`.
     let mut follow = Command::new(&cli)
         .arg("status")
         .arg("logs")

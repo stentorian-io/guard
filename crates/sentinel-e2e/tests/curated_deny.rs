@@ -1,6 +1,6 @@
 //! ALLOW-06 abuse-pattern deny e2e test.
 //!
-//! `*.workers.dev` is in the curated YAML deny list (plan 02-02 →
+//! `*.workers.dev` is in the curated YAML deny list (
 //! `crates/sentinel-core/data/allowlist.yaml` line 162-165). A wrapped
 //! Node connect attempt to `sentinel-test.workers.dev` MUST be denied — the
 //! deny rule has tier=BuiltinDeny (Tier 0) and is non-overridable per D-26.
@@ -13,7 +13,7 @@
 //! default-deny no-rule-match layer.
 //!
 //! This test SKIPs cleanly on machines without a usable Homebrew node (matches
-//! Phase 1 deny.rs pattern).
+//! v0.1 deny.rs pattern).
 
 use sentinel_e2e::{cargo_workspace_root, resolve_cli, resolve_dylib, resolve_node, DaemonHarness};
 use std::process::Command;

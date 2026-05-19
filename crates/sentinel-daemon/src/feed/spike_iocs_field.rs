@@ -1,7 +1,7 @@
 //! Spike A4: validate the empirical `database_specific.iocs` host-IoC
 //! field shape against inline OSV-shaped fixtures.
 //!
-//! Resolves Pitfall 4 in 04-RESEARCH.md (CONTEXT.md D-92 speculated wrong
+//! Resolves Pitfall 4 in 04-RESEARCH.md (originally speculated wrong
 //! field names — `malicious_hosts`, `c2`, `exfil_hosts` — but empirical
 //! sampling of 200 malicious-packages records found 0 occurrences of any
 //! of those keys; the actual signal is `database_specific.iocs.{domains,
@@ -76,7 +76,7 @@ fn spike_url_host_extraction_via_url_crate() {
 
 #[test]
 fn spike_speculative_field_names_are_absent() {
-    // CONTEXT.md D-92 speculated `malicious_hosts`, `c2`, `exfil_hosts` —
+    // Originally speculated `malicious_hosts`, `c2`, `exfil_hosts` —
     // empirical sampling (RESEARCH.md Pitfall 4) shows zero occurrences across
     // 200 records. PATTERNS.md correction #3 corrects the field name to
     // `iocs`. This test pins the empirical conclusion: a parser looking ONLY

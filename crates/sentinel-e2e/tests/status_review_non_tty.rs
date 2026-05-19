@@ -1,6 +1,6 @@
 //! crates/sentinel-e2e/tests/status_review_non_tty.rs
 //!
-//! Phase 07 plan 05 — CLI-19 + CLI-20: `status review` is interactive only.
+//! v0.7 — `status review` is interactive only.
 //! Non-TTY callers must exit 64 with the "developer machine" hint emitted
 //! directly by status::review::run (eprintln + return Ok(64) BEFORE any
 //! daemon IPC), so the test does not require a live daemon.

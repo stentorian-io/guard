@@ -1,10 +1,10 @@
 //! Build the release dylib and verify __DATA,__interpose section size
 //! matches the expected number of records × 16 bytes.
 //!
-//! Phase 1 had 4 records (connect, connectx, sendto, sendmsg). Plan 02-05
-//! added 7 more (fork, vfork, posix_spawn, posix_spawnp, execve, execvp, execv) —
-//! see plan 02-05 SUMMARY "Interpose count rationale" for why execl/execlp/execle
-//! are intentionally OMITTED. M003-S01 added 3 more (send, write, writev).
+//! v0.1 had 4 records (connect, connectx, sendto, sendmsg). v0.2 added 7 more
+//! (fork, vfork, posix_spawn, posix_spawnp, execve, execvp, execv) —
+//! execl/execlp/execle are intentionally OMITTED (variadic ABI; coverage is
+//! preserved transitively via execve). M003-S01 added 3 more (send, write, writev).
 //! M004-S04 added 1 more (getenv) for anti-detection hardening.
 //! M005-S01 added 2 more (getaddrinfo, freeaddrinfo) for daemon-proxied DNS.
 //! open/openat interpose disabled (dispatch_once reentrancy crash on macOS 26+).
@@ -14,9 +14,8 @@
 use std::process::Command;
 
 /// Total number of __DATA,__interpose records the release dylib must expose.
-/// Phase 1 = 4 (connect, connectx, sendto, sendmsg).
-/// Phase 2 plan 02-05 = +7 (fork, vfork, posix_spawn, posix_spawnp, execve,
-///                          execvp, execv).
+/// v0.1 = 4 (connect, connectx, sendto, sendmsg).
+/// v0.2 = +7 (fork, vfork, posix_spawn, posix_spawnp, execve, execvp, execv).
 /// M003-S01 = +3 (send, write, writev).
 /// M004-S04 = +1 (getenv).
 /// M005-S01 = +2 (getaddrinfo, freeaddrinfo).

@@ -1,6 +1,6 @@
 // crates/sentinel-hook/tests/daemon_dead_socket_returns_io_error.rs
 //
-// Phase 08 / VAL-05 D-38 verification spike.
+// v0.7 / VAL-05 D-38 verification spike.
 //
 // Proves that the existing RESOLVE_TIMEOUT_MS=100 + connect_with_timeout shape in
 // crates/sentinel-hook/src/ipc_client.rs returns deterministically (and well under
@@ -8,11 +8,10 @@
 // listener — the SIGKILL'd-daemon scenario per RESEARCH §Pitfall 5.
 //
 // If this test PASSES (default expectation), the D-40 contingency dylib changes
-// in ipc_client.rs are NOT needed — plan 08-06 can collapse the
-// failure_modes_daemon_killed lenient/strict split to denied-only without further
-// dylib edits.
+// in ipc_client.rs are NOT needed — the failure_modes_daemon_killed
+// lenient/strict split can collapse to denied-only without further dylib edits.
 //
-// If this test FAILS, plan 08-06 must include the D-40 fast-path:
+// If this test FAILS, the D-40 fast-path must be added:
 // detect ECONNREFUSED / ENOENT inside connect_with_timeout and return an
 // IpcClientError variant that maps to the cache-miss-deny path.
 

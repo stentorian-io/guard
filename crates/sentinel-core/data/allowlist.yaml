@@ -1,4 +1,4 @@
-# Curated default allowlist + abuse-pattern denies for Sentinel Phase 2.
+# Curated default allowlist + abuse-pattern denies for Sentinel.
 # Loaded at daemon startup via include_str!. Reviewed per-PR.
 #
 # Schema:

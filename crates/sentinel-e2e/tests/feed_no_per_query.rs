@@ -1,5 +1,4 @@
-//! Phase 4 TI-08: bulk fetch only — per-query online lookups must never be
-//! made.
+//! v0.4: bulk fetch only — per-query online lookups must never be made.
 //!
 //! Strategy: instrument the daemon's fetcher to emit
 //! `target = "sentinel.feed.fetch"` events on every network fetch attempt.
@@ -81,7 +80,7 @@ fn block_decisions_do_not_trigger_per_query_online_lookups() {
         &stderr_after_runs.chars().take(4096).collect::<String>(),
     );
 
-    // CRITICAL TI-08 ASSERTION: a `sentinel status` invocation MUST NOT
+    // CRITICAL ASSERTION: a `sentinel status` invocation MUST NOT
     // trigger any new fetch_start events. status reads local feed_metadata
     // SQLite only — no gix call path. If this count grows, the daemon is
     // doing per-status-query fetches.
@@ -102,14 +101,14 @@ fn block_decisions_do_not_trigger_per_query_online_lookups() {
         stderr_after_status.matches("op=\"fetch_start\"").count();
     assert_eq!(
         new_fetch_starts_during_status, 0,
-        "TI-08 violation: `sentinel status` triggered {} fetch_start event(s)\n\
+        "bulk-fetch violation: `sentinel status` triggered {} fetch_start event(s)\n\
          stderr after status:\n{}",
         new_fetch_starts_during_status, stderr_after_status,
     );
 
     // Negative assertion: the daemon never references per-query API
     // endpoints anywhere in stderr. This covers (a) osv.dev / api.github.com
-    // (TI-08 — no per-query for the v1 feeds) AND (b) urlhaus / threatfox
+    // (no per-query for the v1 feeds) AND (b) urlhaus / threatfox
     // (D-78 — confirms the abuse.ch deferral was respected in code, not
     // just in docs).
     let combined_stderr = format!("{stderr_after_runs}{stderr_after_status}");
@@ -122,7 +121,7 @@ fn block_decisions_do_not_trigger_per_query_online_lookups() {
     ] {
         assert!(
             !combined_stderr.contains(forbidden),
-            "Daemon stderr must not reference per-query API endpoint {forbidden:?} (TI-08 / D-78 violation)\n\
+            "Daemon stderr must not reference per-query API endpoint {forbidden:?} (bulk-fetch-only violation)\n\
              stderr (truncated 4KB):\n{}",
             &combined_stderr.chars().take(4096).collect::<String>(),
         );

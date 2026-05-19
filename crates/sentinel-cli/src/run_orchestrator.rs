@@ -23,11 +23,11 @@ pub fn run(
     let cwd = std::env::current_dir().map_err(|e| CliError::Other(format!("cwd: {e}")))?;
     let is_tty = std::io::stdin().is_terminal();
 
-    // Phase 4 plan 04-03: spawn a CR-overwrite progress thread on stderr while
-    // the daemon does the synchronous feed fetch. The progress thread is
-    // joined immediately after PrepareSnapshot returns; the line is cleared
-    // with `\r\x1b[2K` so stderr returns to a clean state for any
-    // feed_warnings or downstream output.
+    // v0.4 — spawn a CR-overwrite progress thread on stderr while the daemon
+    // does the synchronous feed fetch. The progress thread is joined
+    // immediately after PrepareSnapshot returns; the line is cleared with
+    // `\r\x1b[2K` so stderr returns to a clean state for any feed_warnings
+    // or downstream output.
     let progress_stop = Arc::new(AtomicBool::new(false));
     let progress_handle = spawn_feed_progress_thread(Arc::clone(&progress_stop));
 
@@ -40,10 +40,10 @@ pub fn run(
     let manifest_path = outcome.manifest_path.clone();
     let run_uuid = outcome.run_uuid.clone();
 
-    // Phase 4 plan 04-03: surface non-fatal feed_warnings inline. Hard fetch
-    // failures are already converted to CliError::Other by prepare_snapshot_v3
-    // (D-85 strict-fail returns SnapshotReply::Err, which becomes the `?`
-    // above). Warnings here are the D-87 partial-parse path.
+    // v0.4 — surface non-fatal feed_warnings inline. Hard fetch failures are
+    // already converted to CliError::Other by prepare_snapshot_v3 (strict-fail
+    // returns SnapshotReply::Err, which becomes the `?` above). Warnings here
+    // are the partial-parse path.
     for w in &outcome.feed_warnings {
         eprintln!(
             "\u{26A0} feed warning ({}): {} \u{2014} {}",
@@ -82,15 +82,14 @@ pub fn run(
     let (mut child, pgid) =
         crate::spawn::spawn_wrapped_with_pgid(&command, sock, &manifest_path, &run_uuid)?;
 
-    // quick-260508-et9 (Rule 3 fix to a blocking pre-existing regression):
-    // Restore the RegisterRoot delegation that was lost in the Phase 03-13
+    // Restore the RegisterRoot delegation that was lost in the v0.3
     // refactor (commit d020752 — extracted run_orchestrator from main.rs and
     // dropped the audit_token + register_root_with_daemon call sites).
     //
     // Without this, the daemon's `is_tracked(peer_token)` returns false for
     // every IPC the wrapped child sends (DylibLoaded, ForkEvent, ExecEvent,
-    // EnvNotPropagatedGap). The TREE-06 e2e tests, the BLOCKER #1 pm_env
-    // capture e2e tests, and any other test that depends on
+    // EnvNotPropagatedGap). The TREE-06 e2e tests, the pm_env capture e2e
+    // tests, and any other test that depends on
     // tree-tracked-peer state ALL silently fail when this call is missing —
     // the dylib's IPC succeeds at the wire layer but is rejected at the
     // handler-level untracked-peer gate.
@@ -223,14 +222,10 @@ fn truncate_utf8(value: String, max: usize) -> String {
     value[..end].to_string()
 }
 
-/// Phase 4 plan 04-03 — CR-overwrite stderr progress while the daemon is in
-/// the middle of `fetch_feeds_blocking`. The thread frame-cycles on a 250ms
-/// tick. On stop, prints `\r\x1b[2K` to clear the line so subsequent stderr
-/// output (feed_warnings, child output) starts from column 0.
-///
-/// Per CONTEXT.md: the `\u{26A1}` (lightning bolt) is intentional — it's the
-/// design's emotional payoff. CLAUDE.md's no-emoji rule applies to assistant
-/// chat output, not user-facing UX strings the design explicitly specifies.
+/// v0.4 — CR-overwrite stderr progress while the daemon is in the middle of
+/// `fetch_feeds_blocking`. The thread frame-cycles on a 250ms tick. On stop,
+/// prints `\r\x1b[2K` to clear the line so subsequent stderr output
+/// (feed_warnings, child output) starts from column 0.
 fn spawn_feed_progress_thread(stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("sentinel-feed-progress".into())

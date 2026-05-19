@@ -1,11 +1,11 @@
 //! crates/sentinel-daemon/src/log_writer/mod.rs
 //!
-//! Phase 3 — forensic JSONL log writer (D-49, D-50).
+//! v0.3 — forensic JSONL log writer.
 //!
 //! - Bounded mpsc input (`crossbeam_channel::bounded(4096)`) — drop-tolerant on full queue
 //! - Dedicated writer thread named `sentineld-log-writer`
 //! - Size-rotation at SIZE_THRESHOLD with atomic rename + detached gzip (Pitfall 5)
-//! - Retention pruning enforced after each rotation (D-50: 7 archives + 256 MiB cap)
+//! - Retention pruning enforced after each rotation (7 archives + 256 MiB cap)
 //! - Atomic counters expose blocks_today / allows_today / gaps_today for StatusReply
 
 pub mod enrichment;
@@ -39,7 +39,7 @@ pub struct LogWriter {
 
 impl LogWriter {
     /// Create a no-op LogWriter whose channel is immediately disconnected.
-    /// Used by DaemonState::new (the Phase 2 compat constructor) and in tests
+    /// Used by DaemonState::new (the v0.2 compat constructor) and in tests
     /// where a live writer thread is undesirable.
     pub fn noop() -> Self {
         let (tx, _rx) = bounded::<LogRow>(1);

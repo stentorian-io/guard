@@ -1,9 +1,9 @@
 //! Verifies that `spawn_wrapped` puts `SENTINEL_DAEMON_SOCKET=<socket_path>`
-//! in the wrapped child's environment (plan 02-06b).
+//! in the wrapped child's environment.
 //!
 //! The dylib's `cache_daemon_socket_from_env` reads the env var at ctor time
 //! to talk to the daemon for fork/exec/dylib_loaded events; without this,
-//! Phase 2's whole IPC pipeline is no-op.
+//! v0.2's whole IPC pipeline is no-op.
 
 use std::ffi::OsStr;
 use std::io::Read;

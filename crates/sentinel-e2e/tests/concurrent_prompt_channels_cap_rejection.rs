@@ -1,4 +1,4 @@
-//! Phase 3 plan 03-14 — R-05 cap rejection: 65th PromptChannelInit must
+//! v0.3 cap rejection: 65th PromptChannelInit must
 //! Err-Ack with the exact message `"max concurrent channels reached (64)"`.
 //!
 //! Locks the cap-rejection acceptance for the WARNING raised in the plan-03-12
@@ -93,7 +93,7 @@ fn start_background_tracked_run(
     std::thread::sleep(Duration::from_millis(600));
 
     // Recover the run_uuid from the manifest in the daemon state_dir.
-    // Per plan 02-06a, per-run manifests live under state_dir/runs/<uuid>.manifest.
+    // Per-run manifests live under state_dir/runs/<uuid>.manifest.
     let runs_dir = harness.state_dir.join("runs");
     let run_uuid = std::fs::read_dir(&runs_dir)
         .expect("read runs dir")
@@ -141,7 +141,7 @@ fn sixty_fifth_prompt_channel_init_is_err_acked_with_cap_message() {
         .expect("65th PromptChannelInit IPC roundtrip must not I/O-error");
     match ack65 {
         PromptChannelInitAck::Ok { .. } => {
-            panic!("65th PromptChannelInit unexpectedly Ok-acked; R-05 cap not enforced")
+            panic!("65th PromptChannelInit unexpectedly Ok-acked; cap not enforced")
         }
         PromptChannelInitAck::Err { message, .. } => {
             assert!(

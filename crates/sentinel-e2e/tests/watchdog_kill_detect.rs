@@ -46,7 +46,7 @@ fn ping_daemon(sock: &Path) -> Option<(u32, u64)> {
 fn watchdog_detects_daemon_alive_then_dead() {
     let harness = DaemonHarness::start().expect("start daemon");
 
-    // Phase 1: Daemon is alive — Ping must return Pong
+    // Step 1: Daemon is alive — Ping must return Pong
     let result = ping_daemon(&harness.socket);
     assert!(
         result.is_some(),
@@ -57,14 +57,14 @@ fn watchdog_detects_daemon_alive_then_dead() {
     // Uptime should be very small (just started)
     assert!(uptime < 10, "daemon uptime unexpectedly high: {uptime}s");
 
-    // Phase 2: Kill daemon with SIGKILL
+    // Step 2: Kill daemon with SIGKILL
     let daemon_pid = harness.child.id() as libc::pid_t;
     unsafe {
         libc::kill(daemon_pid, libc::SIGKILL);
     }
     std::thread::sleep(Duration::from_millis(100));
 
-    // Phase 3: Daemon is dead — Ping must return None (unreachable)
+    // Step 3: Daemon is dead — Ping must return None (unreachable)
     let result_after_kill = ping_daemon(&harness.socket);
     assert!(
         result_after_kill.is_none(),

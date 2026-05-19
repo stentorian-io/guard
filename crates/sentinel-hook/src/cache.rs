@@ -1,8 +1,7 @@
 //! Per-process bounded LRU getaddrinfo-cache (D-17).
 //!
-//! Phase 1 size: 32 entries. NO HashMap (anti-pattern from
-//! .planning/phases/01-foundations-hook-hello-world/01-RESEARCH.md line 553).
-//! Linear-probe + LRU bumping over a fixed-size array.
+//! v0.1 size: 32 entries. NO HashMap — linear-probe + LRU bumping over a
+//! fixed-size array.
 //!
 //! Key: up to MAX_SOCKADDR_BYTES bytes of canonicalized sockaddr.
 //! Value: up to MAX_HOSTNAME bytes of host name.

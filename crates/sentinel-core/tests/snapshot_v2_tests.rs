@@ -7,19 +7,19 @@ fn schema_constants_have_expected_values() {
 }
 
 #[test]
-fn phase2_default_has_v2_schema_and_nonempty_entries() {
-    let s = Snapshot::phase2_default();
+fn v2_default_has_v2_schema_and_nonempty_entries() {
+    let s = Snapshot::v2_default();
     assert_eq!(s.schema_version, SCHEMA_V2);
     assert!(
         !s.entries.is_empty(),
-        "phase2_default must seed at least loopback + registry.npmjs.org"
+        "v2_default must seed at least loopback + registry.npmjs.org"
     );
     assert!(s.run_uuid.is_none(), "daemon-startup snapshot has no run_uuid");
 }
 
 #[test]
 fn snapshot_encode_decode_roundtrip() {
-    let s = Snapshot::phase2_default();
+    let s = Snapshot::v2_default();
     let bytes = s.encode().expect("encode");
     let back = Snapshot::decode(&bytes).expect("decode");
     assert_eq!(s, back);
@@ -27,7 +27,7 @@ fn snapshot_encode_decode_roundtrip() {
 
 #[test]
 fn decode_rejects_v1_schema() {
-    let v1 = Snapshot::phase1_default();
+    let v1 = Snapshot::v1_default();
     let bytes = v1.encode().expect("encode v1");
     let res = Snapshot::decode(&bytes);
     match res {
@@ -41,7 +41,7 @@ fn decode_rejects_v1_schema() {
 
 #[test]
 fn decode_truncated_returns_codec_error() {
-    let s = Snapshot::phase2_default();
+    let s = Snapshot::v2_default();
     let bytes = s.encode().expect("encode");
     // Truncate to half its length — guaranteed malformed CBOR.
     let truncated = &bytes[..bytes.len() / 2];
@@ -51,7 +51,7 @@ fn decode_truncated_returns_codec_error() {
 
 #[test]
 fn snapshot_with_run_uuid_roundtrips() {
-    let mut s = Snapshot::phase2_default();
+    let mut s = Snapshot::v2_default();
     s.run_uuid = Some("11111111-2222-3333-4444-555555555555".into());
     let bytes = s.encode().expect("encode");
     let back = Snapshot::decode(&bytes).expect("decode");

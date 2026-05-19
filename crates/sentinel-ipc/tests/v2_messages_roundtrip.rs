@@ -23,7 +23,7 @@ fn schema_constants() {
 
 #[test]
 fn frozen_register_root_still_uses_v1() {
-    // Phase 1 contract preserved.
+    // v0.1 contract preserved.
     let id = sentinel_core::AuditToken { val: [9; 8] };
     let r = RegisterRoot::new(id);
     assert_eq!(r.schema_version, IPC_SCHEMA_V1);

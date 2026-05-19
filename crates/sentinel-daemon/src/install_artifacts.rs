@@ -1,6 +1,6 @@
 //! crates/sentinel-daemon/src/install_artifacts.rs
 //!
-//! Phase 3 plan 03-03 — install_artifacts CRUD (D-62).
+//! v0.3 — install_artifacts CRUD.
 //!
 //! Records what `sentinel install` did so `sentinel uninstall` can precisely reverse.
 //! Migrations are owned by RuleStore; this struct just opens connections to the same DB.
@@ -91,7 +91,7 @@ impl InstallArtifactStore {
         )
     }
 
-    /// Phase 07 D-15 (WARNING-5 fix): bulk delete by artifact_kind. Used by
+    /// v0.7 (WARNING-5 fix): bulk delete by artifact_kind. Used by
     /// the DeleteInstallArtifacts IPC handler so per-target `setup --remove`
     /// leaves no rows behind.
     pub fn delete_by_kind(&self, artifact_kind: &str) -> SqlResult<usize> {
@@ -108,7 +108,7 @@ impl InstallArtifactStore {
     }
 }
 
-/// Daemon-down fallback (D-62): direct read-only open of the sentinel.db.
+/// Daemon-down fallback: direct read-only open of the sentinel.db.
 /// Used by `sentinel uninstall` CLI when daemon is unreachable.
 pub fn read_via_db(db_path: &Path) -> SqlResult<Vec<InstallArtifact>> {
     let conn = Connection::open_with_flags(

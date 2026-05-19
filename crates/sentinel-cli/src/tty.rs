@@ -1,10 +1,8 @@
-//! Phase 3 plan 03-09 — TTY detection helper.
+//! v0.3 — TTY detection helper.
 //!
-//! Phase 07 plan 02 (D-18): consolidated `confirm` helper. The four pre-existing
-//! file-private duplicates in `uninstall.rs`, `install/mod.rs::confirm_yn`,
-//! `approve.rs`, and `trust_policy.rs` are scheduled for removal in this plan
-//! (uninstall, here in Task 3) and Plan 04 (the other three; deferred so the
-//! v0.1 dispatch arms remain untouched).
+//! v0.7 — consolidated `confirm` helper. The four pre-existing file-private
+//! duplicates in `uninstall.rs`, `install/mod.rs::confirm_yn`, `approve.rs`,
+//! and `trust_policy.rs` were removed in this version.
 use std::io::IsTerminal;
 
 pub fn stdin_is_tty() -> bool { std::io::stdin().is_terminal() }
@@ -12,8 +10,8 @@ pub fn stdout_is_tty() -> bool { std::io::stdout().is_terminal() }
 pub fn stderr_is_tty() -> bool { std::io::stderr().is_terminal() }
 
 /// Prompt the user with `[y/N]` confirmation. Refuses non-TTY stdin
-/// (D-18: `--yes` is the only authorized auto-confirm; piped `yes` on
-/// stdin is rejected to prevent accidental destructive auto-agree).
+/// (`--yes` is the only authorized auto-confirm; piped `yes` on stdin
+/// is rejected to prevent accidental destructive auto-agree).
 /// Returns true for "y" / "yes" (case-insensitive); false for any other
 /// input including bare Enter.
 pub fn confirm(prompt: &str) -> Result<bool, crate::CliError> {

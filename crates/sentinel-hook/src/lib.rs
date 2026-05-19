@@ -1,7 +1,7 @@
 //! Sentinel hook cdylib (libsentinel_hook.dylib).
 //!
 //! Loaded via DYLD_INSERT_LIBRARIES; intercepts libc outbound calls (D-08).
-//! Plan 07 layers Network.framework on top by adding `replace_nw` and modifying
+//! v0.1 layers Network.framework on top by adding `replace_nw` and modifying
 //! the constructor to dlsym Network.framework symbols.
 //!
 //! Hot-path discipline (D-03): NO heap allocation on intercepted-call paths.
@@ -20,29 +20,28 @@
 // from the exec hooks (also FFI) depend on the safe-API ergonomics. The lint
 // is overly conservative for this defensive-copy helper.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
-// Pre-existing Phase 1 patterns flagged once Phase 2 plan 02-05 added clippy
-// to sentinel-hook's verification gate. Out-of-scope cleanup tracked in
-// Phase 02 deferred-items.md (Plan 02-05 row).
+// Pre-existing v0.1 patterns flagged once v0.2 added clippy to
+// sentinel-hook's verification gate.
 #![allow(clippy::needless_lifetimes, clippy::unnecessary_cast, dead_code)]
 
 pub mod cache;
 pub mod env_scrub; // M004-S04: scrub SENTINEL_*/DYLD_INSERT_LIBRARIES from environ
-pub mod envp; // Plan 02-09: pre-spawn envp inspector (TREE-06)
+pub mod envp; // v0.2: pre-spawn envp inspector (TREE-06)
 pub mod exec_policy; // M003-S02: hardened-runtime exec blocking policy
 pub mod fd_class; // M003-S01-T03: thread-local fd classification bitmap for write/writev hooks
 pub mod interpose; // Filled in by task 2; symbol re-export only at this point
-pub mod ipc_client; // Phase 2 plan 02-05: blocking IPC for ForkEvent / ExecEvent / DylibLoaded
+pub mod ipc_client; // v0.2: blocking IPC for ForkEvent / ExecEvent / DylibLoaded
 pub mod log_buffer;
 pub mod macho_flags; // M003-S02: Mach-O code-signing flag parser for hardened-runtime exec blocking
 pub mod pm_env_filter; // quick-260508-et9 (BLOCKER #1): dylib-side pm_env capture
 pub mod persistence_paths; // M003-S04: persistence-path classifier for open/openat monitoring
 pub mod raw_syscall; // M003-S01: direct kernel syscall wrappers (bypass libc::syscall interpose)
 pub mod reentrancy;
-pub mod replace_exec; // Phase 2 plan 02-05: exec-family shadows
-pub mod replace_fork; // Phase 2 plan 02-05: fork/vfork/posix_spawn shadows
+pub mod replace_exec; // v0.2: exec-family shadows
+pub mod replace_fork; // v0.2: fork/vfork/posix_spawn shadows
 pub mod replace_libc; // Filled in by task 2
 pub mod replace_open; // M003-S04: open/openat interpose for persistence monitoring
-pub mod replace_nw; // Plan 07: Network.framework dlsym + shadow exports
+pub mod replace_nw; // v0.1: Network.framework dlsym + shadow exports
 pub mod replace_syscall; // M003-S01-T04: libc syscall() interpose to catch bypass attempts
 pub mod self_check; // M004-S03: hook binary self-integrity verification
 pub mod snapshot;
@@ -103,10 +102,10 @@ unsafe fn sentinel_hook_init() {
     // triggers CoreFoundation initialization which re-enters dispatch_once).
     // replace_nw::ensure_init() is called lazily from each NW shadow export.
 
-    // 1.6. Phase 2 plan 02-05: cache the daemon socket path from env. Subsequent
+    // 1.6. v0.2: cache the daemon socket path from env. Subsequent
     //      ipc_client::send_*_sync calls use this cached path. Failure here means
     //      env unset — IPC calls return NotConfigured and the dylib operates with
-    //      the same fail-mode as Phase 1 (no fork/exec tracking, but the verdict
+    //      the same fail-mode as v0.1 (no fork/exec tracking, but the verdict
     //      path still works against the snapshot).
     crate::ipc_client::cache_daemon_socket_from_env();
 
@@ -146,10 +145,10 @@ unsafe fn sentinel_hook_init() {
         }
     }
 
-    // 3. Phase 2 plan 02-05 / D-35: send DylibLoaded IPC to daemon.
+    // 3. v0.2 / D-35: send DylibLoaded IPC to daemon.
     //
     //    Best-effort: failure is logged but does NOT FAIL_CLOSED. The daemon's
-    //    gap detector (plan 02-04) will record an UnknownInjectionFailure if
+    //    gap detector will record an UnknownInjectionFailure if
     //    no DylibLoaded arrives within 500ms of the parent's ExecEvent.
     //
     //    Use a SHORT timeout (100ms) — we do not want a slow daemon to block
@@ -181,7 +180,7 @@ unsafe fn sentinel_hook_init() {
     }
 
     // 4. mprotect the originals page read-only (T-01-06-04 mitigation).
-    // PHASE 1 STATUS: disabled. The mprotect call is too coarse-grained — it
+    // v0.1 STATUS: disabled. The mprotect call is too coarse-grained — it
     // marks the ENTIRE page containing REAL_CONNECT read-only. Other writable
     // statics on the same page (e.g. the per-process Mutex<Cache> in
     // replace_libc.rs) then cause SIGBUS when written at connect-time.
@@ -189,21 +188,21 @@ unsafe fn sentinel_hook_init() {
     // on the same 4K page. A page-level mprotect cannot protect only the
     // AtomicPtrs without also making the Mutex read-only.
     //
-    // Phase 5 plan: separate REAL_* statics into a dedicated section
+    // v0.5 plan: separate REAL_* statics into a dedicated section
     // (#[link_section = "__DATA_CONST,__sentinel_orig"]) so they occupy an
     // isolated page that can be safely mprotected. Until then, this step is
     // skipped to avoid the SIGBUS regression (Rule 1 auto-fix).
     //
-    // 5. Phase 2 plan 02-05 / D-44: re-enabled interpose-effectiveness probe.
-    //    Phase 1 commented this out citing "crash; will re-enable after root
-    //    cause identified". Plan 02-05 confirms the crash was the mprotect step
-    //    above (now permanently disabled until Phase 5 dedicated-section work),
+    // 5. v0.2 / D-44: re-enabled interpose-effectiveness probe.
+    //    v0.1 commented this out citing "crash; will re-enable after root
+    //    cause identified". v0.2 confirms the crash was the mprotect step
+    //    above (now permanently disabled until v0.5 dedicated-section work),
     //    NOT probe_self_test itself. Re-enabling closes the silent-injection-
     //    failure gap: if dyld doesn't apply our interpose records, the dylib
     //    loads but no FAIL_CLOSED fires. probe_self_test catches that case by
     //    asserting dlsym(RTLD_DEFAULT,"connect") == &sentinel_connect.
     if !snapshot::FAIL_CLOSED.load(Ordering::Acquire) {
-        // interpose::lock_originals_page();  // disabled: Phase 5 (see above)
+        // interpose::lock_originals_page();  // disabled: v0.5 (see above)
         interpose::probe_self_test();
     }
 

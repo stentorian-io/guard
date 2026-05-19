@@ -1,4 +1,4 @@
-//! Wave-0 spike (Phase 3 plan 03-01): verifies A4 from RESEARCH.md.
+//! Wave-0 spike (v0.3): verifies A4 from RESEARCH.md.
 //! Spawning 32 concurrent OS threads (one per "prompt channel") does not exhaust
 //! pthread limits on a developer Mac; all 32 threads enter their main bodies
 //! within 1 second of spawn.

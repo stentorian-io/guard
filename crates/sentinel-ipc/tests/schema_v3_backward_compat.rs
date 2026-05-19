@@ -1,4 +1,4 @@
-//! Phase 3 plan 03-02: backward-compat decode tests for V2 messages under V3 schemas.
+//! v0.3: backward-compat decode tests for V2 messages under V3 schemas.
 //! Verifies that V2-encoded messages (without new fields) still decode correctly
 //! under V3 schema structs using #[serde(default)].
 

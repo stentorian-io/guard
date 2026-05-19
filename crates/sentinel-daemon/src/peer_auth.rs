@@ -1,7 +1,7 @@
 //! Peer authentication for the daemon's accept loop.
 //!
-//! Wraps sentinel_ipc::transport::peer_identity. Phase 1 acceptable mitigation:
-//! audit-token-only validation. Phase 5 adds executable-path / codesign checks.
+//! Wraps sentinel_ipc::transport::peer_identity. v0.1 acceptable mitigation:
+//! audit-token-only validation. v0.5 adds executable-path / codesign checks.
 
 use sentinel_core::ProcessIdentity;
 use sentinel_ipc::transport::peer_identity as ipc_peer_identity;

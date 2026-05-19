@@ -1,9 +1,9 @@
-//! Snapshot CBOR codec — Phase 2 (SCHEMA_V2).
+//! Snapshot CBOR codec — v0.2 (SCHEMA_V2).
 //!
-//! schema_version is the FIRST field of the CBOR map (D-15 / RESEARCH.md line 547).
-//! Phase 2 readers REJECT anything other than SCHEMA_V2 (fail-closed). Phase 1
-//! SCHEMA_V1 const + phase1_default() are RETAINED as a compat-test fixture only;
-//! production code paths must use SCHEMA_V2 + phase2_default().
+//! schema_version is the FIRST field of the CBOR map.
+//! v0.2 readers REJECT anything other than SCHEMA_V2 (fail-closed). v0.1
+//! SCHEMA_V1 const + v1_default() are RETAINED as a compat-test fixture only;
+//! production code paths must use SCHEMA_V2 + v2_default().
 
 use crate::allowlist::{AllowlistEntry, MatchType, RuleKind, RuleTier};
 use crate::error::Error;
@@ -17,18 +17,18 @@ pub struct Snapshot {
     /// MUST be the first field. Decoder verifies == SCHEMA_V2 (fail-closed otherwise).
     pub schema_version: u16,
     pub generated_at_unix_ms: i64,
-    /// Pre-sorted by RuleTier at write time (daemon, plan 02-02). The dylib
-    /// iterates this Vec linearly and returns at the FIRST matching entry.
+    /// Pre-sorted by RuleTier at write time (daemon). The dylib iterates this
+    /// Vec linearly and returns at the FIRST matching entry.
     pub entries: Vec<AllowlistEntry>,
     /// Per-`sentinel wrap` snapshot: Some(uuid) for runs/{uuid}.cbor; None for the
-    /// daemon-startup snapshot (deprecated post-Phase-2 but kept for compat).
+    /// daemon-startup snapshot (deprecated post-v0.2 but kept for compat).
     pub run_uuid: Option<String>,
 }
 
 impl Snapshot {
-    /// Phase 1 minimal allowlist — KEPT for backward-compat test fixtures only.
-    /// Production code must use phase2_default(). decode() rejects this snapshot.
-    pub fn phase1_default() -> Self {
+    /// v0.1 minimal allowlist — KEPT for backward-compat test fixtures only.
+    /// Production code must use v2_default(). decode() rejects this snapshot.
+    pub fn v1_default() -> Self {
         Self {
             schema_version: SCHEMA_V1,
             generated_at_unix_ms: 0,
@@ -37,10 +37,10 @@ impl Snapshot {
         }
     }
 
-    /// Phase 2 minimal allowlist — used by tests and as the daemon's startup
+    /// v0.2 minimal allowlist — used by tests and as the daemon's startup
     /// fallback before any `sentinel wrap` invocation. Real curated content is
-    /// loaded by plan 02-02 from `crates/sentinel-core/data/allowlist.yaml`.
-    pub fn phase2_default() -> Self {
+    /// loaded from `crates/sentinel-core/data/allowlist.yaml`.
+    pub fn v2_default() -> Self {
         Self {
             schema_version: SCHEMA_V2,
             generated_at_unix_ms: 0,

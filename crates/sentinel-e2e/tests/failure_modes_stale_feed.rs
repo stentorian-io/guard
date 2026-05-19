@@ -1,12 +1,12 @@
-//! Phase 5 plan 05-06 — VAL-04 D-11: stale-feed failure mode.
+//! v0.5 — stale-feed failure mode.
 //!
 //! Verifies `sentinel status` correctly surfaces feeds that haven't been
 //! pulled in > the freshness threshold.
 //!
 //! Approach:
 //!   1. Start daemon (creates feed_metadata schema via migration).
-//!   2. Stop daemon WITHOUT dropping state_dir (Plan 05-02
-//!      DaemonHarness::stop_preserving_state).
+//!   2. Stop daemon WITHOUT dropping state_dir
+//!      (DaemonHarness::stop_preserving_state).
 //!   3. Open the SQLite DB read-write and INSERT a feed_metadata row with
 //!      last_pull_ms = now - 30 days (well past the freshness threshold) and
 //!      last_pull_outcome = 'ok' (so StaleFeeds — not Degraded — fires per
@@ -117,7 +117,7 @@ fn stale_feed_metadata_surfaces_warning_in_status() {
 
     assert_eq!(
         daemon_state, "StaleFeeds",
-        "VAL-04 D-11 HARD assertion failed: expected daemon_state=StaleFeeds, got '{daemon_state}'\n\
+        "HARD assertion failed: expected daemon_state=StaleFeeds, got '{daemon_state}'\n\
          status JSON: {v:#}\n\
          daemon stderr:\n{drained}",
     );

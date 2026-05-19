@@ -4,7 +4,7 @@
 //! CBOR bytes encoding T.
 //!
 //! MAX_FRAME_BYTES bounds the per-message size; the receiver REJECTS oversized
-//! length prefixes before allocating any buffer (security threat T-01-04-01).
+//! length prefixes before allocating any buffer.
 
 use crate::error::IpcError;
 use std::io::{Read, Write};
@@ -30,7 +30,7 @@ pub fn read_frame<R: Read, T: serde::de::DeserializeOwned>(r: &mut R) -> Result<
     let mut prefix = [0u8; FRAME_LENGTH_BYTES];
     r.read_exact(&mut prefix)?;
     let len = u32::from_be_bytes(prefix);
-    // BOUNDS CHECK before any allocation — mitigates T-01-04-01 (DoS via oversized length prefix).
+    // BOUNDS CHECK before any allocation — mitigates DoS via oversized length prefix.
     if len > MAX_FRAME_BYTES {
         return Err(IpcError::FrameTooLarge { got: len, max: MAX_FRAME_BYTES });
     }

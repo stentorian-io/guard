@@ -1,12 +1,11 @@
-//! Phase 4 plan 04-02 — OSV record parser + host-IoC extractor.
+//! v0.4 — OSV record parser + host-IoC extractor.
 //!
 //! Inputs: raw JSON bytes from a single OSV file (typically <8 KB; capped at
 //! `MAX_OSV_RECORD_BYTES` = 64 KB per RESEARCH.md Security V5).
 //!
 //! Outputs: a `ParsedRecord` with the fields needed to build `feed_iocs`
 //! rows, OR a `FeedParseError` that the fetcher counts as parse_error /
-//! schema_unknown / oversized for D-87 last-good-cache + D-Discretion
-//! feed_warning surfacing.
+//! schema_unknown / oversized for last-good-cache + feed_warning surfacing.
 //!
 //! Schema-version range gate (TI-06 per PATTERNS.md correction #6):
 //!   - GHSA records ship `schema_version: "1.4.0"` (haven't migrated since 2023).
@@ -21,7 +20,7 @@
 //!     for legitimate hosts like discord.com / cdn.discordapp.com / dl.dropbox.com).
 //!   - SECONDARY signal: `references[].type IN ('EVIDENCE', 'REPORT')` →
 //!     parse URL host via `url::Url::host_str()`.
-//!   - The CONTEXT.md D-92 speculative names (`malicious_hosts`, `c2`,
+//!   - The speculative names (`malicious_hosts`, `c2`,
 //!     `exfil_hosts`) DO NOT exist in real data — explicitly NOT looked up.
 
 use serde_json::Value;
@@ -206,7 +205,7 @@ pub fn parse_osv_record(json: &[u8], _feed: &str) -> Result<ParsedRecord, FeedPa
 /// `database_specific.iocs.urls[]` is intentionally NOT consulted (over-block
 /// risk for legitimate hosts named in malicious-packages records like
 /// `discord.com`, `cdn.discordapp.com`, `dl.dropbox.com`). The speculative
-/// CONTEXT.md D-92 keys (`malicious_hosts`, `c2`, `exfil_hosts`) DO NOT
+/// speculative keys (`malicious_hosts`, `c2`, `exfil_hosts`) DO NOT
 /// exist in real data and are intentionally NOT looked up.
 ///
 /// SECONDARY: `references[].type IN ('EVIDENCE', 'REPORT')` → URL host via
@@ -415,8 +414,8 @@ mod tests {
     }
 
     #[test]
-    fn parser_skips_speculative_d92_field_names() {
-        // CONTEXT.md D-92 speculated database_specific.malicious_hosts /
+    fn parser_skips_speculative_field_names() {
+        // Speculated database_specific.malicious_hosts /
         // c2 / exfil_hosts. Empirical sampling shows zero occurrences across
         // 200 records (RESEARCH.md Pitfall 4). A record carrying only the
         // speculative names extracts nothing.
@@ -434,7 +433,7 @@ mod tests {
         assert_eq!(
             p.host_iocs.len(),
             0,
-            "speculative D-92 names must NOT match real-data extraction logic"
+            "speculative names must NOT match real-data extraction logic"
         );
     }
 

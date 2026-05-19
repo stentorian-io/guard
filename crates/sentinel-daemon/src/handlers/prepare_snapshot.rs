@@ -1,16 +1,16 @@
-//! PrepareSnapshot handler (D-29).
+//! PrepareSnapshot handler.
 //!
 //! Flow per `sentinel wrap`:
 //!   1. CLI sends PrepareSnapshot { cwd } before posix_spawn
-//!   2. Concatenates curated YAML (plan 02-02) + SQLite user rules + lockfile-discovered registries
+//!   2. Concatenates curated YAML + SQLite user rules + lockfile-discovered registries
 //!   3. Merges FeedDeny entries from threat-intel IOCs
-//!   4. Sorts by RuleTier (Ord derived in plan 02-01)
+//!   4. Sorts by RuleTier
 //!   5. Writes runs/{uuid}.cbor + runs/{uuid}.manifest atomically
-//!   6. Inserts RunRecord into ProcessTree (plan 02-07 GC will use it on tracked-root exit)
+//!   6. Inserts RunRecord into ProcessTree (GC will use it on tracked-root exit)
 //!   7. Returns SnapshotReply::Ok { manifest_path, run_uuid }
 //!
-//! Phase 3 plan 03-07 (IPC_SCHEMA_V3): handler now accepts V3 payloads carrying
-//! `is_tty` (D-73) and `baseline_mode` (D-58). The dispatcher in ipc_server.rs
+//! v0.3 (IPC_SCHEMA_V3): handler now accepts V3 payloads carrying
+//! `is_tty` and `baseline_mode`. The dispatcher in ipc_server.rs
 //! relaxes the schema check to `matches!(v, IPC_SCHEMA_V2 | IPC_SCHEMA_V3)` and
 //! passes those fields through as arguments. V2 callers receive false/false defaults
 //! via #[serde(default)] on the wire fields.
@@ -39,20 +39,20 @@ pub enum PrepareError {
 
 /// Inputs are passed by reference; outputs are the SnapshotReply to write back.
 ///
-/// Phase 3 plan 03-07: `is_tty` and `baseline_mode` are V3 fields; they default
+/// v0.3: `is_tty` and `baseline_mode` are V3 fields; they default
 /// to false on V2 callers. Propagated via `set_run_is_tty` / `set_run_baseline_mode`
 /// after RunRecord insertion.
 ///
-/// Phase 4 plan 04-03 (D-83 + D-85 + D-90): the production handler is
+/// v0.4: the production handler is
 /// [`handle_prepare_snapshot_v4_full`], which performs:
-///   1. `fetch_feeds_blocking(...)` BEFORE building the snapshot (D-83 pure
-///      on-demand). Strict-fail on fetch error (D-85) → SnapshotReply::Err.
-///   2. User / curated / lockfile entries assembly (existing Phase 2 path).
-///   3. `build_feeddeny_entries(feed_store)` merge step (D-90).
+///   1. `fetch_feeds_blocking(...)` BEFORE building the snapshot (pure
+///      on-demand). Strict-fail on fetch error -> SnapshotReply::Err.
+///   2. User / curated / lockfile entries assembly (existing v0.2 path).
+///   3. `build_feeddeny_entries(feed_store)` merge step.
 ///   4. Sort + publish per-run snapshot.
 ///   5. SnapshotReply::ok_v4 carrying any non-fatal `feed_warnings`.
 ///
-/// This pre-Phase-4 entry point delegates to `handle_prepare_snapshot_inner`
+/// This pre-v0.4 entry point delegates to `handle_prepare_snapshot_inner`
 /// with `feed_store = None` (so the fetch-and-merge step is skipped) and is
 /// kept as a thin shim so existing tests that pass individual subsystems
 /// (rather than a full DaemonState) still compile.
@@ -90,7 +90,7 @@ pub fn handle_prepare_snapshot(
 //
 // Production V4 entry point follows.
 
-/// Full Phase 4 entry point used by the V3 IPC dispatcher path: takes the
+/// Full v0.4 entry point used by the V3 IPC dispatcher path: takes the
 /// V3-specific `is_tty` + `baseline_mode` fields plus the DaemonState for feed
 /// access. This is what `ipc_server.rs::handle_prepare_snapshot_frame` calls.
 ///
@@ -181,8 +181,8 @@ fn handle_prepare_snapshot_inner(
     };
     let cwd = cwd.as_path();
 
-    // Phase 4 plan 04-03 step 0 (D-83): pre-flight feed fetch BEFORE building
-    // the snapshot. Strict-fail on Err per D-85 — no last-cached fallback at
+    // v0.4 step 0: pre-flight feed fetch BEFORE building
+    // the snapshot. Strict-fail on error — no last-cached fallback at
     // the run gate. Skip when no feed_store is wired (legacy callers + unit
     // tests that don't exercise the feed path).
     let feed_warnings: Vec<FeedWarning> =
@@ -213,10 +213,10 @@ fn handle_prepare_snapshot_inner(
         }
     };
 
-    // 1a. Phase 4 plan 04-03 (D-90): merge FeedDeny entries derived from
+    // 1a. v0.4: merge FeedDeny entries derived from
     //     feed_iocs WHERE host_ioc IS NOT NULL. Non-fatal failure path follows
     //     the existing project-entries / user-entries discipline (warn + empty
-    //     vec). The structural POL-06 invariant — `RuleTier::CuratedAllow=1 <
+    //     vec). The structural invariant — `RuleTier::CuratedAllow=1 <
     //     RuleTier::FeedDeny=4` — is enforced by the sort step below; this
     //     handler does NOT need to special-case curated overrides.
     let feeddeny_entries: Vec<AllowlistEntry> = match feed_store {
@@ -297,9 +297,9 @@ fn handle_prepare_snapshot_inner(
 
     // 5. Insert RunRecord. The tracked_root is unknown at this point (the
     //    CLI hasn't sent RegisterRoot yet). We record the run with a zero
-    //    audit_token; plan 02-04's RegisterRoot handler updates it later.
+    //    audit_token; the RegisterRoot handler updates it later.
     //
-    //    Phase 3 plan 03-07: is_tty and baseline_mode are set at insertion.
+    //    v0.3: is_tty and baseline_mode are set at insertion.
     process_tree.insert_run(RunRecord {
         run_uuid: run_uuid.clone(),
         tracked_root: sentinel_core::AuditToken { val: [0; 8] },
@@ -309,7 +309,7 @@ fn handle_prepare_snapshot_inner(
         baseline_mode,
     });
 
-    // Phase 3 plan 03-07: also apply via setters so any downstream code that
+    // v0.3: also apply via setters so any downstream code that
     // calls set_run_is_tty / set_run_baseline_mode (e.g. from a V3 ipc_server
     // frame that decodes AFTER insert_run) will see up-to-date values. For the
     // standard V2/V3 path the values are already correct from insert_run above;

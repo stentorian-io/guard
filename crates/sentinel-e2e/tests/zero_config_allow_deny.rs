@@ -1,4 +1,4 @@
-//! E2E test verifying ROADMAP Phase 2 success criteria #2 and #3:
+//! E2E test verifying ROADMAP v0.2 success criteria #2 and #3:
 //!   #2: zero-config sentinel wrap succeeds for allowlisted destinations
 //!   #3: zero-config sentinel wrap blocks non-allowlisted destinations via
 //!       the dylib's in-process snapshot lookup
@@ -8,7 +8,7 @@
 //! The plan originally proposed two distinct loopback IPs (127.0.0.1 +
 //! 127.0.0.2) where 127.0.0.1 would be hard-rule allowed and 127.0.0.2 would
 //! fall through to default-deny. The executor verified during execution that
-//! `sentinel_core::policy::is_loopback_ip` (plan 02-02) accepts the entire
+//! `sentinel_core::policy::is_loopback_ip` accepts the entire
 //! 127.0.0.0/8 range — this is the strictly-correct RFC 1122 behavior — so
 //! BOTH 127.0.0.1 and 127.0.0.2 are hard-rule loopback allow. The plan's
 //! original design therefore cannot differentiate ALLOW from DENY using two
@@ -21,7 +21,7 @@
 //!     also succeeds (kernel allows the connect).
 //!   - addr_b = 192.0.2.1:80 (RFC 5737 TEST-NET-1, unrouted) — exercises the
 //!     dylib's libc connect() hook against a non-loopback IP that has no
-//!     prior getaddrinfo cache entry. The current Phase 2 hot path
+//!     prior getaddrinfo cache entry. The current v0.2 hot path
 //!     (replace_libc.rs) uses `match_hostname_compat` which returns Deny
 //!     when no entry matches — so under sentinel the connect is fast-denied
 //!     (sub-microsecond). Under no-sentinel, the connect attempt to TEST-NET-1

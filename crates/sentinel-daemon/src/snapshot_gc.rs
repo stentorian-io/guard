@@ -1,4 +1,4 @@
-//! Periodic GC for per-run snapshots (D-29).
+//! Periodic GC for per-run snapshots.
 //!
 //! Sweeps `runs/*.cbor` every GC_INTERVAL_SECS:
 //!   - If the file has no matching RunRecord in the ProcessTree, remove it
@@ -117,7 +117,7 @@ pub fn gc_sweep(state_dir: &Path, tree: &ProcessTree) {
 /// The handle is intentionally returned for tests that may want to join;
 /// the daemon's serve() detaches it (thread runs as long as the process).
 ///
-/// WARNING-07 part 2 (Phase 2 review): for graceful shutdown, prefer
+/// WARNING part 2 (v0.2 review): for graceful shutdown, prefer
 /// `spawn_gc_thread_with_shutdown` which takes a `crossbeam_channel::Receiver`
 /// the daemon's signal handler can send on to ask the thread to exit. The
 /// no-shutdown variant remains here for backwards compatibility — process

@@ -1,6 +1,6 @@
 //! crates/sentinel-cli/src/sigint_handler.rs
 //!
-//! Phase 3 plan 03-13 BLOCKER #1 / D-79 — SIGINT handler.
+//! v0.3 — SIGINT handler.
 //!
 //! On Ctrl-C during `sentinel wrap`:
 //!   1. Snapshot in-flight prompt_ids from the shared InflightPrompts registry.

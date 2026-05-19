@@ -203,6 +203,8 @@ pub struct DaemonState {
     pub deferred_resolve: Arc<DeferredResolveTable>,
     // v0.5 M004-S01: monotonic startup instant for uptime reporting in Ping.
     pub startup_instant: std::time::Instant,
+    // Per-message HMAC key for IPC frame signing. Reuses the snapshot HMAC key.
+    pub ipc_hmac_key: Option<[u8; 32]>,
 }
 
 impl DaemonState {
@@ -238,6 +240,7 @@ impl DaemonState {
             last_snapshot_publish_failed: AtomicBool::new(false),
             deferred_resolve: Arc::new(DeferredResolveTable::new()),
             startup_instant: std::time::Instant::now(),
+            ipc_hmac_key: None,
         }
     }
 
@@ -374,6 +377,9 @@ impl IpcServer {
             return;
         }
 
+        // Install per-connection frame signer (if HMAC key is available).
+        set_conn_signer(state.ipc_hmac_key);
+
         // Classify the frame: tagged or legacy length-prefixed.
         let kind = match classify_frame(&mut stream) {
             Ok(k) => k,
@@ -454,6 +460,7 @@ impl IpcServer {
                 handle_ping_frame(&mut stream, state);
             }
         }
+        clear_conn_signer();
     }
 }
 
@@ -462,7 +469,7 @@ impl IpcServer {
 // ============================================================================
 
 fn handle_status_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    let req: Status = match read_tagged_body(stream) {
+    let req: Status = match read_tagged_body(stream, MessageTag::Status) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "Status decode failed");
@@ -492,7 +499,7 @@ fn handle_status_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
 }
 
 fn handle_insert_user_rule_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    let req: InsertUserRule = match read_tagged_body(stream) {
+    let req: InsertUserRule = match read_tagged_body(stream, MessageTag::InsertUserRule) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "InsertUserRule decode failed");
@@ -522,7 +529,7 @@ fn handle_insert_user_rule_frame(stream: &mut UnixStream, state: &Arc<DaemonStat
 }
 
 fn handle_read_install_artifacts_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    let req: ReadInstallArtifacts = match read_tagged_body(stream) {
+    let req: ReadInstallArtifacts = match read_tagged_body(stream, MessageTag::ReadInstallArtifacts) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "ReadInstallArtifacts decode failed");
@@ -554,7 +561,7 @@ fn handle_read_install_artifacts_frame(stream: &mut UnixStream, state: &Arc<Daem
 }
 
 fn handle_baseline_commit_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    let req: BaselineCommit = match read_tagged_body(stream) {
+    let req: BaselineCommit = match read_tagged_body(stream, MessageTag::BaselineCommit) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "BaselineCommit decode failed");
@@ -591,7 +598,7 @@ fn handle_baseline_commit_frame(stream: &mut UnixStream, state: &Arc<DaemonState
 // ============================================================================
 
 fn handle_list_rules_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    let req: ListRules = match read_tagged_body(stream) {
+    let req: ListRules = match read_tagged_body(stream, MessageTag::ListRules) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "ListRules decode failed");
@@ -625,7 +632,7 @@ fn handle_list_rules_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
 }
 
 fn handle_delete_install_artifacts_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    let req: DeleteInstallArtifacts = match read_tagged_body(stream) {
+    let req: DeleteInstallArtifacts = match read_tagged_body(stream, MessageTag::DeleteInstallArtifacts) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "DeleteInstallArtifacts decode failed");
@@ -666,7 +673,7 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
         Decision, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
     };
 
-    let req: DenyNotify = match read_tagged_body(stream) {
+    let req: DenyNotify = match read_tagged_body(stream, MessageTag::DenyNotify) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "DenyNotify decode failed");
@@ -834,7 +841,7 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
 fn handle_exec_blocked_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
     use crate::log_writer::jsonl_row::{JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, now_rfc3339};
 
-    let req: ExecBlocked = match read_tagged_body(stream) {
+    let req: ExecBlocked = match read_tagged_body(stream, MessageTag::ExecBlocked) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "ExecBlocked decode failed");
@@ -916,7 +923,7 @@ fn handle_exec_blocked_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) 
 fn handle_persistence_write_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
     use crate::log_writer::jsonl_row::{JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, now_rfc3339};
 
-    let req: PersistenceWrite = match read_tagged_body(stream) {
+    let req: PersistenceWrite = match read_tagged_body(stream, MessageTag::PersistenceWrite) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "PersistenceWrite decode failed");
@@ -1000,7 +1007,7 @@ fn handle_persistence_write_frame(stream: &mut UnixStream, state: &Arc<DaemonSta
 // ============================================================================
 
 fn handle_ping_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    let _req: Ping = match read_tagged_body(stream) {
+    let _req: Ping = match read_tagged_body(stream, MessageTag::Ping) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "Ping decode failed");
@@ -1034,7 +1041,7 @@ fn handle_ping_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
 ///      `handlers::prompt_channel::run(stream, state, run_uuid)`.
 ///      Pitfall 4: the dedicated thread is NOT on the worker pool.
 fn handle_prompt_channel_init_frame(mut stream: UnixStream, state: &Arc<DaemonState>) {
-    let init: PromptChannelInit = match read_tagged_body(&mut stream) {
+    let init: PromptChannelInit = match read_tagged_body(&mut stream, MessageTag::PromptChannelInit) {
         Ok(m) => m,
         Err(e) => {
             let _ = write_tagged(
@@ -1359,26 +1366,56 @@ fn query_kernel_pidversion(pid: libc::pid_t) -> Option<u32> {
     }
 }
 
-fn read_tagged_body<T>(stream: &mut UnixStream) -> Result<T, IpcError>
+// Per-connection frame signer, set by `handle()` before dispatching to handlers.
+// Thread-local avoids threading the signer through every handler signature.
+thread_local! {
+    static CONN_SIGNER: std::cell::RefCell<Option<sentinel_ipc::signed_frame::FrameSigner>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn set_conn_signer(key: Option<[u8; 32]>) {
+    CONN_SIGNER.with(|cell| {
+        *cell.borrow_mut() = key.map(sentinel_ipc::signed_frame::FrameSigner::new);
+    });
+}
+
+fn clear_conn_signer() {
+    CONN_SIGNER.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+}
+
+fn read_tagged_body<T>(stream: &mut UnixStream, tag: MessageTag) -> Result<T, IpcError>
 where
     T: serde::de::DeserializeOwned,
 {
-    read_frame(stream)
+    CONN_SIGNER.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        match borrow.as_mut() {
+            Some(signer) => signer.read_signed(stream, tag.as_byte()),
+            None => read_frame(stream),
+        }
+    })
 }
 
 fn write_tagged<T>(stream: &mut UnixStream, tag: MessageTag, msg: &T) -> Result<(), IpcError>
 where
     T: serde::Serialize,
 {
-    // Tag byte first, then length-prefixed CBOR body — symmetric with classify_frame.
     if let Err(e) = stream.write_all(&[tag.as_byte()]) {
         return Err(IpcError::Io(e));
     }
-    write_frame(stream, msg)
+    CONN_SIGNER.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        match borrow.as_mut() {
+            Some(signer) => signer.write_signed(stream, tag.as_byte(), msg),
+            None => write_frame(stream, msg),
+        }
+    })
 }
 
 fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Arc<DaemonState>) {
-    let ev: ForkEvent = match read_tagged_body(stream) {
+    let ev: ForkEvent = match read_tagged_body(stream, MessageTag::ForkEvent) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "fork event decode failed");
@@ -1489,7 +1526,7 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
 }
 
 fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Arc<DaemonState>) {
-    let ev: ExecEvent = match read_tagged_body(stream) {
+    let ev: ExecEvent = match read_tagged_body(stream, MessageTag::ExecEvent) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "exec event decode failed");
@@ -1627,7 +1664,7 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
 }
 
 fn handle_dylib_loaded(stream: &mut UnixStream, peer_token: AuditToken, state: &Arc<DaemonState>) {
-    let ev: DylibLoaded = match read_tagged_body(stream) {
+    let ev: DylibLoaded = match read_tagged_body(stream, MessageTag::DylibLoaded) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "DylibLoaded decode failed");
@@ -1689,7 +1726,7 @@ fn handle_prepare_snapshot_frame(
     _peer_token: AuditToken,
     state: &Arc<DaemonState>,
 ) {
-    let req: PrepareSnapshot = match read_tagged_body(stream) {
+    let req: PrepareSnapshot = match read_tagged_body(stream, MessageTag::PrepareSnapshot) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "PrepareSnapshot decode failed");
@@ -1730,7 +1767,7 @@ fn handle_prepare_snapshot_frame(
 }
 
 fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: &Arc<DaemonState>) {
-    let req: Resolve = match read_tagged_body(stream) {
+    let req: Resolve = match read_tagged_body(stream, MessageTag::Resolve) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "Resolve decode failed");
@@ -2008,7 +2045,7 @@ fn handle_env_not_propagated_frame(
     peer_token: AuditToken,
     state: &Arc<DaemonState>,
 ) {
-    let req: EnvNotPropagatedGap = match read_tagged_body(stream) {
+    let req: EnvNotPropagatedGap = match read_tagged_body(stream, MessageTag::EnvNotPropagatedGap) {
         Ok(m) => m,
         Err(e) => {
             warn!(error = %e, "EnvNotPropagatedGap decode failed");

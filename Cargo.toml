@@ -59,14 +59,16 @@ url = "2.5"
 sentinel-core = { path = "crates/sentinel-core" }
 sentinel-ipc  = { path = "crates/sentinel-ipc" }
 
+# Cryptography (snapshot + IPC signing)
+sha2 = "0.10"
+hmac = "0.12"
+rand = "0.8"
+
 # Dev / test
 criterion = "0.8.2"
 tempfile  = "3"
 assert_cmd = "2"
 predicates = "3"
-sha2 = "0.10"
-hmac = "0.12"
-rand = "0.8"
 
 [profile.release]
 lto = "thin"

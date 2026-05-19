@@ -1595,11 +1595,13 @@ name = "sentinel-ipc"
 version = "0.1.0"
 dependencies = [
  "ciborium",
+ "hmac",
  "libc",
  "nix 0.31.2",
  "sentinel-core",
  "serde",
  "serde_bytes",
+ "sha2",
  "thiserror 2.0.18",
 ]
 

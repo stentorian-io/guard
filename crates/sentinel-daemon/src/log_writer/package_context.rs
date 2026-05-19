@@ -111,7 +111,7 @@ pub fn package_context_from_pm_env(
         )
     } else if env
         .iter()
-        .any(|(k, _)| k.starts_with("GO") || k == "GOPATH" || k == "GOPROXY")
+        .any(|(k, _)| sentinel_core::env_filter::is_pm_env_key(k) && k.starts_with("GO"))
     {
         ("go", "(go)".into(), String::new(), None)
     } else if env.iter().any(|(k, _)| k.starts_with("MIX_")) {

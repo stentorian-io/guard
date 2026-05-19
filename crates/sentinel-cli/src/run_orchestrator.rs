@@ -143,58 +143,26 @@ pub fn run(
 }
 
 fn capture_pm_env_from_current_env() -> Vec<(String, String)> {
-    const PM_ENV_PREFIXES: &[&str] = &[
-        "npm_",
-        "PIP_",
-        "VIRTUAL_ENV",
-        "CARGO_",
-        "BUNDLE_",
-        "GEM_HOME",
-        "GO",
-        "MIX_",
-        "HEX_",
-        "COMPOSER_",
-    ];
-    const SECRET_SUBSTRING_PATTERNS: &[&str] =
-        &["TOKEN", "PASSWORD", "SECRET", "PASSWD", "APIKEY", "API_KEY"];
-    const MAX_VALUE_BYTES: usize = 512;
-    const MAX_TOTAL_BYTES: usize = sentinel_ipc::ExecEvent::MAX_PM_ENV_BYTES;
+    use sentinel_core::env_filter;
 
     let mut out = Vec::new();
     let mut total = 0usize;
     for (key, value) in std::env::vars() {
-        if !PM_ENV_PREFIXES.iter().any(|prefix| key.starts_with(prefix)) {
+        if env_filter::is_secret_key(&key) {
             continue;
         }
-        let upper = key.to_ascii_uppercase();
-        if SECRET_SUBSTRING_PATTERNS
-            .iter()
-            .any(|pattern| upper.contains(pattern))
-            || upper.ends_with("_AUTH")
-            || upper.contains("__AUTH")
-        {
+        if !env_filter::is_pm_env_key(&key) {
             continue;
         }
-        let value = truncate_utf8(value, MAX_VALUE_BYTES);
+        let value = env_filter::truncate_value(&value).to_string();
         let pair_size = key.len() + value.len() + 2;
-        if total + pair_size > MAX_TOTAL_BYTES {
+        if total + pair_size > sentinel_ipc::ExecEvent::MAX_PM_ENV_BYTES {
             break;
         }
         total += pair_size;
         out.push((key, value));
     }
     out
-}
-
-fn truncate_utf8(value: String, max: usize) -> String {
-    if value.len() <= max {
-        return value;
-    }
-    let mut end = max;
-    while end > 0 && !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    value[..end].to_string()
 }
 
 fn render_loop(

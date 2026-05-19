@@ -1,140 +1,30 @@
-//! Dylib-side PM env capture + filtering (closes v0.1 milestone audit BLOCKER #1
-//! — LOG-02 + VAL-01).
+//! Dylib-side PM env capture + filtering.
 //!
-//! Walks the null-terminated envp** array passed to exec/posix_spawn, applies a
-//! defense-in-depth allowlist + secret denylist, and returns a
-//! `Vec<(String, String)>` matching the `ExecEvent::pm_env` wire shape.
-//!
-//! The daemon's `extract_pm_env` (in `sentinel_daemon::env_capture`) is the
-//! authoritative trust boundary — it RE-FILTERS server-side. The dylib MUST
-//! still apply the same allowlist + denylist at capture time so:
-//!   1. Sentinel cannot become a telemetry pipe even if a daemon-side
-//!      regression silently widens the filter (anti-leak invariant — Sentinel
-//!      is an anti-exfiltration tool, see PROJECT.md).
-//!   2. The IPC wire never carries known-secret values across the user's own
-//!      Unix-domain socket, where they could be observed via lsof / DTrace
-//!      probes by other (untrusted) processes on the box.
-//!   3. Wire-size cost stays bounded — the daemon caps at 4 KiB; filtering
-//!      pre-IPC keeps the dylib half of the round-trip fast and predictable.
-//!
-//! Filter logic deliberately mirrors `sentinel_daemon::env_capture` byte-for-
-//! byte. If those constants drift, the divergence is a defense-in-depth gap,
-//! not a correctness bug — the daemon's filter is the authoritative gate.
-//!
-//! Hot-path discipline: this module DOES allocate (Vec/String). That is
-//! acceptable because exec/posix_spawn pay an IPC round trip anyway (D-31) —
-//! they are NOT on the <100µs verdict path the snapshot lookup must protect.
-//! The walk itself is `O(envp_count * key_len)` worst-case which is fine for
-//! the realistic envp size of a few hundred entries.
+//! Walks the null-terminated envp** array passed to exec/posix_spawn, applies
+//! the centralized allowlist + secret denylist from `sentinel_core::env_filter`,
+//! and returns a `Vec<(String, String)>` matching the `ExecEvent::pm_env` wire
+//! shape.
 
 use core::ffi::{c_char, CStr};
+use sentinel_core::env_filter;
 
-/// PM env-key allowlist (prefix match). Mirrors
-/// `sentinel_daemon::env_capture::PM_ENV_PREFIXES`. A capture is admitted only
-/// if its key starts with one of these.
-pub const PM_ENV_PREFIXES: &[&str] = &[
-    "npm_",
-    "PIP_",
-    "VIRTUAL_ENV",
-    "CARGO_",
-    "BUNDLE_",
-    "GEM_HOME",
-    "GO",
-    "MIX_",
-    "HEX_",
-    "COMPOSER_",
-];
-
-/// Case-insensitive exact-match denylist (R-08 mitigation). Mirrors
-/// `sentinel_daemon::env_capture::SECRET_DENYLIST`. Takes precedence over the
-/// prefix allowlist — a key that BOTH starts with `npm_` AND matches a denylist
-/// entry is dropped.
-pub const SECRET_DENYLIST: &[&str] = &[
-    "npm_config_authToken",
-    "npm_config_password",
-    "npm_config_email",
-    "npm_config__auth",
-    "PIP_INDEX_URL",
-    "PIP_EXTRA_INDEX_URL",
-    "BUNDLE_GITHUB__COM",
-    "BUNDLE_GEMS__CONTRIBSYS__COM",
-    "CARGO_REGISTRY_TOKEN",
-    "COMPOSER_AUTH",
-];
-
-/// Substring patterns that suggest a key holds credentials. Match is
-/// case-insensitive on the upper-cased key. Mirrors
-/// `sentinel_daemon::env_capture::SECRET_SUBSTRING_PATTERNS`.
-const SECRET_SUBSTRING_PATTERNS: &[&str] = &[
-    "TOKEN",
-    "PASSWORD",
-    "SECRET",
-    "PASSWD",
-    "APIKEY",
-    "API_KEY",
-];
-
-const MAX_VALUE_BYTES: usize = 512;
-
-/// Total wire-size cap for the filtered payload, mirroring
-/// `sentinel_ipc::ExecEvent::MAX_PM_ENV_BYTES` (4 KiB). A malicious envp with
-/// thousands of `npm_` keys cannot inflate the IPC frame past this bound.
 const MAX_PM_ENV_BYTES: usize = sentinel_ipc::ExecEvent::MAX_PM_ENV_BYTES;
 
-/// Defensive bound on envp walk depth. A non-NUL-terminated envp from a
-/// malicious caller cannot trap us in an unbounded loop — this matches the
-/// MAX_ENVP_ENTRIES bound in the existing `envp::should_emit_env_not_propagated_gap`.
 const MAX_ENVP_ENTRIES: isize = 4096;
 
-/// Returns true if `key` is on the case-insensitive denylist OR contains a
-/// credential-like substring pattern OR ends with an auth-shaped suffix.
-/// Mirrors `sentinel_daemon::env_capture::is_secret_key`.
-fn is_secret_key(key: &str) -> bool {
-    if SECRET_DENYLIST.iter().any(|d| d.eq_ignore_ascii_case(key)) {
-        return true;
-    }
-    let upper = key.to_ascii_uppercase();
-    if SECRET_SUBSTRING_PATTERNS.iter().any(|p| upper.contains(p)) {
-        return true;
-    }
-    if upper.ends_with("_AUTH") || upper.contains("__AUTH") {
-        return true;
-    }
-    false
-}
-
-/// Truncate `value` to MAX_VALUE_BYTES bytes respecting UTF-8 char boundaries.
-/// If `value` is already short enough, returned unchanged.
-fn truncate_value(value: &str) -> String {
-    if value.len() <= MAX_VALUE_BYTES {
-        return value.to_string();
-    }
-    let mut end = MAX_VALUE_BYTES;
-    while !value.is_char_boundary(end) && end > 0 {
-        end -= 1;
-    }
-    value[..end].to_string()
-}
-
-/// Pure helper — splits an env entry "KEY=VALUE" into (key, value).
-/// Returns None if there is no `=` in the entry (malformed; drop).
 fn split_env_entry(entry: &str) -> Option<(&str, &str)> {
     let eq = entry.find('=')?;
     Some((&entry[..eq], &entry[eq + 1..]))
 }
 
-/// Decide whether to keep a single (key, value) env pair. Returns the captured
-/// pair (with value possibly truncated) on keep; None on drop. Pulled out so
-/// unit tests can drive it directly without constructing a fake envp**.
 pub fn filter_one(key: &str, value: &str) -> Option<(String, String)> {
-    // R-08: secret denylist takes precedence over prefix allowlist.
-    if is_secret_key(key) {
+    if env_filter::is_secret_key(key) {
         return None;
     }
-    if !PM_ENV_PREFIXES.iter().any(|p| key.starts_with(p)) {
+    if !env_filter::is_pm_env_key(key) {
         return None;
     }
-    Some((key.to_string(), truncate_value(value)))
+    Some((key.to_string(), env_filter::truncate_value(value).to_string()))
 }
 
 /// Walk the null-terminated envp** passed to exec/posix_spawn, filter to
@@ -336,7 +226,7 @@ mod tests {
         let (_owners, ptrs) = make_envp(&[&pair]);
         let out = unsafe { extract_pm_env_from_envp(ptrs.as_ptr()) };
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].1.len(), MAX_VALUE_BYTES);
+        assert_eq!(out[0].1.len(), env_filter::MAX_VALUE_BYTES);
     }
 
     #[test]

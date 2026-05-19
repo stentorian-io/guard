@@ -772,7 +772,7 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
         }
     };
 
-    let decision = Decision {
+    let mut decision = Decision {
         schema_version: JSONL_SCHEMA_VERSION,
         ts: now_rfc3339(),
         verdict: "Deny",
@@ -785,9 +785,33 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
         process: process_ctx,
         parent: parent_ctx,
         root: root_ctx,
-        package_context: pkg_ctx,
+        package_context: pkg_ctx.clone(),
         intel: None,
     };
+
+    // Enrich confirmed/suspect denials with intel from curated rules.
+    if matches!(req.source_kind.as_str(), "confirmed-deny" | "suspect-deny") {
+        if let Some(host) = &req.dest_host {
+            let curated = crate::curated::load_curated().unwrap_or_default();
+            let intel = crate::log_writer::enrich_from_entries(host.as_bytes(), &curated);
+            if !intel.is_empty() {
+                decision.intel = Some(intel);
+            }
+        }
+    }
+
+    // Check for "previously approved, now suspended" in confirmed-deny.
+    if req.source_kind == "confirmed-deny" {
+        if let Some(host) = &req.dest_host {
+            let user_approved = state.rule_store.has_user_allow_for(host).unwrap_or(false);
+            if user_approved {
+                info!(
+                    dest_host = %host,
+                    "DenyNotify: confirmed-deny overrides user-allow — previously approved host now suspended"
+                );
+            }
+        }
+    }
 
     state.log_writer.send(LogRow::Block(decision));
 
@@ -1791,6 +1815,17 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
         if matches!(policy_source,
             sentinel_core::SourceKind::ConfirmedDeny | sentinel_core::SourceKind::BuiltinDeny
         ) {
+            if matches!(policy_source, sentinel_core::SourceKind::ConfirmedDeny) {
+                let was_approved = loaded.as_ref().map(|entries| {
+                    sentinel_core::has_user_allow(req.host.as_bytes(), entries)
+                }).unwrap_or(false);
+                if was_approved {
+                    info!(
+                        host = %req.host,
+                        "confirmed-deny overrides user-allow — previously approved host now suspended"
+                    );
+                }
+            }
             let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
             if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
                 error!(error = %e, "failed to send ResolveReply (non-promptable deny)");

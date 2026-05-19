@@ -13,7 +13,7 @@ pub mod jsonl_row;
 pub mod rotation;
 pub mod package_context;
 
-pub use enrichment::{enrich, enrich_for_host};
+pub use enrichment::{enrich, enrich_for_host, enrich_from_entries};
 pub use jsonl_row::{LogRow, Decision, GapRecord, ProcessCtxLog, RootCtxLog,
                     JSONL_SCHEMA_VERSION, truncate_argv, now_rfc3339};
 pub use package_context::infer_package_context;

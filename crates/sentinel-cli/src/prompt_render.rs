@@ -25,6 +25,25 @@ pub fn render_and_choose(req: &PromptRequest) -> Result<PromptResponse, CliError
     if let Some(loc) = &req.source_locator {
         writeln!(out, "    locator: {loc}").ok();
     }
+    if let Some(intel) = &req.intel {
+        for m in intel {
+            let qualifier = m.tag.as_deref().unwrap_or("unknown");
+            if qualifier == "suspect" {
+                writeln!(
+                    out,
+                    "  \x1b[33mWARNING: suspicious host ({}) — not yet confirmed malicious, approval at own risk\x1b[0m",
+                    m.advisory_id
+                ).ok();
+            } else {
+                writeln!(
+                    out,
+                    "  \x1b[31mBLOCKED: known malicious host ({}) — advisory: {}\x1b[0m",
+                    m.advisory_id,
+                    m.feed
+                ).ok();
+            }
+        }
+    }
     if let Some(pkg) = &req.package_context {
         writeln!(
             out,

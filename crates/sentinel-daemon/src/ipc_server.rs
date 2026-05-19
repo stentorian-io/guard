@@ -1767,28 +1767,41 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
     };
 
     if let Some(run_uuid) = park_eligible {
-        // S03: policy pre-check — if the host is already allowed, resolve
-        // immediately without parking a prompt. Only park for unknown hosts.
         let run_for_policy = state.process_tree.get_run(&run_uuid);
-        let already_allowed = run_for_policy
-            .and_then(|run| crate::handlers::resolve::load_run_entries(&run.snapshot_path))
-            .map(|entries| {
-                let (verdict, _) = sentinel_core::policy::evaluate_policy(
-                    req.host.as_bytes(),
-                    None,
-                    false,
-                    &entries,
-                );
-                matches!(verdict, sentinel_core::Verdict::Allow)
-            })
-            .unwrap_or(false);
-        if already_allowed {
+        let loaded = run_for_policy
+            .and_then(|run| crate::handlers::resolve::load_run_entries(&run.snapshot_path));
+        let (policy_verdict, policy_source) = loaded.as_ref().map(|entries| {
+            sentinel_core::policy::evaluate_policy(
+                req.host.as_bytes(),
+                None,
+                false,
+                entries,
+            )
+        }).unwrap_or((sentinel_core::Verdict::Deny, sentinel_core::SourceKind::DefaultDeny));
+
+        if matches!(policy_verdict, sentinel_core::Verdict::Allow) {
             let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
             if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
                 error!(error = %e, "failed to send ResolveReply (policy-allowed fast path)");
             }
             return;
         }
+
+        // ConfirmedDeny and BuiltinDeny block without prompting.
+        if matches!(policy_source,
+            sentinel_core::SourceKind::ConfirmedDeny | sentinel_core::SourceKind::BuiltinDeny
+        ) {
+            let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
+            if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
+                error!(error = %e, "failed to send ResolveReply (non-promptable deny)");
+            }
+            return;
+        }
+
+        let intel = loaded.as_ref().map(|entries| {
+            crate::log_writer::enrich_from_entries(req.host.as_bytes(), entries)
+        }).unwrap_or_default();
+        let intel_opt = if intel.is_empty() { None } else { Some(intel) };
 
         let prompt_id = state.deferred_resolve.next_prompt_id();
         let outcome = state
@@ -1846,11 +1859,11 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
             dest_host: req.host.clone(),
             dest_port: req.port,
             dest_ip: None,
-            source_kind: "resolve".to_string(),
+            source_kind: policy_source.as_label().to_string(),
             source_locator: None,
             package_context: resolved_package_context.clone(),
             process: process_ctx,
-            intel: None,
+            intel: intel_opt,
             suggested_rules: suggested,
         };
         if let Some(channel) = state.process_tree.get_prompt_channel(&run_uuid) {

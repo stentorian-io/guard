@@ -55,6 +55,15 @@ fn main() -> std::io::Result<()> {
 }
 
 fn serve(state_dir: PathBuf) -> std::io::Result<()> {
+    // Prevent gix / git from ever prompting for credentials interactively.
+    // Feed repos are public; a credential prompt on the user's terminal would
+    // be confusing (they ran `sentinel wrap`, not `git clone`).
+    // SAFETY: called before any threads are spawned.
+    unsafe {
+        std::env::set_var("GIT_TERMINAL_PROMPT", "0");
+        std::env::set_var("GIT_ASKPASS", "/usr/bin/false");
+    }
+
     ensure_state_dir(&state_dir)?;
     ensure_runs_dir(&state_dir)?;
 

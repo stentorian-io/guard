@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# commit-msg hook: enforces conventional commits, rejects Co-Authored-By.
+# commit-msg hook: enforces conventional commits, rejects Co-Authored-By,
+# and validates that the commit type matches the staged files.
 # Install: ./scripts/install-hooks.sh
 #
 set -euo pipefail
@@ -8,17 +9,123 @@ set -euo pipefail
 MSG_FILE="$1"
 MSG=$(head -1 "$MSG_FILE")
 
-if grep -qi '^Co-Authored-By:' "$MSG_FILE"; then
-  echo "error: Co-Authored-By trailers are not allowed." >&2
-  echo "Remove the Co-Authored-By line from your commit message." >&2
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+fail() {
+  echo -e "${RED}${BOLD}commit-msg: $1${RESET}" >&2
   exit 1
+}
+
+warn() {
+  echo -e "${YELLOW}commit-msg: $1${RESET}" >&2
+}
+
+# ── Reject Co-Authored-By trailers ─────────────────────────────────────────
+
+if grep -qi '^Co-Authored-By:' "$MSG_FILE"; then
+  fail "Co-Authored-By trailers are not allowed.
+Remove the Co-Authored-By line from your commit message."
 fi
+
+# ── Validate conventional commit format ────────────────────────────────────
 
 PATTERN='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?!?: .+'
 if ! echo "$MSG" | grep -Eq "$PATTERN"; then
-  echo "error: commit message does not follow Conventional Commits." >&2
-  echo "Expected: <type>(<scope>): <description>" >&2
-  echo "Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert" >&2
-  echo "Got: $MSG" >&2
-  exit 1
+  fail "commit message does not follow Conventional Commits.
+Expected: <type>(<scope>): <description>
+Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+Got: $MSG"
+fi
+
+# ── Extract type and scope ─────────────────────────────────────────────────
+
+TYPE=$(echo "$MSG" | sed -E 's/^([a-z]+).*/\1/')
+SCOPE=$(echo "$MSG" | sed -nE 's/^[a-z]+\(([^)]+)\).*/\1/p')
+
+# ── Classify staged files ──────────────────────────────────────────────────
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)
+[ -z "$STAGED" ] && exit 0
+
+has_src=false
+has_test=false
+has_ci=false
+has_doc=false
+has_build=false
+
+while IFS= read -r f; do
+  case "$f" in
+    .github/workflows/*|.github/actions/*)
+      has_ci=true ;;
+    crates/sentinel-e2e/tests/*|crates/*/tests/*|*/tests/*)
+      has_test=true ;;
+    crates/sentinel-e2e/harness/*|crates/sentinel-e2e/fixtures/*)
+      has_test=true ;;
+    Cargo.toml|crates/*/Cargo.toml|Cargo.lock|rust-toolchain.toml)
+      has_build=true ;;
+    *.rs)
+      has_src=true ;;
+    docs/*|*.md)
+      has_doc=true ;;
+    cliff.toml|.markdownlint*|.actrc|Brewfile|.gitignore|.github/CODEOWNERS)
+      has_build=true ;;
+    scripts/*)
+      has_build=true ;;
+  esac
+done <<< "$STAGED"
+
+# ── Validate type matches files ────────────────────────────────────────────
+
+case "$TYPE" in
+  feat|fix)
+    if ! $has_src; then
+      fail "'${TYPE}' commits must change source code (.rs files).
+Staged files are docs/tests/CI/config only.
+Suggested types: $(
+        $has_test && echo -n 'test, '
+        $has_ci && echo -n 'ci, '
+        $has_doc && echo -n 'docs, '
+        $has_build && echo -n 'chore, '
+        echo 'refactor'
+      )"
+    fi
+    ;;
+  test)
+    if ! $has_test && ! $has_src; then
+      fail "'test' commits must change test or source files.
+Staged: $(echo "$STAGED" | head -5)"
+    fi
+    ;;
+  ci)
+    if ! $has_ci; then
+      warn "'ci' type but no .github/ files staged — double-check the type."
+    fi
+    ;;
+esac
+
+# ── Warn about docs scopes that won't appear in changelog ──────────────────
+
+if [ "$TYPE" = "docs" ] && [ -n "$SCOPE" ]; then
+  case "$SCOPE" in
+    man|install|guide|changelog|readme)
+      ;; # user-facing, will appear in changelog
+    *)
+      warn "docs(${SCOPE}) will be skipped in the changelog.
+Only docs(man|install|guide|changelog|readme) are user-facing.
+If this is intentional, proceed. Otherwise consider 'chore' type."
+      ;;
+  esac
+fi
+
+# ── Warn when fix only touches comments/docs ───────────────────────────────
+
+if [ "$TYPE" = "fix" ] && $has_src; then
+  # Check if .rs changes are comment-only (rough heuristic: all changed lines start with //)
+  RS_DIFF=$(git diff --cached -U0 -- '*.rs' | grep '^[+-]' | grep -v '^[+-][+-][+-]' | grep -v '^[+-]\s*//' | grep -v '^[+-]\s*$' || true)
+  if [ -z "$RS_DIFF" ]; then
+    warn "All .rs changes appear to be comment-only. Consider 'docs' type instead of 'fix'."
+  fi
 fi

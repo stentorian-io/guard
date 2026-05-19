@@ -36,7 +36,14 @@ commit_parsers = [
     { message = "^feat", group = "<!-- 0 -->Features" },
     { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
     { message = "^perf", group = "<!-- 2 -->Performance" },
-    { message = "^docs", group = "<!-- 3 -->Documentation" },
+    # User-facing docs — keep in changelog
+    { message = "^docs\\(man\\)", group = "<!-- 3 -->Documentation" },
+    { message = "^docs\\(install\\)", group = "<!-- 3 -->Documentation" },
+    { message = "^docs\\(guide\\)", group = "<!-- 3 -->Documentation" },
+    { message = "^docs\\(changelog\\)", group = "<!-- 3 -->Documentation" },
+    { message = "^docs\\(readme\\)", group = "<!-- 3 -->Documentation" },
+    # All other docs — internal
+    { message = "^docs", skip = true },
     { message = "^test", skip = true },
     { message = "^refactor", skip = true },
     { message = "^chore", skip = true },

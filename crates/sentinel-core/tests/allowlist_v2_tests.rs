@@ -58,9 +58,10 @@ fn evaluate_rule_returns_kind_on_match_none_on_miss() {
 #[test]
 fn tier_ordering_implements_precedence() {
     assert!(RuleTier::BuiltinDeny < RuleTier::CuratedAllow);
-    assert!(RuleTier::CuratedAllow < RuleTier::UserDeny);
-    assert!(RuleTier::UserDeny < RuleTier::FeedDeny);
-    assert!(RuleTier::FeedDeny < RuleTier::UserAllow);
+    assert!(RuleTier::CuratedAllow < RuleTier::ConfirmedDeny);
+    assert!(RuleTier::ConfirmedDeny < RuleTier::UserDeny);
+    assert!(RuleTier::UserDeny < RuleTier::UserAllow);
+    assert!(RuleTier::UserAllow < RuleTier::SuspectDeny);
 }
 
 #[test]
@@ -83,9 +84,10 @@ fn rule_tier_serde_roundtrips_each_variant() {
     for &t in &[
         RuleTier::BuiltinDeny,
         RuleTier::CuratedAllow,
+        RuleTier::ConfirmedDeny,
         RuleTier::UserDeny,
-        RuleTier::FeedDeny,
         RuleTier::UserAllow,
+        RuleTier::SuspectDeny,
     ] {
         let mut buf = Vec::new();
         ciborium::ser::into_writer(&t, &mut buf).unwrap();

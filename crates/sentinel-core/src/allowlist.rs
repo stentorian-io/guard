@@ -31,21 +31,24 @@ pub enum MatchType {
 
 /// Priority tier — daemon pre-sorts the snapshot's `entries` Vec so the dylib
 /// iterates a flat slice and returns at the FIRST matching entry. The numeric
-/// ordering implements RESEARCH.md §5 precedence:
+/// ordering implements the precedence stack:
 ///
 ///   Tier 0: BuiltinDeny       (YAML kind:deny, non-overridable D-26)
 ///   Tier 1: CuratedAllow      (YAML kind:allow, beats feed-deny POL-06)
-///   Tier 2: UserDeny          (SQLite rules kind:deny)
-///   Tier 3: FeedDeny          (threat-intel IOCs from OSV/GHSA feeds)
+///   Tier 2: ConfirmedDeny     (structured IOCs from OSV feeds, overrides UserAllow)
+///   Tier 3: UserDeny          (SQLite rules kind:deny)
 ///   Tier 4: UserAllow         (SQLite rules kind:allow)
+///   Tier 5: SuspectDeny       (reference-URL IOCs from feeds, prompts if TTY)
+///   Tier 6: DefaultDeny       (implicit — everything else)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum RuleTier {
     BuiltinDeny = 0,
     CuratedAllow = 1,
-    UserDeny = 2,
-    FeedDeny = 3,
+    ConfirmedDeny = 2,
+    UserDeny = 3,
     UserAllow = 4,
+    SuspectDeny = 5,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

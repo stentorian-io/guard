@@ -71,35 +71,51 @@ raw_iocs=$(find "${tmpdir}/advisories" -name 'MAL-*.json' -print0 \
 
     (.id // "unknown") as $id |
 
-    # Primary: structured domains
+    # Primary: structured domains (confirmed)
     ((.database_specific.iocs.domains // []) | safe_str_array
       | select(length > 0 and length <= 256)
-      | "exact\t" + . + "\t" + $id),
+      | "exact\t" + . + "\t" + $id + "\tconfirmed"),
 
-    # Primary: structured IPs
+    # Primary: structured IPs (confirmed)
     ((.database_specific.iocs.ips // []) | safe_str_array
       | select(length > 0 and length <= 256)
-      | "ip\t" + . + "\t" + $id),
+      | "ip\t" + . + "\t" + $id + "\tconfirmed"),
 
-    # Secondary: EVIDENCE/REPORT reference URL hosts (filtered)
+    # Secondary: EVIDENCE/REPORT reference URL hosts (suspect)
     ((.references // [])[]
       | select(.type == "EVIDENCE" or .type == "REPORT")
       | .url // empty
       | capture("^https?://(?<host>[^/:]+)") | .host
       | select(length > 0 and length <= 256)
       | select(benign_ref_host | not)
-      | "exact\t" + . + "\t" + $id)
+      | "exact\t" + . + "\t" + $id + "\tsuspect")
   ' 2>/dev/null || true)
 
 # Deduplicate by (match_type, pattern), keeping the first advisory ID seen.
+# If a host appears as both confirmed and suspect, promote to confirmed.
 declare -A seen
+declare -A confidence_map
 declare -a entries
-while IFS=$'\t' read -r match_type pattern advisory_id; do
+while IFS=$'\t' read -r match_type pattern advisory_id confidence; do
   [[ -z "$pattern" ]] && continue
   key="${match_type}:${pattern}"
   if [[ -z "${seen[$key]:-}" ]]; then
     seen[$key]=1
-    entries+=("${match_type}"$'\t'"${pattern}"$'\t'"${advisory_id}")
+    confidence_map[$key]="${confidence:-suspect}"
+    entries+=("${match_type}"$'\t'"${pattern}"$'\t'"${advisory_id}"$'\t'"${confidence:-suspect}")
+  elif [[ "$confidence" == "confirmed" && "${confidence_map[$key]:-}" != "confirmed" ]]; then
+    # Promote to confirmed: rebuild entry with confirmed confidence
+    confidence_map[$key]="confirmed"
+    local_entries=()
+    for e in "${entries[@]}"; do
+      IFS=$'\t' read -r mt pt ai cf <<< "$e"
+      if [[ "${mt}:${pt}" == "$key" ]]; then
+        local_entries+=("${mt}"$'\t'"${pt}"$'\t'"${ai}"$'\t'"confirmed")
+      else
+        local_entries+=("$e")
+      fi
+    done
+    entries=("${local_entries[@]}")
   fi
 done <<< "$raw_iocs"
 
@@ -116,15 +132,18 @@ echo "Found $ioc_count unique host IOCs."
   echo "# Source: ${OSV_ALL_ZIP}"
   echo "# Managed by scripts/update-feed-rules.sh — do not edit manually."
   for entry in "${sorted_entries[@]}"; do
-    IFS=$'\t' read -r match_type pattern advisory_id <<< "$entry"
+    IFS=$'\t' read -r match_type pattern advisory_id confidence <<< "$entry"
     [[ -z "$pattern" ]] && continue
     cat <<YAML
 - match: $match_type
   pattern: $pattern
   reason: "$advisory_id supply-chain IOC (FEED)"
+  confidence: ${confidence:-suspect}
 YAML
   done
 } > "$OUTPUT_FILE"
 
-echo "Wrote $ioc_count feed IOC entries to $OUTPUT_FILE."
+confirmed_count=$(printf '%s\n' "${sorted_entries[@]}" | grep -c $'\tconfirmed$' || true)
+suspect_count=$(printf '%s\n' "${sorted_entries[@]}" | grep -c $'\tsuspect$' || true)
+echo "Wrote $ioc_count feed IOC entries to $OUTPUT_FILE ($confirmed_count confirmed, $suspect_count suspect)."
 shasum -a 256 "$OUTPUT_FILE"

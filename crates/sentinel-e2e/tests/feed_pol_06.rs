@@ -1,12 +1,12 @@
-//! v0.4 POL-06 regression: planted FeedDeny for registry.npmjs.org should
+//! v0.4 POL-06 regression: planted ConfirmedDeny for registry.npmjs.org should
 //! be overridden by the curated allowlist. Confirms the curated-allow-beats-feed-deny
 //! invariant flows through the daemon's snapshot-build path correctly.
 //!
 //! The unit invariant is verified in `precedence.rs`. This test exercises the FULL
 //! pipeline: daemon fetches a fixture file:// repo via gix → parses OSV record →
-//! upserts feed_iocs → PrepareSnapshot merges FeedDeny entries from
+//! upserts feed_iocs → PrepareSnapshot merges ConfirmedDeny entries from
 //! `feed_iocs.host_ioc IS NOT NULL` → curated YAML's CuratedAllow for
-//! registry.npmjs.org sorts ahead of FeedDeny (RuleTier 1 < 4) → snapshot is
+//! registry.npmjs.org sorts ahead of ConfirmedDeny (RuleTier 1 < 4) → snapshot is
 //! published → /usr/bin/true succeeds.
 //!
 //! Also asserts the TI-07 e2e: after a successful fetch, `sentinel status --json`
@@ -48,7 +48,7 @@ fn registry_npmjs_org_allowed_despite_planted_feed_deny() {
 
     assert!(
         output.status.success(),
-        "sentinel wrap /usr/bin/true should succeed even with planted FeedDeny for registry.npmjs.org\n\
+        "sentinel wrap /usr/bin/true should succeed even with planted ConfirmedDeny for registry.npmjs.org\n\
          exit code: {:?}\nstdout:\n{}\nstderr:\n{}\ndaemon stderr:\n{}",
         output.status.code(),
         String::from_utf8_lossy(&output.stdout),
@@ -79,7 +79,7 @@ fn registry_npmjs_org_allowed_despite_planted_feed_deny() {
         "feed_iocs must contain the planted host_ioc registry.npmjs.org (got count={count})"
     );
 
-    // (b) decoded snapshot CBOR shows CuratedAllow precedes FeedDeny.
+    // (b) decoded snapshot CBOR shows CuratedAllow precedes ConfirmedDeny.
     // The per-run snapshot may have been GC'd 30s after the run; if so,
     // skip this part (the feed_iocs check above is the load-bearing
     // assertion for D-94 — the structural POL-06 invariant is verified by
@@ -98,14 +98,14 @@ fn registry_npmjs_org_allowed_despite_planted_feed_deny() {
                     && e.pattern.contains("npmjs.org")
             });
             let feeddeny_pos = snap.entries.iter().position(|e| {
-                matches!(e.tier, sentinel_core::RuleTier::FeedDeny)
+                matches!(e.tier, sentinel_core::RuleTier::ConfirmedDeny)
                     && e.pattern == "registry.npmjs.org"
             });
             match (curated_pos, feeddeny_pos) {
                 (Some(c), Some(f)) => {
                     assert!(
                         c < f,
-                        "POL-06 invariant: CuratedAllow at pos {c} must precede FeedDeny at pos {f}\nentries: {:?}",
+                        "POL-06 invariant: CuratedAllow at pos {c} must precede ConfirmedDeny at pos {f}\nentries: {:?}",
                         snap.entries.iter().map(|e| (e.tier, e.pattern.clone())).collect::<Vec<_>>(),
                     );
                 }
@@ -117,7 +117,7 @@ fn registry_npmjs_org_allowed_despite_planted_feed_deny() {
                         .collect::<Vec<_>>(),
                 ),
                 (_, None) => panic!(
-                    "Expected FeedDeny for registry.npmjs.org in snapshot; entries={:?}",
+                    "Expected ConfirmedDeny for registry.npmjs.org in snapshot; entries={:?}",
                     snap.entries
                         .iter()
                         .map(|e| (e.tier, e.pattern.clone()))

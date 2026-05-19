@@ -35,6 +35,13 @@ struct YamlFile {
     entries: Vec<YamlEntry>,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Confidence {
+    Confirmed,
+    Suspect,
+}
+
 #[derive(Debug, Deserialize)]
 struct YamlEntry {
     kind: RuleKind,
@@ -42,11 +49,14 @@ struct YamlEntry {
     match_type: MatchType,
     pattern: String,
     reason: String,
+    confidence: Option<Confidence>,
 }
 
-/// Parse the embedded YAML. Tier is assigned from `kind`:
-///   - kind: deny  → tier: BuiltinDeny  (non-overridable)
-///   - kind: allow → tier: CuratedAllow (beats feed-deny by tier ordering)
+/// Parse the embedded YAML. Tier assignment:
+///   - kind: deny + confidence: confirmed → ConfirmedDeny (overrides UserAllow)
+///   - kind: deny + confidence: suspect   → SuspectDeny (below UserAllow, prompts)
+///   - kind: deny (no confidence)         → BuiltinDeny (non-overridable, curated)
+///   - kind: allow                        → CuratedAllow
 pub fn load_curated() -> Result<Vec<AllowlistEntry>, CuratedError> {
     parse_yaml(CURATED_YAML)
 }
@@ -83,9 +93,11 @@ pub fn parse_yaml(yaml: &str) -> Result<Vec<AllowlistEntry>, CuratedError> {
                 });
             }
         }
-        let tier = match e.kind {
-            RuleKind::Deny => RuleTier::BuiltinDeny,
-            RuleKind::Allow => RuleTier::CuratedAllow,
+        let tier = match (e.kind, e.confidence) {
+            (RuleKind::Allow, _) => RuleTier::CuratedAllow,
+            (RuleKind::Deny, Some(Confidence::Confirmed)) => RuleTier::ConfirmedDeny,
+            (RuleKind::Deny, Some(Confidence::Suspect)) => RuleTier::SuspectDeny,
+            (RuleKind::Deny, None) => RuleTier::BuiltinDeny,
         };
         out.push(AllowlistEntry {
             kind: e.kind,
@@ -96,4 +108,99 @@ pub fn parse_yaml(yaml: &str) -> Result<Vec<AllowlistEntry>, CuratedError> {
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sentinel_core::RuleTier;
+
+    #[test]
+    fn confirmed_deny_maps_to_confirmed_deny_tier() {
+        let yaml = r#"
+entries:
+  - kind: deny
+    match: exact
+    pattern: evil.com
+    reason: "MAL-2026-001 supply-chain IOC (FEED)"
+    confidence: confirmed
+"#;
+        let entries = parse_yaml(yaml).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].tier, RuleTier::ConfirmedDeny);
+    }
+
+    #[test]
+    fn suspect_deny_maps_to_suspect_deny_tier() {
+        let yaml = r#"
+entries:
+  - kind: deny
+    match: exact
+    pattern: sketchy.io
+    reason: "MAL-2026-002 supply-chain IOC (FEED)"
+    confidence: suspect
+"#;
+        let entries = parse_yaml(yaml).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].tier, RuleTier::SuspectDeny);
+    }
+
+    #[test]
+    fn deny_without_confidence_maps_to_builtin_deny() {
+        let yaml = r#"
+entries:
+  - kind: deny
+    match: suffix
+    pattern: .workers.dev
+    reason: "Cloudflare Workers C2 pattern"
+"#;
+        let entries = parse_yaml(yaml).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].tier, RuleTier::BuiltinDeny);
+    }
+
+    #[test]
+    fn allow_ignores_confidence_field() {
+        let yaml = r#"
+entries:
+  - kind: allow
+    match: exact
+    pattern: registry.npmjs.org
+    reason: "npm registry"
+    confidence: confirmed
+"#;
+        let entries = parse_yaml(yaml).unwrap();
+        assert_eq!(entries[0].tier, RuleTier::CuratedAllow);
+    }
+
+    #[test]
+    fn mixed_confidence_tiers_sort_correctly() {
+        let yaml = r#"
+entries:
+  - kind: deny
+    match: exact
+    pattern: confirmed-c2.example.com
+    reason: "MAL-001 (FEED)"
+    confidence: confirmed
+  - kind: deny
+    match: exact
+    pattern: suspect-c2.example.com
+    reason: "MAL-002 (FEED)"
+    confidence: suspect
+  - kind: deny
+    match: suffix
+    pattern: .workers.dev
+    reason: "Cloudflare Workers C2 pattern"
+  - kind: allow
+    match: exact
+    pattern: registry.npmjs.org
+    reason: "npm registry"
+"#;
+        let mut entries = parse_yaml(yaml).unwrap();
+        entries.sort_by_key(|e| e.tier);
+        assert_eq!(entries[0].tier, RuleTier::BuiltinDeny);
+        assert_eq!(entries[1].tier, RuleTier::CuratedAllow);
+        assert_eq!(entries[2].tier, RuleTier::ConfirmedDeny);
+        assert_eq!(entries[3].tier, RuleTier::SuspectDeny);
+    }
 }

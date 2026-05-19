@@ -72,12 +72,8 @@ This changelog is generated from [conventional commits](https://www.conventional
 - **ipc:** Add DenyNotify message for hook-to-daemon denial forensics
 
 ### Bug Fixes
-- **e2e:** Use pip download instead of --dry-run for pip registry test
 - **core,daemon:** Ancestor-walk $HOME boundary shared SQLite reader
 - **daemon,hook:** Close PID-reuse race via TASK_AUDIT_TOKEN pidversion cross-check
-
-### Documentation
-- **bench:** Populate binding p99 on MacBookAir10,1
 
 ## [0.2] — 2026-05-09
 
@@ -93,32 +89,18 @@ This changelog is generated from [conventional commits](https://www.conventional
 - **cli:** Add setup::run_setup dispatch + wire install --reinstall
 - **cli:** Atomic clap surface cutover — Cmd::Setup + Cmd::Status hard-cut
 - **cli:** First-trust prompt in run_orchestrator + delete approve.rs + trim trust_policy.rs
-- **hook:** Add cache-hit criterion + hdrhistogram bench
-- Add scripts/bench-hot-path.sh one-command runner
-- Add --dry-run regression-trap to bench-hot-path.sh
 
 ### Bug Fixes
-- **cli:** Use env! for CARGO_BIN_EXE_sentinel in non_tty_learn test
 - **cli:** Reject --learn with named verbs
 - **cli:** Detect stdin EOF in status review to prevent infinite loop
 - **cli:** Narrow --project filter to trusted-toml rules only
 - **cli:** Drift detection — key-by-key plist compare to avoid false drifts
 - **cli:** Clean init_script from daemon-only remove path
 - **cli:** Reject misordered status --json/--verbose with EX_USAGE
-- **e2e:** Retarget test to 192.0.2.1 to exercise dylib's libc-deny path
-- **hook:** Correct SOCKET_TEST_LOCK rationale comment
-- **hook:** Gate cache_hit_hot_path bench to target_os=macos
-- **bench:** Use mktemp -d scratch dir in bench-hot-path.sh
-- **e2e:** Truncate live-wrap stdout dump at UTF-8 char boundary
-- **bench:** Parallel ns-suffix handling for both p99 columns
 
 ### Documentation
-- **cli:** Align baseline.rs module doc-comment with --learn flag
 - Drop 'run' from README usage example
-- **hook:** Refresh hot_path.rs header to cross-ref cache_hit_hot_path
-- Add docs/BENCH.md hot-path bench artifact
 - Add Performance section + docs/BENCH.md cross-link to README
-- Add Capture Procedure section to docs/BENCH.md
 
 ## [0.1] — 2026-05-08
 

@@ -17,9 +17,9 @@ This changelog is generated from [conventional commits](https://www.conventional
 ## [0.8] — 2026-05-14
 
 ### Documentation
-- Add man pages for sentinel(1) and sentineld(8)
-- Add install guide with build, setup, and troubleshooting
-- Overhaul README to standard OSS structure, update roadmap
+- **man:** Add man pages for sentinel(1) and sentineld(8)
+- **install:** Add install guide with build, setup, and troubleshooting
+- **readme:** Overhaul README to standard OSS structure, update roadmap
 
 ## [0.7] — 2026-05-13
 
@@ -39,9 +39,6 @@ This changelog is generated from [conventional commits](https://www.conventional
 ### Bug Fixes
 - **hook,e2e:** Errno ordering and test harness improvements
 - **e2e:** Use local feed fixtures for CI-compatible release builds
-
-### Documentation
-- Align CLAUDE.md and README.md with current Rust/DYLD codebase
 
 ## [0.5] — 2026-05-11
 
@@ -97,10 +94,6 @@ This changelog is generated from [conventional commits](https://www.conventional
 - **cli:** Drift detection — key-by-key plist compare to avoid false drifts
 - **cli:** Clean init_script from daemon-only remove path
 - **cli:** Reject misordered status --json/--verbose with EX_USAGE
-
-### Documentation
-- Drop 'run' from README usage example
-- Add Performance section + docs/BENCH.md cross-link to README
 
 ## [0.1] — 2026-05-08
 

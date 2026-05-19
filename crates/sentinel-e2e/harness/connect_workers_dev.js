@@ -7,8 +7,8 @@
 //   2 = connect failed with an unexpected errno (TEST INDETERMINATE — investigate)
 //   3 = timeout
 //
-// SENTINEL_DENY_HOST env var sets the host (default: sentinel-test.workers.dev).
-// SENTINEL_DENY_PORT env var sets the port (default: 443).
+// SENTINEL_TEST_DENY_HOST env var sets the host (default: sentinel-test.workers.dev).
+// SENTINEL_TEST_DENY_PORT env var sets the port (default: 443).
 //
 // Why this harness exists distinctly from connect_evil.js:
 //   connect_evil.js connects to discord.com (a host that resolves outside
@@ -23,8 +23,8 @@
 
 const net = require('net');
 
-const host = process.env.SENTINEL_DENY_HOST || 'sentinel-test.workers.dev';
-const port = parseInt(process.env.SENTINEL_DENY_PORT || '443', 10);
+const host = process.env.SENTINEL_TEST_DENY_HOST || 'sentinel-test.workers.dev';
+const port = parseInt(process.env.SENTINEL_TEST_DENY_PORT || '443', 10);
 
 const sock = net.connect({ host, port }, () => {
   // Connect succeeded — sentinel did NOT block. TEST FAIL.

@@ -87,8 +87,8 @@ fn workers_dev_deny_emits_jsonl_with_prompt_deny_and_no_intel() {
     cmd.env("SENTINEL_HOOK_DYLIB", dylib.to_str().unwrap());
     cmd.env("SENTINEL_STATE_DIR", harness.state_dir.to_str().unwrap());
     // Same env vars curated_deny.rs uses — the script honors them.
-    cmd.env("SENTINEL_DENY_HOST", DENY_HOST);
-    cmd.env("SENTINEL_DENY_PORT", DENY_PORT);
+    cmd.env("SENTINEL_TEST_DENY_HOST", DENY_HOST);
+    cmd.env("SENTINEL_TEST_DENY_PORT", DENY_PORT);
 
     let mut child = pair.slave.spawn_command(cmd).expect("spawn sentinel wrap");
     let reader = pair.master.try_clone_reader().expect("reader");

@@ -99,8 +99,8 @@ fn node_connect_to_non_allowlisted_host_is_denied() {
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("SENTINEL_HOOK_DYLIB", &dylib)
         .env("SENTINEL_STATE_DIR", &harness.state_dir)
-        .env("SENTINEL_DENY_HOST", DENY_HOST)
-        .env("SENTINEL_DENY_PORT", DENY_PORT)
+        .env("SENTINEL_TEST_DENY_HOST", DENY_HOST)
+        .env("SENTINEL_TEST_DENY_PORT", DENY_PORT)
         .output()
         .expect("run sentinel");
 

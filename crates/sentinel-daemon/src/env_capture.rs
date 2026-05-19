@@ -2,125 +2,24 @@
 //!
 //! v0.3 — PM env subset extraction.
 //!
-//! Strict allowlist by prefix + exact-match denylist for known-secret keys.
-//! Per-value truncation at 512 bytes; total wire-size
-//! cap at sentinel_ipc::ExecEvent::MAX_PM_ENV_BYTES (4 KiB).
+//! Delegates filtering logic to `sentinel_core::env_filter` (single source of
+//! truth). Per-value truncation at 512 bytes; total wire-size cap at
+//! sentinel_ipc::ExecEvent::MAX_PM_ENV_BYTES (4 KiB).
 
+use sentinel_core::env_filter;
 use sentinel_ipc::ExecEvent;
 
-/// PM env-key allowlist contents.
-pub const PM_ENV_PREFIXES: &[&str] = &[
-    "npm_",
-    "PIP_",
-    "VIRTUAL_ENV",
-    "CARGO_",
-    "BUNDLE_",
-    "GEM_HOME",
-    "GO",        // covers GOPATH, GOPROXY, GOMODCACHE, GOROOT, GOFLAGS
-    "MIX_",
-    "HEX_",
-    "COMPOSER_",
-];
-
-/// Per RESEARCH.md "Open Questions for Planner Discretion §7" (R-08 mitigation).
-/// Case-INSENSITIVE exact-match denylist for keys whose VALUES are credentials,
-/// even though the KEYS happen to match a PM_ENV_PREFIXES entry.
-///
-/// CR-07: comparison is case-insensitive because npm normalizes config-key env
-/// vars case-insensitively (`npm` reads `NPM_CONFIG_AUTHTOKEN`,
-/// `npm_config_authtoken`, `NpM_cOnFiG_AuThToKeN` interchangeably) and bundler
-/// does the same for its env vars. A user with `NPM_CONFIG_AUTHTOKEN` set in
-/// their shell would otherwise leak their token into pm_env_snapshot and
-/// downstream JSONL log entries.
-pub const SECRET_DENYLIST: &[&str] = &[
-    // npm authentication / publish credentials
-    "npm_config_authToken",
-    "npm_config_password",
-    "npm_config_email",
-    "npm_config__auth",
-    // pip index URLs may contain inline credentials (https://user:pass@host)
-    "PIP_INDEX_URL",
-    "PIP_EXTRA_INDEX_URL",
-    // bundler private gem index credentials
-    "BUNDLE_GITHUB__COM",
-    "BUNDLE_GEMS__CONTRIBSYS__COM",
-    // cargo crates.io publish token
-    "CARGO_REGISTRY_TOKEN",
-    // composer auth file overrides
-    "COMPOSER_AUTH",
-];
-
-/// CR-07: substring patterns that suggest a key holds credentials regardless
-/// of which package-manager prefix introduced it. Matches are case-insensitive
-/// and substring-anchored — e.g. any key containing "TOKEN", "_AUTH", "PASSWORD",
-/// "SECRET", or that ends in "_KEY" gets dropped. Tightly scoped to keep
-/// false positives low (e.g. CARGO_TARGET_DIR matches none of these).
-const SECRET_SUBSTRING_PATTERNS: &[&str] = &[
-    "TOKEN",
-    "PASSWORD",
-    "SECRET",
-    "PASSWD",
-    "APIKEY",
-    "API_KEY",
-];
-
-/// CR-07: returns true if `key` is on the case-insensitive denylist OR contains
-/// a credential-like substring pattern. Pulled out as a helper so the unit test
-/// can assert behavior without duplicating logic.
-fn is_secret_key(key: &str) -> bool {
-    if SECRET_DENYLIST.iter().any(|d| d.eq_ignore_ascii_case(key)) {
-        return true;
-    }
-    let upper = key.to_ascii_uppercase();
-    if SECRET_SUBSTRING_PATTERNS.iter().any(|p| upper.contains(p)) {
-        return true;
-    }
-    // Defensive auth-suffix patterns: keys ending with "_AUTH" or containing
-    // "__AUTH" (npm uses double-underscore for nested config keys).
-    if upper.ends_with("_AUTH") || upper.contains("__AUTH") {
-        return true;
-    }
-    false
-}
-
-const MAX_VALUE_BYTES: usize = 512;
-
-/// Filter `env` to PM-relevant keys, dropping secrets and respecting the wire cap.
-///
-/// Algorithm:
-/// 1. Skip any pair whose key is in SECRET_DENYLIST (exact-match, case-sensitive).
-/// 2. Skip any pair whose key does NOT start with one of PM_ENV_PREFIXES.
-/// 3. Truncate each surviving value to MAX_VALUE_BYTES (512) respecting UTF-8 char boundaries.
-/// 4. Stop adding pairs once cumulative wire size (key.len() + value.len() + 2) would
-///    exceed ExecEvent::MAX_PM_ENV_BYTES (4 KiB).
-/// 5. Return captured pairs preserving input order.
 pub fn extract_pm_env(env: &[(String, String)]) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     let mut total = 0usize;
     for (k, v) in env {
-        // R-08 / CR-07: case-insensitive denylist + substring pattern check
-        // takes precedence over prefix-allowlist.
-        if is_secret_key(k.as_str()) {
+        if env_filter::is_secret_key(k.as_str()) {
             continue;
         }
-        // Prefix-allowlist gate.
-        if !PM_ENV_PREFIXES.iter().any(|p| k.starts_with(p)) {
+        if !env_filter::is_pm_env_key(k) {
             continue;
         }
-        // Per-value truncation (defensive — a key passes prefix gate but holds a
-        // surprise large value, e.g. malformed env data).
-        let value = if v.len() > MAX_VALUE_BYTES {
-            // Truncate respecting UTF-8 char boundaries.
-            let mut end = MAX_VALUE_BYTES;
-            while !v.is_char_boundary(end) && end > 0 {
-                end -= 1;
-            }
-            v[..end].to_string()
-        } else {
-            v.clone()
-        };
-        // Wire-size cap (4 KiB total). 2-byte overhead per pair approximates
-        // CBOR small-map framing (1-byte key-len + 1-byte val-len for short strings).
+        let value = env_filter::truncate_value(v).to_string();
         let pair_size = k.len() + value.len() + 2;
         if total + pair_size > ExecEvent::MAX_PM_ENV_BYTES {
             break;

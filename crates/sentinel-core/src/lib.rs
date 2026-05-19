@@ -1,6 +1,7 @@
 //! Sentinel domain types — ProcessIdentity, allowlist matcher, snapshot codec.
 
 pub mod allowlist;
+pub mod env_filter;
 pub mod error;
 pub mod identity;
 pub mod lockfile;

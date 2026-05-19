@@ -17,7 +17,7 @@
 //!      DaemonHarness::start()'s implicit default — if the harness default
 //!      ever changes, the daemon would fetch real feeds on restart and clobber
 //!      our stale rows, silently breaking this test.
-//!   5. Run `sentinel status --json` and HARD-assert daemon_state == "StaleFeeds".
+//!   5. Run `sentinel status` and HARD-assert the text output contains "stale-feeds".
 
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -84,41 +84,25 @@ fn stale_feed_metadata_surfaces_warning_in_status() {
         .restart_with_env(&[("SENTINEL_SKIP_FEED_FETCH", "1")])
         .expect("restart daemon with explicit SENTINEL_SKIP_FEED_FETCH=1");
 
-    // Step 5: invoke `sentinel status --json` and parse the daemon_state.
+    // Step 5: invoke `sentinel status` and check the text output for "stale-feeds".
     let out = Command::new(&cli)
         .arg("status")
-        .arg("--json")
         .env_clear()
         .env("HOME", harness.home.path())
         .env("SENTINEL_STATE_DIR", &harness.state_dir)
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .output()
-        .expect("run sentinel status --json");
+        .expect("run sentinel status");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let v: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
-        panic!(
-            "expected JSON from sentinel status --json, got: {stdout}\nerr: {e}\nstderr: {}",
-            String::from_utf8_lossy(&out.stderr)
-        )
-    });
-
-    // status JSON envelope can be either {"Ok": {...}} (Result-shaped) or {...}
-    // directly per crates/sentinel-e2e/tests/status_state_transitions.rs:88-100.
-    let daemon_state = v
-        .get("Ok")
-        .and_then(|ok| ok.get("daemon_state"))
-        .or_else(|| v.get("daemon_state"))
-        .and_then(|x| x.as_str())
-        .unwrap_or("");
 
     // Capture stderr defensively before the assertion so we can include it in
     // the panic message if the assertion fails.
     let drained = harness.drain_stderr();
 
-    assert_eq!(
-        daemon_state, "StaleFeeds",
-        "HARD assertion failed: expected daemon_state=StaleFeeds, got '{daemon_state}'\n\
-         status JSON: {v:#}\n\
+    assert!(
+        stdout.contains("stale-feeds"),
+        "HARD assertion failed: expected 'stale-feeds' in status output\n\
+         stdout:\n{stdout}\n\
          daemon stderr:\n{drained}",
     );
 

@@ -268,17 +268,21 @@ fn status_persistence_shows_events() {
     let _ = harness.drain_stderr();
 
     let status_output = Command::new(&cli)
-        .args(["status", "persistence", "--json"])
+        .args(["status", "persistence"])
         .env_clear()
         .env("HOME", &home)
         .env("SENTINEL_STATE_DIR", &harness.state_dir)
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .output()
-        .expect("run sentinel status persistence --json");
+        .expect("run sentinel status persistence");
 
     let status_stdout = String::from_utf8_lossy(&status_output.stdout);
     assert!(
         status_output.status.success(),
-        "sentinel status persistence --json should succeed; stdout={status_stdout}"
+        "sentinel status persistence should succeed; stdout={status_stdout}"
+    );
+    assert!(
+        !status_stdout.trim().is_empty(),
+        "sentinel status persistence output should be non-empty"
     );
 }

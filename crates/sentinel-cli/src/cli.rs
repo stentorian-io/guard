@@ -16,7 +16,7 @@ USAGE:
   sentinel wrap --learn <cmd> [args...]      Record unknown destinations as user rules
                                              (TTY required; fails clear in non-TTY)
 
-  sentinel status [logs|rules|denials|review|persistence|advisory] [--follow|--all|--json]
+  sentinel status [logs|rules|denials|review|persistence|advisory]
                                              Inspect daemon health, rules, denials
   sentinel status advisory <ID>              Look up threat-intel advisory details
 "
@@ -44,33 +44,23 @@ pub enum Cmd {
     Status {
         #[command(subcommand)]
         sub: Option<StatusSub>,
-        /// Bare-status flag: verbose render. Only valid when `sub` is None.
-        #[arg(long)]
-        verbose: bool,
-        /// Bare-status flag: JSON output. Only valid when `sub` is None.
-        #[arg(long)]
-        json: bool,
     },
 }
 
 /// Status read sub-verbs.
 #[derive(Subcommand, Debug)]
 pub enum StatusSub {
-    /// Stream the JSONL forensic log.
-    Logs {
-        #[arg(long)] follow: bool,
-        #[arg(long)] json: bool,
-    },
+    /// Stream the JSONL forensic log (pipe to `tail -f` for follow mode).
+    Logs,
     /// List active rules.
     Rules {
         /// Include built-in registry-allowlist rules.
-        #[arg(long)] all: bool,
-        #[arg(long)] json: bool,
+        #[arg(long)]
+        include_built_in: bool,
     },
     /// View denials from a specific run_uuid.
     Denials {
         run_uuid: String,
-        #[arg(long)] json: bool,
     },
     /// Interactively walk a previous run's denials. TTY-required.
     Review {
@@ -80,11 +70,9 @@ pub enum StatusSub {
     Persistence {
         /// Filter to a specific run_uuid.
         run_uuid: Option<String>,
-        #[arg(long)] json: bool,
     },
     /// Look up details for a threat-intel advisory ID (e.g. MAL-2025-3008).
     Advisory {
         advisory_id: String,
-        #[arg(long)] json: bool,
     },
 }

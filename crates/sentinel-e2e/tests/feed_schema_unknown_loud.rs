@@ -84,10 +84,9 @@ fn schema_unknown_2_0_0_raises_degraded_and_emits_feed_error() {
         &stripped_stderr.chars().take(2048).collect::<String>(),
     );
 
-    // (c) `sentinel status --json` reports daemon_state = Degraded.
+    // (c) `sentinel status` text output reports State: degraded.
     let status_output = Command::new(&cli)
         .arg("status")
-        .arg("--json")
         .env_clear()
         .env("HOME", harness.home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -96,21 +95,14 @@ fn schema_unknown_2_0_0_raises_degraded_and_emits_feed_error() {
         .expect("run sentinel status");
     assert!(
         status_output.status.success() || status_output.status.code() == Some(0),
-        "sentinel status --json failed: stderr={}",
+        "sentinel status failed: stderr={}",
         String::from_utf8_lossy(&status_output.stderr),
     );
     let stdout = String::from_utf8_lossy(&status_output.stdout);
-    let v: serde_json::Value = serde_json::from_str(&stdout).expect("parse status JSON");
-    let ok = v
-        .get("Ok")
-        .expect("StatusReply::Ok variant required (got: {stdout})");
-    let daemon_state = ok
-        .get("daemon_state")
-        .and_then(|s| s.as_str())
-        .unwrap_or("");
-    assert_eq!(
-        daemon_state, "Degraded",
-        "daemon_state must be Degraded after schema_unknown failure: full status = {stdout}"
+    let stdout_lower = stdout.to_ascii_lowercase();
+    assert!(
+        stdout_lower.contains("state: degraded"),
+        "sentinel status output must contain 'State: degraded' after schema_unknown failure: full output = {stdout}"
     );
 }
 

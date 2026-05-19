@@ -86,7 +86,6 @@ fn block_decisions_do_not_trigger_per_query_online_lookups() {
     // doing per-status-query fetches.
     let _status = Command::new(&cli)
         .arg("status")
-        .arg("--json")
         .env_clear()
         .env("HOME", harness.home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())

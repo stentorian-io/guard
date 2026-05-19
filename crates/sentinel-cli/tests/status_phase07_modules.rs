@@ -5,12 +5,12 @@ use std::path::Path;
 
 #[test]
 fn status_rules_run_signature_pinned() {
-    let _: fn(&Path, bool, bool) -> Result<i32, CliError> = rules::run;
+    let _: fn(&Path, bool) -> Result<i32, CliError> = rules::run;
 }
 
 #[test]
 fn status_denials_run_signature_pinned() {
-    let _: fn(&str, bool) -> Result<i32, CliError> = denials::run;
+    let _: fn(&str) -> Result<i32, CliError> = denials::run;
 }
 
 #[test]
@@ -20,5 +20,5 @@ fn status_review_run_signature_pinned() {
 
 #[test]
 fn status_run_status_still_reachable() {
-    let _: fn(&Path, &Path, bool, bool) -> Result<i32, CliError> = run_status;
+    let _: fn(&Path, &Path) -> Result<i32, CliError> = run_status;
 }

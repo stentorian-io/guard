@@ -1,20 +1,14 @@
-//! `sentinel status persistence [--run-uuid UUID] [--json]` — list detected
-//! persistence-write events from the JSONL forensic log (M003-S05).
+//! `sentinel status persistence [UUID]` — list detected persistence-write
+//! events from the JSONL forensic log (M003-S05).
 
 use crate::install::launchagent;
 use crate::persistence_log;
 use crate::CliError;
 
-pub fn run(run_uuid: Option<&str>, json: bool) -> Result<i32, CliError> {
+pub fn run(run_uuid: Option<&str>) -> Result<i32, CliError> {
     let log_path = launchagent::logs_dir().join("sentinel.log");
     let entries = persistence_log::filter_persistence_writes(&log_path, run_uuid)?;
 
-    if json {
-        let s = serde_json::to_string(&entries)
-            .map_err(|e| CliError::Other(format!("json: {e}")))?;
-        println!("{s}");
-        return Ok(0);
-    }
     if entries.is_empty() {
         match run_uuid {
             Some(uuid) => println!("No persistence-write events for run_uuid={uuid}."),

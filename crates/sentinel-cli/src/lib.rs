@@ -11,7 +11,6 @@ pub mod persistence_log;
 pub mod ipc_client;
 pub mod locate;
 pub mod logs;
-pub mod logs_follow;
 pub mod prompt_channel;
 pub mod prompt_render;
 pub mod run_orchestrator;

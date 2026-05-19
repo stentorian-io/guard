@@ -1,22 +1,16 @@
 //! crates/sentinel-cli/src/logs.rs
 //!
-//! v0.3 — `sentinel logs [--follow]`.
+//! `sentinel status logs` — dump the JSONL forensic log to stdout.
+//! For streaming, pipe to `tail -f ~/Library/Logs/Sentinel/sentinel.log`.
 
 use std::io::Write;
 
 use crate::install::launchagent::logs_dir;
 use crate::CliError;
 
-/// `json`: future-facing flag; the JSONL forensic log is already JSON
-/// natively, so for now this flag is a no-op (kept for parity with other
-/// status reads — re-investigate if a different formatter is added).
-pub fn run_logs(follow: bool, _json: bool) -> Result<i32, CliError> {
+pub fn run_logs() -> Result<i32, CliError> {
     let active = logs_dir().join("sentinel.log");
-    if follow {
-        crate::logs_follow::tail(&active).map(|()| 0)
-    } else {
-        run_dump(&active)
-    }
+    run_dump(&active)
 }
 
 fn run_dump(active: &std::path::Path) -> Result<i32, CliError> {

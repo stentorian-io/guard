@@ -5,7 +5,7 @@
 //! and surfaces the coverage gap. The gap appears in three places:
 //!   - daemon stderr (tracing event with a coverage-gap marker)
 //!   - JSONL log (Gap row with the recorded `gap_kind`)
-//!   - `sentinel status --verbose` output (recent_gaps surface)
+//!   - `sentinel status` output (recent_gaps surface)
 //!
 use std::process::Command;
 use std::time::Duration;
@@ -97,17 +97,16 @@ fn hardened_runtime_exec_surfaces_coverage_gap() {
     );
 
     // -----------------------------------------------------------------------
-    // ASSERTION 3: `sentinel status --verbose` surfaces the gap.
+    // ASSERTION 3: `sentinel status` surfaces the gap.
     // -----------------------------------------------------------------------
     let status_out = Command::new(&cli)
         .arg("status")
-        .arg("--verbose")
         .env_clear()
         .env("HOME", harness.home.path())
         .env("SENTINEL_STATE_DIR", &harness.state_dir)
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .output()
-        .expect("run sentinel status --verbose");
+        .expect("run sentinel status");
     let status_stdout = String::from_utf8_lossy(&status_out.stdout);
     let status_lc = status_stdout.to_ascii_lowercase();
     // WR-08: tighten ASSERTION 3. The previous predicate ('hardened' OR
@@ -124,7 +123,7 @@ fn hardened_runtime_exec_surfaces_coverage_gap() {
         status_lc.contains("hardened-runtime") || status_lc.contains("env-not-propagated");
     assert!(
         has_recent_gaps_header && has_gap_kind,
-        "sentinel status --verbose did not surface the coverage gap;\n\
+        "sentinel status did not surface the coverage gap;\n\
          expected: 'Recent gaps (' header AND a coverage gap_kind\n\
          has_recent_gaps_header={has_recent_gaps_header} \
          has_gap_kind={has_gap_kind}\n\

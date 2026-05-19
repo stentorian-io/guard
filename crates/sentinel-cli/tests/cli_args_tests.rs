@@ -151,7 +151,7 @@ fn non_tty_learn_returns_exit_64() {
 fn status_bare_no_sub() {
     let cli = Cli::try_parse_from(["sentinel", "status"]).expect("parse");
     match cli.cmd {
-        Cmd::Status { sub: None, verbose: false, json: false } => {}
+        Cmd::Status { sub: None } => {}
         other => panic!("expected Status{{None}}, got {other:?}"),
     }
 }
@@ -177,17 +177,36 @@ fn status_review_with_uuid_parses() {
 }
 
 #[test]
-fn status_review_rejects_json_flag() {
-    let r = Cli::try_parse_from(["sentinel", "status", "review", "--json"]);
-    assert!(r.is_err(), "--json on review must be rejected; got {:?}", r);
+fn status_logs_bare_parses() {
+    let cli = Cli::try_parse_from(["sentinel", "status", "logs"]).expect("parse");
+    match cli.cmd {
+        Cmd::Status { sub: Some(StatusSub::Logs), .. } => {}
+        other => panic!("expected Status{{Logs}}, got {other:?}"),
+    }
 }
 
 #[test]
-fn status_logs_follow_parses() {
-    let cli = Cli::try_parse_from(["sentinel", "status", "logs", "--follow"]).expect("parse");
+fn status_rules_include_built_in_parses() {
+    let cli = Cli::try_parse_from(["sentinel", "status", "rules", "--include-built-in"]).expect("parse");
     match cli.cmd {
-        Cmd::Status { sub: Some(StatusSub::Logs { follow: true, json: false }), .. } => {}
-        other => panic!("expected Status{{Logs,follow}}, got {other:?}"),
+        Cmd::Status { sub: Some(StatusSub::Rules { include_built_in: true }), .. } => {}
+        other => panic!("expected Status{{Rules,include_built_in}}, got {other:?}"),
+    }
+}
+
+#[test]
+fn status_rejects_removed_flags() {
+    for args in [
+        vec!["sentinel", "status", "--verbose"],
+        vec!["sentinel", "status", "--json"],
+        vec!["sentinel", "status", "logs", "--follow"],
+        vec!["sentinel", "status", "logs", "--json"],
+        vec!["sentinel", "status", "rules", "--json"],
+        vec!["sentinel", "status", "rules", "--all"],
+        vec!["sentinel", "status", "denials", "abc", "--json"],
+    ] {
+        let r = Cli::try_parse_from(&args);
+        assert!(r.is_err(), "removed flag must be rejected: {:?}", args);
     }
 }
 

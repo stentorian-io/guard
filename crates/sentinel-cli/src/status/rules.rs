@@ -1,6 +1,6 @@
 //! crates/sentinel-cli/src/status/rules.rs
 //!
-//! `sentinel status rules [--all] [--json]` (CLI-16).
+//! `sentinel status rules [--include-built-in]`.
 
 use std::path::Path;
 
@@ -9,15 +9,8 @@ use sentinel_ipc::RuleRow;
 use crate::ipc_client;
 use crate::CliError;
 
-pub fn run(sock: &Path, all: bool, json: bool) -> Result<i32, CliError> {
-    let rules = ipc_client::list_rules_request(sock, all)?;
-
-    if json {
-        let s = serde_json::to_string(&rules)
-            .map_err(|e| CliError::Other(format!("json: {e}")))?;
-        println!("{s}");
-        return Ok(0);
-    }
+pub fn run(sock: &Path, include_built_in: bool) -> Result<i32, CliError> {
+    let rules = ipc_client::list_rules_request(sock, include_built_in)?;
     render_table(&rules);
     Ok(0)
 }

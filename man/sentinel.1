@@ -79,61 +79,25 @@ Cannot be combined with
 .BR \-y ", " \-\-yes
 Skip TTY confirmation prompts.
 .SS sentinel status [\fIsubcommand\fR]
-Show Sentinel operational status. Without a subcommand, prints a summary
-of daemon health, hook integrity, and recent activity.
-.PP
-.B Flags (bare status only):
-.TP
-.B \-\-verbose
-Verbose status output. Invalid when a subcommand is given.
-.TP
-.B \-\-json
-JSON output. Invalid when a subcommand is given.
+Show Sentinel operational status. Without a subcommand, prints daemon
+health, counters, feeds, tracked roots, gaps, and risk exposure.
 .PP
 .B Subcommands:
 .TP
 .B logs
-Show the JSONL forensic log.
-.RS
-.TP
-.B \-\-follow
-Stream new log entries as they arrive.
-.TP
-.B \-\-json
-JSON output.
-.RE
+Dump the JSONL forensic log to stdout. For streaming, pipe to
+.BR "tail -f ~/Library/Logs/Sentinel/sentinel.log" .
 .TP
 .B rules
 List active policy rules.
 .RS
 .TP
-.B \-\-all
+.B \-\-include\-built\-in
 Include built-in registry-allowlist rules.
-.TP
-.B \-\-project
-Filter to rules from the closest
-.I .sentinel.toml
-above the current directory.
-.TP
-.B \-\-json
-JSON output.
-.RE
-.TP
-.B trust
-Show trust policy state for project configuration files.
-.RS
-.TP
-.B \-\-json
-JSON output.
 .RE
 .TP
 .BI "denials " run_uuid
 Show denied connections from a specific run.
-.RS
-.TP
-.B \-\-json
-JSON output.
-.RE
 .TP
 .BI "review " [run_uuid]
 Interactively walk through denied connections and create allow/deny rules.
@@ -143,11 +107,9 @@ is omitted, reviews the most recent run.
 .TP
 .BI "persistence " [run_uuid]
 Show persistence artifacts (files written during install) for a run.
-.RS
 .TP
-.B \-\-json
-JSON output.
-.RE
+.BI "advisory " advisory_id
+Look up details for a threat-intel advisory ID (e.g. MAL-2025-3008).
 .SS sentinel repair
 Verify and repair Sentinel installation integrity. Re-derives the HMAC key
 and hook hash, and re-bootstraps LaunchAgents.

@@ -19,8 +19,6 @@ use sentinel_ipc::{DaemonStateKind, FeedInfo, GapInfo, InstallInfo, StatusCounte
 
 use crate::CliError;
 
-const ONE_DAY_MS: u64 = 24 * 60 * 60 * 1000;
-
 #[derive(Debug, Clone, serde::Deserialize)]
 struct WatchdogHealth {
     restart_count: u32,
@@ -35,15 +33,9 @@ fn read_watchdog_health(state_dir: &Path) -> Option<WatchdogHealth> {
     serde_json::from_str(&content).ok()
 }
 
-pub fn run_status(sock: &Path, state_dir: &Path, verbose: bool, json: bool) -> Result<i32, CliError> {
-    let _ = state_dir;
+pub fn run_status(sock: &Path, state_dir: &Path) -> Result<i32, CliError> {
     let reply = crate::ipc_client::status_request(sock)?;
 
-    if json {
-        let s = serde_json::to_string(&reply).map_err(|e| CliError::Other(format!("json: {e}")))?;
-        println!("{s}");
-        return Ok(0);
-    }
     match reply {
         StatusReply::Err { message, .. } => {
             eprintln!("sentinel: error — {message}");
@@ -58,55 +50,12 @@ pub fn run_status(sock: &Path, state_dir: &Path, verbose: bool, json: bool) -> R
             install_info,
             ..
         } => {
-            // WARNING #6 fix: daemon_state comes from the daemon AS-IS (no CLI promotion).
-            // We still compute a 24h gap count for the minimal-default remediation message.
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let recent_count_24h = recent_gaps
-                .iter()
-                .filter(|g| now_ms.saturating_sub(g.detected_at_ms) < ONE_DAY_MS)
-                .count();
-
-            if verbose {
-                render_verbose(daemon_state, &tracked_roots, &recent_gaps, &counters, &feeds, install_info.as_ref());
-                render_risk_exposure(sock);
-                if let Some(wd) = read_watchdog_health(state_dir) {
-                    render_watchdog_health(&wd);
-                }
-            } else {
-                render_minimal(daemon_state, recent_count_24h, &feeds);
+            render_verbose(daemon_state, &tracked_roots, &recent_gaps, &counters, &feeds, install_info.as_ref());
+            render_risk_exposure(sock);
+            if let Some(wd) = read_watchdog_health(state_dir) {
+                render_watchdog_health(&wd);
             }
             Ok(0)
-        }
-    }
-}
-
-pub fn render_minimal(state: DaemonStateKind, gaps_24h: usize, feeds: &[FeedInfo]) {
-    render_minimal_to(&mut std::io::stdout().lock(), state, gaps_24h, feeds);
-}
-
-pub fn render_minimal_to<W: std::io::Write>(w: &mut W, state: DaemonStateKind, gaps_24h: usize, feeds: &[FeedInfo]) {
-    match state {
-        DaemonStateKind::Operational => {
-            let _ = writeln!(w, "sentinel: operational");
-        }
-        DaemonStateKind::Degraded => { let _ = writeln!(
-            w,
-            "sentinel: degraded — {gaps_24h} coverage gap(s) in last 24h. Run `sentinel status --verbose` for detail."
-        ); }
-        DaemonStateKind::StaleFeeds => {
-            let stale_names: Vec<&str> = feeds.iter().filter(|f| !f.fresh).map(|f| f.name.as_str()).collect();
-            if stale_names.is_empty() {
-                let _ = writeln!(w, "sentinel: stale-feeds — threat-intel feeds older than 7 days. Run `sentinel wrap` to refresh.");
-            } else {
-                let _ = writeln!(
-                    w,
-                    "sentinel: stale-feeds — {} older than 7 days. Run `sentinel wrap` to refresh.",
-                    stale_names.join(", ")
-                );
-            }
         }
     }
 }
@@ -284,42 +233,6 @@ mod render_tests {
     }
 
     #[test]
-    fn render_minimal_emits_correct_line_for_each_state() {
-        let cases: &[(DaemonStateKind, &[&str])] = &[
-            (DaemonStateKind::Operational, &["operational"]),
-            (DaemonStateKind::Degraded, &["degraded", "coverage gap"]),
-            (DaemonStateKind::StaleFeeds, &["stale-feeds", "7 days"]),
-        ];
-
-        for (state, expected_substrings) in cases {
-            let mut buf = Vec::new();
-            render_minimal_to(&mut buf, *state, 0, &[]);
-            let s = String::from_utf8(buf).unwrap();
-            for expected in *expected_substrings {
-                assert!(
-                    s.contains(expected),
-                    "render_minimal_to({:?}): expected '{}' in output, got: {:?}",
-                    state,
-                    expected,
-                    s
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn render_minimal_includes_gap_count_for_degraded() {
-        let mut buf = Vec::new();
-        render_minimal_to(&mut buf, DaemonStateKind::Degraded, 7, &[]);
-        let s = String::from_utf8(buf).unwrap();
-        assert!(
-            s.contains("7 coverage gap"),
-            "expected '7 coverage gap' in degraded output, got: {:?}",
-            s
-        );
-    }
-
-    #[test]
     fn render_verbose_emits_correct_state_string() {
         let cases: &[(DaemonStateKind, &str)] = &[
             (DaemonStateKind::Operational, "State: operational"),
@@ -339,5 +252,4 @@ mod render_tests {
             );
         }
     }
-
 }

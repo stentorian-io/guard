@@ -87,9 +87,8 @@ Check that the daemon is running and the hook is intact:
 sentinel status
 ```
 
-A healthy install shows daemon connectivity, hook integrity, and feed
-freshness. Use `--verbose` for detailed output or `--json` for machine-
-readable output.
+A healthy install shows daemon state, counters, feeds, tracked roots,
+gaps, and risk exposure.
 
 ## First protected install
 

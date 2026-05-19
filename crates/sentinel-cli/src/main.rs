@@ -38,36 +38,29 @@ fn real_main() -> Result<i32, CliError> {
             sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
             run_orchestrator::run(&sock, &state, argv, learn)
         }
-        Cmd::Status { sub, verbose, json } => {
-            if sub.is_some() && (verbose || json) {
-                eprintln!(
-                    "sentinel: --verbose / --json must follow the sub-verb \
-                     (e.g., `status rules --json`, not `status --json rules`)"
-                );
-                return Ok(64); // EX_USAGE
-            }
+        Cmd::Status { sub } => {
             match sub {
                 // Local-only commands: no daemon needed.
-                Some(sentinel_cli::cli::StatusSub::Logs { follow, json }) => {
-                    sentinel_cli::logs::run_logs(follow, json)
+                Some(sentinel_cli::cli::StatusSub::Logs) => {
+                    sentinel_cli::logs::run_logs()
                 }
-                Some(sentinel_cli::cli::StatusSub::Denials { run_uuid, json }) => {
-                    sentinel_cli::status::denials::run(&run_uuid, json)
+                Some(sentinel_cli::cli::StatusSub::Denials { run_uuid }) => {
+                    sentinel_cli::status::denials::run(&run_uuid)
                 }
-                Some(sentinel_cli::cli::StatusSub::Persistence { run_uuid, json }) => {
-                    sentinel_cli::status::persistence::run(run_uuid.as_deref(), json)
+                Some(sentinel_cli::cli::StatusSub::Persistence { run_uuid }) => {
+                    sentinel_cli::status::persistence::run(run_uuid.as_deref())
                 }
-                Some(sentinel_cli::cli::StatusSub::Advisory { advisory_id, json }) => {
-                    sentinel_cli::status::advisory::run(&advisory_id, json)
+                Some(sentinel_cli::cli::StatusSub::Advisory { advisory_id }) => {
+                    sentinel_cli::status::advisory::run(&advisory_id)
                 }
                 // IPC-dependent commands: ensure daemon first.
                 None => {
                     sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
-                    sentinel_cli::status::run_status(&sock, &state, verbose, json)
+                    sentinel_cli::status::run_status(&sock, &state)
                 }
-                Some(sentinel_cli::cli::StatusSub::Rules { all, json }) => {
+                Some(sentinel_cli::cli::StatusSub::Rules { include_built_in }) => {
                     sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
-                    sentinel_cli::status::rules::run(&sock, all, json)
+                    sentinel_cli::status::rules::run(&sock, include_built_in)
                 }
                 Some(sentinel_cli::cli::StatusSub::Review { run_uuid }) => {
                     sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;

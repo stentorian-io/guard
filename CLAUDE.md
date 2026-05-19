@@ -157,4 +157,4 @@ Conventional commits scoped by subsystem: `feat(hook):`, `fix(daemon):`, `test(e
 
 - Managed via interactive prompts during `sentinel wrap` or the `--learn` flag
 - Persisted in SQLite (`sentinel.db`) — no per-project config files
-- Viewable via `sentinel status rules [--all] [--json]`
+- Viewable via `sentinel status rules [--include-built-in]`

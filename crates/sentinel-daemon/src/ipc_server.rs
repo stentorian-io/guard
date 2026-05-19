@@ -199,22 +199,8 @@ pub struct DaemonState {
     pub recent_gaps: Arc<RecentGapsRing>,
     pub baseline_staging: Arc<BaselineStaging>,
     // v0.3 (WARNING #6 fix): snapshot-publication failure flag.
-    // Flipped to true on Err from publish_run; back to false on Ok.
-    // Feeds compute_daemon_state → StatusReply.daemon_state = Degraded on failure.
     pub last_snapshot_publish_failed: AtomicBool,
-    // v0.3: deferred-resolve table for
-    // park-pending-prompt mechanism in the Resolve handler.
     pub deferred_resolve: Arc<DeferredResolveTable>,
-    // v0.4 — feed-store + per-fetch concurrency primitives.
-    // `feed_store` opens against the same `sentinel.db` migrated by
-    // `RuleStore::open` (migration 003). The mutex
-    // serializes `fetch_feeds_blocking` calls; the rwlock holds the
-    // last fetch's outcome+timestamp so concurrent runs share a single
-    // underlying fetch when they arrive within `SHARED_RESULT_TTL`.
-    pub feed_store: Arc<crate::feed::store::FeedStore>,
-    pub feed_fetch_mutex: Arc<Mutex<()>>,
-    pub last_fetch_result:
-        Arc<std::sync::RwLock<Option<crate::feed::concurrency::LastFetchResult>>>,
     // v0.5 M004-S01: monotonic startup instant for uptime reporting in Ping.
     pub startup_instant: std::time::Instant,
 }
@@ -238,12 +224,6 @@ impl DaemonState {
         let prompt_dedup = Arc::new(PromptDedup::new());
         let recent_gaps = Arc::new(RecentGapsRing::new());
         let baseline_staging = Arc::new(BaselineStaging::new());
-        // v0.4 — in-memory feed store + fresh mutex/rwlock.
-        let feed_store = Arc::new(
-            crate::feed::store::FeedStore::open_in_memory().expect("in-memory feed_store"),
-        );
-        let feed_fetch_mutex = Arc::new(Mutex::new(()));
-        let last_fetch_result = Arc::new(std::sync::RwLock::new(None));
         Self {
             process_tree,
             gap_detector,
@@ -257,9 +237,6 @@ impl DaemonState {
             baseline_staging,
             last_snapshot_publish_failed: AtomicBool::new(false),
             deferred_resolve: Arc::new(DeferredResolveTable::new()),
-            feed_store,
-            feed_fetch_mutex,
-            last_fetch_result,
             startup_instant: std::time::Instant::now(),
         }
     }

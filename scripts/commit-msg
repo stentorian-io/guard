@@ -45,6 +45,25 @@ fi
 TYPE=$(echo "$MSG" | sed -E 's/^([a-z]+).*/\1/')
 SCOPE=$(echo "$MSG" | sed -nE 's/^[a-z]+\(([^)]+)\).*/\1/p')
 
+# ── Enforce explicit scope on docs type ────────────────────────────────────
+
+if [ "$TYPE" = "docs" ]; then
+  if [ -z "$SCOPE" ]; then
+    fail "'docs' commits require an explicit scope.
+Allowed: docs(readme), docs(llm), docs(bench), docs(man), docs(help), docs(install)
+Got: $MSG"
+  fi
+  case "$SCOPE" in
+    readme|llm|bench|man|help|install)
+      ;; # known scope
+    *)
+      fail "docs(${SCOPE}) is not a recognized scope.
+Allowed: readme, llm, bench, man, help, install
+Changelog scopes: man, help, install"
+      ;;
+  esac
+fi
+
 # ── Classify staged files ──────────────────────────────────────────────────
 
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)
@@ -105,20 +124,6 @@ Staged: $(echo "$STAGED" | head -5)"
     fi
     ;;
 esac
-
-# ── Warn about docs scopes that won't appear in changelog ──────────────────
-
-if [ "$TYPE" = "docs" ] && [ -n "$SCOPE" ]; then
-  case "$SCOPE" in
-    man|help|install)
-      ;; # shipped in release, will appear in changelog
-    *)
-      warn "docs(${SCOPE}) will be skipped in the changelog.
-Only docs(man|help|install) are shipped in the release artifact.
-If this is intentional, proceed. Otherwise consider 'chore' type."
-      ;;
-  esac
-fi
 
 # ── Warn when fix only touches comments/docs ───────────────────────────────
 

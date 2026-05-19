@@ -320,19 +320,12 @@ fn emit_decision_row(
     dest_port: u16,
     package_context: Option<&PackageContext>,
 ) {
-    // v0.4: combine package-source enrichment (when we have package
-    // context) with host-source enrichment (when the verdict source looks
-    // like a feed-deny match OR the dest_host is non-empty and we want to
-    // attribute any feed signals on it). Caller-side (NOT writer thread).
     let mut intel_combined: Vec<sentinel_ipc::IntelMatch> = Vec::new();
     if let Some(pkg) = package_context {
-        intel_combined.extend(log_writer::enrich(&state.feed_store, pkg));
+        intel_combined.extend(log_writer::enrich(pkg));
     }
-    // Probe host-source intel only when the source attributes a feed-deny
-    // (so we don't pay an SQLite round-trip on every prompt-allow decision
-    // that has nothing to do with feeds).
     if matches!(source_kind, "FeedDeny" | "feed-deny" | "feed_deny") {
-        intel_combined.extend(log_writer::enrich_for_host(&state.feed_store, dest_host));
+        intel_combined.extend(log_writer::enrich_for_host(dest_host));
     }
     let intel = if intel_combined.is_empty() {
         None

@@ -52,14 +52,7 @@ similar = "2.7"
 flate2 = "1.1"
 serde_json = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-gix = { version = "0.83", default-features = false, features = [
-    "blocking-network-client",
-    "blocking-http-transport-reqwest-rust-tls",
-    "sha1",
-    "worktree-mutation",
-] }
 semver = "1.0"
-walkdir = "2.5"
 url = "2.5"
 
 # Internal crates
@@ -90,16 +83,3 @@ strip = "symbols"
 # corrupting the stack. All crates share this profile setting.
 panic = "abort"
 
-# The daemon would benefit from panic = "unwind" so catch_unwind can isolate
-# gix panics. But cargo REJECTS panic settings in per-package profiles with
-# "`panic` may not be specified in a `package` profile". Workspace-wide
-# panic = "abort" remains the only viable setting because the dylib
-# (sentinel-hook) cannot unwind through foreign C++ frames.
-#
-# catch_unwind is a no-op in abort mode; gix panics terminate the daemon.
-# The next CLI invocation auto-restarts it.
-# The blocks below are KEPT as commented documentation of the rejected path.
-# [profile.release.package.sentinel-daemon]
-# panic = "unwind"   # REJECTED by cargo — see SPIKE-RESULTS.md Spike A2
-# [profile.dev.package.sentinel-daemon]
-# panic = "unwind"   # REJECTED by cargo — see SPIKE-RESULTS.md Spike A2

@@ -1,7 +1,7 @@
-//! Curated default allowlist + abuse-pattern denies.
+//! Curated default allowlist + abuse-pattern denies + feed IOCs.
 //!
-//! Source: `crates/sentinel-core/data/allowlist.yaml` (in-tree YAML
-//! compiled into the daemon at build time via include_str!). Loaded once at
+//! Source: `crates/sentinel-core/data/{allow,deny}/*.yaml` (in-tree YAML
+//! assembled into a single blob by build.rs at compile time). Loaded once at
 //! daemon startup. Entries are tagged with the appropriate RuleTier
 //! (BuiltinDeny for kind:deny, CuratedAllow for kind:allow) and the daemon
 //! merges them with project/user rules at PrepareSnapshot time.
@@ -9,12 +9,9 @@
 use sentinel_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
 use serde::Deserialize;
 
-pub const CURATED_YAML_PATH: &str = "crates/sentinel-core/data/allowlist.yaml";
+pub const CURATED_DATA_DIR: &str = "crates/sentinel-core/data";
 
-/// Compile-time embed. The path is relative to this source file; the literal
-/// `../../sentinel-core/data/allowlist.yaml` resolves from
-/// `crates/sentinel-daemon/src/curated.rs` to the in-tree YAML.
-const CURATED_YAML: &str = include_str!("../../sentinel-core/data/allowlist.yaml");
+const CURATED_YAML: &str = include_str!(concat!(env!("OUT_DIR"), "/rules_combined.yaml"));
 
 /// Minimum length for a suffix pattern. WARNING fix (v0.2 review):
 /// raised from 4 → 6 so single-TLD suffixes like `.com`, `.org`, `.net`,

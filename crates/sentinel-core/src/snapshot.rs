@@ -39,7 +39,7 @@ impl Snapshot {
 
     /// v0.2 minimal allowlist — used by tests and as the daemon's startup
     /// fallback before any `sentinel wrap` invocation. Real curated content is
-    /// loaded from `crates/sentinel-core/data/allowlist.yaml`.
+    /// loaded from `crates/sentinel-core/data/{allow,deny}/`.
     pub fn v2_default() -> Self {
         Self {
             schema_version: SCHEMA_V2,

@@ -7,7 +7,6 @@ pub mod daemon_state;
 pub mod log_writer;
 pub mod prompt;
 pub mod env_capture;
-pub mod feed;
 pub mod gap_detector;
 pub mod install_artifacts;
 pub mod handlers;
@@ -20,7 +19,6 @@ pub mod ipc_server;
 pub mod os_ffi;
 pub mod peer_auth;
 pub mod tracked;
-pub mod feed_refresh;
 pub mod persistence_watcher;
 pub mod rule_store;
 

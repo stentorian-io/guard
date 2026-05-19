@@ -1,0 +1,19 @@
+# JS / npm / Yarn / pnpm / GitHub Packages (ALLOW-01)
+- match: exact
+  pattern: registry.npmjs.org
+  reason: "npm default registry (ALLOW-01)"
+- match: exact
+  pattern: registry.yarnpkg.com
+  reason: "Yarn v1 default registry (ALLOW-01)"
+- match: exact
+  pattern: objects.githubusercontent.com
+  reason: "git+ npm deps; Electron prebuilts; node-canvas/sharp postinstalls (ALLOW-01)"
+- match: suffix
+  pattern: .pkg.github.com
+  reason: "GitHub Packages registry subdomains (ALLOW-01)"
+- match: exact
+  pattern: nodejs.org
+  reason: "node-gyp downloads node headers/prebuilts (ALLOW-01)"
+- match: exact
+  pattern: electronjs.org
+  reason: "Electron postinstall downloads (ALLOW-01)"

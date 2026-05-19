@@ -286,32 +286,4 @@ mod render_tests {
         }
     }
 
-    #[test]
-    fn render_minimal_stale_feeds_shows_feed_names() {
-        use sentinel_ipc::FeedInfo;
-        let feeds = vec![
-            FeedInfo { name: "OSV".to_string(), last_pulled_at_ms: Some(100), fresh: false },
-            FeedInfo { name: "GHSA".to_string(), last_pulled_at_ms: Some(200), fresh: true },
-        ];
-        let mut buf = Vec::new();
-        render_minimal_to(&mut buf, DaemonStateKind::StaleFeeds, 0, &feeds);
-        let s = String::from_utf8(buf).unwrap();
-        assert!(s.contains("OSV"), "should mention the stale feed name");
-        assert!(!s.contains("GHSA"), "should not mention the fresh feed");
-    }
-
-    #[test]
-    fn render_verbose_includes_feeds_section() {
-        use sentinel_ipc::FeedInfo;
-        let feeds = vec![
-            FeedInfo { name: "OSV".to_string(), last_pulled_at_ms: None, fresh: false },
-        ];
-        let mut buf = Vec::new();
-        render_verbose_to(&mut buf, DaemonStateKind::Operational, &[], &[], &empty_counters(), &feeds, None);
-        let s = String::from_utf8(buf).unwrap();
-        assert!(s.contains("Feeds (1):"), "should have Feeds section");
-        assert!(s.contains("OSV"), "should list OSV feed");
-        assert!(s.contains("never"), "should show 'never' for unpulled feed");
-        assert!(s.contains("STALE"), "should show STALE for non-fresh feed");
-    }
 }

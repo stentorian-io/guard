@@ -65,7 +65,8 @@ pub fn well_known_state_dir() -> PathBuf {
             return PathBuf::from(s);
         }
     }
-    let home = std::env::var_os("HOME").unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .expect("HOME environment variable must be set");
     PathBuf::from(home).join("Library/Application Support/Sentinel")
 }
 

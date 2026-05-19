@@ -34,7 +34,7 @@ struct Cli {
 fn default_state_dir() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
+        .expect("HOME environment variable must be set");
     home.join("Library")
         .join("Application Support")
         .join("Sentinel")

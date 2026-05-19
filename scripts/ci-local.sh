@@ -12,8 +12,9 @@
 #
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/check-cache.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -35,45 +36,54 @@ step() { echo -e "\n${BOLD}── $1 ──${RESET}"; }
 pass() { echo -e "${GREEN}✓${RESET} $1"; }
 fail() { echo -e "${RED}${BOLD}FAIL: $1${RESET}" >&2; exit 1; }
 warn() { echo -e "${YELLOW}⚠${RESET} $1"; }
+skip() { echo -e "${GREEN}✓${RESET} $1 ${BOLD}(cached)${RESET}"; }
+
+cache_prune
 
 # ── lint-markdown job (ubuntu) ─────────────────────────────────────────────
-# Prefer brew's node (declared in Brewfile) over whatever the user's PATH
-# resolves to — the latest markdownlint-cli2 needs Node 20+ and some users
-# have an older nvm default that shadows brew.
 step "Markdown lint"
 node_bin="$(command -v node || true)"
 if [ -x /opt/homebrew/bin/node ]; then
   node_bin=/opt/homebrew/bin/node
 fi
 if [ -n "$node_bin" ]; then
-  node_dir="$(dirname "$node_bin")"
-  PATH="$node_dir:$PATH" npx --yes markdownlint-cli2 "**/*.md" "#target" "#.gsd" \
-    || fail "markdown lint"
-  pass "markdown lint (node $($node_bin --version))"
+  fp=$(all_md_fingerprint)
+  if cache_hit "ci-local:mdlint" "$fp"; then
+    skip "markdown lint"
+  else
+    node_dir="$(dirname "$node_bin")"
+    PATH="$node_dir:$PATH" npx --yes markdownlint-cli2 "**/*.md" "#target" "#.gsd" \
+      || fail "markdown lint"
+    cache_mark "ci-local:mdlint" "$fp"
+    pass "markdown lint (node $($node_bin --version))"
+  fi
 else
   warn "node not found — skipping markdown lint"
 fi
 
 # ── validation job: fixture SHA check ──────────────────────────────────────
 step "Fixture hash check"
-fixture=crates/sentinel-e2e/fixtures/ua-parser-js-0.7.29-sanitized/ua-parser-js-0.7.29-sanitized.tgz
-test -f "$fixture" || fail "sanitized fixture missing at $fixture"
-actual=$(shasum -a 256 "$fixture" | awk '{print $1}')
-matches=$(grep -c '^EXPECTED_OUTPUT_SHA256="[a-f0-9]\{64\}"$' \
-          tools/vendor-ua-parser-js.sh || true)
-[ "$matches" -eq 1 ] || fail "expected one EXPECTED_OUTPUT_SHA256 line in vendor-ua-parser-js.sh, found $matches"
-pinned=$(grep '^EXPECTED_OUTPUT_SHA256="[a-f0-9]\{64\}"$' tools/vendor-ua-parser-js.sh \
-         | sed -E 's/^EXPECTED_OUTPUT_SHA256="([a-f0-9]{64})"$/\1/')
-[ "$actual" = "$pinned" ] || fail "fixture hash mismatch (on-disk $actual vs pinned $pinned)"
-pass "fixture matches pinned hash"
+fp=$(fixture_fingerprint)
+if cache_hit "ci-local:fixture" "$fp"; then
+  skip "fixture hash check"
+else
+  fixture=crates/sentinel-e2e/fixtures/ua-parser-js-0.7.29-sanitized/ua-parser-js-0.7.29-sanitized.tgz
+  test -f "$fixture" || fail "sanitized fixture missing at $fixture"
+  actual=$(shasum -a 256 "$fixture" | awk '{print $1}')
+  matches=$(grep -c '^EXPECTED_OUTPUT_SHA256="[a-f0-9]\{64\}"$' \
+            tools/vendor-ua-parser-js.sh || true)
+  [ "$matches" -eq 1 ] || fail "expected one EXPECTED_OUTPUT_SHA256 line in vendor-ua-parser-js.sh, found $matches"
+  pinned=$(grep '^EXPECTED_OUTPUT_SHA256="[a-f0-9]\{64\}"$' tools/vendor-ua-parser-js.sh \
+           | sed -E 's/^EXPECTED_OUTPUT_SHA256="([a-f0-9]{64})"$/\1/')
+  [ "$actual" = "$pinned" ] || fail "fixture hash mismatch (on-disk $actual vs pinned $pinned)"
+  cache_mark "ci-local:fixture" "$fp"
+  pass "fixture matches pinned hash"
+fi
 
 # ── ubuntu jobs via act (optional) ─────────────────────────────────────────
 if [ "$USE_ACT" -eq 1 ]; then
   if command -v act >/dev/null; then
     step "Ubuntu jobs via act (lint-markdown)"
-    # Only run the lint-markdown job — pr-title needs a PR context that act
-    # can't synthesise cleanly. The pre-commit hook covers conventional-commit
-    # validation for local commits.
     act push --job lint-markdown --quiet 2>&1 \
       || fail "act lint-markdown failed"
     pass "act lint-markdown"
@@ -89,9 +99,16 @@ if [ "$QUICK" -eq 1 ] || [ "${CI_LOCAL_SKIP_E2E:-0}" -eq 1 ]; then
   exit 0
 fi
 
+fp=$(e2e_fingerprint)
+
 step "cargo build --workspace --release"
-cargo build --workspace --release || fail "cargo build"
-pass "cargo build"
+if cache_hit "ci-local:cargo-build" "$fp"; then
+  skip "cargo build"
+else
+  cargo build --workspace --release || fail "cargo build"
+  cache_mark "ci-local:cargo-build" "$fp"
+  pass "cargo build"
+fi
 
 E2E_TESTS=(
   "ua_parser_js_demo:VAL-01 ua-parser-js@0.7.29 demo"
@@ -102,13 +119,18 @@ E2E_TESTS=(
   "failure_modes_hardened_exec:VAL-04 D-10 hardened-binary exec gap"
 )
 
-for entry in "${E2E_TESTS[@]}"; do
-  test_name="${entry%%:*}"
-  label="${entry#*:}"
-  step "$label"
-  cargo test -p sentinel-e2e --test "$test_name" --release -- --nocapture \
-    || fail "$label"
-  pass "$label"
-done
+if cache_hit "ci-local:e2e-all" "$fp"; then
+  skip "e2e tests (all 6)"
+else
+  for entry in "${E2E_TESTS[@]}"; do
+    test_name="${entry%%:*}"
+    label="${entry#*:}"
+    step "$label"
+    cargo test -p sentinel-e2e --test "$test_name" --release -- --nocapture \
+      || fail "$label"
+    pass "$label"
+  done
+  cache_mark "ci-local:e2e-all" "$fp"
+fi
 
 echo -e "\n${GREEN}${BOLD}All CI checks passed locally.${RESET}"

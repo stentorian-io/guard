@@ -261,3 +261,18 @@ fn user_allow_used_when_no_higher_tier_matches() {
     assert_eq!(v, Verdict::Allow);
     assert_eq!(src, SourceKind::UserAllow);
 }
+
+#[test]
+fn source_kind_as_label_covers_all_variants() {
+    assert_eq!(SourceKind::HardRule("loopback").as_label(), "loopback");
+    assert_eq!(SourceKind::HardRule("cloud-metadata").as_label(), "cloud-metadata-blocked");
+    assert_eq!(SourceKind::HardRule("raw-ip-cache-miss").as_label(), "raw-ip-no-dns");
+    assert_eq!(SourceKind::HardRule("fail-closed").as_label(), "fail-closed");
+    assert_eq!(SourceKind::HardRule("unknown").as_label(), "hard-rule");
+    assert_eq!(SourceKind::BuiltinDeny.as_label(), "builtin-deny");
+    assert_eq!(SourceKind::CuratedAllow.as_label(), "curated-allow");
+    assert_eq!(SourceKind::UserDeny.as_label(), "user-deny");
+    assert_eq!(SourceKind::FeedDeny.as_label(), "feed-deny");
+    assert_eq!(SourceKind::UserAllow.as_label(), "user-allow");
+    assert_eq!(SourceKind::DefaultDeny.as_label(), "default-deny");
+}

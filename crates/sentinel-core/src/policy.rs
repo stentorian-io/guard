@@ -31,6 +31,22 @@ impl SourceKind {
             RuleTier::UserAllow => SourceKind::UserAllow,
         }
     }
+
+    pub fn as_label(&self) -> &'static str {
+        match self {
+            SourceKind::HardRule("loopback") => "loopback",
+            SourceKind::HardRule("cloud-metadata") => "cloud-metadata-blocked",
+            SourceKind::HardRule("raw-ip-cache-miss") => "raw-ip-no-dns",
+            SourceKind::HardRule("fail-closed") => "fail-closed",
+            SourceKind::HardRule(_) => "hard-rule",
+            SourceKind::BuiltinDeny => "builtin-deny",
+            SourceKind::CuratedAllow => "curated-allow",
+            SourceKind::UserDeny => "user-deny",
+            SourceKind::FeedDeny => "feed-deny",
+            SourceKind::UserAllow => "user-allow",
+            SourceKind::DefaultDeny => "default-deny",
+        }
+    }
 }
 
 // ============================================================================

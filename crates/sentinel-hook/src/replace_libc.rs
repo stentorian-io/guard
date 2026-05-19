@@ -15,7 +15,7 @@ use core::sync::atomic::Ordering;
 use libc::{msghdr, size_t, ssize_t, sockaddr, socklen_t, AF_INET, AF_INET6};
 use sentinel_core::{
     allowlist::{MatchType, RuleKind, RuleTier},
-    policy::{evaluate_policy, is_cloud_metadata_ip, is_loopback_ip},
+    policy::{evaluate_policy, is_cloud_metadata_ip, is_loopback_ip, SourceKind},
     AllowlistEntry, Verdict,
 };
 use sentinel_ipc::{AuditTokenWire, SOCKADDR_WIRE_LEN};
@@ -56,9 +56,8 @@ fn evaluate_in_hook(
     ip: Option<&[u8]>,
     resolved_via_getaddrinfo: bool,
     entries: &[AllowlistEntry],
-) -> Verdict {
-    let (verdict, _src) = evaluate_policy(host, ip, resolved_via_getaddrinfo, entries);
-    verdict
+) -> (Verdict, SourceKind) {
+    evaluate_policy(host, ip, resolved_via_getaddrinfo, entries)
 }
 
 // BL-04 RAII reentrancy guard. See `reentrancy.rs` for the canonical
@@ -172,10 +171,11 @@ pub unsafe extern "C" fn sentinel_connect(
         Some(g) => g,
         None => return unsafe { raw_connect(s, addr, addrlen) },
     };
-    let verdict = decide_for_sockaddr(addr, addrlen);
+    let (verdict, source) = decide_for_sockaddr(addr, addrlen);
     if matches!(verdict, Verdict::Deny) {
-        LOG_RING.append(b"[sentinel-hook] DENY connect");
-        unsafe { notify_deny_for_sockaddr(addr, addrlen, "connect") };
+        let msg = format!("[sentinel-hook] DENY connect ({})", source.as_label());
+        LOG_RING.append(msg.as_bytes());
+        unsafe { notify_deny_for_sockaddr(addr, addrlen, "connect", source) };
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         return -1;
     }
@@ -227,18 +227,19 @@ unsafe extern "C" fn sentinel_connectx(
         },
     };
 
-    let verdict = if endpoints.is_null() {
-        Verdict::Deny
+    let (verdict, source) = if endpoints.is_null() {
+        (Verdict::Deny, SourceKind::HardRule("null-endpoints"))
     } else {
         let ep = unsafe { &*(endpoints as *const SaEndpoints) };
         decide_for_sockaddr(ep.sae_dstaddr, ep.sae_dstaddrlen)
     };
 
     if matches!(verdict, Verdict::Deny) {
-        LOG_RING.append(b"[sentinel-hook] DENY connectx");
+        let msg = format!("[sentinel-hook] DENY connectx ({})", source.as_label());
+        LOG_RING.append(msg.as_bytes());
         if !endpoints.is_null() {
             let ep = unsafe { &*(endpoints as *const SaEndpoints) };
-            unsafe { notify_deny_for_sockaddr(ep.sae_dstaddr, ep.sae_dstaddrlen, "connectx") };
+            unsafe { notify_deny_for_sockaddr(ep.sae_dstaddr, ep.sae_dstaddrlen, "connectx", source) };
         }
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         return -1;
@@ -490,14 +491,15 @@ unsafe extern "C" fn sentinel_sendto(
     //   address was already permitted at connect() time). Denying connected
     //   sends would break all established TCP data flows.
     // - to set → run the allowlist check.
-    let verdict = if to.is_null() || tolen == 0 {
-        Verdict::Allow
+    let (verdict, source) = if to.is_null() || tolen == 0 {
+        (Verdict::Allow, SourceKind::HardRule("connected-send"))
     } else {
         decide_for_sockaddr(to, tolen)
     };
     if matches!(verdict, Verdict::Deny) {
-        LOG_RING.append(b"[sentinel-hook] DENY sendto");
-        unsafe { notify_deny_for_sockaddr(to, tolen, "sendto") };
+        let msg = format!("[sentinel-hook] DENY sendto ({})", source.as_label());
+        LOG_RING.append(msg.as_bytes());
+        unsafe { notify_deny_for_sockaddr(to, tolen, "sendto", source) };
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
         return -1;
     }
@@ -525,19 +527,20 @@ unsafe extern "C" fn sentinel_sendmsg(
     //   which was already permitted at connect() time). Blocking connected
     //   sends would break all established TCP/Unix socket data flows.
     // - msg_name set → run the same allowlist check as connect().
-    let verdict = if msg.is_null() {
-        Verdict::Deny
+    let (verdict, source) = if msg.is_null() {
+        (Verdict::Deny, SourceKind::HardRule("null-msg"))
     } else {
         let m = unsafe { &*msg };
         if m.msg_name.is_null() || m.msg_namelen == 0 {
-            Verdict::Allow
+            (Verdict::Allow, SourceKind::HardRule("connected-send"))
         } else {
             decide_for_sockaddr(m.msg_name as *const sockaddr, m.msg_namelen)
         }
     };
     if matches!(verdict, Verdict::Deny) {
         unsafe { *libc::__error() = libc::EHOSTUNREACH; }
-        LOG_RING.append(b"[sentinel-hook] DENY sendmsg");
+        let log_msg = format!("[sentinel-hook] DENY sendmsg ({})", source.as_label());
+        LOG_RING.append(log_msg.as_bytes());
         if !msg.is_null() {
             let m = unsafe { &*msg };
             if !m.msg_name.is_null() && m.msg_namelen > 0 {
@@ -546,6 +549,7 @@ unsafe extern "C" fn sentinel_sendmsg(
                         m.msg_name as *const sockaddr,
                         m.msg_namelen,
                         "sendmsg",
+                        source,
                     );
                 }
             }
@@ -563,7 +567,7 @@ unsafe extern "C" fn sentinel_sendmsg(
 ///
 /// # Safety
 /// Same as `decide_for_sockaddr` — `addr` must be null or point to a valid sockaddr.
-pub unsafe fn _decide_for_sockaddr_pub(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
+pub unsafe fn _decide_for_sockaddr_pub(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, SourceKind) {
     decide_for_sockaddr(addr, addrlen)
 }
 
@@ -577,6 +581,7 @@ unsafe fn notify_deny_for_sockaddr(
     addr: *const sockaddr,
     addrlen: socklen_t,
     source_surface: &str,
+    source_kind: SourceKind,
 ) {
     if daemon_socket_path().is_none() {
         return;
@@ -600,10 +605,12 @@ unsafe fn notify_deny_for_sockaddr(
         0
     };
 
+    let sk_label = source_kind.as_label();
+
     let (sa_buf, sa_n) = match sockaddr_bytes(addr, addrlen) {
         Some(v) => v,
         None => {
-            send_deny_notify(audit_token, None, port, ip_opt, source_surface);
+            send_deny_notify(audit_token, None, port, ip_opt, source_surface, sk_label);
             return;
         }
     };
@@ -619,10 +626,10 @@ unsafe fn notify_deny_for_sockaddr(
         .as_ref()
         .and_then(|(buf, len)| core::str::from_utf8(&buf[..*len]).ok());
 
-    send_deny_notify(audit_token, host_str, port, ip_opt, source_surface);
+    send_deny_notify(audit_token, host_str, port, ip_opt, source_surface, sk_label);
 }
 
-fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
+fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, SourceKind) {
     // v0.1 policy: Unix domain sockets (AF_UNIX) are always allowed.
     // They are local IPC — not network egress. Denying them breaks Node's
     // internal libuv event loop (it uses a Unix socketpair for signaling),
@@ -632,17 +639,17 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> Verdict {
     {
         let family = unsafe { (*addr).sa_family };
         if family as i32 == libc::AF_UNIX {
-            return Verdict::Allow;
+            return (Verdict::Allow, SourceKind::HardRule("unix-socket"));
         }
     }
 
     let entries = match entries_or_deny() {
         Some(e) => e,
-        None => return Verdict::Deny,
+        None => return (Verdict::Deny, SourceKind::HardRule("fail-closed")),
     };
     let (sa_buf, sa_n) = match sockaddr_bytes(addr, addrlen) {
         Some(v) => v,
-        None => return Verdict::Deny,
+        None => return (Verdict::Deny, SourceKind::HardRule("bad-sockaddr")),
     };
     // Look up the hostname in the per-process getaddrinfo cache. A cache hit
     // means the sockaddr was previously resolved via getaddrinfo for THIS

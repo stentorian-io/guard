@@ -200,11 +200,3 @@ fn audit_token_for_self_pid_succeeds() {
     assert_eq!(token.val[5] as libc::pid_t, pid, "token.val[5] should equal pid");
 }
 
-#[test]
-fn locate_dylib_with_env_override() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    unsafe { std::env::set_var("SENTINEL_HOOK_DYLIB", tmp.path()); }
-    let p = sentinel_cli::locate::find_dylib().expect("find_dylib");
-    assert_eq!(p, tmp.path().canonicalize().unwrap());
-    unsafe { std::env::remove_var("SENTINEL_HOOK_DYLIB"); }
-}

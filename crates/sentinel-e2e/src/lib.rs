@@ -241,20 +241,11 @@ pub fn cargo_target_dir() -> PathBuf {
 /// spike A2, but Homebrew node (ad-hoc signed) does not. This function
 /// prefers Homebrew node to avoid that pitfall.
 pub fn resolve_node() -> Result<PathBuf, String> {
-    if let Some(p) = std::env::var_os("SENTINEL_E2E_NODE") {
-        let p = PathBuf::from(p);
-        if !p.exists() {
-            return Err(format!("SENTINEL_E2E_NODE={} does not exist", p.display()));
-        }
-        return Ok(p);
-    }
     // Prefer Homebrew node (non-hardened, ad-hoc signed) over nvm node.
-    // Homebrew node is at /opt/homebrew/bin/node on Apple Silicon.
     let homebrew_node = PathBuf::from("/opt/homebrew/bin/node");
     if homebrew_node.is_file() {
         return Ok(homebrew_node);
     }
-    // Fall back to `which node` via $PATH lookup.
     for dir in std::env::var_os("PATH")
         .unwrap_or_default()
         .to_string_lossy()
@@ -267,7 +258,7 @@ pub fn resolve_node() -> Result<PathBuf, String> {
             return Ok(cand);
         }
     }
-    Err("node not found on PATH; set SENTINEL_E2E_NODE or install Homebrew node".into())
+    Err("node not found on PATH; install Homebrew node or add node to PATH".into())
 }
 
 /// Path to the test-built libsentinel_hook.dylib.

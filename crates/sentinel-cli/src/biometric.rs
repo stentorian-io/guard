@@ -4,7 +4,8 @@
 //! Objective-C block FFI complexity while using the native system auth UI
 //! (Touch ID with password fallback on all Macs).
 //!
-//! The gate can be disabled via SENTINEL_SKIP_BIOMETRIC=1 for CI/testing.
+//! Fail-closed: if Swift is unavailable or the process fails to launch,
+//! authentication is denied.
 
 use std::process::Command;
 
@@ -25,19 +26,12 @@ exit(ok ? 0 : 1)
 /// Prompt the user for Touch ID or password authentication.
 /// Returns `true` if authentication succeeded, `false` otherwise.
 ///
-/// Skipped (returns true) when:
-/// - SENTINEL_SKIP_BIOMETRIC=1 is set
-/// - `/usr/bin/swift` is not available
-/// - The Swift process fails to launch
+/// Fail-closed: returns `false` if `/usr/bin/swift` is missing or fails to launch.
 pub fn authenticate(reason: &str) -> bool {
-    if std::env::var("SENTINEL_SKIP_BIOMETRIC").as_deref() == Ok("1") {
-        return true;
-    }
-
     let swift = "/usr/bin/swift";
     if !std::path::Path::new(swift).exists() {
-        tracing::warn!("swift not found; skipping biometric gate");
-        return true;
+        tracing::error!("swift not found — cannot perform biometric auth; denying");
+        return false;
     }
 
     match Command::new(swift)
@@ -51,8 +45,8 @@ pub fn authenticate(reason: &str) -> bool {
     {
         Ok(status) => status.success(),
         Err(e) => {
-            tracing::warn!(error = %e, "biometric auth process failed to launch");
-            true
+            tracing::error!(error = %e, "biometric auth process failed to launch; denying");
+            false
         }
     }
 }

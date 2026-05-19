@@ -12,7 +12,6 @@ use core::ffi::c_char;
 
 const REQUIRED_KEYS: &[&[u8]] = &[
     b"DYLD_INSERT_LIBRARIES=",
-    b"SENTINEL_DAEMON_SOCKET=",
     b"SENTINEL_SNAPSHOT_MANIFEST=",
 ];
 
@@ -28,7 +27,7 @@ pub unsafe fn should_emit_env_not_propagated_gap(envp: *const *mut c_char) -> bo
     if envp.is_null() {
         return true;
     }
-    let mut found = [false; 3];
+    let mut found = [false; 2];
     let mut i: isize = 0;
     // Cap the walk at 4096 entries to bound worst-case (defensive against a
     // malformed envp without a null terminator).

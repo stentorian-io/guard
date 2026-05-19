@@ -31,7 +31,7 @@ struct Cli {
 enum Cmd {
     /// Run the daemon: publish snapshot, bind socket, accept RegisterRoot.
     Serve {
-        #[arg(long)]
+        #[arg(long, hide = true)]
         state_dir: Option<PathBuf>,
     },
 }
@@ -85,15 +85,10 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     );
 
     // v0.3: log directory + writer.
-    let log_dir = match std::env::var_os("SENTINEL_LOG_DIR") {
-        Some(p) => PathBuf::from(p),
-        None => {
-            let home = std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/tmp"));
-            home.join("Library").join("Logs").join("Sentinel")
-        }
-    };
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| std::io::Error::other("HOME not set — cannot determine log directory"))?;
+    let log_dir = home.join("Library").join("Logs").join("Sentinel");
     std::fs::create_dir_all(&log_dir)?;
     #[cfg(unix)]
     {

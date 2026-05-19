@@ -3,16 +3,15 @@
 //! D-31: synchronous — the calling hook blocks until the daemon Acks.
 //! D-33: fail-closed-on-timeout for fork events (caller kills child + EAGAIN).
 //!
-//! Socket path: read once at ctor time from SENTINEL_DAEMON_SOCKET env var via
-//! libc::getenv (matches v0.1 snapshot.rs pattern — keeps ctor allocation
-//! minimal and avoids std::env::var which allocates per call).
+//! Socket path: derived from well_known_state_dir() at ctor time — the socket
+//! is always at `{state_dir}/sentineld.sock`.
 //!
 //! Wire shape: each message is a `tag byte (0x03..=0x05) + length-prefixed CBOR
 //! body`. The daemon's first-byte-peek dispatcher routes the tag
 //! to the matching handler. The handler responds with the same tag echoed
 //! followed by a length-prefixed CBOR ack body.
 
-use core::ffi::{c_char, CStr};
+use core::ffi::c_char;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     AuditTokenWire, DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, ExecAck, ExecBlocked,
@@ -41,32 +40,38 @@ static IPC_HMAC_KEY: OnceLock<Option<[u8; 32]>> = OnceLock::new();
 
 /// Per-test override for the daemon socket path.
 ///
-/// OnceLock is correct for production (set once at ctor time from SENTINEL_DAEMON_SOCKET,
-/// never changes). Integration tests need a per-test override so each test can point at
-/// its own stub Unix socket without racing on the OnceLock.
+/// OnceLock is correct for production (set once at ctor time from state dir,
+/// never changes). Integration tests need a per-test override so each test can
+/// point at its own stub Unix socket without racing on the OnceLock.
 ///
-/// The `_` prefix signals test-only usage. These helpers are compiled unconditionally
-/// (not behind #[cfg(test)]) because integration tests in `tests/` are separate crates
-/// that cannot see #[cfg(test)] items in the library. In production builds, these
-/// functions compile to a simple Mutex<Option> write/clear — no observable behavior
-/// difference as long as nothing calls them outside of tests.
-static TEST_SOCKET_OVERRIDE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+/// Tri-state: `None` = no override (fall through to OnceLock),
+/// `Some(None)` = explicitly no socket (NotConfigured),
+/// `Some(Some(path))` = use this path.
+static TEST_SOCKET_OVERRIDE: std::sync::Mutex<Option<Option<PathBuf>>> =
+    std::sync::Mutex::new(None);
 
 /// Override the daemon socket path for the current test. Test-only by convention.
 pub fn _set_daemon_socket_for_test(path: PathBuf) {
     let mut g = TEST_SOCKET_OVERRIDE.lock().expect("test socket override mutex");
-    *g = Some(path);
+    *g = Some(Some(path));
 }
 
-/// Clear the test socket override. Call after a test to avoid leaking state.
+/// Clear the test socket override so daemon_socket_path() returns None
+/// (NotConfigured). Call this to simulate "no daemon" in tests.
 pub fn _clear_daemon_socket_for_test() {
+    let mut g = TEST_SOCKET_OVERRIDE.lock().expect("test socket override mutex");
+    *g = Some(None);
+}
+
+/// Remove the test override entirely, falling through to the OnceLock.
+pub fn _reset_daemon_socket_for_test() {
     let mut g = TEST_SOCKET_OVERRIDE.lock().expect("test socket override mutex");
     *g = None;
 }
 
 #[derive(Debug)]
 pub enum IpcClientError {
-    /// SENTINEL_DAEMON_SOCKET env var unset (e.g. unit tests, or dylib loaded
+    /// Daemon socket path not configured (e.g. unit tests, or dylib loaded
     /// outside `sentinel wrap`). Caller treats this as "no IPC available".
     NotConfigured,
     /// Connect / read / write timed out within the budget.
@@ -88,7 +93,7 @@ impl From<std::io::Error> for IpcClientError {
 impl std::fmt::Display for IpcClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IpcClientError::NotConfigured => write!(f, "ipc-client: SENTINEL_DAEMON_SOCKET unset"),
+            IpcClientError::NotConfigured => write!(f, "ipc-client: daemon socket path not configured"),
             IpcClientError::Timeout => write!(f, "ipc-client: timeout"),
             IpcClientError::Io(e) => write!(f, "ipc-client: io: {e}"),
             IpcClientError::DaemonRejected(m) => write!(f, "ipc-client: daemon-rejected: {m}"),
@@ -97,22 +102,12 @@ impl std::fmt::Display for IpcClientError {
     }
 }
 
-/// Read SENTINEL_DAEMON_SOCKET via libc::getenv (allocation-free until found).
+/// Derive the daemon socket path from well_known_state_dir().
 /// Idempotent — subsequent calls are no-ops. Called once from the dylib ctor.
-pub fn cache_daemon_socket_from_env() {
+pub fn cache_daemon_socket_path() {
     DAEMON_SOCKET_PATH.get_or_init(|| {
-        // SAFETY: ctor runs pre-main, single-threaded; getenv pointer stable.
-        unsafe {
-            let p = libc::getenv(c"SENTINEL_DAEMON_SOCKET".as_ptr());
-            if p.is_null() {
-                return None;
-            }
-            let s = CStr::from_ptr(p).to_string_lossy();
-            if s.is_empty() {
-                return None;
-            }
-            Some(PathBuf::from(s.as_ref()))
-        }
+        let state_dir = crate::snapshot::well_known_state_dir();
+        Some(state_dir.join("sentineld.sock"))
     });
 }
 
@@ -146,13 +141,17 @@ fn ipc_hmac_key() -> Option<[u8; 32]> {
 }
 
 /// Returns the daemon socket path. The test override (set via `_set_daemon_socket_for_test`)
-/// is consulted first; in production, the OnceLock value (set once at ctor time from
-/// SENTINEL_DAEMON_SOCKET env var) is used.
+/// is consulted first; in production, the OnceLock value (derived from state dir at ctor
+/// time) is used.
 pub fn daemon_socket_path() -> Option<PathBuf> {
-    // Test override takes precedence — allows integration tests to inject a stub socket.
     let g = TEST_SOCKET_OVERRIDE.lock().expect("test socket override mutex");
-    if let Some(ref p) = *g {
-        return Some(p.clone());
+    match &*g {
+        Some(override_val) => {
+            let result = override_val.clone();
+            drop(g);
+            return result;
+        }
+        None => {}
     }
     drop(g);
     DAEMON_SOCKET_PATH.get().and_then(|o| o.clone())

@@ -108,7 +108,7 @@ unsafe fn sentinel_hook_init() {
     //      env unset — IPC calls return NotConfigured and the dylib operates with
     //      the same fail-mode as v0.1 (no fork/exec tracking, but the verdict
     //      path still works against the snapshot).
-    crate::ipc_client::cache_daemon_socket_from_env();
+    crate::ipc_client::cache_daemon_socket_path();
     crate::ipc_client::cache_ipc_hmac_key();
 
     // 2. Load snapshot (manifest + digest verify + mmap).

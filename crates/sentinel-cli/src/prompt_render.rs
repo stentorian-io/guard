@@ -99,8 +99,8 @@ pub fn render_and_choose(req: &PromptRequest) -> Result<PromptResponse, CliError
             "2" => PromptVerdict::AllowAlwaysMachine,
             "3" => PromptVerdict::Deny,
             "?" => {
-                println!("  [1] allow this connection once (no rule written)");
-                println!("  [2] allow always — write to SQLite rules");
+                println!("  [1] allow this connection once (requires Touch ID / password)");
+                println!("  [2] allow always — write to SQLite rules (requires Touch ID / password)");
                 println!("  [3] deny — connection blocked, logged");
                 continue;
             }
@@ -108,6 +108,20 @@ pub fn render_and_choose(req: &PromptRequest) -> Result<PromptResponse, CliError
                 println!("  invalid choice; pick 1/2/3 or ?");
                 continue;
             }
+        };
+        let verdict = if matches!(verdict, PromptVerdict::AllowOnce | PromptVerdict::AllowAlwaysMachine) {
+            let reason = format!(
+                "Sentinel: approve outbound to {}:{}",
+                req.dest_host, req.dest_port
+            );
+            if crate::biometric::authenticate(&reason) {
+                verdict
+            } else {
+                println!("  authentication failed — treating as deny");
+                PromptVerdict::Deny
+            }
+        } else {
+            verdict
         };
         let rule_pattern = match verdict {
             PromptVerdict::AllowAlwaysMachine => {

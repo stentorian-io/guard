@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 use portable_pty::PtySize;
 
 const DENY_HOST: &str = "discord.com";
-const DENY_PORT: &str = "443";
 
 #[cfg(target_os = "macos")]
 #[test]

@@ -5,11 +5,10 @@
 //! SIGINT handler is registered here.
 
 use std::ffi::OsString;
-use std::io::{IsTerminal, Write as _};
+use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use crate::CliError;
 
@@ -23,33 +22,9 @@ pub fn run(
     let cwd = std::env::current_dir().map_err(|e| CliError::Other(format!("cwd: {e}")))?;
     let is_tty = std::io::stdin().is_terminal();
 
-    // v0.4 — spawn a CR-overwrite progress thread on stderr while the daemon
-    // does the synchronous feed fetch. The progress thread is joined
-    // immediately after PrepareSnapshot returns; the line is cleared with
-    // `\r\x1b[2K` so stderr returns to a clean state for any feed_warnings
-    // or downstream output.
-    let progress_stop = Arc::new(AtomicBool::new(false));
-    let progress_handle = spawn_feed_progress_thread(Arc::clone(&progress_stop));
-
-    let outcome = crate::ipc_client::prepare_snapshot_v3(sock, &cwd, is_tty, learn_mode);
-
-    progress_stop.store(true, Ordering::SeqCst);
-    let _ = progress_handle.join();
-
-    let outcome = outcome?;
+    let outcome = crate::ipc_client::prepare_snapshot_v3(sock, &cwd, is_tty, learn_mode)?;
     let manifest_path = outcome.manifest_path.clone();
     let run_uuid = outcome.run_uuid.clone();
-
-    // v0.4 — surface non-fatal feed_warnings inline. Hard fetch failures are
-    // already converted to CliError::Other by prepare_snapshot_v3 (strict-fail
-    // returns SnapshotReply::Err, which becomes the `?` above). Warnings here
-    // are the partial-parse path.
-    for w in &outcome.feed_warnings {
-        eprintln!(
-            "\u{26A0} feed warning ({}): {} \u{2014} {}",
-            w.feed, w.kind, w.message
-        );
-    }
 
     // Open PromptChannel BEFORE spawning the wrapped child. The shared mutex is
     // shared between the render-loop and the SIGINT handler.
@@ -222,33 +197,6 @@ fn truncate_utf8(value: String, max: usize) -> String {
     value[..end].to_string()
 }
 
-/// v0.4 — CR-overwrite stderr progress while the daemon is in the middle of
-/// `fetch_feeds_blocking`. The thread frame-cycles on a 250ms tick. On stop,
-/// prints `\r\x1b[2K` to clear the line so subsequent stderr output
-/// (feed_warnings, child output) starts from column 0.
-fn spawn_feed_progress_thread(stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .name("sentinel-feed-progress".into())
-        .spawn(move || {
-            let frames = ["osv... ghsa...", "osv ... ghsa..", "osv .. ghsa.."];
-            let mut i = 0usize;
-            while !stop.load(Ordering::Relaxed) {
-                let _ = write!(
-                    std::io::stderr(),
-                    "\r\u{26A1} Refreshing threat feeds ({})  ",
-                    frames[i % frames.len()]
-                );
-                let _ = std::io::stderr().flush();
-                std::thread::sleep(Duration::from_millis(250));
-                i += 1;
-            }
-            // Clear the progress line so downstream stderr output starts clean.
-            let _ = write!(std::io::stderr(), "\r\x1b[2K");
-            let _ = std::io::stderr().flush();
-        })
-        .expect("spawn feed progress thread")
-}
-
 fn render_loop(
     mut reader: crate::prompt_channel::PromptReader,
     shared_channel: crate::sigint_handler::SharedChannel,
@@ -283,21 +231,3 @@ fn render_loop(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn feed_progress_thread_starts_and_stops_cleanly() {
-        // Smoke test: spawning the thread, signalling stop, joining all
-        // happen without panic. We can't easily redirect this thread's
-        // stderr output (it writes via std::io::stderr() directly) so the
-        // assertion is process-survival + clean join.
-        let stop = Arc::new(AtomicBool::new(false));
-        let h = spawn_feed_progress_thread(Arc::clone(&stop));
-        // Let one tick fire so the worker actually executes the loop body.
-        std::thread::sleep(Duration::from_millis(50));
-        stop.store(true, Ordering::Relaxed);
-        h.join().expect("progress thread joins cleanly");
-    }
-}

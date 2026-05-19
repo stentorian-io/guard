@@ -4,7 +4,6 @@ pub mod allowlist;
 pub mod error;
 pub mod identity;
 pub mod lockfile;
-pub mod osv_match;
 pub mod policy;
 pub mod snapshot;
 

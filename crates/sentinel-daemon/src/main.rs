@@ -55,15 +55,6 @@ fn main() -> std::io::Result<()> {
 }
 
 fn serve(state_dir: PathBuf) -> std::io::Result<()> {
-    // Prevent gix / git from ever prompting for credentials interactively.
-    // Feed repos are public; a credential prompt on the user's terminal would
-    // be confusing (they ran `sentinel wrap`, not `git clone`).
-    // SAFETY: called before any threads are spawned.
-    unsafe {
-        std::env::set_var("GIT_TERMINAL_PROMPT", "0");
-        std::env::set_var("GIT_ASKPASS", "/usr/bin/false");
-    }
-
     ensure_state_dir(&state_dir)?;
     ensure_runs_dir(&state_dir)?;
 
@@ -128,18 +119,6 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     let recent_gaps = Arc::new(RecentGapsRing::new());
     let baseline_staging = Arc::new(BaselineStaging::new());
 
-    // v0.4: feed_store opens against the same sentinel.db that
-    // RuleStore::open migrated (migration 003 added feed_iocs/feed_metadata
-    // and applied WAL via runtime pragma). feed_fetch_mutex serializes
-    // PrepareSnapshot fetch calls; last_fetch_result holds the most recent
-    // outcome for shared-result optimization across concurrent runs.
-    let feed_store = Arc::new(
-        sentinel_daemon::feed::store::FeedStore::open(&db_path(&state_dir))
-            .map_err(|e| std::io::Error::other(format!("open feed_store: {e}")))?,
-    );
-    let feed_fetch_mutex = Arc::new(std::sync::Mutex::new(()));
-    let last_fetch_result = Arc::new(std::sync::RwLock::new(None));
-
     let process_tree = Arc::new(ProcessTree::new());
     let gap_detector = Arc::new(GapDetector::new());
     let state = Arc::new(DaemonState {
@@ -155,9 +134,6 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         baseline_staging,
         last_snapshot_publish_failed: std::sync::atomic::AtomicBool::new(false),
         deferred_resolve: std::sync::Arc::new(sentinel_daemon::ipc_server::DeferredResolveTable::new()),
-        feed_store,
-        feed_fetch_mutex,
-        last_fetch_result,
         startup_instant: std::time::Instant::now(),
     });
 
@@ -177,16 +153,6 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         state.log_writer.clone(),
     );
     info!("persistence watcher spawned");
-
-    // M006-S01: background feed refresh timer. Sleeps for the configured
-    // interval (default 6h), then calls fetch_feeds_blocking. Errors are
-    // logged, never crash the daemon.
-    let _feed_refresh_handle = sentinel_daemon::feed_refresh::spawn_feed_refresh_thread(
-        state_dir.clone(),
-        state.feed_store.clone(),
-        state.feed_fetch_mutex.clone(),
-        state.last_fetch_result.clone(),
-    );
 
     // TODO: wire gap_detector -> log_writer + recent_gaps when the gap fires.
     //   - hardened-runtime gap (csops): extends gap_detector closure

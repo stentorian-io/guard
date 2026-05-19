@@ -87,30 +87,3 @@ pub fn ensure_runs_dir(state_dir: &Path) -> std::io::Result<()> {
 }
 
 // --- Per-feed cache directory helpers (v0.4) ----------------------------------
-//
-// Layout: $state_dir/feeds/{osv,ghsa}/ holds the shallow-cloned working trees
-// for the two production feeds. The directories are created with mode 0700
-// (defense-in-depth — a feed clone is just JSON files but the parent state_dir
-// is already 0700 and consistency simplifies audits).
-
-pub fn feeds_dir(state_dir: &Path) -> PathBuf {
-    state_dir.join("feeds")
-}
-
-pub fn ensure_feeds_dir(state_dir: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
-    let dir = feeds_dir(state_dir);
-    if dir.exists() {
-        return Ok(());
-    }
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)
-}
-
-/// Per-feed cache directory: `$state_dir/feeds/<feed-lowercased>/`.
-/// Used by `feed::fetcher` as the gix clone destination.
-pub fn feed_subdir(state_dir: &Path, feed: &str) -> PathBuf {
-    feeds_dir(state_dir).join(feed.to_lowercase())
-}

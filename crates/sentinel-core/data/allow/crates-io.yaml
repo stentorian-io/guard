@@ -1,0 +1,10 @@
+# Rust / Cargo (ALLOW-03)
+- match: exact
+  pattern: crates.io
+  reason: "crates.io metadata redirect (ALLOW-03)"
+- match: exact
+  pattern: static.crates.io
+  reason: "Crate tarball downloads (ALLOW-03)"
+- match: exact
+  pattern: index.crates.io
+  reason: "Cargo sparse registry index (ALLOW-03)"

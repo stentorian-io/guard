@@ -1,0 +1,1058 @@
+# Auto-generated from ossf/malicious-packages OSV records.
+# Managed by scripts/update-feed-rules.sh — do not edit manually.
+- match: exact
+  pattern: 0.feedback
+  reason: "MAL-2025-3008 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 01d73592-4d64-43f7-b664-ecd679686756-00-30a5f50srzeko.janeway.replit.dev
+  reason: "MAL-2024-11712 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 0wn.sh
+  reason: "MAL-2025-960 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 100.31.118.36
+  reason: "MAL-2026-3135 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 101.47.72.91
+  reason: "MAL-2026-2017 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 103.252.137.168
+  reason: "MAL-2025-191818 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 104.194.151.19
+  reason: "MAL-2025-1965 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 108.143.253.126
+  reason: "MAL-2026-1092 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 119.8.26.163
+  reason: "MAL-2023-8356 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 122.51.221.63
+  reason: "MAL-2024-11611 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 124.221.175.251
+  reason: "MAL-2025-6483 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 13.125.103.41
+  reason: "MAL-2025-191748 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 135.181.211.196
+  reason: "MAL-2026-3220 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 136.243.103.253
+  reason: "MAL-2025-47762 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 142.11.206.73
+  reason: "MAL-2026-2306 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 144.126.142.148
+  reason: "MAL-2026-3619 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 144.172.116.56
+  reason: "MAL-2025-191843 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 144.31.203.113
+  reason: "MAL-2026-2697 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 147.45.124.42
+  reason: "MAL-2025-192940 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 150.158.37.61
+  reason: "MAL-2026-603 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 161.97.81.147
+  reason: "MAL-2026-2820 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 178.128.27.205
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 178.16.53.35
+  reason: "MAL-2025-191681 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 178.20.47.231
+  reason: "MAL-2026-823 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 178.208.187.105
+  reason: "MAL-2025-191715 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 18.144.73.108
+  reason: "MAL-2025-191696 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 185.118.79.22
+  reason: "MAL-2025-191814 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 185.118.79.24
+  reason: "MAL-2025-191899 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 185.196.8.88
+  reason: "MAL-2025-3008 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 185.208.159.245
+  reason: "MAL-2025-191889 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 185.208.172.174
+  reason: "MAL-2025-192679 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 185.246.113.53
+  reason: "MAL-2026-3244 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 185.254.198.245
+  reason: "MAL-2025-5124 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 185.62.56.25
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 185.62.57.60
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 188.168.22.21
+  reason: "MAL-2026-984 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 192.3.209.43
+  reason: "MAL-2025-935 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 194.163.191.205
+  reason: "MAL-2024-10116 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 194.26.192.145
+  reason: "MAL-2025-6594 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 195.177.94.161
+  reason: "MAL-2026-910 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 196.251.81.229
+  reason: "MAL-2025-5113 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 196.251.86.48
+  reason: "MAL-2025-41730 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 198.199.83.132
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 199.247.10.166
+  reason: "MAL-2025-191160 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 1r.vc
+  reason: "MAL-2026-2109 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 1wy3rk316x8qqy4fyxtvcs4kkbq2es2h.oastify.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 200.58.107.25
+  reason: "MAL-2025-47453 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 204.10.194.247
+  reason: "MAL-2026-2124 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 212.80.7.213
+  reason: "MAL-2025-191798 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 213.136.64.157
+  reason: "MAL-2026-3356 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 217.69.2.135
+  reason: "MAL-2026-2448 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 217.69.3.218
+  reason: "MAL-2025-191160 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 23.227.203.99
+  reason: "MAL-2026-99 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 288utkkrohmp0nr8znflcp88nztrhg.oastify.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 35.170.187.220
+  reason: "MAL-2025-1984 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 35.170.72.247
+  reason: "MAL-2026-3242 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 35.219.55.10
+  reason: "MAL-2025-191785 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 38.181.219.70
+  reason: "MAL-2025-3019 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 38.54.57.42
+  reason: "MAL-2024-12287 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 3gkkr6u2z1a9rinocp0ue4tw1n7ev4jt.oastify.com
+  reason: "MAL-2024-9409 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 3zoz.duckdns.org
+  reason: "MAL-2026-649 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 4.242.58.206
+  reason: "MAL-2026-1288 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 444ee3d0c982.ngrok-free.app
+  reason: "MAL-2026-653 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 45.115.38.27
+  reason: "MAL-2025-191648 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 45.142.115.225
+  reason: "MAL-2025-948 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 45.150.34.209
+  reason: "MAL-2026-898 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 46.225.21.180
+  reason: "MAL-2026-3389 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 4or5o5yn5lqzenk4.b.requestbin.net
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 5.9.104.19
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 51.178.25.148
+  reason: "MAL-2023-8572 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 51.250.2.204
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 52.148.155.85
+  reason: "MAL-2026-1340 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 52.16.41.151
+  reason: "MAL-2026-2403 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 52.77.142.175
+  reason: "MAL-2026-921 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 54.234.216.79
+  reason: "MAL-2026-3347 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 54.242.228.151
+  reason: "MAL-2026-870 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 61.28.229.27
+  reason: "MAL-2024-11582 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 64.188.79.157
+  reason: "MAL-2025-191783 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 64.49.11.161
+  reason: "MAL-2026-3146 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 65.21.108.160
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 65.21.205.84
+  reason: "MAL-2026-2299 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 66.45.225.94
+  reason: "MAL-2026-2244 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 66c0dc0bba6f27ca9a57c4bf.mockapi.io
+  reason: "MAL-2025-6606 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 67b9f37c51192bd378dee810.mockapi.io
+  reason: "MAL-2025-6606 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 68076f26e81df7060eba3e58.mockapi.io
+  reason: "MAL-2025-6606 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 6wxd3v84nevku06dcgbqcxrmt.canarytokens.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 77.105.161.164
+  reason: "MAL-2025-191919 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 77.246.103.245
+  reason: "MAL-2026-855 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 77.91.65.24
+  reason: "MAL-2026-1140 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 77.91.76.45
+  reason: "MAL-2025-4238 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 8.217.75.147
+  reason: "MAL-2026-3661 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 82.98.144.242
+  reason: "MAL-2026-4166 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 83.147.255.125
+  reason: "MAL-2026-1080 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 84.21.173.202
+  reason: "MAL-2026-449 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 84.54.44.100
+  reason: "MAL-2024-10163 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 85.215.240.118
+  reason: "MAL-2026-843 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 87.120.107.132
+  reason: "MAL-2025-192579 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 89.110.93.132
+  reason: "MAL-2024-10163 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 89.110.96.251
+  reason: "MAL-2024-10163 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 89.23.105.103
+  reason: "MAL-2024-10179 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 89.23.113.83
+  reason: "MAL-2024-11534 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 89.23.98.149
+  reason: "MAL-2025-6613 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 89.39.121.49
+  reason: "MAL-2025-192686 supply-chain IOC (FEED)"
+- match: exact
+  pattern: 8d7sabfsd2.youkyy.com
+  reason: "MAL-2026-762 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 90.156.226.65
+  reason: "MAL-2025-73 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 91.149.191.134
+  reason: "MAL-2026-3203 supply-chain IOC (FEED)"
+- match: ip
+  pattern: 95.216.98.237
+  reason: "MAL-2025-191624 supply-chain IOC (FEED)"
+- match: exact
+  pattern: a1091388.xsph.ru
+  reason: "MAL-2025-191723 supply-chain IOC (FEED)"
+- match: exact
+  pattern: a1124634.xsph.ru
+  reason: "MAL-2025-191723 supply-chain IOC (FEED)"
+- match: exact
+  pattern: acerputas.90shipsnormal.site
+  reason: "MAL-2025-3450 supply-chain IOC (FEED)"
+- match: exact
+  pattern: acysec.site
+  reason: "MAL-2026-3216 supply-chain IOC (FEED)"
+- match: exact
+  pattern: ai-mcp-storage.oss-cn-hangzhou.aliyuncs.com
+  reason: "MAL-2026-2669 supply-chain IOC (FEED)"
+- match: exact
+  pattern: aioutil3.tech
+  reason: "MAL-2026-1289 supply-chain IOC (FEED)"
+- match: exact
+  pattern: airaproxy.com
+  reason: "MAL-2026-619 supply-chain IOC (FEED)"
+- match: exact
+  pattern: aksjdbajkb2jeblad.oss-cn-hongkong.aliyuncs.com
+  reason: "MAL-2025-5094 supply-chain IOC (FEED)"
+- match: exact
+  pattern: aliniami.atwebpages.com
+  reason: "MAL-2024-12280 supply-chain IOC (FEED)"
+- match: exact
+  pattern: aliyun-sdk-requests.xyz
+  reason: "MAL-2025-191721 supply-chain IOC (FEED)"
+- match: exact
+  pattern: ambertransit.com
+  reason: "MAL-2026-28 supply-chain IOC (FEED)"
+- match: exact
+  pattern: apachelicense.vercel.app
+  reason: "MAL-2026-2244 supply-chain IOC (FEED)"
+- match: exact
+  pattern: api-gateway.nodehealth.workers.dev
+  reason: "MAL-2026-3223 supply-chain IOC (FEED)"
+- match: exact
+  pattern: api-tdgbanking.vercel.app
+  reason: "MAL-2025-191732 supply-chain IOC (FEED)"
+- match: exact
+  pattern: api.0dev.store
+  reason: "MAL-2025-191769 supply-chain IOC (FEED)"
+- match: exact
+  pattern: api.aliyun-sdk-requests.xyz
+  reason: "MAL-2025-191686 supply-chain IOC (FEED)"
+- match: exact
+  pattern: api.bensaru.site
+  reason: "MAL-2026-1000 supply-chain IOC (FEED)"
+- match: exact
+  pattern: api.diar.ai
+  reason: "MAL-2025-191932 supply-chain IOC (FEED)"
+- match: exact
+  pattern: api.jumpservercdn.com
+  reason: "MAL-2026-610 supply-chain IOC (FEED)"
+- match: exact
+  pattern: api.masscan.cloud
+  reason: "MAL-2026-3608 supply-chain IOC (FEED)"
+- match: exact
+  pattern: api.pureapk.co
+  reason: "MAL-2026-3431 supply-chain IOC (FEED)"
+- match: exact
+  pattern: api.unstoppableapi.xyz
+  reason: "MAL-2025-191769 supply-chain IOC (FEED)"
+- match: exact
+  pattern: api.zerodev.pro
+  reason: "MAL-2025-191769 supply-chain IOC (FEED)"
+- match: exact
+  pattern: app.any.run
+  reason: "MAL-2026-899 supply-chain IOC (FEED)"
+- match: exact
+  pattern: app.safedep.io
+  reason: "MAL-2026-450 supply-chain IOC (FEED)"
+- match: exact
+  pattern: arpy8-bha-dubious-backend.hf.space
+  reason: "MAL-2025-191695 supply-chain IOC (FEED)"
+- match: exact
+  pattern: aurevian.cloud
+  reason: "MAL-2025-192385 supply-chain IOC (FEED)"
+- match: exact
+  pattern: azure-monitor.org
+  reason: "MAL-2025-47781 supply-chain IOC (FEED)"
+- match: exact
+  pattern: b32.simplest-solutions.pl
+  reason: "MAL-2025-192961 supply-chain IOC (FEED)"
+- match: exact
+  pattern: bachelor-thesis-001.proxy.beeceptor.com
+  reason: "MAL-2026-1018 supply-chain IOC (FEED)"
+- match: exact
+  pattern: bad-packages.kam193.eu
+  reason: "MAL-2025-191534 supply-chain IOC (FEED)"
+- match: exact
+  pattern: bananasquad.ru
+  reason: "MAL-2024-12324 supply-chain IOC (FEED)"
+- match: exact
+  pattern: banlist.heroku-ub.top
+  reason: "MAL-2025-2967 supply-chain IOC (FEED)"
+- match: exact
+  pattern: beacon.kubershell.io
+  reason: "MAL-2025-191731 supply-chain IOC (FEED)"
+- match: exact
+  pattern: bensaru.site
+  reason: "MAL-2026-1000 supply-chain IOC (FEED)"
+- match: exact
+  pattern: bet.slotgambit.com
+  reason: "MAL-2026-2517 supply-chain IOC (FEED)"
+- match: exact
+  pattern: bi2price.com
+  reason: "MAL-2023-782 supply-chain IOC (FEED)"
+- match: exact
+  pattern: bind9-or-callback-server.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: bitensor.xyz
+  reason: "MAL-2026-99 supply-chain IOC (FEED)"
+- match: exact
+  pattern: blackwolf.obs.cn-north-4.myhuaweicloud.com
+  reason: "MAL-2025-3433 supply-chain IOC (FEED)"
+- match: exact
+  pattern: blockatlaspro.com
+  reason: "MAL-2024-11686 supply-chain IOC (FEED)"
+- match: exact
+  pattern: botconfig4.nurmohammadrafi9966.workers.dev
+  reason: "MAL-2026-3133 supply-chain IOC (FEED)"
+- match: exact
+  pattern: bq5m9lnmalh9ktyi9wydockt9kfb32rr.oastify.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: brainwavehub.org
+  reason: "MAL-2026-2949 supply-chain IOC (FEED)"
+- match: exact
+  pattern: byted-dast.com
+  reason: "MAL-2024-10828 supply-chain IOC (FEED)"
+- match: exact
+  pattern: c7kxnys58daceezcxx0jjstn6ec50vok.oastify.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cameradriver.pro
+  reason: "MAL-2026-99 supply-chain IOC (FEED)"
+- match: exact
+  pattern: carterforyou.pythonanywhere.com
+  reason: "MAL-2025-6578 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cczk46g2vtc0000k68dgggx31deyyyyyb.oast.fun
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cfrg38n2vtc0000h72xgg8hebweyyyyyb.oast.fun
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cfswk0m2vtc0000myvg0g8h6jocyyyyyb.oast.fun
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cfytrzv2vtc00002v400geytd6yyyyyyn.oast.fun
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: checkmarx.com
+  reason: "MAL-2026-2231 supply-chain IOC (FEED)"
+- match: exact
+  pattern: checkmarx.zone
+  reason: "MAL-2026-2231 supply-chain IOC (FEED)"
+- match: exact
+  pattern: checktimeserver.org
+  reason: "MAL-2025-191721 supply-chain IOC (FEED)"
+- match: exact
+  pattern: chimerasandbox.workers.dev
+  reason: "MAL-2025-191701 supply-chain IOC (FEED)"
+- match: exact
+  pattern: chrome-data-receiver.up.railway.app
+  reason: "MAL-2025-6586 supply-chain IOC (FEED)"
+- match: exact
+  pattern: chrome-extract.up.railway.app
+  reason: "MAL-2025-6586 supply-chain IOC (FEED)"
+- match: exact
+  pattern: ck0r1hp2vtc00007c0zggjocy3ryyyyyb.oast.fun
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: ckvertikal.online
+  reason: "MAL-2025-191914 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cleverstack-ext30341.vercel.app
+  reason: "MAL-2026-1262 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cloudops.ink
+  reason: "MAL-2026-2519 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cloudyhost.org
+  reason: "MAL-2025-192679 supply-chain IOC (FEED)"
+- match: exact
+  pattern: coingecko-liard.vercel.app
+  reason: "MAL-2026-2905 supply-chain IOC (FEED)"
+- match: exact
+  pattern: coingeckoprice.com
+  reason: "MAL-2023-782 supply-chain IOC (FEED)"
+- match: exact
+  pattern: contabo.e-kounoupidi.gr
+  reason: "MAL-2026-3354 supply-chain IOC (FEED)"
+- match: exact
+  pattern: contorosa.space
+  reason: "MAL-2025-3483 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cookieshop.cloud
+  reason: "MAL-2026-2233 supply-chain IOC (FEED)"
+- match: exact
+  pattern: covenant.thinkgreencorp.net
+  reason: "MAL-2024-12275 supply-chain IOC (FEED)"
+- match: exact
+  pattern: crypto-api.net
+  reason: "MAL-2024-11599 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cryptopriceoffer.com
+  reason: "MAL-2023-782 supply-chain IOC (FEED)"
+- match: exact
+  pattern: ctx-graphics.vercel.app
+  reason: "MAL-2026-3212 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cup1qnm56sdo4bdv.b.requestbin.net
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: cxojh-118-179-99-2.a.free.pinggy.link
+  reason: "MAL-2025-48896 supply-chain IOC (FEED)"
+- match: exact
+  pattern: d1n0.me
+  reason: "MAL-2025-191710 supply-chain IOC (FEED)"
+- match: exact
+  pattern: d3gnpasobcdyif.cloudfront.net
+  reason: "MAL-2025-4526 supply-chain IOC (FEED)"
+- match: exact
+  pattern: dapper-flan-46eb5a.netlify.app
+  reason: "MAL-2025-4273 supply-chain IOC (FEED)"
+- match: exact
+  pattern: dark-resonance-459b.blammervale.workers.dev
+  reason: "MAL-2026-2143 supply-chain IOC (FEED)"
+- match: exact
+  pattern: deadly-polished-snail.ngrok-free.app
+  reason: "MAL-2025-5847 supply-chain IOC (FEED)"
+- match: exact
+  pattern: depcon.buzz
+  reason: "MAL-2025-1982 supply-chain IOC (FEED)"
+- match: exact
+  pattern: dependency-bot.pages.dev
+  reason: "MAL-2025-191850 supply-chain IOC (FEED)"
+- match: exact
+  pattern: dependency-bot.satirical6355.workers.dev
+  reason: "MAL-2025-191850 supply-chain IOC (FEED)"
+- match: exact
+  pattern: dependency-confusion.sec-lab.it
+  reason: "MAL-2025-192961 supply-chain IOC (FEED)"
+- match: exact
+  pattern: diar.ai
+  reason: "MAL-2025-191933 supply-chain IOC (FEED)"
+- match: exact
+  pattern: dnslog.sbs
+  reason: "MAL-2025-191720 supply-chain IOC (FEED)"
+- match: exact
+  pattern: doc-sendapplication.com
+  reason: "MAL-2026-898 supply-chain IOC (FEED)"
+- match: exact
+  pattern: donkeyback.glitch.me
+  reason: "MAL-2024-12269 supply-chain IOC (FEED)"
+- match: exact
+  pattern: dool.cloudyhost.org
+  reason: "MAL-2025-192679 supply-chain IOC (FEED)"
+- match: exact
+  pattern: dothebest.store
+  reason: "MAL-2026-3429 supply-chain IOC (FEED)"
+- match: exact
+  pattern: dry-hall-8967.blammervale.workers.dev
+  reason: "MAL-2026-2143 supply-chain IOC (FEED)"
+- match: exact
+  pattern: dry-star-7e02.skyshed.workers.dev
+  reason: "MAL-2026-1290 supply-chain IOC (FEED)"
+- match: exact
+  pattern: edef4.pcloud.com
+  reason: "MAL-2025-6495 supply-chain IOC (FEED)"
+- match: exact
+  pattern: efrva6.dnslog.cn
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: electronics-affiliate.gl.at.ply.gg
+  reason: "MAL-2025-1975 supply-chain IOC (FEED)"
+- match: exact
+  pattern: elijahjoseph.pythonanywhere.com
+  reason: "MAL-2026-3741 supply-chain IOC (FEED)"
+- match: exact
+  pattern: entmc8svqapf25h.m.pipedream.net
+  reason: "MAL-2024-12266 supply-chain IOC (FEED)"
+- match: exact
+  pattern: eo64g38fdes1lxm.m.pipedream.net
+  reason: "MAL-2025-191684 supply-chain IOC (FEED)"
+- match: exact
+  pattern: eoaqkzhr0rddtp6.m.pipedream.net
+  reason: "MAL-2025-191972 supply-chain IOC (FEED)"
+- match: exact
+  pattern: eozpdddh3tifjo.m.pipedream.net
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: etherjs.pro
+  reason: "MAL-2025-6491 supply-chain IOC (FEED)"
+- match: exact
+  pattern: ethscanold.com
+  reason: "MAL-2024-11599 supply-chain IOC (FEED)"
+- match: exact
+  pattern: evduuu5l01di1hdn9i5qslhxzo5ft6ju8.oastify.com
+  reason: "MAL-2025-47755 supply-chain IOC (FEED)"
+- match: exact
+  pattern: fastobfuscate.run
+  reason: "MAL-2025-6496 supply-chain IOC (FEED)"
+- match: exact
+  pattern: femboy.rich
+  reason: "MAL-2026-3104 supply-chain IOC (FEED)"
+- match: exact
+  pattern: fhg62xavat9jzyt6euwxi6sro.canarytokens.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: files.inostage.ru
+  reason: "MAL-2024-9266 supply-chain IOC (FEED)"
+- match: exact
+  pattern: files.pythonhosted.ru
+  reason: "MAL-2024-9266 supply-chain IOC (FEED)"
+- match: exact
+  pattern: filev2.getsession.org
+  reason: "MAL-2026-3608 supply-chain IOC (FEED)"
+- match: exact
+  pattern: fireindahole.fun
+  reason: "MAL-2024-9947 supply-chain IOC (FEED)"
+- match: exact
+  pattern: flicxd2.com
+  reason: "MAL-2025-191865 supply-chain IOC (FEED)"
+- match: exact
+  pattern: free.beeceptor.com
+  reason: "MAL-2025-5102 supply-chain IOC (FEED)"
+- match: exact
+  pattern: gauss-security.com
+  reason: "MAL-2025-191680 supply-chain IOC (FEED)"
+- match: exact
+  pattern: gcloudns.net
+  reason: "MAL-2026-2117 supply-chain IOC (FEED)"
+- match: exact
+  pattern: gifpngstore.com
+  reason: "MAL-2026-2949 supply-chain IOC (FEED)"
+- match: exact
+  pattern: git-tanstack.com
+  reason: "MAL-2026-3608 supply-chain IOC (FEED)"
+- match: exact
+  pattern: github.com
+  reason: "MAL-2026-2144 supply-chain IOC (FEED)"
+- match: exact
+  pattern: godver3isthe.one
+  reason: "MAL-2026-2486 supply-chain IOC (FEED)"
+- match: exact
+  pattern: helixguard.ai
+  reason: "MAL-2025-191534 supply-chain IOC (FEED)"
+- match: exact
+  pattern: hello.16fps.in
+  reason: "MAL-2026-3356 supply-chain IOC (FEED)"
+- match: exact
+  pattern: helper-dun-seven.vercel.app
+  reason: "MAL-2026-501 supply-chain IOC (FEED)"
+- match: exact
+  pattern: hereisitat.lucyatemysuperbox.space
+  reason: "MAL-2026-3000 supply-chain IOC (FEED)"
+- match: exact
+  pattern: heroku-ub.top
+  reason: "MAL-2025-2967 supply-chain IOC (FEED)"
+- match: exact
+  pattern: ho94479k12fy3mdiwjvzvvo09rfh36.oastify.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: holy-sun-41ff.staraledreamer.workers.dev
+  reason: "MAL-2026-3104 supply-chain IOC (FEED)"
+- match: exact
+  pattern: honey.zakura-int.workers.dev
+  reason: "MAL-2025-191940 supply-chain IOC (FEED)"
+- match: exact
+  pattern: i-like-boys.com
+  reason: "MAL-2026-3104 supply-chain IOC (FEED)"
+- match: exact
+  pattern: i.1r.vc
+  reason: "MAL-2026-2109 supply-chain IOC (FEED)"
+- match: exact
+  pattern: i88za2.pages.dev
+  reason: "MAL-2025-191816 supply-chain IOC (FEED)"
+- match: exact
+  pattern: igotnofriendsonlineorirl-imgonnakmslmao.skyhanni.cloud
+  reason: "MAL-2026-3083 supply-chain IOC (FEED)"
+- match: exact
+  pattern: imad213-py-rsa.ct.ws
+  reason: "MAL-2025-191764 supply-chain IOC (FEED)"
+- match: exact
+  pattern: ip-database-netutils.pages.dev
+  reason: "MAL-2025-191803 supply-chain IOC (FEED)"
+- match: exact
+  pattern: jjjy-9mb.pages.dev
+  reason: "MAL-2025-6564 supply-chain IOC (FEED)"
+- match: exact
+  pattern: jolly-violet-def9.staraledreamer.workers.dev
+  reason: "MAL-2026-2280 supply-chain IOC (FEED)"
+- match: exact
+  pattern: jumpservercdn.com
+  reason: "MAL-2026-610 supply-chain IOC (FEED)"
+- match: exact
+  pattern: just4testlm.tos-cn-hongkong.volces.com
+  reason: "MAL-2026-2519 supply-chain IOC (FEED)"
+- match: exact
+  pattern: juvenile-server.vercel.app
+  reason: "MAL-2026-501 supply-chain IOC (FEED)"
+- match: exact
+  pattern: kuruptd.ink
+  reason: "MAL-2025-191899 supply-chain IOC (FEED)"
+- match: exact
+  pattern: l2g8zu5qwvsj5bewhvvxusdpp.canarytokens.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: litellm.cloud
+  reason: "MAL-2026-2144 supply-chain IOC (FEED)"
+- match: exact
+  pattern: locate-my-ip.vercel.app
+  reason: "MAL-2026-2896 supply-chain IOC (FEED)"
+- match: exact
+  pattern: loejfrw2.ignorelist.com
+  reason: "MAL-2026-932 supply-chain IOC (FEED)"
+- match: exact
+  pattern: loguru.guru
+  reason: "MAL-2025-191729 supply-chain IOC (FEED)"
+- match: exact
+  pattern: lucky-tubes.000webhostapp.com
+  reason: "MAL-2024-10179 supply-chain IOC (FEED)"
+- match: exact
+  pattern: lustodyssey.com
+  reason: "MAL-2026-1498 supply-chain IOC (FEED)"
+- match: exact
+  pattern: m.yubitusoft.com
+  reason: "MAL-2025-191706 supply-chain IOC (FEED)"
+- match: exact
+  pattern: maiden-apply-looks-education.trycloudflare.com
+  reason: "MAL-2026-3803 supply-chain IOC (FEED)"
+- match: exact
+  pattern: marcomayo.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: mexc.workers.dev
+  reason: "MAL-2025-3439 supply-chain IOC (FEED)"
+- match: exact
+  pattern: nasweb.000webhostapp.com
+  reason: "MAL-2026-1412 supply-chain IOC (FEED)"
+- match: exact
+  pattern: netupdates.info
+  reason: "MAL-2025-191775 supply-chain IOC (FEED)"
+- match: exact
+  pattern: nirobtest.xyz
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: npm.artifactsnpm.com
+  reason: "MAL-2026-1332 supply-chain IOC (FEED)"
+- match: exact
+  pattern: npm.jpartifacts.com
+  reason: "MAL-2026-1510 supply-chain IOC (FEED)"
+- match: exact
+  pattern: npmaudit.com
+  reason: "MAL-2023-782 supply-chain IOC (FEED)"
+- match: exact
+  pattern: npmcloudjs.com
+  reason: "MAL-2023-782 supply-chain IOC (FEED)"
+- match: exact
+  pattern: npmjs.help
+  reason: "MAL-2025-46991 supply-chain IOC (FEED)"
+- match: exact
+  pattern: npmjscloud.com
+  reason: "MAL-2023-782 supply-chain IOC (FEED)"
+- match: exact
+  pattern: npmjsregister.com
+  reason: "MAL-2023-782 supply-chain IOC (FEED)"
+- match: exact
+  pattern: npmrepos.com
+  reason: "MAL-2023-782 supply-chain IOC (FEED)"
+- match: exact
+  pattern: npmtesttut.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: nppacks.com
+  reason: "MAL-2026-2138 supply-chain IOC (FEED)"
+- match: exact
+  pattern: ok-omega-eight.vercel.app
+  reason: "MAL-2024-10039 supply-chain IOC (FEED)"
+- match: exact
+  pattern: open-hookbin.vercel.app
+  reason: "MAL-2026-1436 supply-chain IOC (FEED)"
+- match: exact
+  pattern: or-6.github.io
+  reason: "MAL-2026-1036 supply-chain IOC (FEED)"
+- match: exact
+  pattern: pack.nppacks.com
+  reason: "MAL-2026-2138 supply-chain IOC (FEED)"
+- match: exact
+  pattern: package.storeartifacts.com
+  reason: "MAL-2026-1567 supply-chain IOC (FEED)"
+- match: exact
+  pattern: papiculo.net
+  reason: "MAL-2024-12259 supply-chain IOC (FEED)"
+- match: exact
+  pattern: partywave.site
+  reason: "MAL-2024-11657 supply-chain IOC (FEED)"
+- match: exact
+  pattern: peers.proxly.cc
+  reason: "MAL-2026-28 supply-chain IOC (FEED)"
+- match: exact
+  pattern: pipi.8d90982c.cdn.cloudops.ink
+  reason: "MAL-2026-2519 supply-chain IOC (FEED)"
+- match: exact
+  pattern: platform.safedep.io
+  reason: "MAL-2025-41421 supply-chain IOC (FEED)"
+- match: exact
+  pattern: polymarket-bdoor.vercel.app
+  reason: "MAL-2026-3219 supply-chain IOC (FEED)"
+- match: exact
+  pattern: pov.sh
+  reason: "MAL-2025-2940 supply-chain IOC (FEED)"
+- match: exact
+  pattern: project-runnner-default-rtdb.firebaseio.com
+  reason: "MAL-2024-11751 supply-chain IOC (FEED)"
+- match: exact
+  pattern: proxly.cc
+  reason: "MAL-2026-28 supply-chain IOC (FEED)"
+- match: exact
+  pattern: pub-b63e77578ffe42519de7d1771935f8b0.r2.dev
+  reason: "MAL-2025-193014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: pureapk.co
+  reason: "MAL-2026-3431 supply-chain IOC (FEED)"
+- match: exact
+  pattern: python-modules.netlify.app
+  reason: "MAL-2026-189 supply-chain IOC (FEED)"
+- match: exact
+  pattern: pythonhosted.ru
+  reason: "MAL-2024-9266 supply-chain IOC (FEED)"
+- match: exact
+  pattern: quantumic.digital
+  reason: "MAL-2026-1438 supply-chain IOC (FEED)"
+- match: exact
+  pattern: reda-sequestered-justine.ngrok-free.dev
+  reason: "MAL-2025-6606 supply-chain IOC (FEED)"
+- match: exact
+  pattern: redir.acysec.site
+  reason: "MAL-2026-3216 supply-chain IOC (FEED)"
+- match: exact
+  pattern: renderkit1.vercel.app
+  reason: "MAL-2026-3212 supply-chain IOC (FEED)"
+- match: exact
+  pattern: romsbamgel470.giize.com
+  reason: "MAL-2025-191843 supply-chain IOC (FEED)"
+- match: exact
+  pattern: saboreysecretos.com
+  reason: "MAL-2025-3014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: safedep.io
+  reason: "MAL-2026-4149 supply-chain IOC (FEED)"
+- match: exact
+  pattern: searchbox.info
+  reason: "MAL-2026-3429 supply-chain IOC (FEED)"
+- match: exact
+  pattern: sec-lab.it
+  reason: "MAL-2025-192961 supply-chain IOC (FEED)"
+- match: exact
+  pattern: seed1.getsession.org
+  reason: "MAL-2026-3608 supply-chain IOC (FEED)"
+- match: exact
+  pattern: serene-springs-50769.herokuapp.com
+  reason: "MAL-2022-7438 supply-chain IOC (FEED)"
+- match: exact
+  pattern: server-unlock-hack.onrender.com
+  reason: "MAL-2026-623 supply-chain IOC (FEED)"
+- match: exact
+  pattern: servers.genzrulez.com
+  reason: "MAL-2024-12275 supply-chain IOC (FEED)"
+- match: exact
+  pattern: sfrclak.com
+  reason: "MAL-2026-2306 supply-chain IOC (FEED)"
+- match: exact
+  pattern: sfxeur.com
+  reason: "MAL-2025-191720 supply-chain IOC (FEED)"
+- match: exact
+  pattern: sign-tx.web3rpc.workers.dev
+  reason: "MAL-2026-950 supply-chain IOC (FEED)"
+- match: exact
+  pattern: simplest-solutions.pl
+  reason: "MAL-2025-192961 supply-chain IOC (FEED)"
+- match: exact
+  pattern: skydeo.herokuapp.com
+  reason: "MAL-2026-815 supply-chain IOC (FEED)"
+- match: exact
+  pattern: sl4x0.xyz
+  reason: "MAL-2025-3740 supply-chain IOC (FEED)"
+- match: exact
+  pattern: slack-dw-javabackend-109783.s3.us-west-1.amazonaws.com
+  reason: "MAL-2025-1978 supply-chain IOC (FEED)"
+- match: exact
+  pattern: sleipnirbrowser.org
+  reason: "MAL-2024-10037 supply-chain IOC (FEED)"
+- match: exact
+  pattern: soop.space
+  reason: "MAL-2025-191872 supply-chain IOC (FEED)"
+- match: exact
+  pattern: spring-math-9df3.aledreamsaledreams2.workers.dev
+  reason: "MAL-2026-3104 supply-chain IOC (FEED)"
+- match: exact
+  pattern: stats-helpers-1.onrender.com
+  reason: "MAL-2026-2139 supply-chain IOC (FEED)"
+- match: exact
+  pattern: stellar-conquest.fr
+  reason: "MAL-2025-191663 supply-chain IOC (FEED)"
+- match: exact
+  pattern: still-paper-8832.samjango.workers.dev
+  reason: "MAL-2026-189 supply-chain IOC (FEED)"
+- match: exact
+  pattern: swampo-c2.vercel.app
+  reason: "MAL-2026-3031 supply-chain IOC (FEED)"
+- match: exact
+  pattern: swampo-stage2.de-zahlung.info
+  reason: "MAL-2026-3031 supply-chain IOC (FEED)"
+- match: exact
+  pattern: swampo-update.vercel.app
+  reason: "MAL-2026-3031 supply-chain IOC (FEED)"
+- match: exact
+  pattern: sync.geeker.indevs.in
+  reason: "MAL-2026-2400 supply-chain IOC (FEED)"
+- match: exact
+  pattern: tradingprice.net
+  reason: "MAL-2023-782 supply-chain IOC (FEED)"
+- match: exact
+  pattern: tria.ge
+  reason: "MAL-2025-191814 supply-chain IOC (FEED)"
+- match: exact
+  pattern: tronapipy.sbs
+  reason: "MAL-2025-191911 supply-chain IOC (FEED)"
+- match: exact
+  pattern: ttder9qf90.execute-api.us-east-1.amazonaws.com
+  reason: "MAL-2026-3034 supply-chain IOC (FEED)"
+- match: exact
+  pattern: u3yjt7ui4aa5egu44kdrpys1psvjj97y.oastify.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: u61eou88vswlvti2yihx8ktyrpxfl4.oastify.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: unld4fepiyjq4ywsrj7mmpaz3q9hx9ly.oastify.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: update.mexc.workers.dev
+  reason: "MAL-2025-3439 supply-chain IOC (FEED)"
+- match: exact
+  pattern: updatedappython.com
+  reason: "MAL-2026-898 supply-chain IOC (FEED)"
+- match: exact
+  pattern: updatenet.work
+  reason: "MAL-2026-3429 supply-chain IOC (FEED)"
+- match: exact
+  pattern: us-central1-bucket-438814.cloudfunctions.net
+  reason: "MAL-2026-1019 supply-chain IOC (FEED)"
+- match: exact
+  pattern: us-central1-zawya-83b19.cloudfunctions.net
+  reason: "MAL-2025-191765 supply-chain IOC (FEED)"
+- match: exact
+  pattern: uzx39o3nimx3qp8s14uu6kfjhan1brzg.oastify.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: v3.mexc.workers.dev
+  reason: "MAL-2025-3439 supply-chain IOC (FEED)"
+- match: exact
+  pattern: v95b8bj2eirzfyr4nzj762ved5jw71vq.oastify.com
+  reason: "MAL-2025-47755 supply-chain IOC (FEED)"
+- match: exact
+  pattern: vell-production.up.railway.app
+  reason: "MAL-2025-6586 supply-chain IOC (FEED)"
+- match: exact
+  pattern: vpnico-1318014164.cos.ap-singapore.myqcloud.com
+  reason: "MAL-2026-1085 supply-chain IOC (FEED)"
+- match: exact
+  pattern: web3check-api.netlify.app
+  reason: "MAL-2025-4273 supply-chain IOC (FEED)"
+- match: exact
+  pattern: webhook-relay.nurmohammadrafi9966.workers.dev
+  reason: "MAL-2026-3133 supply-chain IOC (FEED)"
+- match: exact
+  pattern: webhook.lewisakura.moe
+  reason: "MAL-2025-3464 supply-chain IOC (FEED)"
+- match: exact
+  pattern: whined.org
+  reason: "MAL-2025-3008 supply-chain IOC (FEED)"
+- match: exact
+  pattern: wonderchristmas.store
+  reason: "MAL-2025-191775 supply-chain IOC (FEED)"
+- match: exact
+  pattern: www.indece.com
+  reason: "MAL-2026-2897 supply-chain IOC (FEED)"
+- match: exact
+  pattern: www.virustotal.com
+  reason: "MAL-2024-11532 supply-chain IOC (FEED)"
+- match: exact
+  pattern: www.zscaler.com
+  reason: "MAL-2025-47453 supply-chain IOC (FEED)"
+- match: exact
+  pattern: xenx.lol
+  reason: "MAL-2025-191773 supply-chain IOC (FEED)"
+- match: exact
+  pattern: xnrij-118-179-99-2.a.free.pinggy.link
+  reason: "MAL-2025-48896 supply-chain IOC (FEED)"
+- match: exact
+  pattern: xz0dyd944kh150h6d199w4lg379yx0lp.oastify.com
+  reason: "MAL-2025-47755 supply-chain IOC (FEED)"
+- match: exact
+  pattern: yhj0choyrutnbvpcjuesxpph58bzztni.oastify.com
+  reason: "MAL-2023-8014 supply-chain IOC (FEED)"
+- match: exact
+  pattern: yl4zicglte.execute-api.us-east-1.amazonaws.com
+  reason: "MAL-2024-12219 supply-chain IOC (FEED)"
+- match: exact
+  pattern: youjustgotbeamed.com
+  reason: "MAL-2026-1325 supply-chain IOC (FEED)"
+- match: exact
+  pattern: youkyy.com
+  reason: "MAL-2026-762 supply-chain IOC (FEED)"
+- match: exact
+  pattern: yubitusoft.com
+  reason: "MAL-2025-191706 supply-chain IOC (FEED)"
+- match: exact
+  pattern: zetolacs-cloud.top
+  reason: "MAL-2025-3483 supply-chain IOC (FEED)"
+- match: exact
+  pattern: zkecscnceogkcofvfnoqhyc1gg3hf6aqe.22.ax
+  reason: "MAL-2024-12366 supply-chain IOC (FEED)"
+- match: exact
+  pattern: zxgwlqh.request.dreamhack.games
+  reason: "MAL-2025-191805 supply-chain IOC (FEED)"

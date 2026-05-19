@@ -102,15 +102,12 @@ if [ -n "$CURRENT_TYPE" ]; then
     REWRITE="chore"
   fi
 
-  # docs(bench|code|internal) → skip in changelog; suggest chore if not user-facing
+  # docs without a recognized scope → commit-msg hook will reject it
   if [ "$CURRENT_TYPE" = "docs" ]; then
     SCOPE=$(echo "$FIRST_LINE" | sed -nE 's/^docs\(([^)]+)\).*/\1/p')
-    case "$SCOPE" in
-      man|help|install) ;; # shipped in release, keep
-      bench|code|internal)
-        # These will be skipped by cliff anyway, but note it
-        ;;
-    esac
+    if [ -z "$SCOPE" ]; then
+      echo "prepare-commit-msg: 'docs' requires a scope (readme|llm|bench|man|help|install)" >&2
+    fi
   fi
 
   if [ -n "$REWRITE" ] && [ "$REWRITE" != "$CURRENT_TYPE" ]; then
@@ -140,13 +137,13 @@ if [ "$MSG_SOURCE" != "message" ] || [ -z "$CURRENT_TYPE" ]; then
     echo "# Staged files suggest: ${INFERRED} ${CHANGELOG_NOTE}"
     echo "#"
     echo "# Changelog types: feat, fix, perf, docs(man|help|install)"
-    echo "# Internal types:  test, refactor, chore, build, ci, docs(*)"
+    echo "# Internal types:  test, refactor, chore, build, ci, docs(readme|llm|bench)"
     echo "#"
     echo "# Rules enforced by commit-msg hook:"
     echo "#   feat/fix → must change source code (.rs), not just docs/tests/CI"
     echo "#   test     → must change test files"
     echo "#   ci       → must change .github/ files"
-    echo "#   docs     → only (man|help|install) scopes reach changelog"
+    echo "#   docs     → requires scope: readme, llm, bench, man, help, install"
     echo "# ──────────────────────────────────────────────────────────────"
   } >> "$MSG_FILE"
 fi

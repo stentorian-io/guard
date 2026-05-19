@@ -1,0 +1,10 @@
+# Python / pip (ALLOW-02)
+- match: exact
+  pattern: pypi.org
+  reason: "PyPI JSON API + package metadata (ALLOW-02)"
+- match: exact
+  pattern: files.pythonhosted.org
+  reason: "PyPI package file downloads (ALLOW-02)"
+- match: exact
+  pattern: pythonhosted.org
+  reason: "Legacy redirect target for files.pythonhosted.org (ALLOW-02)"

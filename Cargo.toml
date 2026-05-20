@@ -37,23 +37,16 @@ clap = { version = "4.6.1", features = ["derive"] }
 memmap2 = "0.9.10"
 socket2 = { version = "0.5", features = ["all"] }
 thiserror = "2.0.18"
-toml = "1.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-plist = "1.9.0"
 ctor = "1.0.1"
 rusqlite = { version = "0.39", features = ["bundled"] }
 rusqlite_migration = "2.5"
 uuid = { version = "1", features = ["v4"] }
-dialoguer = "0.12"
-toml_edit = "0.23"
-notify = "8.2"
-similar = "2.7"
 flate2 = "1.1"
 serde_json = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 semver = "1.0"
-url = "2.5"
 
 # Internal crates
 sentinel-core = { path = "crates/sentinel-core" }

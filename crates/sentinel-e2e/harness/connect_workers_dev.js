@@ -39,8 +39,9 @@ sock.on('error', (err) => {
   // ENOTFOUND:     Sentinel getaddrinfo deny path OR DNS NXDOMAIN
   //                (sentinel-test.workers.dev is fictional; either is acceptable —
   //                the assertion is "deny path fired", not the specific errno)
+  // EAI_FAIL:      Sentinel policy-deny at Resolve gate (daemon rejected before DNS)
   // ECONNREFUSED:  kernel refused — should not happen for a non-loopback host
-  if (err.code === 'EHOSTUNREACH' || err.code === 'ENOTFOUND') {
+  if (err.code === 'EHOSTUNREACH' || err.code === 'ENOTFOUND' || err.code === 'EAI_FAIL') {
     process.exit(1);
   }
   process.stderr.write(`unexpected error: ${err.code} ${err.message}\n`);

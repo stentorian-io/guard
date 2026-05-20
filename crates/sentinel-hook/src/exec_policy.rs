@@ -1,84 +1,50 @@
-//! Exec-blocking policy for hardened-runtime binaries.
+//! Exec-time policy for issue #1 layered enforcement phase 1.
 //!
-//! When a tracked process attempts to exec a binary that will shed the
-//! DYLD interpose library (platform binary, CS_RUNTIME, setuid), this
-//! module decides whether to block or allow the exec.
-//!
-//! Policy: exec of known network-capable tools (curl, wget, nc, etc.)
-//! is BLOCKED because those tools can exfiltrate data without Sentinel's
-//! hooks. Other hardened binaries are ALLOWED (gap detector still fires).
+//! Classification is based on structural facts about the target binary. T0
+//! targets are blocked before exec. T3 targets are logged in detection-only
+//! mode for this phase; ptrace enforcement is a later phase.
 
-use crate::macho_flags;
-
-const BLOCKED_BASENAMES: &[&[u8]] = &[
-    b"curl",
-    b"wget",
-    b"nc",
-    b"ncat",
-    b"netcat",
-    b"fetch",
-    b"ftp",
-    b"sftp",
-    b"ssh",
-    b"scp",
-    b"telnet",
-    b"nscurl",
-];
+use crate::log_buffer::LOG_RING;
+use crate::macho_scan::{self, BinaryTier, BlockReason};
 
 pub enum ExecDecision {
     Allow,
-    BlockHardened,
+    Block(BlockReason),
 }
 
 pub fn check_exec_target(path: *const libc::c_char) -> ExecDecision {
-    if path.is_null() {
-        return ExecDecision::Allow;
-    }
-
-    if !macho_flags::will_shed_dylib(path) {
-        return ExecDecision::Allow;
-    }
-
-    let mut basename_buf = [0u8; 256];
-    let basename_len = extract_basename(path, &mut basename_buf);
-    let basename = &basename_buf[..basename_len];
-
-    for blocked in BLOCKED_BASENAMES {
-        if basename == *blocked {
-            return ExecDecision::BlockHardened;
+    match macho_scan::classify_path(path) {
+        BinaryTier::T0Blocked(reason) => ExecDecision::Block(reason),
+        BinaryTier::T3SuspiciousUnknown(reason) => {
+            let mut path_buf = [0u8; 512];
+            let n = extract_path(path, &mut path_buf);
+            let line = format!(
+                "[sentinel-hook] detection-only: T3 suspicious binary reason={} path={}",
+                reason.as_str(),
+                String::from_utf8_lossy(&path_buf[..n])
+            );
+            LOG_RING.append(line.as_bytes());
+            ExecDecision::Allow
         }
+        BinaryTier::T1TrustedRuntime | BinaryTier::T2CleanUnknown => ExecDecision::Allow,
     }
-
-    ExecDecision::Allow
 }
 
-fn extract_basename(path: *const libc::c_char, out: &mut [u8; 256]) -> usize {
-    let mut len = 0usize;
-    let mut last_slash = 0usize;
-    let mut found_slash = false;
-
+fn extract_path(path: *const libc::c_char, out: &mut [u8]) -> usize {
+    if path.is_null() || out.is_empty() {
+        return 0;
+    }
+    let mut len = 0;
     loop {
         let b = unsafe { *path.add(len) } as u8;
         if b == 0 {
             break;
         }
-        if b == b'/' {
-            last_slash = len;
-            found_slash = true;
-        }
-        len += 1;
-        if len > 4096 {
+        if len == out.len() {
             break;
         }
+        out[len] = b;
+        len += 1;
     }
-
-    let start = if found_slash { last_slash + 1 } else { 0 };
-    if start >= len {
-        return 0;
-    }
-    let name_len = (len - start).min(256);
-    unsafe {
-        core::ptr::copy_nonoverlapping(path.add(start) as *const u8, out.as_mut_ptr(), name_len);
-    }
-    name_len
+    len
 }

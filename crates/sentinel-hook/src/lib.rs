@@ -34,6 +34,7 @@ pub mod ipc_client; // v0.2: blocking IPC for ForkEvent / ExecEvent / DylibLoade
 pub mod log_buffer;
 pub mod macho_flags; // M003-S02: Mach-O code-signing flag parser for hardened-runtime exec blocking
 pub mod pm_env_filter; // quick-260508-et9 (BLOCKER #1): dylib-side pm_env capture
+pub mod macho_scan; // Issue #1 phase 1: Mach-O tier classification + syscall-byte scan
 pub mod persistence_paths; // M003-S04: persistence-path classifier for open/openat monitoring
 pub mod raw_syscall; // M003-S01: direct kernel syscall wrappers (bypass libc::syscall interpose)
 pub mod reentrancy;

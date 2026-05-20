@@ -1,8 +1,6 @@
-//! M003-S02: verify that exec of known network-capable hardened-runtime
-//! binaries (curl, etc.) is blocked with EACCES, while exec of non-network
-//! system utilities (env) is allowed despite being hardened.
+//! Verify issue #1 phase 1 exec-time layered enforcement.
 
-use sentinel_e2e::{cargo_target_dir, resolve_cli, resolve_dylib, DaemonHarness};
+use sentinel_e2e::{DaemonHarness, cargo_target_dir, resolve_cli, resolve_dylib};
 use std::process::Command;
 
 fn probe_bin() -> std::path::PathBuf {
@@ -13,7 +11,11 @@ fn run_probe(harness: &DaemonHarness, mode: &str) -> std::process::Output {
     let cli = resolve_cli();
     let dylib = resolve_dylib();
     let probe = probe_bin();
-    assert!(probe.exists(), "hardened_exec_probe not built at {}", probe.display());
+    assert!(
+        probe.exists(),
+        "hardened_exec_probe not built at {}",
+        probe.display()
+    );
 
     Command::new(&cli)
         .arg("wrap")
@@ -78,20 +80,76 @@ fn posix_spawn_curl_blocked() {
     );
 }
 
-/// execve(/usr/bin/env) must NOT be blocked — it's not a network tool.
+/// execve(/usr/bin/env) must now be blocked because phase 1 treats all
+/// hardened-runtime exec targets as T0.
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
-fn exec_env_not_blocked() {
+fn exec_env_blocked_as_t0_hardened_runtime() {
     let harness = DaemonHarness::start().expect("start daemon");
     let output = run_probe(&harness, "exec_env");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // env runs echo, which outputs ENV-EXEC-OK.
-    // The exec replaces the process image, so the probe's exit code is
-    // whatever env+echo returns (0).
     assert!(
-        output.status.success() || stdout.contains("ENV-EXEC-OK"),
-        "exec_env should succeed (env is not a blocked binary); stdout={stdout}\nstderr={stderr}"
+        !output.status.success(),
+        "exec_env probe should fail (blocked); stdout={stdout}\nstderr={stderr}"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected exit 2 (EACCES block); got {:?}\nstdout={stdout}\nstderr={stderr}",
+        output.status.code()
+    );
+    assert!(
+        stdout.contains("EXEC-BLOCKED-EACCES"),
+        "expected EXEC-BLOCKED-EACCES marker; stdout={stdout}"
+    );
+}
+
+/// Fat/universal Mach-O binaries are T0-blocked until multi-slice scanning
+/// lands.
+#[cfg_attr(not(target_os = "macos"), ignore)]
+#[test]
+fn synthetic_fat_macho_blocked() {
+    let harness = DaemonHarness::start().expect("start daemon");
+    let output = run_probe(&harness, "exec_synthetic_fat");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !output.status.success(),
+        "synthetic fat probe should fail (blocked); stdout={stdout}\nstderr={stderr}"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected exit 2 (EACCES block); got {:?}\nstdout={stdout}\nstderr={stderr}",
+        output.status.code()
+    );
+    assert!(
+        stdout.contains("SYNTHETIC-FAT-BLOCKED-EACCES"),
+        "expected SYNTHETIC-FAT-BLOCKED-EACCES marker; stdout={stdout}"
+    );
+}
+
+/// A native thin Mach-O containing raw syscall bytes is T3. Phase 1 is
+/// detection-only for T3, so exec must proceed to the kernel rather than
+/// returning Sentinel's EACCES block.
+#[cfg_attr(not(target_os = "macos"), ignore)]
+#[test]
+fn synthetic_syscall_macho_detection_only_not_blocked() {
+    let harness = DaemonHarness::start().expect("start daemon");
+    let output = run_probe(&harness, "exec_synthetic_syscall");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "synthetic syscall probe should exit 0 after non-EACCES kernel failure; \
+         stdout={stdout}\nstderr={stderr}"
+    );
+    assert!(
+        stdout.contains("SYNTHETIC-SYSCALL-DETECTION-ONLY"),
+        "expected detection-only marker; stdout={stdout}\nstderr={stderr}"
     );
 }

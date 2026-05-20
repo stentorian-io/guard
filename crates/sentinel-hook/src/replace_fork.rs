@@ -19,10 +19,18 @@ use crate::ipc_client::{
     copy_cstr_to_buf, send_env_not_propagated_gap_sync, send_exec_blocked, send_exec_event_sync,
     send_fork_event_sync, IpcClientError,
 };
+use crate::macho_scan::BlockReason;
 use crate::reentrancy::IN_HOOK;
 use sentinel_ipc::AuditTokenWire;
 
 const IPC_TIMEOUT_MS: u64 = 250;
+
+fn report_exec_blocked(path: *const libc::c_char, reason: BlockReason) {
+    let mut path_buf = [0u8; 1024];
+    let n = copy_cstr_to_buf(path, &mut path_buf);
+    let token = current_audit_token_wire();
+    send_exec_blocked(token, &path_buf[..n], reason.as_str());
+}
 
 /// BLOCKER-02 fix: distinguish "daemon says I'm not tracked" (do not fail
 /// closed — the dylib is loaded into a process outside `sentinel wrap`, so
@@ -266,11 +274,8 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
             return unsafe { libc::posix_spawn(pid_out, path, file_actions, attrp, argv, envp) };
         }
     };
-    if let ExecDecision::BlockHardened = exec_policy::check_exec_target(path) {
-        let mut path_buf = [0u8; 1024];
-        let n = copy_cstr_to_buf(path, &mut path_buf);
-        let token = current_audit_token_wire();
-        send_exec_blocked(token, &path_buf[..n], "hardened-runtime");
+    if let ExecDecision::Block(reason) = exec_policy::check_exec_target(path) {
+        report_exec_blocked(path, reason);
         return libc::EACCES;
     }
 
@@ -402,11 +407,8 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
             return unsafe { libc::posix_spawnp(pid_out, path, file_actions, attrp, argv, envp) };
         }
     };
-    if let ExecDecision::BlockHardened = exec_policy::check_exec_target(path) {
-        let mut path_buf = [0u8; 1024];
-        let n = copy_cstr_to_buf(path, &mut path_buf);
-        let token = current_audit_token_wire();
-        send_exec_blocked(token, &path_buf[..n], "hardened-runtime");
+    if let ExecDecision::Block(reason) = exec_policy::check_exec_target(path) {
+        report_exec_blocked(path, reason);
         return libc::EACCES;
     }
 

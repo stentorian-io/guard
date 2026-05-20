@@ -76,9 +76,9 @@ struct WatchdogState {
 
 impl WatchdogState {
     fn load(state_dir: &std::path::Path) -> Self {
-        std::fs::read_to_string(watchdog_state_path(state_dir))
+        std::fs::read(watchdog_state_path(state_dir))
             .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
+            .and_then(|bytes| ciborium::from_reader(bytes.as_slice()).ok())
             .unwrap_or(Self {
                 restart_count: 0,
                 last_restart_reason: None,
@@ -88,8 +88,9 @@ impl WatchdogState {
     }
 
     fn save(&self, state_dir: &std::path::Path) {
-        if let Ok(json) = serde_json::to_string(self) {
-            let _ = std::fs::write(watchdog_state_path(state_dir), json);
+        let mut buf = Vec::new();
+        if ciborium::into_writer(self, &mut buf).is_ok() {
+            let _ = std::fs::write(watchdog_state_path(state_dir), buf);
         }
     }
 }

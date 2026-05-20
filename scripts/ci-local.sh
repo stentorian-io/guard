@@ -4,7 +4,7 @@
 # .github/workflows/validation.yml, no GH minutes consumed.
 #
 # Usage:
-#   scripts/ci-local.sh             # full validation (build + 6 e2e tests)
+#   scripts/ci-local.sh             # full validation (build + e2e tests + ubuntu jobs via act)
 #   scripts/ci-local.sh --quick     # skip cargo build + e2e (lint + fixture only)
 #   scripts/ci-local.sh --no-act    # skip act for the ubuntu jobs
 #
@@ -78,6 +78,21 @@ else
   [ "$actual" = "$pinned" ] || fail "fixture hash mismatch (on-disk $actual vs pinned $pinned)"
   cache_mark "ci-local:fixture" "$fp"
   pass "fixture matches pinned hash"
+fi
+
+# ── lint-unused-deps (cargo-machete — stable toolchain, no compilation) ────
+step "Unused dependency lint"
+fp=$(rust_fingerprint)
+if cache_hit "ci-local:machete" "$fp"; then
+  skip "cargo-machete"
+else
+  if command -v cargo-machete >/dev/null; then
+    cargo machete --with-metadata || fail "cargo-machete"
+    cache_mark "ci-local:machete" "$fp"
+    pass "cargo-machete"
+  else
+    warn "cargo-machete not found — skipping (cargo install cargo-machete)"
+  fi
 fi
 
 # ── ubuntu jobs via act (optional) ─────────────────────────────────────────

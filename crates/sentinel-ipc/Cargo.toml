@@ -17,3 +17,6 @@ libc = { workspace = true }
 thiserror = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["serde_bytes"]

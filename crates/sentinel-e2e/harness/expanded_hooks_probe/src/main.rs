@@ -204,11 +204,20 @@ fn test_write_pipe() {
 fn resolve_host(host: &str, port: u16) -> libc::sockaddr_in {
     use std::net::ToSocketAddrs;
     let addr_str = format!("{host}:{port}");
-    let socket_addr = addr_str
-        .to_socket_addrs()
-        .expect("DNS resolution")
+    let addrs = match addr_str.to_socket_addrs() {
+        Ok(iter) => iter,
+        Err(_) => {
+            println!("DNS-DENIED");
+            std::process::exit(2);
+        }
+    };
+    let socket_addr = addrs
+        .into_iter()
         .find(|a| a.is_ipv4())
-        .expect("at least one IPv4 address");
+        .unwrap_or_else(|| {
+            println!("DNS-DENIED-NO-IPV4");
+            std::process::exit(2);
+        });
     match socket_addr {
         std::net::SocketAddr::V4(v4) => {
             let mut sin: libc::sockaddr_in = unsafe { std::mem::zeroed() };

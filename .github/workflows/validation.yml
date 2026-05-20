@@ -25,8 +25,6 @@ name: validation
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
 
 # Cancel stale runs on the same ref. Avoids piling up macos-14 minutes when
 # developers push quick re-runs.

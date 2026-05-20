@@ -68,6 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: amannn/action-semantic-pull-request@v5
+        id: lint_pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -94,6 +95,10 @@ jobs:
           subjectPatternError: |
             The subject "{subject}" found in the pull request title "{title}"
             must start with a lowercase letter and not end with a period.
+      - if: steps.lint_pr.outputs.type == 'ci' && steps.lint_pr.outputs.scope != ''
+        run: |
+          echo "::error::Scopes are not allowed for the 'ci' type. Use 'ci: ...' not 'ci(scope): ...'"
+          exit 1
 
   lint-markdown:
     name: Lint Markdown

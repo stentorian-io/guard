@@ -23,8 +23,6 @@
 name: validation
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
@@ -35,27 +33,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── Cache warming on main ────────────────────────────────────────────────
-  # After a squash-merge lands, build on macos-14 to populate the shared
-  # Cargo cache so PR branches start warm instead of cold.
-  warm-cache:
-    if: github.event_name == 'push'
-    name: Warm Cargo cache
-    runs-on: macos-14
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: validation
-      - run: cargo check --workspace --release
-
   # ── Detect whether any build/test-relevant files changed ─────────────────
   # Repo-meta-only changes (docs, licenses, git config, CI yaml, changelog
   # tooling) skip the expensive validation, lint-unused-deps, and
   # lint-test-env-vars jobs.  Markdown lint and PR-title checks still run.
   changes:
-    if: github.event_name == 'pull_request'
     name: Detect code changes
     runs-on: ubuntu-latest
     permissions:
@@ -81,7 +63,6 @@ jobs:
               - 'tools/**'
 
   pr-title:
-    if: github.event_name == 'pull_request'
     name: PR title (conventional commit)
     runs-on: ubuntu-latest
     steps:
@@ -119,7 +100,6 @@ jobs:
           exit 1
 
   lint-markdown:
-    if: github.event_name == 'pull_request'
     name: Lint Markdown
     runs-on: ubuntu-latest
     steps:

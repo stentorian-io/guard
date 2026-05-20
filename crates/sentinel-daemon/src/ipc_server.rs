@@ -1858,6 +1858,10 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
         if matches!(policy_source,
             sentinel_core::SourceKind::ConfirmedDeny | sentinel_core::SourceKind::BuiltinDeny
         ) {
+            use crate::log_writer::jsonl_row::{
+                Decision, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
+            };
+
             if matches!(policy_source, sentinel_core::SourceKind::ConfirmedDeny) {
                 let was_approved = loaded.as_ref().map(|entries| {
                     sentinel_core::has_user_allow(req.host.as_bytes(), entries)
@@ -1869,7 +1873,30 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
                     );
                 }
             }
-            let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
+
+            let source_kind_str = policy_source.as_label();
+            let intel = loaded.as_ref().map(|entries| {
+                crate::log_writer::enrich_from_entries(req.host.as_bytes(), entries)
+            }).unwrap_or_default();
+            let decision = Decision {
+                schema_version: JSONL_SCHEMA_VERSION,
+                ts: now_rfc3339(),
+                verdict: "Deny",
+                dest_host: req.host.clone(),
+                dest_port: req.port,
+                dest_ip: None,
+                run_uuid: run_uuid.to_string(),
+                source_kind: source_kind_str.to_string(),
+                source_locator: None,
+                process: ProcessCtxLog { pid: 0, pidversion: 0, argv: vec![], cwd: String::new() },
+                parent: ProcessCtxLog { pid: 0, pidversion: 0, argv: vec![], cwd: String::new() },
+                root: RootCtxLog { audit_token: [0; 8], argv: vec![] },
+                package_context: None,
+                intel: if intel.is_empty() { None } else { Some(intel) },
+            };
+            state.log_writer.send(LogRow::Block(decision));
+
+            let reply = ResolveReply::err(format!("denied by policy: {source_kind_str}"));
             if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
                 error!(error = %e, "failed to send ResolveReply (non-promptable deny)");
             }
@@ -2018,9 +2045,9 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
                                     source = ?source,
                                     "Resolve denied by policy gate"
                                 );
-                                true
+                                Some((run.run_uuid.clone(), source, entries))
                             }
-                            sentinel_core::Verdict::Allow => false,
+                            sentinel_core::Verdict::Allow => None,
                         }
                     }
                     None => {
@@ -2028,19 +2055,43 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
                             snapshot_path = %run.snapshot_path.display(),
                             "snapshot unreadable — denying resolve (fail-closed)"
                         );
-                        true
+                        Some((run.run_uuid.clone(), sentinel_core::SourceKind::HardRule("fail-closed"), vec![]))
                     }
                 }
             }
-            _ => false,
+            _ => None,
         }
     };
 
-    if policy_deny {
+    if let Some((run_uuid, source, entries)) = policy_deny {
+        use crate::log_writer::jsonl_row::{
+            Decision, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
+        };
+
+        let source_kind_str = source.as_label();
+        let intel = crate::log_writer::enrich_from_entries(req.host.as_bytes(), &entries);
+        let decision = Decision {
+            schema_version: JSONL_SCHEMA_VERSION,
+            ts: now_rfc3339(),
+            verdict: "Deny",
+            dest_host: req.host.clone(),
+            dest_port: req.port,
+            dest_ip: None,
+            run_uuid,
+            source_kind: source_kind_str.to_string(),
+            source_locator: None,
+            process: ProcessCtxLog { pid: 0, pidversion: 0, argv: vec![], cwd: String::new() },
+            parent: ProcessCtxLog { pid: 0, pidversion: 0, argv: vec![], cwd: String::new() },
+            root: RootCtxLog { audit_token: [0; 8], argv: vec![] },
+            package_context: None,
+            intel: if intel.is_empty() { None } else { Some(intel) },
+        };
+        state.log_writer.send(LogRow::Block(decision));
+
         let _ = write_tagged(
             stream,
             MessageTag::Resolve,
-            &ResolveReply::err(format!("resolve {} denied by policy", req.host)),
+            &ResolveReply::err(format!("denied by policy: {source_kind_str}")),
         );
         return;
     }

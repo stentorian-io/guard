@@ -45,32 +45,6 @@ pub enum Cmd {
         #[command(subcommand)]
         sub: Option<StatusSub>,
     },
-
-    /// Manage curated (built-in) rules.
-    Rules {
-        #[command(subcommand)]
-        sub: RulesSub,
-    },
-}
-
-/// Rules management sub-verbs.
-#[derive(Subcommand, Debug)]
-pub enum RulesSub {
-    /// Disable a curated (built-in) rule by pattern.
-    /// Use when a trusted source is compromised.
-    Disable {
-        /// The rule pattern to disable (e.g. "registry.npmjs.org").
-        pattern: String,
-
-        /// Reason for disabling (e.g. "suspected compromise 2026-05-20").
-        #[arg(long)]
-        reason: String,
-    },
-    /// Re-enable a previously disabled curated rule.
-    Enable {
-        /// The rule pattern to re-enable.
-        pattern: String,
-    },
 }
 
 /// Status read sub-verbs.
@@ -78,11 +52,24 @@ pub enum RulesSub {
 pub enum StatusSub {
     /// Stream the JSONL forensic log (pipe to `tail -f` for follow mode).
     Logs,
-    /// List active rules.
+    /// List active rules. Use --disable/--enable to manage built-in rules.
     Rules {
         /// Include built-in registry-allowlist rules.
         #[arg(long)]
         include_built_in: bool,
+
+        /// Disable a built-in rule by pattern (e.g. "registry.npmjs.org").
+        /// Use when a trusted source is compromised. Requires --reason.
+        #[arg(long, requires = "reason")]
+        disable: Option<String>,
+
+        /// Re-enable a previously disabled built-in rule by pattern.
+        #[arg(long, conflicts_with = "disable")]
+        enable: Option<String>,
+
+        /// Reason for disabling (required with --disable).
+        #[arg(long, requires = "disable")]
+        reason: Option<String>,
     },
     /// View denials from a specific run_uuid.
     Denials {

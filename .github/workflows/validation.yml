@@ -227,3 +227,26 @@ jobs:
       # drained stderr. GHA captures step output by default — no extra
       # artifact upload needed for v0.1 (CONTEXT D-15: green CI run is the
       # evidence; failures debug from the step output directly).
+
+  # ── Merge gate ───────────────────────────────────────────────────────────
+  # Single required status check. Succeeds only when every job that wasn't
+  # skipped has passed. Skipped conditional jobs (docs-only PRs) don't block.
+  gate:
+    name: Gate
+    if: always()
+    needs:
+      - changes
+      - pr-title
+      - lint-markdown
+      - lint-test-env-vars
+      - lint-unused-deps
+      - validation
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          results='${{ toJSON(needs.*.result) }}'
+          echo "Job results: $results"
+          if echo "$results" | grep -qE '"(failure|cancelled)"'; then
+            echo "::error::One or more jobs failed or were cancelled"
+            exit 1
+          fi

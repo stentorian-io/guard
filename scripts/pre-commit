@@ -66,7 +66,21 @@ else
   pass "cargo check"
 fi
 
-# ── 4. Cargo test — unit + integration tests (excludes E2E) ─────────────────
+# ── 4. Unused dependency lint (cargo-machete — stable, no compilation) ──────
+if cache_hit "pre-commit:machete" "$fp"; then
+  skip "cargo machete"
+else
+  if command -v cargo-machete &>/dev/null; then
+    cargo machete --with-metadata \
+      || fail "cargo machete found unused dependencies"
+    cache_mark "pre-commit:machete" "$fp"
+    pass "cargo machete"
+  else
+    echo "⚠ cargo-machete not found — skipping (cargo install cargo-machete)"
+  fi
+fi
+
+# ── 5. Cargo test — unit + integration tests (excludes E2E) ─────────────────
 if cache_hit "pre-commit:cargo-test" "$fp"; then
   skip "cargo test (unit + integration, E2E skipped)"
 else

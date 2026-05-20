@@ -19,7 +19,7 @@ serde.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 clap.workspace = true
-nix.workspace = true
+libc.workspace = true
 signal-hook.workspace = true
 
 [dev-dependencies]

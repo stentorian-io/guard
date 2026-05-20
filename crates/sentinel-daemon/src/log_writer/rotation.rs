@@ -26,7 +26,50 @@ pub fn rotate(active_path: &Path) -> io::Result<()> {
     // the second `fs::rename` would silently clobber the first rotation's
     // data. ms-precision + an atomic in-process counter guarantees a unique
     // rotated filename for every call to rotate().
-    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%3f").to_string();
+    let stamp = {
+        let d = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let secs = d.as_secs();
+        let millis = d.subsec_millis();
+
+        const SECS_PER_DAY: u64 = 86_400;
+        const DAYS_PER_400Y: u64 = 146_097;
+        const SECS_PER_400Y: u64 = DAYS_PER_400Y * SECS_PER_DAY;
+
+        let mut rem = secs;
+        let mut year: i64 = 1970;
+        let n400 = rem / SECS_PER_400Y;
+        rem %= SECS_PER_400Y;
+        year += (n400 * 400) as i64;
+
+        let mut days = (rem / SECS_PER_DAY) as u32;
+        let day_secs = (rem % SECS_PER_DAY) as u32;
+        let hh = day_secs / 3600;
+        let mm = (day_secs % 3600) / 60;
+        let ss = day_secs % 60;
+
+        loop {
+            let yd = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
+            if days < yd { break; }
+            days -= yd;
+            year += 1;
+        }
+
+        let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+        let mdays: [u32; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        let mut month = 0u32;
+        for &md in &mdays {
+            if days < md { break; }
+            days -= md;
+            month += 1;
+        }
+
+        format!(
+            "{year:04}{:02}{:02}T{hh:02}{mm:02}{ss:02}{millis:03}",
+            month + 1, days + 1,
+        )
+    };
     let seq = next_in_process_seq();
     let rotated = parent.join(format!("{ROTATED_GLOB_PREFIX}{stamp}-{seq:03}.log"));
     if active_path.exists() {

@@ -4,8 +4,6 @@
 //! alongside the daemon; launchd KeepAlive=true then restarts the daemon.
 
 use clap::Parser;
-use nix::sys::signal::{self, Signal};
-use nix::unistd::Pid;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{Ping, PingReply};
 use socket2::{Domain, SockAddr, Socket, Type};
@@ -96,17 +94,16 @@ impl WatchdogState {
 }
 
 fn kill_escalation(pid: u32) {
-    let nix_pid = Pid::from_raw(pid as i32);
+    let raw_pid = pid as i32;
     info!(pid, "sending SIGTERM");
-    if signal::kill(nix_pid, Signal::SIGTERM).is_err() {
+    if unsafe { libc::kill(raw_pid, libc::SIGTERM) } != 0 {
         debug!(pid, "SIGTERM failed (process already gone?)");
         return;
     }
     std::thread::sleep(SIGTERM_GRACE);
-    // Check if still alive
-    if signal::kill(nix_pid, None).is_ok() {
+    if unsafe { libc::kill(raw_pid, 0) } == 0 {
         warn!(pid, "still alive after SIGTERM grace period, sending SIGKILL");
-        let _ = signal::kill(nix_pid, Signal::SIGKILL);
+        unsafe { libc::kill(raw_pid, libc::SIGKILL) };
     } else {
         debug!(pid, "process exited after SIGTERM");
     }

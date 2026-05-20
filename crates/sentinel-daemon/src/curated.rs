@@ -1,8 +1,8 @@
 //! Curated default allowlist + abuse-pattern denies + feed IOCs.
 //!
 //! Source: `crates/sentinel-core/data/{allow,deny}/*.yaml` (in-tree YAML
-//! assembled into a single blob by build.rs at compile time). Loaded once at
-//! daemon startup. Entries are tagged with the appropriate RuleTier
+//! assembled and converted to JSON by build.rs at compile time). Loaded once
+//! at daemon startup. Entries are tagged with the appropriate RuleTier
 //! (BuiltinDeny for kind:deny, CuratedAllow for kind:allow) and the daemon
 //! merges them with project/user rules at PrepareSnapshot time.
 
@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 pub const CURATED_DATA_DIR: &str = "crates/sentinel-core/data";
 
-const CURATED_YAML: &str = include_str!(concat!(env!("OUT_DIR"), "/rules_combined.yaml"));
+const CURATED_JSON: &str = include_str!(concat!(env!("OUT_DIR"), "/rules_combined.json"));
 
 /// Minimum length for a suffix pattern. WARNING fix (v0.2 review):
 /// raised from 4 → 6 so single-TLD suffixes like `.com`, `.org`, `.net`,
@@ -24,15 +24,15 @@ pub const MIN_SUFFIX_LEN: usize = 6;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CuratedError {
-    #[error("yaml parse: {0}")]
+    #[error("parse: {0}")]
     Parse(String),
     #[error("invalid pattern at index {index}: {reason}")]
     InvalidPattern { index: usize, reason: String },
 }
 
 #[derive(Debug, Deserialize)]
-struct YamlFile {
-    entries: Vec<YamlEntry>,
+struct EntriesFile {
+    entries: Vec<RawEntry>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -43,7 +43,7 @@ pub enum Confidence {
 }
 
 #[derive(Debug, Deserialize)]
-struct YamlEntry {
+struct RawEntry {
     kind: RuleKind,
     #[serde(rename = "match")]
     match_type: MatchType,
@@ -52,30 +52,34 @@ struct YamlEntry {
     confidence: Option<Confidence>,
 }
 
-/// Parse the embedded YAML. Tier assignment:
-///   - kind: deny + confidence: confirmed → ConfirmedDeny (overrides UserAllow)
-///   - kind: deny + confidence: suspect   → SuspectDeny (below UserAllow, prompts)
-///   - kind: deny (no confidence)         → BuiltinDeny (non-overridable, curated)
-///   - kind: allow                        → CuratedAllow
+/// Load the build-time-embedded JSON (converted from YAML by build.rs).
 pub fn load_curated() -> Result<Vec<AllowlistEntry>, CuratedError> {
-    parse_yaml(CURATED_YAML)
+    parse_entries(CURATED_JSON)
 }
 
-/// Pure parser — useful for tests with adversarial fixtures.
-pub fn parse_yaml(yaml: &str) -> Result<Vec<AllowlistEntry>, CuratedError> {
-    let file: YamlFile =
-        serde_yml::from_str(yaml).map_err(|e| CuratedError::Parse(e.to_string()))?;
+fn parse_entries(json: &str) -> Result<Vec<AllowlistEntry>, CuratedError> {
+    let file: EntriesFile =
+        serde_json::from_str(json).map_err(|e| CuratedError::Parse(e.to_string()))?;
+    validate_entries(file.entries)
+}
 
-    let mut out = Vec::with_capacity(file.entries.len());
-    for (i, e) in file.entries.into_iter().enumerate() {
-        // Validate reason non-empty.
+/// Pure YAML parser — available only in tests for adversarial fixtures.
+#[cfg(any(test, feature = "test-yaml"))]
+pub fn parse_yaml(yaml: &str) -> Result<Vec<AllowlistEntry>, CuratedError> {
+    let file: EntriesFile =
+        serde_yml::from_str(yaml).map_err(|e| CuratedError::Parse(e.to_string()))?;
+    validate_entries(file.entries)
+}
+
+fn validate_entries(entries: Vec<RawEntry>) -> Result<Vec<AllowlistEntry>, CuratedError> {
+    let mut out = Vec::with_capacity(entries.len());
+    for (i, e) in entries.into_iter().enumerate() {
         if e.reason.trim().is_empty() {
             return Err(CuratedError::InvalidPattern {
                 index: i,
                 reason: "reason field is empty".into(),
             });
         }
-        // Validate suffix patterns.
         if matches!(e.match_type, MatchType::Suffix) {
             if !e.pattern.starts_with('.') {
                 return Err(CuratedError::InvalidPattern {

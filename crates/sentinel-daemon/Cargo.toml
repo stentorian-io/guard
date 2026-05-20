@@ -16,6 +16,9 @@ path = "src/lib.rs"
 name = "sentineld"
 path = "src/main.rs"
 
+[features]
+test-yaml = ["dep:serde_yml"]
+
 [dependencies]
 sentinel-core = { workspace = true }
 sentinel-ipc = { workspace = true }
@@ -24,20 +27,22 @@ crossbeam-channel = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 ciborium = { workspace = true }
-nix = { workspace = true }
 libc = { workspace = true }
 thiserror = { workspace = true }
 sha2 = { workspace = true }
 hmac = { workspace = true }
-rand = { workspace = true }
+getrandom = { workspace = true }
 serde = { workspace = true }
-serde_yml = { workspace = true }
 rusqlite = { workspace = true }
 rusqlite_migration = { workspace = true }
-uuid = { workspace = true }
 flate2 = { workspace = true }
 serde_json = { workspace = true }
-chrono = { workspace = true }
 tempfile = { workspace = true }
+serde_yml = { workspace = true, optional = true }
+
+[build-dependencies]
+serde_yml = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
+sentinel-daemon = { path = ".", features = ["test-yaml"] }

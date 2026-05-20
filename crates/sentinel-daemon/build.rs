@@ -13,7 +13,6 @@ fn main() {
     println!("cargo:rerun-if-changed={}", deny_dir.display());
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
-    let out_path = Path::new(&out_dir).join("rules_combined.yaml");
 
     let mut combined = String::from("entries:\n");
 
@@ -54,6 +53,17 @@ fn main() {
         }
     }
 
-    std::fs::write(&out_path, &combined)
-        .unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
+    // Keep YAML for reference / debugging
+    let yaml_path = Path::new(&out_dir).join("rules_combined.yaml");
+    std::fs::write(&yaml_path, &combined)
+        .unwrap_or_else(|e| panic!("write {}: {e}", yaml_path.display()));
+
+    // Parse YAML → JSON so the runtime only needs serde_json
+    let parsed: serde_yml::Value = serde_yml::from_str(&combined)
+        .unwrap_or_else(|e| panic!("parse combined yaml: {e}"));
+    let json = serde_json::to_string(&parsed)
+        .unwrap_or_else(|e| panic!("serialize to json: {e}"));
+    let json_path = Path::new(&out_dir).join("rules_combined.json");
+    std::fs::write(&json_path, &json)
+        .unwrap_or_else(|e| panic!("write {}: {e}", json_path.display()));
 }

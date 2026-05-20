@@ -105,7 +105,58 @@ fn truncate_str(s: String, max: usize) -> String {
 
 /// Pitfall 9: explicit Millis precision + Z suffix → lexicographically-sortable.
 pub fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = d.as_secs();
+    let millis = d.subsec_millis();
+
+    const SECS_PER_DAY: u64 = 86_400;
+    const DAYS_PER_400Y: u64 = 146_097;
+    const SECS_PER_400Y: u64 = DAYS_PER_400Y * SECS_PER_DAY;
+
+    let mut rem = secs;
+    let mut year: i64 = 1970;
+
+    let n400 = rem / SECS_PER_400Y;
+    rem %= SECS_PER_400Y;
+    year += (n400 * 400) as i64;
+
+    let mut days = (rem / SECS_PER_DAY) as u32;
+    let day_secs = (rem % SECS_PER_DAY) as u32;
+    let hh = day_secs / 3600;
+    let mm = (day_secs % 3600) / 60;
+    let ss = day_secs % 60;
+
+    loop {
+        let yd = if is_leap(year) { 366 } else { 365 };
+        if days < yd { break; }
+        days -= yd;
+        year += 1;
+    }
+
+    let leap = is_leap(year);
+    let mdays: [u32; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    let mut month = 0u32;
+    for &md in &mdays {
+        if days < md { break; }
+        days -= md;
+        month += 1;
+    }
+
+    format!(
+        "{year:04}-{:02}-{:02}T{hh:02}:{mm:02}:{ss:02}.{millis:03}Z",
+        month + 1,
+        days + 1,
+    )
+}
+
+fn is_leap(y: i64) -> bool {
+    y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
 }
 
 /// Append one row as a JSON line to the open writer. Preserves caller's file-open mode.

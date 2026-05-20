@@ -74,7 +74,12 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     // so any pre-v0.2 CLI caller (or post-install smoke probe) still sees
     // a SCHEMA_V2 snapshot at the legacy path. Use v2_default rather than
     // v1_default so the published bytes round-trip Snapshot::decode.
-    let nonce: u64 = rand::random();
+    let nonce: u64 = {
+        let mut buf = [0u8; 8];
+        getrandom::getrandom(&mut buf)
+            .map_err(|e| std::io::Error::other(format!("getrandom: {e}")))?;
+        u64::from_ne_bytes(buf)
+    };
     let snap = Snapshot::v2_default();
     let pub_ = publish(&state_dir, &snap, nonce)?;
     manifest::write(&state_dir, &pub_)?;

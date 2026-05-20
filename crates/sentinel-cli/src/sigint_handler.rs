@@ -11,8 +11,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use nix::sys::signal::{killpg, Signal};
-use nix::unistd::Pid;
 use signal_hook::consts::SIGINT;
 use signal_hook::iterator::{Handle, Signals};
 
@@ -74,7 +72,7 @@ pub fn handle_sigint(inflight: &InflightPrompts, channel: &SharedChannel, pgid: 
             }
         }
     }
-    let _ = killpg(Pid::from_raw(pgid), Signal::SIGINT);
+    unsafe { libc::killpg(pgid, libc::SIGINT) };
 }
 
 impl Drop for SigIntHandle {

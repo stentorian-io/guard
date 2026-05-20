@@ -20,9 +20,9 @@ pub fn key_path(state_dir: &Path) -> PathBuf {
 /// with mode 0600. Returns the key bytes. Overwrites any existing key
 /// (idempotent for reinstall).
 pub fn generate_and_store(state_dir: &Path) -> std::io::Result<[u8; KEY_LEN]> {
-    use rand::RngCore;
     let mut key = [0u8; KEY_LEN];
-    rand::thread_rng().fill_bytes(&mut key);
+    getrandom::getrandom(&mut key)
+        .map_err(|e| std::io::Error::other(format!("getrandom: {e}")))?;
 
     let path = key_path(state_dir);
     let mut f = OpenOptions::new()

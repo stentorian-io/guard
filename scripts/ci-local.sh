@@ -40,6 +40,12 @@ skip() { echo -e "${GREEN}✓${RESET} $1 ${BOLD}(cached)${RESET}"; }
 
 cache_prune
 
+# ── 0. Detect repo-meta-only changes (skip build/test when nothing compiled changes)
+REPO_META_ONLY=0
+if changes_only_repo_meta all; then
+  REPO_META_ONLY=1
+fi
+
 # ── lint-markdown job (ubuntu) ─────────────────────────────────────────────
 step "Markdown lint"
 node_bin="$(command -v node || true)"
@@ -81,17 +87,21 @@ else
 fi
 
 # ── lint-unused-deps (cargo-machete — stable toolchain, no compilation) ────
-step "Unused dependency lint"
-fp=$(rust_fingerprint)
-if cache_hit "ci-local:machete" "$fp"; then
-  skip "cargo-machete"
+if [ "$REPO_META_ONLY" -eq 1 ]; then
+  skip "cargo-machete (repo-meta-only change)"
 else
-  if command -v cargo-machete >/dev/null; then
-    cargo machete --with-metadata || fail "cargo-machete"
-    cache_mark "ci-local:machete" "$fp"
-    pass "cargo-machete"
+  step "Unused dependency lint"
+  fp=$(rust_fingerprint)
+  if cache_hit "ci-local:machete" "$fp"; then
+    skip "cargo-machete"
   else
-    warn "cargo-machete not found — skipping (cargo install cargo-machete)"
+    if command -v cargo-machete >/dev/null; then
+      cargo machete --with-metadata || fail "cargo-machete"
+      cache_mark "ci-local:machete" "$fp"
+      pass "cargo-machete"
+    else
+      warn "cargo-machete not found — skipping (cargo install cargo-machete)"
+    fi
   fi
 fi
 
@@ -108,8 +118,12 @@ if [ "$USE_ACT" -eq 1 ]; then
 fi
 
 # ── heavy validation: release build + e2e tests ───────────────────────────
-if [ "$QUICK" -eq 1 ] || [ "${CI_LOCAL_SKIP_E2E:-0}" -eq 1 ]; then
-  warn "skipping cargo build + e2e (--quick or CI_LOCAL_SKIP_E2E=1)"
+if [ "$QUICK" -eq 1 ] || [ "${CI_LOCAL_SKIP_E2E:-0}" -eq 1 ] || [ "$REPO_META_ONLY" -eq 1 ]; then
+  if [ "$REPO_META_ONLY" -eq 1 ]; then
+    warn "skipping cargo build + e2e (repo-meta-only change)"
+  else
+    warn "skipping cargo build + e2e (--quick or CI_LOCAL_SKIP_E2E=1)"
+  fi
   echo -e "\n${GREEN}${BOLD}Quick checks passed.${RESET}"
   exit 0
 fi

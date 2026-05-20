@@ -35,6 +35,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Detect whether any build/test-relevant files changed ─────────────────
+  # Repo-meta-only changes (docs, licenses, git config, CI yaml, changelog
+  # tooling) skip the expensive validation, lint-unused-deps, and
+  # lint-test-env-vars jobs.  Markdown lint and PR-title checks still run.
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - '**/*.rs'
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'crates/sentinel-e2e/fixtures/**'
+              - 'crates/sentinel-e2e/harness/**'
+              - 'crates/sentinel-core/data/**'
+              - 'scripts/*.sh'
+              - 'tools/**'
+
   pr-title:
     if: github.event_name == 'pull_request'
     name: PR title (conventional commit)
@@ -77,6 +105,8 @@ jobs:
 
   lint-test-env-vars:
     name: Lint test env var hygiene
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +114,8 @@ jobs:
 
   lint-unused-deps:
     name: Lint unused dependencies
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +125,8 @@ jobs:
 
   validation:
     name: Validation suite
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-14
     timeout-minutes: 25
 

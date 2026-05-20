@@ -28,6 +28,12 @@ skip() {
 
 cache_prune
 
+# ── 0. Skip build/test when only repo-meta files changed ────────────────────
+REPO_META_ONLY=0
+if changes_only_repo_meta staged; then
+  REPO_META_ONLY=1
+fi
+
 # ── 1. Reject Co-Authored-By lines ──────────────────────────────────────────
 #
 # Check the staged diff for Co-Authored-By trailers. The commit message isn't
@@ -55,39 +61,44 @@ else
   echo "⚠ npx not found — skipping markdown lint"
 fi
 
-# ── 3. Cargo check (fast type/borrow check, no codegen) ─────────────────────
-fp=$(rust_fingerprint)
-if cache_hit "pre-commit:cargo-check" "$fp"; then
-  skip "cargo check"
+# ── 3–5. Cargo check / machete / test — skip when only repo-meta changed ────
+if [ "$REPO_META_ONLY" -eq 1 ]; then
+  skip "cargo check, machete, test (repo-meta-only change)"
 else
-  cargo check --workspace --quiet \
-    || fail "cargo check failed"
-  cache_mark "pre-commit:cargo-check" "$fp"
-  pass "cargo check"
-fi
-
-# ── 4. Unused dependency lint (cargo-machete — stable, no compilation) ──────
-if cache_hit "pre-commit:machete" "$fp"; then
-  skip "cargo machete"
-else
-  if command -v cargo-machete &>/dev/null; then
-    cargo machete --with-metadata \
-      || fail "cargo machete found unused dependencies"
-    cache_mark "pre-commit:machete" "$fp"
-    pass "cargo machete"
+  # ── 3. Cargo check (fast type/borrow check, no codegen) ───────────────────
+  fp=$(rust_fingerprint)
+  if cache_hit "pre-commit:cargo-check" "$fp"; then
+    skip "cargo check"
   else
-    echo "⚠ cargo-machete not found — skipping (cargo install cargo-machete)"
+    cargo check --workspace --quiet \
+      || fail "cargo check failed"
+    cache_mark "pre-commit:cargo-check" "$fp"
+    pass "cargo check"
   fi
-fi
 
-# ── 5. Cargo test — unit + integration tests (excludes E2E) ─────────────────
-if cache_hit "pre-commit:cargo-test" "$fp"; then
-  skip "cargo test (unit + integration, E2E skipped)"
-else
-  cargo test --workspace --exclude sentinel-e2e --quiet \
-    || fail "cargo test failed"
-  cache_mark "pre-commit:cargo-test" "$fp"
-  pass "cargo test (unit + integration, E2E skipped)"
+  # ── 4. Unused dependency lint (cargo-machete — stable, no compilation) ────
+  if cache_hit "pre-commit:machete" "$fp"; then
+    skip "cargo machete"
+  else
+    if command -v cargo-machete &>/dev/null; then
+      cargo machete --with-metadata \
+        || fail "cargo machete found unused dependencies"
+      cache_mark "pre-commit:machete" "$fp"
+      pass "cargo machete"
+    else
+      echo "⚠ cargo-machete not found — skipping (cargo install cargo-machete)"
+    fi
+  fi
+
+  # ── 5. Cargo test — unit + integration tests (excludes E2E) ───────────────
+  if cache_hit "pre-commit:cargo-test" "$fp"; then
+    skip "cargo test (unit + integration, E2E skipped)"
+  else
+    cargo test --workspace --exclude sentinel-e2e --quiet \
+      || fail "cargo test failed"
+    cache_mark "pre-commit:cargo-test" "$fp"
+    pass "cargo test (unit + integration, E2E skipped)"
+  fi
 fi
 
 echo -e "\n${GREEN}${BOLD}All pre-commit checks passed.${RESET}"

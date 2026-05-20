@@ -21,9 +21,9 @@
   - [How Sentinel prevents it](#how-sentinel-prevents-it)
 - [Usage](#usage)
   - [Installation](#installation)
-  - [Manual wrapping](#manual-wrapping)
-  - [Selective aliasing](#selective-aliasing)
-  - [Shell wrapping (recommended)](#shell-wrapping-recommended)
+  - [Manual](#manual)
+  - [Aliased](#aliased)
+  - [Shell (recommended)](#shell-recommended)
   - [Reviewing activity](#reviewing-activity)
   - [Manuals](#manuals)
 - [Coverage](#coverage)
@@ -134,10 +134,10 @@ brew install stentorian-io/tap/sentinel
 Or build from source — see [CONTRIBUTING.md](CONTRIBUTING.md#build) for
 prerequisites and detailed instructions.
 
-### Manual wrapping
+### Manual
 
 > For trying out and setting baselines only. Use
-> [shell wrapping](#shell-wrapping-recommended) for day-to-day work.
+> [shell](#shell-recommended) for day-to-day work.
 
 Wrap individual commands on a case-by-case basis:
 
@@ -158,7 +158,7 @@ sentinel wrap --learn npm install
 This auto-allows all destinations encountered during the run and records them
 as user rules. Only use this on a project you trust. Requires a TTY.
 
-### Selective aliasing
+### Aliased
 
 Alias specific toolchain commands so they always go through Sentinel:
 
@@ -174,7 +174,7 @@ anything you haven't aliased runs unmonitored and malicious code that clears the
 shell environment can still reach the network. Run the unwrapped command directly
 (e.g. `command npm install`) to bypass the alias for a specific invocation.
 
-### Shell wrapping (recommended)
+### Shell (recommended)
 
 Wrap your entire shell session so every command is protected by default:
 

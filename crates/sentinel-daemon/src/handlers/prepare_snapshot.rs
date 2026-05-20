@@ -88,12 +88,10 @@ pub fn handle_prepare_snapshot(
     let effective_curated = if disabled.is_empty() {
         curated
     } else {
-        if !disabled.is_empty() {
-            info!(
-                disabled_count = disabled.len(),
-                "PrepareSnapshot: filtering disabled curated rules"
-            );
-        }
+        info!(
+            disabled_count = disabled.len(),
+            "PrepareSnapshot: filtering disabled curated rules"
+        );
         &filtered_curated
     };
 

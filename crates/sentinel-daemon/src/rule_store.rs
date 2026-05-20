@@ -23,6 +23,7 @@
 use rusqlite::{params, Connection, OpenFlags, Result as SqlResult};
 use rusqlite_migration::{Migrations, M};
 use sentinel_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -46,6 +47,7 @@ pub struct StoredRule {
 }
 
 const SQL_001_SCHEMA: &str = include_str!("../migrations/001_schema.sql");
+const SQL_002_CURATED_OVERRIDES: &str = include_str!("../migrations/002_curated_overrides.sql");
 
 pub struct RuleStore {
     /// Long-lived connection used for migrations + the write path.
@@ -73,7 +75,10 @@ impl RuleStore {
             let _ = std::fs::set_permissions(db_path, perms);
         }
 
-        let migrations = Migrations::new(vec![M::up(SQL_001_SCHEMA)]);
+        let migrations = Migrations::new(vec![
+            M::up(SQL_001_SCHEMA),
+            M::up(SQL_002_CURATED_OVERRIDES),
+        ]);
         migrations
             .to_latest(&mut conn)
             .map_err(|e| RuleStoreError::Migrate(e.to_string()))?;
@@ -214,6 +219,51 @@ impl RuleStore {
         Ok(out)
     }
 
+    // ==================================================================
+    // Curated rule overrides — disable/enable built-in rules.
+    // ==================================================================
+
+    /// Disable a curated rule by pattern. INSERT OR REPLACE into
+    /// curated_overrides so repeated calls are idempotent.
+    pub fn disable_curated_rule(&self, pattern: &str, reason: &str) -> SqlResult<()> {
+        debug_assert!(!pattern.trim().is_empty(), "pattern must be non-empty");
+        debug_assert!(!reason.trim().is_empty(), "reason must be non-empty");
+        let conn = self.conn.lock().expect("rule store mutex");
+        let now = unix_ms_now();
+        conn.execute(
+            "INSERT OR REPLACE INTO curated_overrides (pattern, disabled, reason, created_at) \
+             VALUES (?1, 1, ?2, ?3)",
+            params![pattern, reason, now],
+        )?;
+        Ok(())
+    }
+
+    /// Re-enable a previously disabled curated rule. Returns true if a
+    /// row was actually deleted (the rule was disabled), false otherwise.
+    pub fn enable_curated_rule(&self, pattern: &str) -> SqlResult<bool> {
+        let conn = self.conn.lock().expect("rule store mutex");
+        let deleted = conn.execute(
+            "DELETE FROM curated_overrides WHERE pattern = ?1",
+            params![pattern],
+        )?;
+        Ok(deleted > 0)
+    }
+
+    /// Return the set of all currently-disabled curated rule patterns.
+    /// Used by PrepareSnapshot to filter out disabled curated rules.
+    pub fn disabled_curated_patterns(&self) -> SqlResult<HashSet<String>> {
+        let conn = self.reader.lock().expect("rule store reader mutex");
+        let mut stmt = conn.prepare(
+            "SELECT pattern FROM curated_overrides WHERE disabled = 1",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut set = HashSet::new();
+        for r in rows {
+            set.insert(r?);
+        }
+        Ok(set)
+    }
+
     pub fn has_user_allow_for(&self, pattern: &str) -> SqlResult<bool> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         let count: i64 = conn.query_row(
@@ -230,4 +280,82 @@ pub fn unix_ms_now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn open_store() -> (TempDir, RuleStore) {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("sentinel.db");
+        let store = RuleStore::open(&db_path).expect("open");
+        (tmp, store)
+    }
+
+    #[test]
+    fn disable_curated_rule_inserts_override() {
+        let (_tmp, store) = open_store();
+        store
+            .disable_curated_rule("registry.npmjs.org", "suspected compromise")
+            .expect("disable");
+        let disabled = store.disabled_curated_patterns().expect("read");
+        assert!(disabled.contains("registry.npmjs.org"));
+    }
+
+    #[test]
+    fn disable_curated_rule_is_idempotent() {
+        let (_tmp, store) = open_store();
+        store
+            .disable_curated_rule("registry.npmjs.org", "first reason")
+            .expect("disable 1");
+        store
+            .disable_curated_rule("registry.npmjs.org", "updated reason")
+            .expect("disable 2");
+        let disabled = store.disabled_curated_patterns().expect("read");
+        assert_eq!(disabled.len(), 1);
+        assert!(disabled.contains("registry.npmjs.org"));
+    }
+
+    #[test]
+    fn enable_curated_rule_removes_override() {
+        let (_tmp, store) = open_store();
+        store
+            .disable_curated_rule("registry.npmjs.org", "compromise")
+            .expect("disable");
+        let was_disabled = store.enable_curated_rule("registry.npmjs.org").expect("enable");
+        assert!(was_disabled, "should have been disabled");
+        let disabled = store.disabled_curated_patterns().expect("read");
+        assert!(disabled.is_empty());
+    }
+
+    #[test]
+    fn enable_curated_rule_not_found() {
+        let (_tmp, store) = open_store();
+        let was_disabled = store.enable_curated_rule("nonexistent.example.com").expect("enable");
+        assert!(!was_disabled, "should not have been disabled");
+    }
+
+    #[test]
+    fn disabled_curated_patterns_returns_empty_when_none() {
+        let (_tmp, store) = open_store();
+        let disabled = store.disabled_curated_patterns().expect("read");
+        assert!(disabled.is_empty());
+    }
+
+    #[test]
+    fn multiple_disabled_patterns() {
+        let (_tmp, store) = open_store();
+        store
+            .disable_curated_rule("registry.npmjs.org", "reason 1")
+            .expect("disable 1");
+        store
+            .disable_curated_rule("pypi.org", "reason 2")
+            .expect("disable 2");
+        let disabled = store.disabled_curated_patterns().expect("read");
+        assert_eq!(disabled.len(), 2);
+        assert!(disabled.contains("registry.npmjs.org"));
+        assert!(disabled.contains("pypi.org"));
+    }
 }

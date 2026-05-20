@@ -45,6 +45,32 @@ pub enum Cmd {
         #[command(subcommand)]
         sub: Option<StatusSub>,
     },
+
+    /// Manage curated (built-in) rules.
+    Rules {
+        #[command(subcommand)]
+        sub: RulesSub,
+    },
+}
+
+/// Rules management sub-verbs.
+#[derive(Subcommand, Debug)]
+pub enum RulesSub {
+    /// Disable a curated (built-in) rule by pattern.
+    /// Use when a trusted source is compromised.
+    Disable {
+        /// The rule pattern to disable (e.g. "registry.npmjs.org").
+        pattern: String,
+
+        /// Reason for disabling (e.g. "suspected compromise 2026-05-20").
+        #[arg(long)]
+        reason: String,
+    },
+    /// Re-enable a previously disabled curated rule.
+    Enable {
+        /// The rule pattern to re-enable.
+        pattern: String,
+    },
 }
 
 /// Status read sub-verbs.

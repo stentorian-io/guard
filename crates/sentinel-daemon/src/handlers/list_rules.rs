@@ -34,8 +34,13 @@ pub fn handle_list_rules(
         Err(e) => return ListRulesReply::err(format!("rule_store: {e}")),
     };
     if req.include_builtins {
+        let disabled = match store.disabled_curated_patterns() {
+            Ok(d) => d,
+            Err(e) => return ListRulesReply::err(format!("rule_store (overrides): {e}")),
+        };
         for e in curated {
-            rows.push(curated_to_rule_row(e));
+            let is_disabled = disabled.contains(&e.pattern);
+            rows.push(curated_to_rule_row(e, is_disabled));
         }
     }
     ListRulesReply::ok(rows)
@@ -53,10 +58,11 @@ fn rule_row_from_storage(row: StoredRule) -> RuleRow {
     }
 }
 
-/// Map a curated AllowlistEntry to the wire shape with `source = "builtin"`.
+/// Map a curated AllowlistEntry to the wire shape with `source = "builtin"`
+/// (or `source = "builtin (disabled)"` when overridden).
 /// Match-type strings mirror the InsertUserRule discriminator vocabulary
 /// (per `RuleStore::insert_user_rule` validation: "exact" | "suffix" | "ip").
-fn curated_to_rule_row(e: &AllowlistEntry) -> RuleRow {
+fn curated_to_rule_row(e: &AllowlistEntry, disabled: bool) -> RuleRow {
     let kind = match e.kind {
         RuleKind::Allow => "allow",
         RuleKind::Deny => "deny",
@@ -66,8 +72,13 @@ fn curated_to_rule_row(e: &AllowlistEntry) -> RuleRow {
         MatchType::Suffix => "suffix",
         MatchType::Ip => "ip",
     };
+    let source = if disabled {
+        "builtin (disabled)".into()
+    } else {
+        "builtin".into()
+    };
     RuleRow {
-        source: "builtin".into(),
+        source,
         kind: kind.into(),
         match_type: match_type.into(),
         pattern: e.pattern.clone(),
@@ -129,6 +140,50 @@ mod tests {
                 assert_eq!(r.kind, "allow");
                 assert_eq!(r.match_type, "suffix");
                 assert_eq!(r.pattern, ".npmjs.org");
+            }
+            ListRulesReply::Err { message, .. } => panic!("unexpected err: {message}"),
+        }
+    }
+
+    #[test]
+    fn disabled_curated_rule_shows_disabled_source() {
+        let (_tmp, store) = empty_store();
+        store
+            .disable_curated_rule(".npmjs.org", "suspected compromise")
+            .expect("disable");
+        let req = ListRules::new(true);
+        let reply = handle_list_rules(&req, &store, &fixture_curated());
+        match reply {
+            ListRulesReply::Ok { rules, .. } => {
+                let disabled: Vec<&RuleRow> = rules
+                    .iter()
+                    .filter(|r| r.source == "builtin (disabled)")
+                    .collect();
+                assert_eq!(disabled.len(), 1, "exactly one disabled builtin row");
+                assert_eq!(disabled[0].pattern, ".npmjs.org");
+            }
+            ListRulesReply::Err { message, .. } => panic!("unexpected err: {message}"),
+        }
+    }
+
+    #[test]
+    fn re_enabled_curated_rule_shows_builtin_source() {
+        let (_tmp, store) = empty_store();
+        store
+            .disable_curated_rule(".npmjs.org", "compromise")
+            .expect("disable");
+        store.enable_curated_rule(".npmjs.org").expect("enable");
+        let req = ListRules::new(true);
+        let reply = handle_list_rules(&req, &store, &fixture_curated());
+        match reply {
+            ListRulesReply::Ok { rules, .. } => {
+                let builtins: Vec<&RuleRow> =
+                    rules.iter().filter(|r| r.source == "builtin").collect();
+                assert_eq!(builtins.len(), 1, "back to builtin after re-enable");
+                assert!(
+                    rules.iter().all(|r| r.source != "builtin (disabled)"),
+                    "no disabled rows after re-enable"
+                );
             }
             ListRulesReply::Err { message, .. } => panic!("unexpected err: {message}"),
         }

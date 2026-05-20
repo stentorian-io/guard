@@ -1,7 +1,7 @@
 //! sentinel — wrap a command under default-deny outbound network enforcement.
 
 use clap::Parser;
-use sentinel_cli::cli::{Cli, Cmd};
+use sentinel_cli::cli::{Cli, Cmd, RulesSub};
 use sentinel_cli::{run_orchestrator, CliError};
 use sentinel_daemon::state_dir::{default_state_dir, socket_path};
 
@@ -37,6 +37,28 @@ fn real_main() -> Result<i32, CliError> {
             }
             sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
             run_orchestrator::run(&sock, &state, argv, learn)
+        }
+        Cmd::Rules { sub } => {
+            sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
+            match sub {
+                RulesSub::Disable { pattern, reason } => {
+                    sentinel_cli::ipc_client::disable_curated_rule_request(
+                        &sock, &pattern, &reason,
+                    )?;
+                    eprintln!("Disabled curated rule: {pattern}");
+                    Ok(0)
+                }
+                RulesSub::Enable { pattern } => {
+                    let was_disabled =
+                        sentinel_cli::ipc_client::enable_curated_rule_request(&sock, &pattern)?;
+                    if was_disabled {
+                        eprintln!("Re-enabled curated rule: {pattern}");
+                    } else {
+                        eprintln!("Rule was not disabled: {pattern}");
+                    }
+                    Ok(0)
+                }
+            }
         }
         Cmd::Status { sub } => {
             match sub {

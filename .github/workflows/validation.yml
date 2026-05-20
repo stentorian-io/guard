@@ -41,6 +41,7 @@ jobs:
     name: Detect code changes
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}

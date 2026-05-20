@@ -7,6 +7,9 @@
 use std::path::{Path, PathBuf};
 
 pub fn default_state_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("SENTINEL_STATE_DIR") {
+        return PathBuf::from(dir);
+    }
     let home = std::env::var_os("HOME").expect("HOME environment variable must be set");
     PathBuf::from(home).join("Library/Application Support/Sentinel")
 }

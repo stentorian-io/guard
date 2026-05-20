@@ -117,9 +117,9 @@ graph LR
 
 ### Rule tiers (precedence order)
 
-1. **CuratedAllow** — built-in allowlist: package registries, CDNs (`crates/sentinel-core/data/allow/`)
+1. **CuratedAllow** — built-in trusted network rules: package registries, CDNs (`crates/sentinel-core/data/trusted-registry-*.yaml`)
 2. **UserAllow** — user-created rules (via prompt or `--learn`), persisted in SQLite
-3. **CuratedDeny** — threat-intel IOCs from OSV/GHSA feeds (`crates/sentinel-core/data/deny/`)
+3. **CuratedDeny** — malicious/suspicious network IOCs from OSV/GHSA feeds (`crates/sentinel-core/data/{malicious,suspicious}-*.yaml`)
 4. **Default Deny** — everything else
 
 ### Security model

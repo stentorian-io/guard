@@ -46,6 +46,7 @@ pub mod replace_nw; // v0.1: Network.framework dlsym + shadow exports
 pub mod replace_syscall; // M003-S01-T04: libc syscall() interpose to catch bypass attempts
 pub mod self_check; // M004-S03: hook binary self-integrity verification
 pub mod snapshot;
+pub mod trusted_runtime; // Issue #1 phase 2: content-hash trusted runtime registry
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use log_buffer::LOG_RING;

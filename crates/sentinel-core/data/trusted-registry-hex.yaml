@@ -1,10 +1,13 @@
 # Elixir / Hex (ALLOW-04)
-- match: exact
+- kind: allow
+  match: exact
   pattern: hex.pm
   reason: "Hex package manager API (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: repo.hex.pm
   reason: "Hex package repository (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: builds.hex.pm
   reason: "Hex dependency builds (ALLOW-04)"

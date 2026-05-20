@@ -5,7 +5,8 @@
 //! bytes in executable `__TEXT` segments. It intentionally does not cache any
 //! behavioral observation about a process run.
 
-use crate::{macho_flags, raw_syscall};
+use crate::trusted_runtime::TrustedRuntimeRegistry;
+use crate::{macho_flags, raw_syscall, trusted_runtime};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -81,6 +82,13 @@ enum HeaderKind {
 }
 
 pub fn classify_path(path: *const libc::c_char) -> BinaryTier {
+    classify_path_with_registry(path, trusted_runtime::registry())
+}
+
+pub fn classify_path_with_registry(
+    path: *const libc::c_char,
+    trusted_registry: &TrustedRuntimeRegistry,
+) -> BinaryTier {
     if path.is_null() {
         return BinaryTier::T2CleanUnknown;
     }
@@ -113,9 +121,15 @@ pub fn classify_path(path: *const libc::c_char) -> BinaryTier {
                 return BinaryTier::T0Blocked(BlockReason::UnsupportedArch);
             }
 
-            match hash_file(path).and_then(|hash| cached_or_scan(path, hash)) {
-                Some(ScanVerdict::Clean) | None => BinaryTier::T2CleanUnknown,
-                Some(ScanVerdict::Suspicious(reason)) => BinaryTier::T3SuspiciousUnknown(reason),
+            match hash_file(path) {
+                Some(hash) if trusted_registry.get(&hash).is_some() => BinaryTier::T1TrustedRuntime,
+                Some(hash) => match cached_or_scan(path, hash) {
+                    Some(ScanVerdict::Clean) | None => BinaryTier::T2CleanUnknown,
+                    Some(ScanVerdict::Suspicious(reason)) => {
+                        BinaryTier::T3SuspiciousUnknown(reason)
+                    }
+                },
+                None => BinaryTier::T2CleanUnknown,
             }
         }
     }
@@ -304,6 +318,8 @@ fn contains_syscall_pattern(bytes: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::trusted_runtime::TrustedRuntimeRegistry;
+    use sha2::{Digest, Sha256};
     use std::ffi::CString;
     use std::io::Write;
     use std::os::unix::ffi::OsStrExt;
@@ -363,6 +379,23 @@ mod tests {
         assert_eq!(
             classify_path(path.as_ptr()),
             BinaryTier::T3SuspiciousUnknown(SuspiciousReason::SyscallInstruction)
+        );
+    }
+
+    #[test]
+    fn classify_path_promotes_trusted_runtime_before_syscall_scan() {
+        let data = thin_header(NATIVE_CPU_TYPE, &[0xaa, 0x01, 0x10, 0x00, 0xd4]);
+        let hash = Sha256::digest(&data);
+        let registry_yaml = format!(
+            "runtimes:\n  - sha256: \"{}\"\n    name: sentinel-test-runtime\n    version: \"0.0.0\"\n    source: unit-test\n",
+            hash.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        );
+        let registry = TrustedRuntimeRegistry::parse(&registry_yaml);
+        let file = write_temp(&data);
+        let path = path_cstring(&file);
+        assert_eq!(
+            classify_path_with_registry(path.as_ptr(), &registry),
+            BinaryTier::T1TrustedRuntime
         );
     }
 

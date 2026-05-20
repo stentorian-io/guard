@@ -1,7 +1,7 @@
 //! ALLOW-06 abuse-pattern deny e2e test.
 //!
 //! `*.workers.dev` is in the curated YAML deny list (
-//! `crates/sentinel-core/data/deny/curated.yaml`). A wrapped
+//! `crates/sentinel-core/data/malicious-curated.yaml`). A wrapped
 //! Node connect attempt to `sentinel-test.workers.dev` MUST be denied — the
 //! deny rule has tier=BuiltinDeny (Tier 0) and is non-overridable per D-26.
 //!

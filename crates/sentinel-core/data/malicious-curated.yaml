@@ -4,92 +4,119 @@
 # abused by supply-chain malware for C2 and exfiltration.
 
 # Cloudflare shared CDN abuse patterns (ALLOW-06)
-- match: suffix
+- kind: deny
+  match: suffix
   pattern: .workers.dev
   reason: "Cloudflare Workers C2/exfil shared subdomain (ALLOW-06)"
-- match: suffix
+- kind: deny
+  match: suffix
   pattern: .pages.dev
   reason: "Cloudflare Pages phishing/exfil shared subdomain (ALLOW-06)"
 
 # Webhook testing services (ALLOW-06)
-- match: exact
+- kind: deny
+  match: exact
   pattern: webhook.site
   reason: "Webhook testing service often used in malware PoCs (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: hookb.in
   reason: "Webhook testing service (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: requestbin.com
   reason: "Webhook testing service (ALLOW-06)"
 
 # Discord / Telegram webhook endpoints (ALLOW-06)
-- match: exact
+- kind: deny
+  match: exact
   pattern: discord.com
   reason: "Discord webhook exfil (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: discordapp.com
   reason: "Legacy Discord API endpoint (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: ptb.discord.com
   reason: "Discord PTB (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: canary.discord.com
   reason: "Discord Canary (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: api.telegram.org
   reason: "Telegram bot API exfil (ALLOW-06)"
 
 # Paste services (ALLOW-06)
-- match: exact
+- kind: deny
+  match: exact
   pattern: pastebin.com
   reason: "Public paste service often used in malware analysis (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: paste.ee
   reason: "Public paste service (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: dpaste.com
   reason: "Public paste service (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: hastebin.com
   reason: "Public paste service (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: ix.io
   reason: "Public paste service (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: 0x0.st
   reason: "Public paste service (ALLOW-06)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: transfer.sh
   reason: "Public paste service (ALLOW-06)"
 
 # DoH / DoT endpoints — DNS-as-egress bypass (ALLOW-07)
-- match: ip
+- kind: deny
+  match: ip
   pattern: 1.1.1.1
   reason: "Cloudflare DoH/DoT (ALLOW-07)"
-- match: ip
+- kind: deny
+  match: ip
   pattern: 1.0.0.1
   reason: "Cloudflare DoH/DoT alt (ALLOW-07)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: cloudflare-dns.com
   reason: "Cloudflare DoH hostname (ALLOW-07)"
-- match: ip
+- kind: deny
+  match: ip
   pattern: 8.8.8.8
   reason: "Google Public DNS DoH (ALLOW-07)"
-- match: ip
+- kind: deny
+  match: ip
   pattern: 8.8.4.4
   reason: "Google Public DNS DoH alt (ALLOW-07)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: dns.google
   reason: "Google DoH hostname (ALLOW-07)"
-- match: ip
+- kind: deny
+  match: ip
   pattern: 9.9.9.9
   reason: "Quad9 DoH (ALLOW-07)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: dns.quad9.net
   reason: "Quad9 DoH hostname (ALLOW-07)"
-- match: exact
+- kind: deny
+  match: exact
   pattern: dns.nextdns.io
   reason: "NextDNS DoH (ALLOW-07)"
-- match: ip
+- kind: deny
+  match: ip
   pattern: 45.90.28.0
   reason: "NextDNS IP (ALLOW-07)"

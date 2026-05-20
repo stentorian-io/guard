@@ -16,8 +16,8 @@
 
 ### Key Paths
 
-- Curated allow rules: `crates/sentinel-core/data/allow/`
-- Curated deny rules: `crates/sentinel-core/data/deny/`
+- Curated trusted network rules: `crates/sentinel-core/data/trusted-registry-*.yaml`
+- Curated malicious/suspicious network rules: `crates/sentinel-core/data/{malicious,suspicious}-*.yaml`
 - Daemon migrations: `crates/sentinel-daemon/migrations/`
 - E2E tests: `crates/sentinel-e2e/tests/`
 - E2E fixtures: `crates/sentinel-e2e/fixtures/`

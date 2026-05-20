@@ -1897,19 +1897,18 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
         match run_opt {
             Some(run)
                 if run.is_tty
-                    && !run.baseline_mode
                     && state
                         .process_tree
                         .get_prompt_channel(&run.run_uuid)
                         .is_some() =>
             {
-                Some(run.run_uuid.clone())
+                Some((run.run_uuid.clone(), run.baseline_mode))
             }
             _ => None,
         }
     };
 
-    if let Some(run_uuid) = park_eligible {
+    if let Some((run_uuid, is_baseline)) = park_eligible {
         let run_for_policy = state.process_tree.get_run(&run_uuid);
         let loaded = run_for_policy
             .and_then(|run| crate::handlers::resolve::load_run_entries(&run.snapshot_path));
@@ -1930,7 +1929,7 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
             return;
         }
 
-        // ConfirmedDeny and BuiltinDeny block without prompting.
+        // ConfirmedDeny and BuiltinDeny block without prompting — even in learn mode.
         if matches!(policy_source,
             sentinel_core::SourceKind::ConfirmedDeny | sentinel_core::SourceKind::BuiltinDeny
         ) {
@@ -1975,6 +1974,23 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
             let reply = ResolveReply::err(format!("denied by policy: {source_kind_str}"));
             if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
                 error!(error = %e, "failed to send ResolveReply (non-promptable deny)");
+            }
+            return;
+        }
+
+        // In learn mode, DefaultDeny and UserDeny fall through: allow the
+        // connection and stage the host for end-of-run review. SuspectDeny
+        // still prompts (handled below).
+        if is_baseline && !matches!(policy_source, sentinel_core::SourceKind::SuspectDeny) {
+            state.baseline_staging.record_allow(
+                &run_uuid,
+                "exact",
+                &req.host,
+                "learn: recorded by sentinel wrap --learn",
+            );
+            let reply = crate::handlers::resolve::handle_resolve(&req.host, req.port);
+            if let Err(e) = write_tagged(stream, MessageTag::Resolve, &reply) {
+                error!(error = %e, "failed to send ResolveReply (learn-mode allow)");
             }
             return;
         }
@@ -2105,7 +2121,7 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
             .as_ref()
             .and_then(|n| state.process_tree.get_run(&n.run_uuid));
         match run_opt {
-            Some(run) if !run.baseline_mode => {
+            Some(run) => {
                 match crate::handlers::resolve::load_run_entries(&run.snapshot_path) {
                     Some(entries) => {
                         let (verdict, source) = sentinel_core::policy::evaluate_policy(
@@ -2116,12 +2132,31 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
                         );
                         match verdict {
                             sentinel_core::Verdict::Deny => {
-                                debug!(
-                                    host = %req.host,
-                                    source = ?source,
-                                    "Resolve denied by policy gate"
-                                );
-                                Some((run.run_uuid.clone(), source, entries))
+                                // In learn mode, only hard-deny sources block;
+                                // everything else is allowed and staged for review.
+                                if run.baseline_mode
+                                    && !matches!(
+                                        source,
+                                        sentinel_core::SourceKind::ConfirmedDeny
+                                            | sentinel_core::SourceKind::BuiltinDeny
+                                            | sentinel_core::SourceKind::HardRule(_)
+                                    )
+                                {
+                                    state.baseline_staging.record_allow(
+                                        &run.run_uuid,
+                                        "exact",
+                                        &req.host,
+                                        "learn: recorded by sentinel wrap --learn",
+                                    );
+                                    None
+                                } else {
+                                    debug!(
+                                        host = %req.host,
+                                        source = ?source,
+                                        "Resolve denied by policy gate"
+                                    );
+                                    Some((run.run_uuid.clone(), source, entries))
+                                }
                             }
                             sentinel_core::Verdict::Allow => None,
                         }

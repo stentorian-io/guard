@@ -11,10 +11,10 @@ use crate::CliError;
 use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
-    DeleteInstallArtifacts, DeleteInstallArtifactsReply,
+    BaselineCommit, BaselineCommitReply, DeleteInstallArtifacts, DeleteInstallArtifactsReply,
     DisableCuratedRule, DisableCuratedRuleReply, EnableCuratedRule, EnableCuratedRuleReply,
     InsertUserRule, InsertUserRuleReply, InstallArtifact,
-    ListRules, ListRulesReply, PrepareSnapshot, ReadInstallArtifacts,
+    ListRules, ListRulesReply, PrepareSnapshot, ProposedRule, ReadInstallArtifacts,
     ReadInstallArtifactsReply, RegisterRoot, Reply, RuleRow, SnapshotReply,
 };
 use socket2::{Domain, SockAddr, Socket, Type};
@@ -31,6 +31,7 @@ pub(crate) const TAG_PROMPT_CHANNEL_INIT: u8 = 0x0A;
 const TAG_INSERT_USER_RULE: u8 = 0x0B;
 const TAG_READ_INSTALL_ARTIFACTS: u8 = 0x0C;
 const TAG_LIST_RULES: u8 = 0x0E;
+const TAG_BASELINE_COMMIT: u8 = 0x0D;
 const TAG_DELETE_INSTALL_ARTIFACTS: u8 = 0x11;
 const TAG_DISABLE_CURATED_RULE: u8 = 0x16;
 const TAG_ENABLE_CURATED_RULE: u8 = 0x17;
@@ -408,6 +409,26 @@ pub fn enable_curated_rule_request(
         EnableCuratedRuleReply::Ok { was_disabled, .. } => Ok(was_disabled),
         EnableCuratedRuleReply::Err { message, .. } => {
             Err(CliError::Other(format!("EnableCuratedRule: {message}")))
+        }
+    }
+}
+
+/// Commit baseline staging for a learn-mode run. Returns the proposed rules
+/// accumulated during the run.
+pub fn baseline_commit_request(
+    sock: &Path,
+    run_uuid: &str,
+) -> Result<Vec<ProposedRule>, CliError> {
+    let req = BaselineCommit {
+        schema_version: sentinel_ipc::IPC_SCHEMA_V3,
+        run_uuid: run_uuid.to_string(),
+    };
+    let reply: BaselineCommitReply = send_tagged_request(sock, TAG_BASELINE_COMMIT, &req)?;
+    match reply {
+        BaselineCommitReply::Ok { proposed_rules, .. } => Ok(proposed_rules),
+        BaselineCommitReply::Err { message, .. } => {
+            Err(CliError::Other(format!("BaselineCommit: {message}")))
+
         }
     }
 }

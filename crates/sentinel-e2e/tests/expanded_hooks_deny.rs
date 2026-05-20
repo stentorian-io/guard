@@ -70,7 +70,7 @@ fn send_to_non_allowed_host_denied() {
         output.status.code()
     );
     assert!(
-        stdout.contains("DENIED") || stdout.contains("EHOSTUNREACH"),
+        stdout.contains("DENIED") || stdout.contains("EHOSTUNREACH") || stdout.contains("DNS-DENIED"),
         "expected denial marker in output; stdout={stdout}"
     );
 }

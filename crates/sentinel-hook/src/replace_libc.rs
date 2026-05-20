@@ -157,6 +157,24 @@ fn sockaddr_bytes(
     Some((buf, len))
 }
 
+/// Build a port-independent cache key from raw sockaddr bytes.
+///
+/// The DNS cache maps (address-family, IP) → hostname. Port must NOT be part
+/// of the key because `getaddrinfo` is typically called with service=NULL
+/// (port 0) while `connect` uses the real port (e.g., 443). Including port
+/// in the key causes every lookup to miss. Zeroing bytes [2..4] (the port
+/// field in both sockaddr_in and sockaddr_in6) normalizes the key.
+fn cache_key(sa: &[u8], sa_len: usize) -> ([u8; MAX_SOCKADDR_BYTES], usize) {
+    let mut key = [0u8; MAX_SOCKADDR_BYTES];
+    let n = sa_len.min(MAX_SOCKADDR_BYTES);
+    key[..n].copy_from_slice(&sa[..n]);
+    if n >= 4 {
+        key[2] = 0;
+        key[3] = 0;
+    }
+    (key, n)
+}
+
 // ---- connect ----
 
 #[unsafe(no_mangle)]
@@ -397,9 +415,9 @@ pub unsafe extern "C" fn sentinel_getaddrinfo(
         };
 
         // Populate the DNS cache with this address → hostname mapping.
-        // The cache key is the raw sockaddr bytes (sa_len bytes of the wire).
-        let cache_key_len = sa_len.min(SOCKADDR_WIRE_LEN);
-        with_cache(|c| c.insert(&wire[..cache_key_len], host.as_bytes()));
+        let ck_len = sa_len.min(SOCKADDR_WIRE_LEN);
+        let (ck, ck_n) = cache_key(wire, ck_len);
+        with_cache(|c| c.insert(&ck[..ck_n], host.as_bytes()));
 
         // Allocate addrinfo + embedded sockaddr in a single block.
         let ai_size = core::mem::size_of::<libc::addrinfo>();
@@ -614,8 +632,9 @@ unsafe fn notify_deny_for_sockaddr(
             return;
         }
     };
+    let (ck, ck_n) = cache_key(&sa_buf, sa_n);
     let host_opt = with_cache(|c| {
-        c.lookup(&sa_buf[..sa_n]).map(|h| {
+        c.lookup(&ck[..ck_n]).map(|h| {
             let mut buf = [0u8; MAX_HOSTNAME];
             let len = h.len().min(MAX_HOSTNAME);
             buf[..len].copy_from_slice(&h[..len]);
@@ -654,10 +673,9 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, S
     // Look up the hostname in the per-process getaddrinfo cache. A cache hit
     // means the sockaddr was previously resolved via getaddrinfo for THIS
     // process — the tier-walk evaluator's `resolved_via_getaddrinfo` flag.
+    let (ck, ck_n) = cache_key(&sa_buf, sa_n);
     let host = with_cache(|c| {
-        // Copy the hostname out of the cache to avoid holding the lock
-        // across the policy evaluation.
-        c.lookup(&sa_buf[..sa_n]).map(|h| {
+        c.lookup(&ck[..ck_n]).map(|h| {
             let mut buf = [0u8; MAX_HOSTNAME];
             buf[..h.len()].copy_from_slice(h);
             (buf, h.len())
@@ -723,17 +741,16 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, S
 
                 match send_resolve_sync(&entry.pattern, port, RESOLVE_TIMEOUT_MS) {
                     Ok(addrs) => {
-                        // Compare each returned sockaddr wire buffer against sa_buf[..sa_n].
-                        // The daemon's sockaddr_to_wire uses sa_len as byte[0], so the
-                        // match key is the first sa_n bytes of each wire buffer.
+                        // Compare each returned sockaddr wire buffer against
+                        // sa_buf, ignoring port (bytes [2..4]). The daemon
+                        // resolves with the connect-time port but the wire
+                        // may differ in edge cases; the address family + IP
+                        // are the meaningful identity.
                         for wire_addr in &addrs {
-                            // The wire addr is always SOCKADDR_WIRE_LEN bytes; compare
-                            // up to sa_n bytes (the caller's addrlen).
                             let cmp_len = sa_n.min(SOCKADDR_WIRE_LEN);
-                            if &wire_addr[..cmp_len] == &sa_buf[..cmp_len] {
-                                // Match found: populate the cache so future connects
-                                // to the same sockaddr are cache-hit-only.
-                                with_cache(|c| c.insert(&sa_buf[..sa_n], entry.pattern.as_bytes()));
+                            let (wk, _) = cache_key(wire_addr, cmp_len);
+                            if wk[..cmp_len] == ck[..cmp_len] {
+                                with_cache(|c| c.insert(&ck[..ck_n], entry.pattern.as_bytes()));
                                 let mut hbuf = [0u8; MAX_HOSTNAME];
                                 let hlen = entry.pattern.len().min(MAX_HOSTNAME);
                                 hbuf[..hlen].copy_from_slice(&entry.pattern.as_bytes()[..hlen]);

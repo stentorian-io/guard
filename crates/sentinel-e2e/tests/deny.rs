@@ -134,21 +134,20 @@ fn node_connect_to_non_allowlisted_host_is_denied() {
 
     // CRITICAL ASSERTION:
     // - Sentinel-deny at libc connect: errno = EHOSTUNREACH (D-10).
-    // - Sentinel-deny at getaddrinfo: errno = EAI_FAIL (D-10) -- Node's
-    //   dns layer surfaces this as ENOTFOUND (because EAI_FAIL is
-    //   c-ares's "non-recoverable failure" path, mapped to ENOTFOUND).
+    // - Sentinel-deny at getaddrinfo: Node surfaces EAI_FAIL directly
+    //   (libuv thread pool path) or as ENOTFOUND (c-ares path).
     // - ECONNREFUSED would mean Sentinel let the connect through to the
     //   network layer -- that's a TEST BUG (and a Sentinel regression).
     // Because DENY_HOST resolves outside Sentinel (we confirmed at gate
-    // time), ENOTFOUND inside Sentinel is unambiguous evidence of
-    // Sentinel firing at the getaddrinfo layer.
+    // time), any of these inside Sentinel is unambiguous evidence of
+    // Sentinel firing.
     let sentinel_deny_errno =
-        stdout.contains("EHOSTUNREACH") || stdout.contains("ENOTFOUND");
+        stdout.contains("EHOSTUNREACH") || stdout.contains("ENOTFOUND") || stdout.contains("EAI_FAIL");
     assert!(
         sentinel_deny_errno,
-        "expected EHOSTUNREACH (libc deny) or ENOTFOUND (getaddrinfo deny) in script \
-         output -- these are Sentinel's deny errnos for a host that DOES resolve \
-         outside Sentinel. Got: {stdout}"
+        "expected EHOSTUNREACH (libc deny), ENOTFOUND, or EAI_FAIL (getaddrinfo deny) \
+         in script output -- these are Sentinel's deny errnos for a host that DOES \
+         resolve outside Sentinel. Got: {stdout}"
     );
 
     let test_bug_errno = stdout.contains("ECONNREFUSED");

@@ -18,7 +18,6 @@ use sentinel_ipc::SnapshotReply;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PrepareError {
@@ -39,7 +38,22 @@ pub fn handle_prepare_snapshot(
     is_tty: bool,
     baseline_mode: bool,
 ) -> SnapshotReply {
-    let run_uuid = Uuid::new_v4().to_string();
+    let run_uuid = {
+        let mut buf = [0u8; 16];
+        if getrandom::getrandom(&mut buf).is_err() {
+            return SnapshotReply::err("getrandom failed");
+        }
+        buf[6] = (buf[6] & 0x0f) | 0x40; // version 4
+        buf[8] = (buf[8] & 0x3f) | 0x80; // variant 1
+        format!(
+            "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            buf[0], buf[1], buf[2], buf[3],
+            buf[4], buf[5],
+            buf[6], buf[7],
+            buf[8], buf[9],
+            buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
+        )
+    };
 
     let cwd = match validate_cwd(cwd) {
         Ok(p) => p,

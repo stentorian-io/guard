@@ -18,7 +18,6 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = { workspace = true }
-nix = { workspace = true }
 libc = { workspace = true }
 socket2 = { workspace = true }
 sentinel-core = { workspace = true }

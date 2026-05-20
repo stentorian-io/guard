@@ -1,0 +1,20 @@
+# Cache-warming workflow — runs on main after squash-merge to populate the
+# shared Cargo cache so PR branches start warm instead of cold.
+
+name: cache-warm
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  warm-cache:
+    name: Warm Cargo cache
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: validation
+      - run: cargo check --workspace --release

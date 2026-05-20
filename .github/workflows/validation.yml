@@ -131,6 +131,29 @@ jobs:
       - uses: taiki-e/install-action@cargo-machete
       - run: cargo machete --with-metadata
 
+  # ── Security checks ─────────────────────────────────────────────────────
+  # Always run on every PR regardless of changed paths — secrets and CVEs
+  # can hide in any file or transitive dependency.
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: trufflesecurity/trufflehog@v3.88.26
+        with:
+          extra_args: --only-verified
+
+  cargo-audit:
+    name: Dependency CVE audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   validation:
     name: Validation suite
     needs: changes
@@ -245,6 +268,8 @@ jobs:
       - lint-markdown
       - lint-test-env-vars
       - lint-unused-deps
+      - secret-scan
+      - cargo-audit
       - validation
     runs-on: ubuntu-latest
     steps:

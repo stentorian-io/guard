@@ -5,7 +5,6 @@
     <strong>Installing dependencies shouldn't feel like Russian Roulette</strong>
   </p>
   <p align="center">
-    <a href="https://github.com/stentorian-io/sentinel/actions/workflows/validation.yml"><img src="https://github.com/stentorian-io/sentinel/actions/workflows/validation.yml/badge.svg" alt="CI"></a>
     <a href="#license"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License"></a>
   </p>
 </p>

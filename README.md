@@ -217,6 +217,18 @@ sentinel status rules                    # user rules only
 sentinel status rules --include-built-in # include registry allowlists
 ```
 
+Disable a built-in allow rule (e.g. when a registry is compromised):
+
+```sh
+sentinel status rules --disable registry.npmjs.org --reason "suspected compromise"
+```
+
+Re-enable a previously disabled built-in rule:
+
+```sh
+sentinel status rules --enable registry.npmjs.org
+```
+
 View persistence-write events (files written during a wrapped run):
 
 ```sh

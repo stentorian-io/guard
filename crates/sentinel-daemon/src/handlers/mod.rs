@@ -8,6 +8,8 @@
 
 pub mod baseline_commit;
 pub mod delete_install_artifacts;
+pub mod disable_curated_rule;
+pub mod enable_curated_rule;
 pub mod insert_user_rule;
 pub mod list_rules;
 pub mod prepare_snapshot;

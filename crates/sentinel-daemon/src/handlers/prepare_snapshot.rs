@@ -64,6 +64,37 @@ pub fn handle_prepare_snapshot(
     };
     let cwd = cwd.as_path();
 
+    // 0. Load disabled curated patterns and filter curated rules.
+    let disabled = match rule_store.disabled_curated_patterns() {
+        Ok(d) => d,
+        Err(e) => {
+            warn!(
+                error = %e,
+                "PrepareSnapshot: disabled_curated_patterns read failed; proceeding with all curated rules"
+            );
+            std::collections::HashSet::new()
+        }
+    };
+    let filtered_curated: Vec<_> = if disabled.is_empty() {
+        // Fast path: no overrides, borrow the slice directly later.
+        Vec::new()
+    } else {
+        curated
+            .iter()
+            .filter(|e| !disabled.contains(&e.pattern))
+            .cloned()
+            .collect()
+    };
+    let effective_curated = if disabled.is_empty() {
+        curated
+    } else {
+        info!(
+            disabled_count = disabled.len(),
+            "PrepareSnapshot: filtering disabled curated rules"
+        );
+        &filtered_curated
+    };
+
     // 1. SQLite user rules.
     let user_entries = match rule_store.all_user_rules() {
         Ok(r) => r,
@@ -109,9 +140,9 @@ pub fn handle_prepare_snapshot(
 
     // 3. Concatenate + sort by tier.
     let mut entries: Vec<AllowlistEntry> = Vec::with_capacity(
-        curated.len() + user_entries.len() + lockfile_entries.len(),
+        effective_curated.len() + user_entries.len() + lockfile_entries.len(),
     );
-    entries.extend_from_slice(curated);
+    entries.extend_from_slice(effective_curated);
     entries.extend(user_entries);
     entries.extend(lockfile_entries);
     entries.sort_by_key(|e| e.tier);

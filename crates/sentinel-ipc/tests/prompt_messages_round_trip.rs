@@ -181,3 +181,18 @@ fn status_reply_full_ok_round_trip() {
     );
     round_trip(&r);
 }
+
+#[test]
+fn disable_curated_rule_round_trip() {
+    round_trip(&DisableCuratedRule::new("registry.npmjs.org", "suspected compromise"));
+    round_trip(&DisableCuratedRuleReply::ok());
+    round_trip(&DisableCuratedRuleReply::err("no curated rule matches"));
+}
+
+#[test]
+fn enable_curated_rule_round_trip() {
+    round_trip(&EnableCuratedRule::new("registry.npmjs.org"));
+    round_trip(&EnableCuratedRuleReply::ok(true));
+    round_trip(&EnableCuratedRuleReply::ok(false));
+    round_trip(&EnableCuratedRuleReply::err("pattern must be non-empty"));
+}

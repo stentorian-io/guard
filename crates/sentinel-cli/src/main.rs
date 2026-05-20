@@ -58,9 +58,20 @@ fn real_main() -> Result<i32, CliError> {
                     sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
                     sentinel_cli::status::run_status(&sock, &state)
                 }
-                Some(sentinel_cli::cli::StatusSub::Rules { include_built_in }) => {
+                Some(sentinel_cli::cli::StatusSub::Rules {
+                    include_built_in,
+                    disable,
+                    enable,
+                    reason,
+                }) => {
                     sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
-                    sentinel_cli::status::rules::run(&sock, include_built_in)
+                    sentinel_cli::status::rules::run(
+                        &sock,
+                        include_built_in,
+                        disable,
+                        enable,
+                        reason,
+                    )
                 }
                 Some(sentinel_cli::cli::StatusSub::Review { run_uuid }) => {
                     sentinel_cli::ensure_daemon::ensure_daemon(&sock, &state)?;

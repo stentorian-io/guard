@@ -52,11 +52,24 @@ pub enum Cmd {
 pub enum StatusSub {
     /// Stream the JSONL forensic log (pipe to `tail -f` for follow mode).
     Logs,
-    /// List active rules.
+    /// List active rules. Use --disable/--enable to manage built-in rules.
     Rules {
         /// Include built-in registry-allowlist rules.
         #[arg(long)]
         include_built_in: bool,
+
+        /// Disable a built-in rule by pattern (e.g. "registry.npmjs.org").
+        /// Use when a trusted source is compromised. Requires --reason.
+        #[arg(long, requires = "reason")]
+        disable: Option<String>,
+
+        /// Re-enable a previously disabled built-in rule by pattern.
+        #[arg(long, conflicts_with = "disable")]
+        enable: Option<String>,
+
+        /// Reason for disabling (required with --disable).
+        #[arg(long, requires = "disable")]
+        reason: Option<String>,
     },
     /// View denials from a specific run_uuid.
     Denials {

@@ -21,6 +21,7 @@
 
 use crate::exec_policy::{self, ExecDecision};
 use crate::ipc_client::{copy_cstr_to_buf, send_exec_blocked, send_exec_event_sync};
+use crate::macho_scan::BlockReason;
 use crate::raw_syscall;
 use crate::reentrancy::IN_HOOK;
 use core::ffi::{c_char, c_int};
@@ -62,11 +63,11 @@ fn current_audit_token_wire() -> AuditTokenWire {
     AuditTokenWire { val }
 }
 
-fn report_exec_blocked(path: *const c_char) {
+fn report_exec_blocked(path: *const c_char, reason: BlockReason) {
     let mut path_buf = [0u8; 1024];
     let n = copy_cstr_to_buf(path, &mut path_buf);
     let token = current_audit_token_wire();
-    send_exec_blocked(token, &path_buf[..n], "hardened-runtime");
+    send_exec_blocked(token, &path_buf[..n], reason.as_str());
 }
 
 /// Send an ExecEvent IPC for `path`. Best-effort: errors are silently dropped
@@ -94,9 +95,11 @@ pub unsafe extern "C" fn sentinel_execve(
             return unsafe { raw_syscall::raw_execve(path, argv, envp) };
         }
     };
-    if let ExecDecision::BlockHardened = exec_policy::check_exec_target(path) {
-        report_exec_blocked(path);
-        unsafe { *libc::__error() = libc::EACCES; }
+    if let ExecDecision::Block(reason) = exec_policy::check_exec_target(path) {
+        report_exec_blocked(path, reason);
+        unsafe {
+            *libc::__error() = libc::EACCES;
+        }
         return -1;
     }
     let pm_env = unsafe { crate::pm_env_filter::extract_pm_env_from_envp(envp) };
@@ -113,9 +116,11 @@ pub unsafe extern "C" fn sentinel_execvp(
         Some(g) => g,
         None => return unsafe { libc::execvp(path, argv) },
     };
-    if let ExecDecision::BlockHardened = exec_policy::check_exec_target(path) {
-        report_exec_blocked(path);
-        unsafe { *libc::__error() = libc::EACCES; }
+    if let ExecDecision::Block(reason) = exec_policy::check_exec_target(path) {
+        report_exec_blocked(path, reason);
+        unsafe {
+            *libc::__error() = libc::EACCES;
+        }
         return -1;
     }
     let pm_env = crate::pm_env_filter::extract_pm_env_from_environ();
@@ -129,9 +134,11 @@ pub unsafe extern "C" fn sentinel_execv(path: *const c_char, argv: *const *const
         Some(g) => g,
         None => return unsafe { libc::execv(path, argv) },
     };
-    if let ExecDecision::BlockHardened = exec_policy::check_exec_target(path) {
-        report_exec_blocked(path);
-        unsafe { *libc::__error() = libc::EACCES; }
+    if let ExecDecision::Block(reason) = exec_policy::check_exec_target(path) {
+        report_exec_blocked(path, reason);
+        unsafe {
+            *libc::__error() = libc::EACCES;
+        }
         return -1;
     }
     let pm_env = crate::pm_env_filter::extract_pm_env_from_environ();

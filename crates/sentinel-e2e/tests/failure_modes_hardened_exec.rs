@@ -1,25 +1,16 @@
-//! v0.5 — hardened-binary failure mode.
-//!
-//! Verifies that when a wrapped command exec's into an Apple-signed
-//! hardened-runtime binary, DYLD env vars are stripped and Sentinel detects
-//! and surfaces the coverage gap. The gap appears in three places:
-//!   - daemon stderr (tracing event with a coverage-gap marker)
-//!   - JSONL log (Gap row with the recorded `gap_kind`)
-//!   - `sentinel status` output (recent_gaps surface)
-//!
-use std::process::Command;
-use std::time::Duration;
+//! Issue #1 phase 1 closes the old hardened-runtime coverage gap by blocking
+//! T0 exec targets before DYLD stripping can occur.
 
-use sentinel_e2e::{
-    DaemonHarness, cargo_target_dir, resolve_cli, resolve_dylib,
-};
+use std::process::Command;
+
+use sentinel_e2e::{DaemonHarness, cargo_target_dir, resolve_cli, resolve_dylib};
 
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
-fn hardened_runtime_exec_surfaces_coverage_gap() {
+fn hardened_runtime_exec_is_blocked_before_coverage_gap() {
     let cli = resolve_cli();
     let dylib = resolve_dylib();
-    let mut harness = DaemonHarness::start().expect("start daemon");
+    let harness = DaemonHarness::start().expect("start daemon");
 
     // Start Sentinel on a non-hardened helper so the hook loads, then have the
     // helper exec an Apple-signed hardened binary. Starting Sentinel directly
@@ -42,87 +33,21 @@ fn hardened_runtime_exec_surfaces_coverage_gap() {
         .env("SENTINEL_STATE_DIR", &harness.state_dir)
         .output()
         .expect("run sentinel");
-    // /usr/bin/env is allowed by policy and may succeed; the assertion is that
-    // the daemon sees the child coverage gap after DYLD is stripped on spawn.
-    eprintln!("[hardened-exec] target exit: {:?}", out.status.code());
-    eprintln!(
-        "[hardened-exec] target stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
 
-    // Allow gap_detector + log_writer mpsc to drain (env_not_propagated.rs
-    // canon: 500ms margin).
-    std::thread::sleep(Duration::from_millis(500));
-
-    // -----------------------------------------------------------------------
-    // ASSERTION 1: daemon stderr carries a tracing event mentioning the gap.
-    // -----------------------------------------------------------------------
-    let stderr = harness.drain_stderr();
-    let stderr_lc = stderr.to_ascii_lowercase();
-    let stderr_has_gap =
-        stderr_lc.contains("hardened-runtime") || stderr_lc.contains("env-not-propagated");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr_has_gap,
-        "daemon stderr missing coverage-gap marker.\nstderr:\n{stderr}",
+        !out.status.success(),
+        "hardened-runtime spawn should be blocked; stdout={stdout}\nstderr={stderr}"
     );
-
-    // -----------------------------------------------------------------------
-    // ASSERTION 2: JSONL log carries a Gap row with the recorded gap_kind.
-    // -----------------------------------------------------------------------
-    let log = harness
-        .home
-        .path()
-        .join("Library/Logs/Sentinel/sentinel.log");
-    let content = std::fs::read_to_string(&log).unwrap_or_default();
-    let has_gap_row = content.lines().any(|l| {
-        l.contains(r#""gap_kind":"hardened-runtime""#)
-            || l.contains(r#""gap_kind": "hardened-runtime""#)
-            || l.contains(r#""gap_kind":"env-not-propagated""#)
-            || l.contains(r#""gap_kind": "env-not-propagated""#)
-    });
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "expected exit 2 (EACCES block); got {:?}\nstdout={stdout}\nstderr={stderr}",
+        out.status.code()
+    );
     assert!(
-        has_gap_row,
-        "no JSONL Gap row with hardened-runtime or env-not-propagated gap_kind;\n\
-         log path: {}\n\
-         contents:\n{content}\n\
-         daemon stderr:\n{stderr}",
-        log.display()
+        stdout.contains("POSIX-SPAWN-BLOCKED-EACCES"),
+        "expected POSIX-SPAWN-BLOCKED-EACCES marker; stdout={stdout}\nstderr={stderr}"
     );
-
-    // -----------------------------------------------------------------------
-    // ASSERTION 3: `sentinel status` surfaces the gap.
-    // -----------------------------------------------------------------------
-    let status_out = Command::new(&cli)
-        .arg("status")
-        .env_clear()
-        .env("HOME", harness.home.path())
-        .env("SENTINEL_STATE_DIR", &harness.state_dir)
-        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-        .output()
-        .expect("run sentinel status");
-    let status_stdout = String::from_utf8_lossy(&status_out.stdout);
-    let status_lc = status_stdout.to_ascii_lowercase();
-    // WR-08: tighten ASSERTION 3. The previous predicate ('hardened' OR
-    // 'gap') was too lenient — 'gap' is a broad word that could match any
-    // unrelated text in verbose status output (e.g. 'language gap',
-    // 'release gap', help-text mentioning gaps). Match the exact markers
-    // that sentinel-cli/src/status.rs:188-197 emits:
-    //   - 'Recent gaps (N):' header
-    //   - the literal gap_kind printed in column 1
-    // We require BOTH the section header AND the specific gap_kind, so a
-    // pristine verbose status with no gaps does NOT pass.
-    let has_recent_gaps_header = status_lc.contains("recent gaps");
-    let has_gap_kind =
-        status_lc.contains("hardened-runtime") || status_lc.contains("env-not-propagated");
-    assert!(
-        has_recent_gaps_header && has_gap_kind,
-        "sentinel status did not surface the coverage gap;\n\
-         expected: 'Recent gaps (' header AND a coverage gap_kind\n\
-         has_recent_gaps_header={has_recent_gaps_header} \
-         has_gap_kind={has_gap_kind}\n\
-         status stdout:\n{status_stdout}\n\
-         daemon stderr:\n{stderr}",
-    );
-
-    drop(harness);
 }

@@ -36,7 +36,7 @@ pub fn run(
     // even while the render thread is parked in `next_prompt`.
     let shared_channel: crate::sigint_handler::SharedChannel = Arc::new(Mutex::new(None));
     let mut prompt_reader: Option<crate::prompt_channel::PromptReader> = None;
-    let inflight_handle: Option<crate::prompt_channel::InflightPrompts> = if is_tty && !learn_mode {
+    let inflight_handle: Option<crate::prompt_channel::InflightPrompts> = if is_tty {
         match crate::prompt_channel::PromptChannel::open(sock, &run_uuid) {
             Ok(mut channel) => {
                 let inflight = channel.inflight_handle();
@@ -95,7 +95,8 @@ pub fn run(
     let _sigint_handle =
         crate::sigint_handler::install(inflight_for_sigint, Arc::clone(&shared_channel), pgid)?;
 
-    // Render-loop thread (only when interactive AND not learn-mode).
+    // Render-loop thread (interactive runs, including learn-mode for
+    // SuspectDeny prompts).
     //
     // The thread owns the `PromptReader` directly and reads without
     // holding the SharedChannel mutex. Writes (`answer`/`cancel`) go through
@@ -139,7 +140,96 @@ pub fn run(
     if let Some(h) = render_handle {
         let _ = h.join();
     }
+
+    if learn_mode {
+        present_learn_review(sock, &run_uuid);
+    }
+
     Ok(exit_code)
+}
+
+fn present_learn_review(sock: &Path, run_uuid: &str) {
+    let proposed = match crate::ipc_client::baseline_commit_request(sock, run_uuid) {
+        Ok(rules) => rules,
+        Err(e) => {
+            tracing::warn!(error = %e, "baseline commit failed; no learn-mode review");
+            return;
+        }
+    };
+    if proposed.is_empty() {
+        eprintln!("\nsentinel --learn: no new hosts observed during this run.");
+        return;
+    }
+    eprintln!(
+        "\nsentinel --learn: {} host(s) observed. Review each to create rules:\n",
+        proposed.len()
+    );
+
+    let mut allowed: u64 = 0;
+    let mut denied: u64 = 0;
+    let mut skipped: u64 = 0;
+
+    for rule in &proposed {
+        loop {
+            eprint!(
+                "  {} — [a]llow / [d]eny / [s]kip / [q]uit > ",
+                rule.pattern
+            );
+            std::io::Write::flush(&mut std::io::stderr()).ok();
+            let mut line = String::new();
+            let bytes_read = std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut line)
+                .unwrap_or(0);
+            if bytes_read == 0 {
+                eprintln!(
+                    "Learn review: {allowed} allow, {denied} deny, {skipped} skipped (stdin closed)."
+                );
+                return;
+            }
+            let c = line.trim().to_lowercase().chars().next().unwrap_or('s');
+            match c {
+                'a' => {
+                    let reason = format!("user-approved from learn run {run_uuid}");
+                    match crate::ipc_client::insert_user_rule_request(
+                        sock,
+                        "allow",
+                        &rule.match_type,
+                        &rule.pattern,
+                        &reason,
+                    ) {
+                        Ok(_) => allowed += 1,
+                        Err(e) => eprintln!("    failed to insert allow rule: {e}"),
+                    }
+                    break;
+                }
+                'd' => {
+                    let reason = format!("user-denied from learn run {run_uuid}");
+                    match crate::ipc_client::insert_user_rule_request(
+                        sock,
+                        "deny",
+                        &rule.match_type,
+                        &rule.pattern,
+                        &reason,
+                    ) {
+                        Ok(_) => denied += 1,
+                        Err(e) => eprintln!("    failed to insert deny rule: {e}"),
+                    }
+                    break;
+                }
+                's' => {
+                    skipped += 1;
+                    break;
+                }
+                'q' => {
+                    eprintln!(
+                        "Learn review: {allowed} allow, {denied} deny, {skipped} skipped (quit early)."
+                    );
+                    return;
+                }
+                _ => eprintln!("  invalid; enter a, d, s, or q"),
+            }
+        }
+    }
+    eprintln!("Learn review: {allowed} allow, {denied} deny, {skipped} skipped.");
 }
 
 fn capture_pm_env_from_current_env() -> Vec<(String, String)> {

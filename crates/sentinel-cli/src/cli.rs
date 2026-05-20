@@ -30,8 +30,9 @@ pub struct Cli {
 pub enum Cmd {
     /// Wrap a command under default-deny network enforcement.
     Wrap {
-        /// Auto-allow unknown destinations and record them as user rules.
-        /// TTY required; refuses to run in non-interactive environments.
+        /// Observe unknown destinations and present them for review after the
+        /// run. Curated-deny and confirmed intel threats still block; suspect
+        /// intel prompts interactively. TTY required.
         #[arg(long)]
         learn: bool,
 

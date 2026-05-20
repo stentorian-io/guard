@@ -189,7 +189,7 @@ fn status_logs_bare_parses() {
 fn status_rules_include_built_in_parses() {
     let cli = Cli::try_parse_from(["sentinel", "status", "rules", "--include-built-in"]).expect("parse");
     match cli.cmd {
-        Cmd::Status { sub: Some(StatusSub::Rules { include_built_in: true }), .. } => {}
+        Cmd::Status { sub: Some(StatusSub::Rules { include_built_in: true, .. }), .. } => {}
         other => panic!("expected Status{{Rules,include_built_in}}, got {other:?}"),
     }
 }

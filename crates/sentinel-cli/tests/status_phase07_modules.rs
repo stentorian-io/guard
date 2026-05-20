@@ -5,7 +5,7 @@ use std::path::Path;
 
 #[test]
 fn status_rules_run_signature_pinned() {
-    let _: fn(&Path, bool) -> Result<i32, CliError> = rules::run;
+    let _: fn(&Path, bool, Option<String>, Option<String>, Option<String>) -> Result<i32, CliError> = rules::run;
 }
 
 #[test]

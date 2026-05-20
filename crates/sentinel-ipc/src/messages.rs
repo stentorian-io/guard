@@ -1199,6 +1199,105 @@ impl PersistenceWriteAck {
     }
 }
 
+// ============================================================
+// v1.0 — DisableCuratedRule (tag 0x16; sentinel rules disable)
+// ============================================================
+
+/// CLI → daemon: disable a curated (built-in) rule by pattern.
+/// Used when a trusted source is compromised and the user wants to
+/// immediately revoke the curated allowlist entry.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DisableCuratedRule {
+    pub schema_version: u16, // V3
+    pub pattern: String,
+    pub reason: String, // non-empty
+}
+
+impl DisableCuratedRule {
+    pub fn new(pattern: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V3,
+            pattern: pattern.into(),
+            reason: reason.into(),
+        }
+    }
+}
+
+/// Daemon → CLI: response to DisableCuratedRule.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DisableCuratedRuleReply {
+    Ok {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl DisableCuratedRuleReply {
+    pub fn ok() -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V3,
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V3,
+            message: message.into(),
+        }
+    }
+}
+
+// ============================================================
+// v1.0 — EnableCuratedRule (tag 0x17; sentinel rules enable)
+// ============================================================
+
+/// CLI → daemon: re-enable a previously disabled curated rule.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EnableCuratedRule {
+    pub schema_version: u16, // V3
+    pub pattern: String,
+}
+
+impl EnableCuratedRule {
+    pub fn new(pattern: impl Into<String>) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V3,
+            pattern: pattern.into(),
+        }
+    }
+}
+
+/// Daemon → CLI: response to EnableCuratedRule.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EnableCuratedRuleReply {
+    Ok {
+        schema_version: u16,
+        /// Whether a row was actually removed (false = pattern was not disabled).
+        was_disabled: bool,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl EnableCuratedRuleReply {
+    pub fn ok(was_disabled: bool) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V3,
+            was_disabled,
+        }
+    }
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V3,
+            message: message.into(),
+        }
+    }
+}
+
 // ============================================================================
 // v0.5 — Ping (tag 0x15; watchdog liveness check)
 // ============================================================================

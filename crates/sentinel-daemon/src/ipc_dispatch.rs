@@ -14,13 +14,15 @@
 //! 0x00..=0x01 ∪ 0x09..=0xff was "legacy length-prefix high byte" — but a
 //! valid legacy frame has only 0x00 in the high byte (0x01 already implies
 //! a 16+ MiB body, far above MAX_FRAME_BYTES). The dispatcher now treats:
-//!   - 0x02..=0x15            → tagged v0.2/v0.3/v0.4/v0.5/v0.7 message
+//!   - 0x02..=0x17            → tagged v0.2/v0.3/v0.4/v0.5/v0.7 message
 //!                              (0x0E = ListRules, 0x11 = DeleteInstallArtifacts, v0.7;
 //!                               0x07/0x0F/0x10 formerly TrustPolicy/ListTrust/IsTrusted — removed)
 //!                              (0x12 = DenyNotify, v0.3)
 //!                              (0x13 = ExecBlocked, v0.4 M003-S02)
 //!                              (0x14 = PersistenceWrite, v0.4 M003-S04)
 //!                              (0x15 = Ping, v0.5 M004-S01)
+//!                              (0x16 = DisableCuratedRule, v1.0)
+//!                              (0x17 = EnableCuratedRule, v1.0)
 //!   - 0x00                   → legacy RegisterRoot (v0.1)
 //!   - everything else        → protocol violation (rejected immediately)
 //!
@@ -61,6 +63,9 @@ pub enum MessageTag {
     PersistenceWrite = 0x14,
     // v0.5 — M004-S01 watchdog liveness:
     Ping = 0x15,
+    // v1.0 — curated rule overrides:
+    DisableCuratedRule = 0x16,
+    EnableCuratedRule = 0x17,
 }
 
 impl MessageTag {
@@ -89,6 +94,9 @@ impl MessageTag {
             0x13 => Some(Self::ExecBlocked),
             0x14 => Some(Self::PersistenceWrite),
             0x15 => Some(Self::Ping),
+            // v1.0:
+            0x16 => Some(Self::DisableCuratedRule),
+            0x17 => Some(Self::EnableCuratedRule),
             _ => None,
         }
     }
@@ -123,7 +131,7 @@ pub enum FrameKind {
 /// Peek the first byte to decide framing kind. Reads exactly 1 byte from the
 /// stream — caller must continue with the appropriate read path.
 ///
-/// WARNING: only 0x00 (legacy length-prefix high byte) and 0x02..=0x15
+/// WARNING: only 0x00 (legacy length-prefix high byte) and 0x02..=0x17
 /// (v0.2..v0.7 tags) are valid first bytes. Anything else is a protocol
 /// violation (invalid length prefix or unknown tag). Rejecting at this
 /// stage prevents the legacy handler from spending three more
@@ -177,6 +185,9 @@ mod tests {
             MessageTag::PersistenceWrite,
             // v0.5 M004-S01:
             MessageTag::Ping,
+            // v1.0:
+            MessageTag::DisableCuratedRule,
+            MessageTag::EnableCuratedRule,
         ] {
             let b = tag.as_byte();
             assert_eq!(MessageTag::from_byte(b), Some(tag));
@@ -193,8 +204,8 @@ mod tests {
         assert!(MessageTag::from_byte(0x07).is_none());
         assert!(MessageTag::from_byte(0x0F).is_none());
         assert!(MessageTag::from_byte(0x10).is_none());
-        // 0x16+ — unassigned tag space (0x15 = Ping, v0.5 M004-S01).
-        assert!(MessageTag::from_byte(0x16).is_none());
+        // 0x18+ — unassigned tag space (0x17 = EnableCuratedRule, v1.0).
+        assert!(MessageTag::from_byte(0x18).is_none());
         assert!(MessageTag::from_byte(0xff).is_none());
     }
 
@@ -259,7 +270,12 @@ mod tests {
         // v0.5 M004-S01:
         assert_eq!(MessageTag::Ping as u8, 0x15);
         assert_eq!(MessageTag::from_byte(0x15), Some(MessageTag::Ping));
-        // 0x16 is unassigned — must return None:
-        assert_eq!(MessageTag::from_byte(0x16), None);
+        // v1.0:
+        assert_eq!(MessageTag::DisableCuratedRule as u8, 0x16);
+        assert_eq!(MessageTag::from_byte(0x16), Some(MessageTag::DisableCuratedRule));
+        assert_eq!(MessageTag::EnableCuratedRule as u8, 0x17);
+        assert_eq!(MessageTag::from_byte(0x17), Some(MessageTag::EnableCuratedRule));
+        // 0x18 is unassigned — must return None:
+        assert_eq!(MessageTag::from_byte(0x18), None);
     }
 }

@@ -12,6 +12,7 @@ use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     DeleteInstallArtifacts, DeleteInstallArtifactsReply,
+    DisableCuratedRule, DisableCuratedRuleReply, EnableCuratedRule, EnableCuratedRuleReply,
     InsertUserRule, InsertUserRuleReply, InstallArtifact,
     ListRules, ListRulesReply, PrepareSnapshot, ReadInstallArtifacts,
     ReadInstallArtifactsReply, RegisterRoot, Reply, RuleRow, SnapshotReply,
@@ -31,6 +32,8 @@ const TAG_INSERT_USER_RULE: u8 = 0x0B;
 const TAG_READ_INSTALL_ARTIFACTS: u8 = 0x0C;
 const TAG_LIST_RULES: u8 = 0x0E;
 const TAG_DELETE_INSTALL_ARTIFACTS: u8 = 0x11;
+const TAG_DISABLE_CURATED_RULE: u8 = 0x16;
+const TAG_ENABLE_CURATED_RULE: u8 = 0x17;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
@@ -358,6 +361,53 @@ pub fn list_rules_request(
         ListRulesReply::Ok { rules, .. } => Ok(rules),
         ListRulesReply::Err { message, .. } => {
             Err(CliError::Other(format!("ListRules: {message}")))
+        }
+    }
+}
+
+/// Disable a curated (built-in) rule by pattern.
+/// Requires biometric authentication (Touch ID / password).
+pub fn disable_curated_rule_request(
+    sock: &Path,
+    pattern: &str,
+    reason: &str,
+) -> Result<(), CliError> {
+    let bio_reason = format!("Sentinel: disable curated rule for {pattern}");
+    if !crate::biometric::authenticate(&bio_reason) {
+        return Err(CliError::Other(
+            "biometric authentication required to modify rules".into(),
+        ));
+    }
+    let req = DisableCuratedRule::new(pattern, reason);
+    let reply: DisableCuratedRuleReply =
+        send_tagged_request(sock, TAG_DISABLE_CURATED_RULE, &req)?;
+    match reply {
+        DisableCuratedRuleReply::Ok { .. } => Ok(()),
+        DisableCuratedRuleReply::Err { message, .. } => {
+            Err(CliError::Other(format!("DisableCuratedRule: {message}")))
+        }
+    }
+}
+
+/// Re-enable a previously disabled curated rule by pattern.
+/// Requires biometric authentication (Touch ID / password).
+pub fn enable_curated_rule_request(
+    sock: &Path,
+    pattern: &str,
+) -> Result<bool, CliError> {
+    let bio_reason = format!("Sentinel: re-enable curated rule for {pattern}");
+    if !crate::biometric::authenticate(&bio_reason) {
+        return Err(CliError::Other(
+            "biometric authentication required to modify rules".into(),
+        ));
+    }
+    let req = EnableCuratedRule::new(pattern);
+    let reply: EnableCuratedRuleReply =
+        send_tagged_request(sock, TAG_ENABLE_CURATED_RULE, &req)?;
+    match reply {
+        EnableCuratedRuleReply::Ok { was_disabled, .. } => Ok(was_disabled),
+        EnableCuratedRuleReply::Err { message, .. } => {
+            Err(CliError::Other(format!("EnableCuratedRule: {message}")))
         }
     }
 }

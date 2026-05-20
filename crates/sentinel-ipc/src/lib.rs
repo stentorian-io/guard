@@ -87,6 +87,12 @@ pub use messages::{
     // v0.4 — PersistenceWrite (tag 0x14)
     PersistenceWrite,
     PersistenceWriteAck,
+    // v1.0 — DisableCuratedRule (tag 0x16)
+    DisableCuratedRule,
+    DisableCuratedRuleReply,
+    // v1.0 — EnableCuratedRule (tag 0x17)
+    EnableCuratedRule,
+    EnableCuratedRuleReply,
     // v0.5 — Ping (tag 0x15; watchdog liveness)
     Ping,
     PingReply,

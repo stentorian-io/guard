@@ -1,6 +1,6 @@
 //! crates/sentinel-cli/src/status/rules.rs
 //!
-//! `sentinel status rules [--include-built-in]`.
+//! `sentinel status rules [--include-built-in] [--disable <pattern> --reason <reason>] [--enable <pattern>]`.
 
 use std::path::Path;
 
@@ -9,7 +9,36 @@ use sentinel_ipc::RuleRow;
 use crate::ipc_client;
 use crate::CliError;
 
-pub fn run(sock: &Path, include_built_in: bool) -> Result<i32, CliError> {
+pub fn run(
+    sock: &Path,
+    include_built_in: bool,
+    disable: Option<String>,
+    enable: Option<String>,
+    reason: Option<String>,
+) -> Result<i32, CliError> {
+    if let Some(pattern) = disable {
+        let reason = match reason {
+            Some(r) if !r.trim().is_empty() => r,
+            _ => {
+                eprintln!("sentinel: --disable requires --reason");
+                return Ok(64); // EX_USAGE
+            }
+        };
+        ipc_client::disable_curated_rule_request(sock, &pattern, &reason)?;
+        eprintln!("Disabled built-in rule: {pattern}");
+        return Ok(0);
+    }
+
+    if let Some(pattern) = enable {
+        let was_disabled = ipc_client::enable_curated_rule_request(sock, &pattern)?;
+        if was_disabled {
+            eprintln!("Re-enabled built-in rule: {pattern}");
+        } else {
+            eprintln!("Rule was not disabled: {pattern}");
+        }
+        return Ok(0);
+    }
+
     let rules = ipc_client::list_rules_request(sock, include_built_in)?;
     render_table(&rules);
     Ok(0)

@@ -31,7 +31,8 @@ use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     BaselineCommit, BaselineCommitReply, DeleteInstallArtifacts, DeleteInstallArtifactsReply,
-    DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, EnvNotPropagatedGap,
+    DenyNotify, DenyNotifyAck, DisableCuratedRule, DisableCuratedRuleReply, DylibLoaded,
+    DylibLoadedAck, EnableCuratedRule, EnableCuratedRuleReply, EnvNotPropagatedGap,
     EnvNotPropagatedGapAck, ExecAck, ExecBlocked, ExecBlockedAck, ExecEvent, ForkAck, ForkEvent,
     IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4, InsertUserRule, InsertUserRuleReply, IpcError,
     ListRules, ListRulesReply,
@@ -458,6 +459,13 @@ impl IpcServer {
             }
             FrameKind::Tagged(MessageTag::Ping) => {
                 handle_ping_frame(&mut stream, state);
+            }
+            // v1.0 — curated rule override IPC:
+            FrameKind::Tagged(MessageTag::DisableCuratedRule) => {
+                handle_disable_curated_rule_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(MessageTag::EnableCuratedRule) => {
+                handle_enable_curated_rule_frame(&mut stream, state);
             }
         }
         clear_conn_signer();
@@ -1029,6 +1037,77 @@ fn handle_ping_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
     let uptime_secs = state.startup_instant.elapsed().as_secs();
     if let Err(e) = write_tagged(stream, MessageTag::Ping, &PingReply::pong(pid, uptime_secs)) {
         error!(error = %e, "failed to send PingReply");
+    }
+}
+
+// ============================================================================
+// v1.0 — DisableCuratedRule / EnableCuratedRule frame handlers
+// ============================================================================
+
+fn handle_disable_curated_rule_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: DisableCuratedRule = match read_tagged_body(stream, MessageTag::DisableCuratedRule) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "DisableCuratedRule decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::DisableCuratedRule,
+                &DisableCuratedRuleReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V3 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::DisableCuratedRule,
+            &DisableCuratedRuleReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V3",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let reply = crate::handlers::disable_curated_rule::handle_disable_curated_rule(
+        &req,
+        &state.rule_store,
+        state.curated.as_ref(),
+    );
+    if let Err(e) = write_tagged(stream, MessageTag::DisableCuratedRule, &reply) {
+        error!(error = %e, "failed to send DisableCuratedRuleReply");
+    }
+}
+
+fn handle_enable_curated_rule_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: EnableCuratedRule = match read_tagged_body(stream, MessageTag::EnableCuratedRule) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "EnableCuratedRule decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::EnableCuratedRule,
+                &EnableCuratedRuleReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if req.schema_version != IPC_SCHEMA_V3 {
+        let _ = write_tagged(
+            stream,
+            MessageTag::EnableCuratedRule,
+            &EnableCuratedRuleReply::err(format!(
+                "schema_version {} != IPC_SCHEMA_V3",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let reply = crate::handlers::enable_curated_rule::handle_enable_curated_rule(
+        &req,
+        &state.rule_store,
+    );
+    if let Err(e) = write_tagged(stream, MessageTag::EnableCuratedRule, &reply) {
+        error!(error = %e, "failed to send EnableCuratedRuleReply");
     }
 }
 

@@ -18,7 +18,7 @@
 use std::process::Command;
 
 use sentinel_e2e::{
-    DaemonHarness, cargo_workspace_root, prepare_feed_fixture, resolve_cli, resolve_dylib,
+    DaemonHarness, cargo_workspace_root, resolve_cli, resolve_dylib,
     resolve_node,
 };
 
@@ -37,12 +37,7 @@ fn workers_dev_deny_emits_jsonl_with_builtin_deny_and_no_intel() {
             return;
         }
     };
-    let (_feed_dir, feed_url) = prepare_feed_fixture("feed-mock-ua-parser-js");
-    let mut harness = DaemonHarness::start_with_env(&[
-        ("SENTINEL_FEED_URL_OVERRIDE_OSV", feed_url.as_str()),
-        ("SENTINEL_FEED_URL_OVERRIDE_GHSA", feed_url.as_str()),
-    ])
-    .expect("start daemon");
+    let mut harness = DaemonHarness::start().expect("start daemon");
 
     let script = cargo_workspace_root().join("crates/sentinel-e2e/harness/connect_workers_dev.js");
     assert!(

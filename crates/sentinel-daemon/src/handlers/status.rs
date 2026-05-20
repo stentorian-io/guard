@@ -54,7 +54,7 @@ pub fn handle_status(state: &DaemonState) -> StatusReply {
         .load(Ordering::Relaxed);
     let daemon_state = compute_daemon_state(&recent_gaps, snapshot_failed, now_ms);
 
-    StatusReply::ok(daemon_state, tracked_roots, recent_gaps, counters, Vec::new(), install_info)
+    StatusReply::ok(daemon_state, tracked_roots, recent_gaps, counters, install_info)
 }
 
 pub fn compute_daemon_state(

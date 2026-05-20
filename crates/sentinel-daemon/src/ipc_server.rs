@@ -1758,9 +1758,6 @@ fn handle_prepare_snapshot_frame(
         return;
     }
     let cwd = std::path::PathBuf::from(req.cwd);
-    // v0.4: use the V4 entry point so the handler pre-flights
-    // `fetch_feeds_blocking` and merges feed-derived deny entries.
-    // The reply is `SnapshotReply::ok_v4(..., feed_warnings)`.
     let reply = crate::handlers::prepare_snapshot::handle_prepare_snapshot_v4_full(
         state,
         &cwd,

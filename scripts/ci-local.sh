@@ -127,7 +127,6 @@ fi
 
 # Tests skipped due to known pre-existing issues:
 #   failure_modes_daemon_killed — getaddrinfo_async not interposed (#4)
-#   failure_modes_stale_feed    — feed metadata feature unimplemented (#5)
 E2E_TESTS=(
   "ua_parser_js_demo:VAL-01 ua-parser-js@0.7.29 demo"
   "workers_dev_validation:VAL-02 workers.dev allowlist-bleed"

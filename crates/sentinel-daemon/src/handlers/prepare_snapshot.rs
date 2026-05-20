@@ -152,10 +152,9 @@ pub fn handle_prepare_snapshot(
         snapshot = %pub_.path.display(),
         "PrepareSnapshot OK"
     );
-    SnapshotReply::ok_v4(
+    SnapshotReply::ok(
         run_manifest_path(state_dir, &run_uuid).display().to_string(),
         run_uuid,
-        Vec::new(),
     )
 }
 

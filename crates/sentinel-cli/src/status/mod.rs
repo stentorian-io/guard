@@ -15,7 +15,7 @@ pub mod rules;
 
 use std::path::Path;
 
-use sentinel_ipc::{DaemonStateKind, FeedInfo, GapInfo, InstallInfo, StatusCounters, StatusReply, TrackedRootInfo};
+use sentinel_ipc::{DaemonStateKind, GapInfo, InstallInfo, StatusCounters, StatusReply, TrackedRootInfo};
 
 use crate::CliError;
 
@@ -46,11 +46,10 @@ pub fn run_status(sock: &Path, state_dir: &Path) -> Result<i32, CliError> {
             tracked_roots,
             recent_gaps,
             counters,
-            feeds,
             install_info,
             ..
         } => {
-            render_verbose(daemon_state, &tracked_roots, &recent_gaps, &counters, &feeds, install_info.as_ref());
+            render_verbose(daemon_state, &tracked_roots, &recent_gaps, &counters, install_info.as_ref());
             render_risk_exposure(sock);
             if let Some(wd) = read_watchdog_health(state_dir) {
                 render_watchdog_health(&wd);
@@ -65,7 +64,6 @@ pub fn render_verbose(
     tracked_roots: &[TrackedRootInfo],
     recent_gaps: &[GapInfo],
     counters: &StatusCounters,
-    feeds: &[FeedInfo],
     install_info: Option<&InstallInfo>,
 ) {
     render_verbose_to(
@@ -74,7 +72,6 @@ pub fn render_verbose(
         tracked_roots,
         recent_gaps,
         counters,
-        feeds,
         install_info,
     );
 }
@@ -85,13 +82,11 @@ pub fn render_verbose_to<W: std::io::Write>(
     tracked_roots: &[TrackedRootInfo],
     recent_gaps: &[GapInfo],
     counters: &StatusCounters,
-    feeds: &[FeedInfo],
     install_info: Option<&InstallInfo>,
 ) {
     let state_str = match state {
         DaemonStateKind::Operational => "operational",
         DaemonStateKind::Degraded => "degraded",
-        DaemonStateKind::StaleFeeds => "stale-feeds",
     };
     let _ = writeln!(w, "State: {state_str}");
     if let Some(info) = install_info {
@@ -108,29 +103,6 @@ pub fn render_verbose_to<W: std::io::Write>(
     let _ = writeln!(w, "  blocks_today: {}", counters.blocks_today);
     let _ = writeln!(w, "  allows_today: {}", counters.allows_today);
     let _ = writeln!(w, "  gaps_today:   {}", counters.gaps_today);
-
-    let _ = writeln!(w, "\nFeeds ({}):", feeds.len());
-    for f in feeds {
-        let age_str = match f.last_pulled_at_ms {
-            Some(ms) => {
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0);
-                let age_h = now_ms.saturating_sub(ms) / (60 * 60 * 1000);
-                if age_h < 1 {
-                    "< 1h ago".to_string()
-                } else if age_h < 24 {
-                    format!("{age_h}h ago")
-                } else {
-                    format!("{}d ago", age_h / 24)
-                }
-            }
-            None => "never".to_string(),
-        };
-        let fresh_str = if f.fresh { "fresh" } else { "STALE" };
-        let _ = writeln!(w, "  {:<6} {:<12} ({})", f.name, age_str, fresh_str);
-    }
 
     let _ = writeln!(w, "\nTracked roots ({}):", tracked_roots.len());
     for r in tracked_roots {
@@ -237,12 +209,11 @@ mod render_tests {
         let cases: &[(DaemonStateKind, &str)] = &[
             (DaemonStateKind::Operational, "State: operational"),
             (DaemonStateKind::Degraded, "State: degraded"),
-            (DaemonStateKind::StaleFeeds, "State: stale-feeds"),
         ];
 
         for (state, expected_first_line) in cases {
             let mut buf = Vec::new();
-            render_verbose_to(&mut buf, *state, &[], &[], &empty_counters(), &[], None);
+            render_verbose_to(&mut buf, *state, &[], &[], &empty_counters(), None);
             let s = String::from_utf8(buf).unwrap();
             let first_line = s.lines().next().unwrap_or("");
             assert_eq!(

@@ -17,7 +17,6 @@ fn verbose_render_produces_output() {
         &[],
         &[],
         &counters,
-        &[],
         None,
     );
     let s = String::from_utf8(buf).unwrap();

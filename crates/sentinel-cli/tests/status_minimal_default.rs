@@ -20,7 +20,6 @@ fn render_verbose_includes_state_line() {
         &[],
         &[],
         &empty_counters(),
-        &[],
         None,
     );
     let s = String::from_utf8(buf).unwrap();

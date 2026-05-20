@@ -1,160 +1,56 @@
 ## Project
 
-**Sentinel**
+**Sentinel** — free, open-source macOS supply-chain firewall. Default-deny outbound network for package-install subtrees via DYLD injection. See [README.md](README.md) for user-facing docs, [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, crate map, tech stack, IPC protocol, and build/test instructions.
 
-Sentinel is a free, open-source macOS supply-chain firewall that enforces default-deny on outbound network connections from package-install subtrees. The user runs `sentinel wrap npm install …` (or `pip`, `cargo`, etc.) and Sentinel sandboxes that subtree's network egress — registries are allowed, anything else is denied or surfaces an interactive prompt. The daemon (`sentineld`) is auto-spawned on demand by the CLI — no manual setup required. v1 is process-tree-only and uses DYLD library injection (no system extension, no kernel components). Whole-machine mode is deferred to v2.
+**Core Value:** When a compromised package tries to phone home during install, Sentinel blocks it cold and tells the user what happened. Every other feature serves this.
 
-**Core Value:** **When a compromised package tries to phone home during install, Sentinel blocks it cold and tells the user what happened.** That's the one thing that must work. Every other feature serves this.
+### Agent-Relevant Constraints
 
-### Constraints
+- **Platform**: macOS only (v1). DYLD injection mechanism.
+- **Privilege**: no root required; daemon runs as user
+- **Performance**: hook overhead < 100us per intercepted call (in-process cache, no IPC on hot path)
+- **Privacy**: no telemetry, no upstream submissions; threat-intel pull only
+- **Fail-closed**: any error in snapshot/HMAC/IPC -> deny all network
+- **panic=abort workspace-wide**: cdylib must not unwind through foreign C++ frames. Cannot use `catch_unwind`.
+- **Bypass acknowledgement**: defense-in-depth, not a sandbox. Hardened-runtime binaries and raw syscalls can escape.
 
-- **Platform**: macOS only in v1
-- **Tech stack**: Rust everywhere — CLI, daemon (`sentineld`, user-level LaunchAgent), and the `libsentinel_hook.dylib` injected into wrapped processes
-- **Enforcement mechanism**: DYLD library injection via `DYLD_INSERT_LIBRARIES` — covers the libc-using real-world supply-chain attack class but not hardened-runtime children or raw-syscall malware
-- **Privilege**: no root/admin required for enforcement; daemon runs as the user
-- **Privacy**: Sentinel is an anti-exfiltration tool — it cannot itself become a telemetry pipe. Threat-intel feed pulls only; no upstream submissions in v1; no analytics in the daemon
-- **UX**: terminal-only — no GUI, no menu bar, no web dashboard in v1
-- **Performance**: hook overhead must be negligible — under 100µs per intercepted call (in-process lookup against an mmap'd snapshot, no IPC on the hot path)
-- **Bypass acknowledgement**: this is a defense-in-depth layer, not a sandbox — sufficiently advanced malware can use raw syscalls or exec into hardened binaries to escape. Sentinel must catch the realistic supply-chain attack class, not the theoretical 100%
+### Key Paths
 
-## Technology Stack
-
-| Layer | Implementation | Notes |
-|---|---|---|
-| Language | **Rust** (edition 2024, MSRV 1.85) | All crates: CLI, daemon, hook dylib, core, IPC, watchdog, E2E |
-| Build | **Cargo workspaces** | 11 member crates; release profile: LTO thin, codegen-units=1, panic=abort, strip symbols |
-| Enforcement | **DYLD_INSERT_LIBRARIES** → `libsentinel_hook.dylib` (cdylib) | Interposes libc network/exec/fork/open calls via `dlsym(RTLD_NEXT, ...)` |
-| IPC | **Unix domain socket** + length-prefixed **CBOR** frames | Peer auth via `getsockopt(SOL_LOCAL, LOCAL_PEERTOKEN)` (kernel-sourced audit token) |
-| Daemon | **sentineld** — sync 32-thread worker pool, bounded queue (64) | Auto-spawned by CLI on demand; watchdog crate monitors liveness |
-| Persistence | **rusqlite** (bundled SQLite) | Migrations in `crates/sentinel-daemon/migrations/`; stores rules, feed IOCs, install artifacts |
-| CLI parsing | **clap 4.6** (derive) | Subcommands: wrap, status |
-| Serialization | **ciborium** (CBOR), **serde** | Snapshot format, IPC wire protocol |
-| Logging | **tracing** + **tracing-subscriber** | Daemon logs; JSONL forensic log to `~/Library/Logs/Sentinel/` |
-| Threat-intel | **Build-time embedded** (nightly CI) | OSV.dev bulk archive → `scripts/update-feed-rules.sh` → YAML deny rules baked in at compile time |
-| Integrity | **HMAC-SHA256** snapshot + IPC signing | Snapshot integrity at load time; per-message HMAC + nonce on IPC frames; self-check of hook binary hash |
-| Process tracking | **audit_token** + **pidversion** | Fork/exec IPC events; PID-reuse guard via TASK_AUDIT_TOKEN |
-
-### Key Dependencies
-
-**Production:** libc, ciborium, serde, nix, clap, rusqlite, uuid, signal-hook, memmap2, socket2, tracing, plist, ctor, notify, flate2, semver, url, sha2, hmac, rand
-
-**Dev/Test:** criterion, tempfile, assert_cmd, predicates
-
-## Architecture
-
-```
-sentinel wrap <cmd>   sentineld (auto-spawned)        libsentinel_hook.dylib
-┌──────────┐          ┌───────────────────┐           ┌──────────────────────┐
-│ CLI      │          │ IPC server        │           │ DYLD-injected cdylib │
-│          │          │ (Unix socket)     │           │                      │
-│ ensure   │          │                   │           │ ctor: load snapshot  │
-│ daemon   │ ──IPC──→ │ handlers:         │           │ interpose:           │
-│          │          │  prepare_snapshot  │           │  socket/connect/     │
-│ prepare  │          │  resolve (DNS)    │           │  bind/listen/send/   │
-│ snapshot │          │  prompt_channel   │           │  getaddrinfo/        │
-│          │          │  insert_user_rule │           │  exec*/fork/vfork/   │
-│ spawn    │          │  status/rules/... │           │                      │
-│ child    │          │                   │           │ hot path:            │
-│ w/ DYLD  │          │ feed system:      │           │  decide_for_sockaddr │
-│ wait +   │          │  gix fetch → OSV  │           │  → cache hit: <100µs│
-│ report   │          │  parse → SQLite   │           │  → cache miss: IPC  │
-└──────────┘          │                   │           │    Resolve → daemon  │
-                      │ log writer: JSONL │           │                      │
-                      │ process tree      │           │ fail-closed on:      │
-                      │ snapshot GC       │           │  corrupt snapshot    │
-                      │ persistence watch │           │  IPC timeout (250ms) │
-                      └───────────────────┘           │  HMAC mismatch       │
-                                                      └──────────────────────┘
-```
-
-### Workspace Crates
-
-| Crate | Type | Purpose |
-|---|---|---|
-| `sentinel-cli` | bin | CLI entry point — `sentinel wrap <cmd>`, `sentinel status` |
-| `sentinel-daemon` | bin | `sentineld serve` — IPC server, policy engine, feed fetcher, log writer |
-| `sentinel-hook` | cdylib | `libsentinel_hook.dylib` — DYLD-injected interposition library |
-| `sentinel-core` | lib | Domain types: ProcessIdentity, AllowlistEntry, Snapshot (CBOR), policy evaluator, lockfile parser |
-| `sentinel-ipc` | lib | IPC wire protocol: CBOR frame codec, Unix socket transport, peer audit-token auth |
-| `sentinel-watchdog` | bin | Daemon liveness monitor — ping every 500ms, SIGTERM→SIGKILL on 2 consecutive misses |
-| `sentinel-e2e` | tests | 56 E2E test suites + benchmark harness binaries |
+- Curated allow rules: `crates/sentinel-core/data/allow/`
+- Curated deny rules: `crates/sentinel-core/data/deny/`
+- Daemon migrations: `crates/sentinel-daemon/migrations/`
+- E2E tests: `crates/sentinel-e2e/tests/`
+- E2E fixtures: `crates/sentinel-e2e/fixtures/`
+- CI workflow: `.github/workflows/validation.yml`
+- Man pages: `docs/sentinel.1.md`, `docs/sentineld.8.md`
 
 ### Policy Evaluation Flow
 
-1. CLI sends `PrepareSnapshot` IPC → daemon fetches feeds, merges curated + user rules → returns CBOR snapshot (HMAC-signed)
-2. CLI spawns child with `DYLD_INSERT_LIBRARIES=libsentinel_hook.dylib` + `SENTINEL_SNAPSHOT_MANIFEST=<path>`
-3. Hook `#[ctor]` loads snapshot, captures original libc symbols via `RTLD_NEXT`
-4. On `connect()` / `sendto()` / etc.: `decide_for_sockaddr()` → in-process cache → `evaluate_policy()` (tier walk: CuratedAllow → UserAllow → CuratedDeny → default Deny)
-5. Cache miss → `Resolve` IPC to daemon for DNS → cache result → re-evaluate
-6. Deny + TTY → prompt channel → user Allow/Deny → persist to SQLite
+1. CLI sends `PrepareSnapshot` IPC -> daemon merges rules -> CBOR snapshot (HMAC-signed)
+2. CLI spawns child with `DYLD_INSERT_LIBRARIES` + snapshot path
+3. Hook `#[ctor]` loads snapshot, captures libc symbols via `RTLD_NEXT`
+4. On `connect()`/`sendto()`/etc.: `decide_for_sockaddr()` -> cache -> `evaluate_policy()` (CuratedAllow -> ConfirmedDeny -> UserDeny -> UserAllow -> SuspectDeny -> DefaultDeny)
+5. Cache miss -> `Resolve` IPC to daemon for DNS -> cache -> re-evaluate
+6. Deny + TTY -> prompt channel -> user decision -> persist to SQLite
 
-### Rule Tiers (precedence order)
+### Version History
 
-1. **CuratedAllow** — built-in allowlist (`crates/sentinel-core/data/allowlist.yaml`): package registries, CDNs
-2. **UserAllow** — user-created rules (via prompt or CLI), persisted in SQLite
-3. **CuratedDeny** — threat-intel IOCs from OSV/GHSA feeds
-4. **Default Deny** — everything else
+| Tag | Key Features |
+|---|---|
+| v0.1 | Hook hello-world, basic IPC, curated allowlist |
+| v0.2 | ForkEvent/ExecEvent IPC, per-run snapshots, OSV/GHSA feed system, benchmarks |
+| v0.3 | Prompt channel, install artifacts, JSONL logging, persistence watcher, PID-reuse guard |
+| v0.4 | Watchdog, HMAC-SHA256 integrity, exec blocking, lockfile extraction, persistence-path monitoring |
+| v0.5 | macOS 26+ dyld crash fix, getaddrinfo interpose via daemon-proxied DNS |
+| v0.6 | Prompt timeout, E2E test modernization |
+| v0.7 | Gap-detector wiring, background feed refresh, codesign peer auth, SpscRing fix |
+| v0.8 | Man pages, install guide, changelog |
+| v0.9 | CLI cleanup, auto-spawn daemon on demand |
 
-### Known Limitations (v1 / DYLD approach)
-
-- **Hardened-runtime binaries** (`/bin/bash`, `/usr/bin/python3`, system binaries) reject DYLD injection; hook cannot interpose them. Mitigated by exec-blocking hardened children from wrapped subtrees.
-- **Raw syscalls** bypass libc interposition entirely. Not a realistic supply-chain attack vector (packages use libc).
-- **macOS 26+** required a dyld init-order fix (v0.5); `open`/`openat` interposition disabled on 26+ (replaced with kqueue watcher).
-- **panic=abort workspace-wide** — gix panics terminate the daemon (next CLI invocation auto-restarts it). Cannot use catch_unwind because cdylib must not unwind through foreign C++ frames.
-
-## Version History
-
-| Tag | Milestone | Key Features |
-|---|---|---|
-| v0.1 | Foundations | Hook hello-world, basic IPC, curated allowlist |
-| v0.2 | Feed + Snapshot | ForkEvent/ExecEvent IPC, per-run snapshots, OSV/GHSA feed system, benchmarks |
-| v0.3 | Prompt + Install | Prompt channel (dedup 5s), install artifacts, JSONL logging, persistence watcher, PID-reuse guard |
-| v0.4 | Hardening | Watchdog, HMAC-SHA256 snapshot integrity, exec blocking, lockfile extraction, persistence-path monitoring |
-| v0.5 | Stability | macOS 26+ dyld crash fix, getaddrinfo interpose via daemon-proxied DNS, feed fixture CI compat |
-| v0.6 | Prompt + E2E | Prompt timeout, E2E test modernization |
-| v0.7 | Production Hardening | Gap-detector wiring, background feed refresh, codesign peer auth, SpscRing fix, probe_self_test |
-
-**Current:** v0.7 shipped. Three milestones to v1.0:
-
-- **v0.8 (M007):** Docs — man pages, install guide, changelog, README polish
-- **v0.9 (M008):** Pre-distribution — branch protection, tag-on-merge automation, CI gating (green required to merge), release workflow scaffolding
-- **v1.0 (M009):** Distribution — Homebrew Formula, signing/notarization, first public release
-
-## CI
-
-GitHub Actions workflow (`.github/workflows/validation.yml`):
-
-- Runner: macOS-14
-- Steps: checkout → Node 20 (non-hardened) → cargo cache → verify fixture SHA-256 → `cargo build --workspace --release` → 6 validation E2E tests (ua-parser-js demo, workers.dev edge case, 4 failure-mode tests)
+**Current:** v0.9 shipped. Next: **v1.0** — Homebrew Formula, signing/notarization, first public release.
 
 ## Conventions
 
-### Commit Messages
-
 Conventional commits scoped by subsystem: `feat(hook):`, `fix(daemon):`, `test(e2e):`, `docs(bench):`, `chore:`
 
-### Error Handling
-
-- Hook: fail-closed — any error in snapshot load, HMAC verify, or IPC timeout → deny all network
-- Daemon: launchd KeepAlive restart on crash; feed panics (gix) are terminal but non-blocking to user
-- CLI: structured error types via `thiserror`
-
-### Testing
-
-- Unit tests in each crate (`#[cfg(test)]` modules)
-- Integration tests in `crates/*/tests/`
-- E2E tests in `crates/sentinel-e2e/tests/` — spawn real daemon + hook, exercise full flow
-- Benchmarks: criterion micro-benchmarks + E2E live-wrap bench (see `docs/BENCH.md`)
-
-### IPC Protocol
-
-- Schema versions: V1 (RegisterRoot — frozen), V2 (PrepareSnapshot/Prompt), V3 (Resolve/Status), V4 (ForkEvent/ExecEvent/DylibLoaded)
-- Frame format: `[1-byte tag][8-byte nonce LE][32-byte HMAC-SHA256][4-byte length BE][CBOR payload]` (signed); unsigned fallback when no HMAC key
-- Per-message signing: HMAC-SHA256 covers tag + nonce + length prefix + payload; reuses snapshot HMAC key from `state_dir/hmac.key`
-- Auth: kernel-sourced audit token via `LOCAL_PEERTOKEN` socket option
-
-### User Rules
-
-- Managed via interactive prompts during `sentinel wrap` or the `--learn` flag
-- Persisted in SQLite (`sentinel.db`) — no per-project config files
-- Viewable via `sentinel status rules [--include-built-in]`
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full conventions (error handling, testing, IPC protocol, code style).

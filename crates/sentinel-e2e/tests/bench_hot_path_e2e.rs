@@ -4,7 +4,7 @@
 //
 // Wraps a real `node` child via `sentinel wrap`, loops `net.connect` against
 // `registry.npmjs.org`, and prints a `LIVE_WRAP_NS p50=... p99=...` line on
-// stdout that scripts/bench-hot-path.sh parses for docs/BENCH.md.
+// stdout that scripts/bench-hot-path.sh parses.
 //
 // This is the *context* number per CONTEXT D-32 — captures cache-hit +
 // occasional Resolve-IPC cache-miss + TCP handshake against the real host.

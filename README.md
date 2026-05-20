@@ -328,7 +328,8 @@ or just gives you peace of mind, consider
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for release history.
+See [GitHub Releases](https://github.com/stentorian-io/sentinel/releases) for
+release history.
 
 ## Contributing
 

@@ -82,6 +82,18 @@ jobs:
       - uses: actions/checkout@v4
       - run: scripts/lint-test-env-vars.sh
 
+  lint-unused-deps:
+    name: Lint unused dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: udeps
+      - run: cargo install cargo-udeps --locked
+      - run: cargo +nightly udeps --workspace
+
   validation:
     name: Validation suite
     runs-on: macos-14

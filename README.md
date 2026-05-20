@@ -28,7 +28,7 @@
   - [Reviewing activity](#reviewing-activity)
   - [Manuals](#manuals)
 - [Coverage](#coverage)
-  - [Supported platforms](#supported-platforms)
+  - [Platform support](#platform-support)
   - [Threat intelligence](#threat-intelligence)
   - [Security limitations](#security-limitations)
 - [Found Sentinel useful?](#found-sentinel-useful)
@@ -269,7 +269,7 @@ man sentineld   # daemon internals
 
 ## Coverage
 
-### Supported platforms
+### Platform support
 
 | Platform | Version       | Status        | Mechanism                | Notes                                                                                                                                                                                                                                                     |
 | -------- | ------------- | ------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -300,8 +300,15 @@ coverage is either misleading you or naive about how attackers operate.
 Sentinel is defense-in-depth, not a sandbox: it raises the cost of an attack
 rather than eliminating it. Policy is enforced in userspace, so an attacker who
 can run arbitrary native code, issue raw syscalls, or exploit the kernel can
-bypass it — as they can bypass any userspace defense. At the extreme, even
+bypass it — as they can bypass any userspace defense. Advanced techniques like
+return-oriented programming (ROP) can chain existing code gadgets to invoke
+syscalls without ever calling the hooked libc functions. At the extreme, even
 hardware has proven vulnerable (Rowhammer, Spectre).
+
+Sentinel's allowlists are domain-based, which means a compromise of a
+previously trusted domain or subdomain (e.g. a hijacked CDN endpoint or a
+compromised registry mirror) would pass policy checks. Sentinel cannot
+distinguish legitimate traffic from malicious traffic on an allowed host.
 
 What Sentinel handles well is the realistic, high-volume attack class:
 supply-chain packages that phone home through standard networking calls, which

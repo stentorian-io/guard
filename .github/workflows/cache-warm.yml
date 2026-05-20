@@ -6,6 +6,12 @@ name: cache-warm
 on:
   push:
     branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
 
 jobs:
   warm-cache:

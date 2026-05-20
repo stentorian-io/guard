@@ -135,16 +135,6 @@ pub struct IntelMatch {
     pub first_seen_ms: u64,
 }
 
-/// Non-fatal post-fetch parse problem surfaced inline to the CLI via
-/// SnapshotReply::Ok.feed_warnings. Hard fetch failure returns
-/// SnapshotReply::Err instead.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct FeedWarning {
-    pub feed: String,
-    pub kind: String, // "parse_error" | "schema_unknown" | "partial"
-    pub message: String,
-}
-
 // --- PrepareSnapshot / SnapshotReply ----------------------------------------
 
 /// CLI → daemon: sent BEFORE posix_spawn. Daemon merges curated YAML + SQLite
@@ -192,11 +182,6 @@ pub enum SnapshotReply {
         schema_version: u16,
         manifest_path: String,
         run_uuid: String,
-        /// V4 addition: non-fatal post-fetch warnings the CLI surfaces
-        /// inline (e.g. `schema_version unknown` records skipped). Empty by
-        /// default; `#[serde(default)]` ensures V2/V3 senders decode cleanly.
-        #[serde(default)]
-        feed_warnings: Vec<FeedWarning>,
     },
     Err {
         schema_version: u16,
@@ -205,28 +190,11 @@ pub enum SnapshotReply {
 }
 
 impl SnapshotReply {
-    /// V2-compatible constructor — emits V2 schema_version with empty
-    /// feed_warnings (so existing v0.2/v0.3 callers don't break).
     pub fn ok(manifest_path: impl Into<String>, run_uuid: impl Into<String>) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V2,
             manifest_path: manifest_path.into(),
             run_uuid: run_uuid.into(),
-            feed_warnings: Vec::new(),
-        }
-    }
-
-    /// V4 constructor — opt-in to feed_warnings.
-    pub fn ok_v4(
-        manifest_path: impl Into<String>,
-        run_uuid: impl Into<String>,
-        feed_warnings: Vec<FeedWarning>,
-    ) -> Self {
-        Self::Ok {
-            schema_version: IPC_SCHEMA_V4,
-            manifest_path: manifest_path.into(),
-            run_uuid: run_uuid.into(),
-            feed_warnings,
         }
     }
 
@@ -564,7 +532,6 @@ impl Default for Status {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DaemonStateKind {
     Degraded,
-    StaleFeeds,
     Operational,
 }
 
@@ -595,14 +562,6 @@ pub struct StatusCounters {
     pub gaps_today: u64,
 }
 
-/// Threat-feed freshness info (v0.4 populated; v0.3 emits empty vec).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct FeedInfo {
-    pub name: String,
-    pub last_pulled_at_ms: Option<u64>,
-    pub fresh: bool,
-}
-
 /// Single install artifact recorded by `sentinel install`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstallArtifact {
@@ -630,7 +589,6 @@ pub enum StatusReply {
         tracked_roots: Vec<TrackedRootInfo>,
         recent_gaps: Vec<GapInfo>,
         counters: StatusCounters,
-        feeds: Vec<FeedInfo>, // empty in v0.3 (v0.4 reserved)
         install_info: Option<InstallInfo>,
     },
     Err {
@@ -640,13 +598,11 @@ pub enum StatusReply {
 }
 
 impl StatusReply {
-    #[allow(clippy::too_many_arguments)]
     pub fn ok(
         daemon_state: DaemonStateKind,
         tracked_roots: Vec<TrackedRootInfo>,
         recent_gaps: Vec<GapInfo>,
         counters: StatusCounters,
-        feeds: Vec<FeedInfo>,
         install_info: Option<InstallInfo>,
     ) -> Self {
         Self::Ok {
@@ -655,7 +611,6 @@ impl StatusReply {
             tracked_roots,
             recent_gaps,
             counters,
-            feeds,
             install_info,
         }
     }

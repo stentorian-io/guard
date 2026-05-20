@@ -12,7 +12,7 @@ use sentinel_core::AuditToken;
 use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     DeleteInstallArtifacts, DeleteInstallArtifactsReply,
-    FeedWarning, InsertUserRule, InsertUserRuleReply, InstallArtifact,
+    InsertUserRule, InsertUserRuleReply, InstallArtifact,
     ListRules, ListRulesReply, PrepareSnapshot, ReadInstallArtifacts,
     ReadInstallArtifactsReply, RegisterRoot, Reply, RuleRow, SnapshotReply,
 };
@@ -41,20 +41,9 @@ fn load_ipc_hmac_key(sock: &Path) -> Option<[u8; 32]> {
     sentinel_daemon::hmac_key::load(state_dir)
 }
 
-/// WR-11 fix: PrepareSnapshot's read timeout must EXCEED the daemon's
-/// `fetch_feeds_blocking` worst-case deadline. The daemon allows up to
-/// 120s for first-run shallow clones (`FETCH_DEADLINE_FIRST_RUN`) +
-/// 60s for incremental fetches; if the CLI tripped its 5s read timeout
-/// FIRST, the user would see `DaemonUnreachable("read reply: ...")`
-/// while the daemon was actually working hard on a legitimate fetch.
-///
-/// 150s gives the daemon's 120s ceiling room to either complete OR
-/// produce a graceful `feed fetch timeout` SnapshotReply::Err. If the
-/// daemon's deadline propagation itself broke and the fetch hung
-/// past 150s, the CLI's read timeout fires (defense-in-depth) and
-/// produces DaemonUnreachable — but THAT is a true daemon-side bug,
-/// not a normal-operation timeout.
-const PREPARE_SNAPSHOT_READ_TIMEOUT: Duration = Duration::from_secs(150);
+/// PrepareSnapshot's read timeout is generous to accommodate snapshot
+/// generation on large rule sets.
+const PREPARE_SNAPSHOT_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Connect to the daemon socket with an explicit 5s connect timeout. Returns
 /// a blocking `UnixStream` on success. ISS-08: the prior implementation used
@@ -246,21 +235,13 @@ pub fn prepare_snapshot(sock: &Path, cwd: &Path) -> Result<(PathBuf, String), Cl
     }
 }
 
-/// Outcome of a PrepareSnapshot v3 call. v0.4 added the `feed_warnings`
-/// field so callers (run_orchestrator) can surface non-fatal post-fetch parse
-/// problems inline on stderr after the reply.
 #[derive(Debug, Clone)]
 pub struct PrepareSnapshotOutcome {
     pub manifest_path: PathBuf,
     pub run_uuid: String,
-    pub feed_warnings: Vec<FeedWarning>,
 }
 
 /// V3 PrepareSnapshot with is_tty + learn_mode.
-/// Used by run_orchestrator instead of prepare_snapshot.
-///
-/// Returns `PrepareSnapshotOutcome` carrying `feed_warnings` from the
-/// V4-shaped reply.
 pub fn prepare_snapshot_v3(
     sock: &Path,
     cwd: &Path,
@@ -284,12 +265,10 @@ pub fn prepare_snapshot_v3(
         SnapshotReply::Ok {
             manifest_path,
             run_uuid,
-            feed_warnings,
             ..
         } => Ok(PrepareSnapshotOutcome {
             manifest_path: PathBuf::from(manifest_path),
             run_uuid,
-            feed_warnings,
         }),
         SnapshotReply::Err { message, .. } => {
             Err(CliError::Other(format!("PrepareSnapshot V3: {message}")))

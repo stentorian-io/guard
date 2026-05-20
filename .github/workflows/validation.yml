@@ -179,7 +179,6 @@ jobs:
         run: cargo test -p sentinel-e2e --test workers_dev_validation --release -- --nocapture
 
       # VAL-04 D-09 (daemon-killed) skipped: getaddrinfo_async not interposed (#4)
-      # VAL-04 D-11 (stale-feed) skipped: feed metadata feature unimplemented (#5)
 
       - name: VAL-04 D-12 — corrupt snapshot
         run: cargo test -p sentinel-e2e --test failure_modes_corrupt_snapshot --release -- --nocapture

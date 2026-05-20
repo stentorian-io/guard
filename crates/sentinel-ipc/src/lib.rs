@@ -39,7 +39,6 @@ pub use messages::{
     IPC_SCHEMA_V3,
     // v0.3 — Status (tag 0x09)
     DaemonStateKind,
-    FeedInfo,
     GapInfo,
     InstallArtifact,
     InstallInfo,
@@ -69,10 +68,9 @@ pub use messages::{
     BaselineCommit,
     BaselineCommitReply,
     ProposedRule,
-    // v0.4 — Threat-intel and SnapshotReply::Ok V4 schema bump
+    // v0.4 — Threat-intel
     IPC_SCHEMA_V4,
     IntelMatch,
-    FeedWarning,
     // v0.7 — ListRules (tag 0x0E)
     ListRules,
     ListRulesReply,

@@ -27,7 +27,6 @@ fn status_reply_ok_round_trip() {
             allows_today: 0,
             gaps_today: 0,
         },
-        vec![],
         None,
     );
     round_trip(&r);
@@ -168,11 +167,6 @@ fn status_reply_full_ok_round_trip() {
             allows_today: 100,
             gaps_today: 1,
         },
-        vec![FeedInfo {
-            name: "osv".into(),
-            last_pulled_at_ms: Some(1_700_000_000_000),
-            fresh: true,
-        }],
         Some(InstallInfo {
             version: "0.3.0".into(),
             installed_at_ms: 1_700_000_000_000,

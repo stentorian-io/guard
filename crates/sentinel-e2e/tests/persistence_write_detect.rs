@@ -20,7 +20,7 @@ use std::process::Command;
 #[test]
 fn persistence_write_to_launch_agents_detected() {
     let harness = DaemonHarness::start_with_env_and_home_setup(
-        &[("SENTINEL_SKIP_FEED_FETCH", "1")],
+        &[],
         |home| {
             // Pre-create the LaunchAgents directory so the daemon's persistence
             // watcher registers a kqueue watch at startup.

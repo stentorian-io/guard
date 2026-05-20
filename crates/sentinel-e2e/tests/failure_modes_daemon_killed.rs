@@ -47,7 +47,7 @@ use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use sentinel_e2e::{prepare_feed_fixture, resolve_cli, resolve_dylib, resolve_node, DaemonHarness};
+use sentinel_e2e::{resolve_cli, resolve_dylib, resolve_node, DaemonHarness};
 
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
@@ -61,14 +61,7 @@ fn daemon_killed_mid_run_keeps_enforcing_known_hosts_then_fails_closed() {
             return;
         }
     };
-    // Use a local file:// feed fixture instead of DaemonHarness::start()'s
-    // default SENTINEL_SKIP_FEED_FETCH=1 (compiled out in --release builds).
-    let (_feed_dir, feed_url) = prepare_feed_fixture("feed-mock-ua-parser-js");
-    let mut harness = DaemonHarness::start_with_env(&[
-        ("SENTINEL_FEED_URL_OVERRIDE_OSV", feed_url.as_str()),
-        ("SENTINEL_FEED_URL_OVERRIDE_GHSA", feed_url.as_str()),
-    ])
-    .expect("start daemon");
+    let mut harness = DaemonHarness::start().expect("start daemon");
 
     // Two-step node script.
     // Step 1 connect must be ALLOWED (registry.npmjs.org is on the curated

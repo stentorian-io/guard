@@ -45,9 +45,7 @@ pub struct StoredRule {
     pub reason: String,
 }
 
-const SQL_001_INITIAL: &str = include_str!("../migrations/001_initial.sql");
-const SQL_002_INSTALL_ARTIFACTS: &str = include_str!("../migrations/002_install_artifacts.sql");
-const SQL_003_FEED_IOCS_AND_WAL: &str = include_str!("../migrations/003_feed_iocs_and_wal.sql");
+const SQL_001_SCHEMA: &str = include_str!("../migrations/001_schema.sql");
 
 pub struct RuleStore {
     /// Long-lived connection used for migrations + the write path.
@@ -75,20 +73,14 @@ impl RuleStore {
             let _ = std::fs::set_permissions(db_path, perms);
         }
 
-        let migrations = Migrations::new(vec![
-            M::up(SQL_001_INITIAL),
-            M::up(SQL_002_INSTALL_ARTIFACTS),
-            M::up(SQL_003_FEED_IOCS_AND_WAL),
-        ]);
+        let migrations = Migrations::new(vec![M::up(SQL_001_SCHEMA)]);
         migrations
             .to_latest(&mut conn)
             .map_err(|e| RuleStoreError::Migrate(e.to_string()))?;
 
-        // v0.4: WAL applied at runtime per
-        // 04-SPIKE-RESULTS.md A3 outcome. A PRAGMA-only M::up step silently
-        // leaves journal_mode = delete (rusqlite_migration wraps each step in a
-        // transaction; WAL change is rolled back). The runtime pragma_update
-        // path works as expected.
+        // WAL pragma must be applied outside the migration transaction —
+        // rusqlite_migration wraps each M::up in a transaction, which causes
+        // the journal_mode change to be silently rolled back.
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(|e| RuleStoreError::Migrate(format!("WAL pragma: {e}")))?;
         let mode: String = conn

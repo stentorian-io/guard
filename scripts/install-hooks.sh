@@ -22,4 +22,3 @@ install_hook() {
 install_hook prepare-commit-msg
 install_hook commit-msg
 install_hook pre-commit
-install_hook pre-push

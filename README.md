@@ -1,170 +1,348 @@
-# Sentinel
+<p align="center">
+  <!-- TODO: Replace with actual logo image -->
+  <h1 align="center">Sentinel</h1>
+  <p align="center">
+    <strong>Installing dependencies shouldn't feel like Russian Roulette</strong>
+  </p>
+  <p align="center">
+    <a href="https://github.com/stentorian-io/sentinel/actions/workflows/validation.yml"><img src="https://github.com/stentorian-io/sentinel/actions/workflows/validation.yml/badge.svg" alt="CI"></a>
+    <a href="#license"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License"></a>
+  </p>
+</p>
 
-**Free, open-source macOS supply-chain firewall.**
+---
 
-Default-deny outbound network enforcement for package-install subtrees.
-When a compromised dependency tries to phone home during `npm install`,
-`pip install`, or `cargo build`, Sentinel blocks it cold and tells you
-what happened.
+<!-- TODO: Replace with animated terminal GIF showing Sentinel in action -->
+<!-- <p align="center"><img src="docs/assets/demo.gif" alt="Sentinel demo" width="720"></p> -->
 
-[![CI](https://github.com/anthropics/sentinel/actions/workflows/validation.yml/badge.svg)](https://github.com/anthropics/sentinel/actions/workflows/validation.yml)
+## Table of contents
 
-> **Status:** pre-release (v0.9). Core enforcement works end-to-end.
-> Build from source; packaged distribution coming in v1.0.
+- [Why Sentinel?](#why-sentinel)
+  - [How exfiltration usually happens](#how-exfiltration-usually-happens)
+  - [How Sentinel prevents it](#how-sentinel-prevents-it)
+- [Usage](#usage)
+  - [Installation](#installation)
+  - [Manual wrapping](#manual-wrapping)
+  - [Selective aliasing](#selective-aliasing)
+  - [Shell wrapping (recommended)](#shell-wrapping-recommended)
+  - [Reviewing activity](#reviewing-activity)
+  - [Manuals](#manuals)
+- [Coverage](#coverage)
+  - [Supported platforms](#supported-platforms)
+  - [Threat intelligence](#threat-intelligence)
+  - [Security limitations](#security-limitations)
+- [Found Sentinel useful?](#found-sentinel-useful)
+- [Changelog](#changelog)
+- [Contributing](#contributing)
+- [Licensing](#licensing)
 
-## How it works
+## Why Sentinel?
 
-```sh
-sentinel wrap npm install
+Compromised dependencies are silently stealing developer credentials at an unprecedented scale — and every project is a target. Sentinel is a free, community-driven solution that cuts off exfiltration to C2 servers.
+
+### How exfiltration usually happens
+
+Every process you run in your terminal can make outbound network connections
+without asking. Package installs execute code from hundreds of strangers.
+Developer tools phone home with telemetry. Build scripts reach out to analytics
+endpoints. Most of the time you have no visibility into what's leaving your
+machine.
+
+Consider a real-world scenario: a compromised npm package like `ua-parser-js`
+(October 2021). An attacker publishes a hijacked version containing a
+postinstall script. Here's what happens when you install it:
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant PM as npm install
+    participant Reg as registry.npmjs.org
+    participant Pkg as ua-parser-js (compromised)
+    participant C2 as attacker server
+
+    Dev->>PM: npm install
+    PM->>Reg: Fetch package
+    Reg-->>PM: ua-parser-js@0.7.29
+
+    PM->>Pkg: Run postinstall
+    Pkg->>C2: POST /exfil {hostname, user, keys}
+    C2-->>Pkg: 200 OK
+    Note over Dev,C2: The developer sees a normal install. The malicious payload runs silently, exfiltrates credentials, and the attacker has everything they need.
 ```
 
-Sentinel wraps your command via DYLD library injection. Every outbound
-network call from the process tree is checked against a multi-tier policy:
+These attacks are accelerating. AI-driven development means more dependencies
+pulled in faster, with less review — and a single compromised package propagates
+like a worm through thousands of downstream projects. What happened to
+[event-stream](https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident),
+[ua-parser-js](https://github.com/nicedreams/ua-parser-js-hijack-incident),
+and [colors/faker](https://www.theverge.com/2022/1/9/22874949/developer-corrupts-open-source-libraries-colors-faker-protest)
+is now happening across every ecosystem.
 
-1. **Curated Allow** — package registries and CDNs (built-in)
-2. **User Allow** — personal allow/deny decisions
-3. **Curated Deny** — known-malicious hosts from OSV/GHSA threat-intel feeds
-4. **Default Deny** — everything else is blocked (or prompts in TTY mode)
+### How Sentinel prevents it
 
-No root privileges required. No kernel extensions. No system extension.
-No manual setup — the daemon auto-starts on first use.
+Same scenario, but the developer runs `sentinel wrap npm install`. Sentinel
+injects a hook library into the process tree that intercepts every outbound
+connection before it leaves the machine:
 
-## Quick start
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant SW as sentinel wrap
+    participant PM as npm install
+    participant Hook as libsentinel_hook.dylib
+    participant Reg as registry.npmjs.org
+    participant Pkg as ua-parser-js (compromised)
+    participant C2 as attacker server
 
-```sh
-# Build from source
-git clone https://github.com/anthropics/sentinel.git
-cd sentinel
-cargo build --workspace --release
+    Dev->>SW: sentinel wrap npm install
+    SW->>PM: Spawn with DYLD_INSERT_LIBRARIES
 
-# Protect a package install (daemon auto-starts on first use)
-sentinel wrap npm install
+    PM->>Hook: connect() → registry.npmjs.org
+    Hook->>Hook: Policy check (curated allow ✓)
+    Hook-->>Reg: Connection allowed
+    Reg-->>PM: ua-parser-js@0.7.29
 
-# Learn mode — record what a clean install talks to
-sentinel wrap --learn npm install
-
-# Review blocked connections
-sentinel status denials <run-uuid>
-sentinel status review
+    PM->>Pkg: Run postinstall
+    Pkg->>Hook: connect() → attacker server
+    Hook->>Hook: Policy check (curated deny ✗)
+    Note over Dev,C2: Attacker server is never reached — credentials stay on your machine.
 ```
 
-See the [install guide](docs/INSTALL.md) for detailed setup instructions.
+Policy is evaluated in tier order:
+
+1. **Curated Allow** — registries, CDNs
+2. **Confirmed Deny** — threat-intel IOCs (confirmed malicious)
+3. **User Deny** — your deny rules
+4. **User Allow** — your allow rules
+5. **Suspect Deny** — suspected IOCs (prompts if TTY)
+6. **Default Deny**
+
+Cache hits resolve in under 100 microseconds with no IPC.
+
+- No root privileges required
+- No kernel extensions or system extensions
+- No manual setup — the daemon auto-starts on first use
+- Works with any command or binary run from the terminal, not just package managers
 
 ## Usage
 
-### Wrapping commands
+### Installation
 
 ```sh
-sentinel wrap npm install                    # npm
-sentinel wrap pip install -r requirements.txt  # pip
-sentinel wrap cargo build                     # cargo
+brew install stentorian-io/tap/sentinel
 ```
 
-Any command works — Sentinel wraps the entire process tree.
+Or build from source — see [CONTRIBUTING.md](CONTRIBUTING.md#build) for
+prerequisites and detailed instructions.
 
-### Learn mode
+### Manual wrapping
 
-Build a baseline of expected network destinations for a known-clean project:
+> For trying out and setting baselines only. Use
+> [shell wrapping](#shell-wrapping-recommended) for day-to-day work.
+
+Wrap individual commands on a case-by-case basis:
+
+```sh
+sentinel wrap npm install
+sentinel wrap pip install -r requirements.txt
+sentinel wrap cargo build
+sentinel wrap ./some-script.sh
+```
+
+Build a baseline of expected network destinations for a known-clean project
+with learn mode:
 
 ```sh
 sentinel wrap --learn npm install
 ```
 
-This records all contacted hosts for future installs.
+This auto-allows all destinations encountered during the run and records them
+as user rules. Only use this on a project you trust. Requires a TTY.
 
-### Status and review
+### Selective aliasing
+
+Alias specific toolchain commands so they always go through Sentinel:
 
 ```sh
-sentinel status                # daemon health, hook integrity, feed freshness
-sentinel status --verbose      # detailed output
-sentinel status --json         # machine-readable output
-sentinel status logs --follow  # stream forensic log
-sentinel status rules          # list active policy rules
+# In ~/.zshrc or ~/.bashrc
+alias npm="sentinel wrap npm"
+alias pip="sentinel wrap pip"
+alias cargo="sentinel wrap cargo"
 ```
 
-## Architecture
+A reasonable middle ground — your package managers are always protected, but
+anything you haven't aliased runs unmonitored and malicious code that clears the
+shell environment can still reach the network. Run the unwrapped command directly
+(e.g. `command npm install`) to bypass the alias for a specific invocation.
 
-```text
-sentinel wrap <cmd>   sentineld (auto-spawned)        libsentinel_hook.dylib
-┌──────────┐          ┌───────────────────┐           ┌──────────────────────┐
-│ CLI      │          │ IPC server        │           │ DYLD-injected cdylib │
-│          │          │ (Unix socket)     │           │                      │
-│ ensure   │          │                   │           │ ctor: load snapshot  │
-│ daemon   │ ──IPC──→ │ handlers:         │           │ interpose:           │
-│          │          │  prepare_snapshot  │           │  socket/connect/     │
-│ prepare  │          │  resolve (DNS)    │           │  bind/listen/send/   │
-│ snapshot │          │  prompt_channel   │           │  getaddrinfo/        │
-│          │          │  insert_user_rule │           │  exec*/fork/vfork/   │
-│ spawn    │          │  status/rules/... │           │                      │
-│ child    │          │                   │           │ hot path:            │
-│ w/ DYLD  │          │ feed system:      │           │  decide_for_sockaddr │
-│          │          │  gix fetch → OSV  │           │  → cache hit: <100µs│
-│ wait +   │          │  parse → SQLite   │           │  → cache miss: IPC  │
-│ report   │          │                   │           │    Resolve → daemon  │
-└──────────┘          │ log writer: JSONL │           │                      │
-                      │ process tree      │           │ fail-closed on:      │
-                      │ snapshot GC       │           │  corrupt snapshot    │
-                      │ persistence watch │           │  IPC timeout (250ms) │
-                      └───────────────────┘           │  HMAC mismatch       │
-                                                      └──────────────────────┘
+### Shell wrapping (recommended)
+
+Wrap your entire shell session so every command is protected by default:
+
+```sh
+# In ~/.zshrc or ~/.bashrc — must be first
+sentinel wrap --shell
 ```
 
-**Key properties:**
+This must appear before other commands in your shell configuration — anything
+that runs before this line (e.g. other plugin initialisation, `eval` calls)
+bypasses enforcement. The most intrusive option but also the most secure:
+nothing leaves your machine without going through Sentinel's policy.
 
-- Hook overhead < 100 µs per intercepted call (in-process cache lookup, no IPC on hit)
-- Fail-closed: any error in snapshot, HMAC, or IPC → deny all network
-- HMAC-SHA256 signed snapshots prevent tamper
-- Kernel audit-token IPC authentication
-- JSONL forensic logging to `~/Library/Logs/Sentinel/`
+### Reviewing activity
 
-See [docs/BENCH.md](docs/BENCH.md) for performance methodology and numbers.
+Check daemon health and hook integrity:
 
-## Workspace crates
+```sh
+sentinel status
+```
 
-| Crate | Type | Purpose |
-|---|---|---|
-| `sentinel-cli` | bin | CLI entry point |
-| `sentinel-daemon` | bin | `sentineld` — IPC server, policy engine, feed fetcher |
-| `sentinel-hook` | cdylib | `libsentinel_hook.dylib` — DYLD-injected interposition |
-| `sentinel-core` | lib | Domain types, policy evaluator, snapshot codec |
-| `sentinel-ipc` | lib | CBOR wire protocol, Unix socket transport |
-| `sentinel-watchdog` | bin | Daemon liveness monitor |
-| `sentinel-e2e` | tests | End-to-end test suites and benchmarks |
+Review denied connections from a specific run (the run UUID is printed when
+`sentinel wrap` completes):
 
-## Limitations
+```sh
+sentinel status denials <run-id>
+```
 
-This is a defense-in-depth layer, not a sandbox:
+Interactively walk through recent denials and create allow/deny rules:
 
-- **Hardened-runtime binaries** (`/bin/bash`, system tools) reject DYLD
-  injection — Sentinel blocks exec into them from wrapped subtrees instead
-- **Raw syscalls** bypass libc interposition — not a realistic supply-chain
-  attack vector (packages use libc)
-- **macOS only** in v1; requires macOS 14+ (Sonoma) on Apple Silicon or Intel
+```sh
+sentinel status review              # review most recent run
+sentinel status review <run-id>     # review a specific run
+```
 
-## Documentation
+List active policy rules:
 
-- [Install guide](docs/INSTALL.md) — build, setup, and troubleshooting
-- [Benchmarks](docs/BENCH.md) — performance methodology and reference numbers
-- [Changelog](CHANGELOG.md) — version history
-- `man sentinel` — CLI reference (after install)
-- `man sentineld` — daemon reference (after install)
+```sh
+sentinel status rules                    # user rules only
+sentinel status rules --include-built-in # include registry allowlists
+```
+
+View persistence-write events (files written during a wrapped run):
+
+```sh
+sentinel status persistence              # all events
+sentinel status persistence <run-id>
+```
+
+Look up threat-intel advisory details:
+
+```sh
+sentinel status advisory <advisory-id>   # e.g. MAL-2025-3008
+```
+
+Stream the JSONL forensic log:
+
+```sh
+sentinel status logs
+```
+
+### Manuals
+
+Running `sentinel` with no arguments prints help with all available commands
+and options:
+
+```sh
+sentinel
+```
+
+```
+Usage: sentinel <COMMAND>
+
+Commands:
+  wrap     Wrap a command with default-deny network policy
+  status   Show daemon health, hook integrity, and run history
+  install  Install the background daemon as a LaunchAgent
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+Detailed documentation is also available via man pages:
+
+```sh
+man sentinel    # CLI usage
+man sentineld   # daemon internals
+```
+
+## Coverage
+
+### Supported platforms
+
+| Platform | Version       | Status        | Mechanism                | Notes                                                                                                                                                                                                                                                     |
+| -------- | ------------- | ------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS    | 13+ (Ventura) | **Supported** | DYLD injection           | Primary platform, tested in CI                                                                                                                                                                                                                            |
+| macOS    | 12 (Monterey) | Best-effort   | DYLD injection           | Not tested in CI                                                                                                                                                                                                                                          |
+| Linux    | —             | Planned (v2)  | LD_PRELOAD / seccomp-bpf | [Tracking issue](https://github.com/stentorian-io/sentinel/issues/2)                                                                                                                                                                                      |
+| Windows  | —             | Not planned   | —                        | Windows restricts userspace library injection behind kernel-mode driver signing and security features that require paid enterprise certificates. There is no equivalent to DYLD or LD_PRELOAD available to open-source tools without elevated privileges. |
+
+### Threat intelligence
+
+Sentinel ships with threat intelligence sourced from
+[OSV.dev malicious-package advisories](https://osv.dev) (the OSSF Malicious
+Packages dataset). A nightly CI job pulls new advisories, commits them to the
+repository, and the data is baked into the binary at compile time — no runtime
+network fetches, no phone-home. Hand-curated abuse-pattern rules (e.g. shared
+hosting domains commonly used for exfiltration) supplement the automated feed.
+
+| Signal                      | Action                                       | Source                           |
+| --------------------------- | -------------------------------------------- | -------------------------------- |
+| Confirmed malicious package | **Default deny**                             | OSV.dev advisories               |
+| Suspected malicious host    | **Flagged** — surfaces an interactive prompt | Hand-curated abuse patterns      |
+| Known-good registry/CDN     | **Allow**                                    | Curated allowlists per ecosystem |
+
+### Security limitations
+
+No security tool provides absolute protection, and any tool claiming 100%
+coverage is either misleading you or naive about how attackers operate.
+Sentinel is defense-in-depth, not a sandbox: it raises the cost of an attack
+rather than eliminating it. Policy is enforced in userspace, so an attacker who
+can run arbitrary native code, issue raw syscalls, or exploit the kernel can
+bypass it — as they can bypass any userspace defense. At the extreme, even
+hardware has proven vulnerable (Rowhammer, Spectre).
+
+What Sentinel handles well is the realistic, high-volume attack class:
+supply-chain packages that phone home through standard networking calls, which
+is how the overwhelming majority of these compromises work. The aim is to lift
+the bar high enough to stop those attacks cold — while being honest that a
+sufficiently funded and determined attacker can still chain vulnerabilities to
+get what they want.
+
+## Found Sentinel useful?
+
+Sentinel is free and always will be — it's a community-driven effort to protect
+developers from supply-chain attacks. If it's saved you from a sketchy package
+or just gives you peace of mind, consider
+[sponsoring the project](https://github.com/sponsors/stentorian-io).
+
+<!-- TODO: Add sponsorship badge when set up -->
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Contributing
 
-Contributions welcome. This project uses:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture details, crate map, IPC
+protocol documentation, and build instructions.
 
-- **Rust** (edition 2024, stable toolchain)
-- **Conventional commits** — `feat(hook):`, `fix(daemon):`, `test(e2e):`, etc.
-- **CI validation** — PRs must pass the E2E test suite on macOS-14
+## Licensing
 
-```sh
-# Run the full test suite
-cargo test --workspace --release
+Licensed under either of
 
-# Run just the E2E validation tests
-cargo test -p sentinel-e2e --release
-```
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT License](LICENSE-MIT)
 
-## License
+at your option.
 
-License TBD before v1.0 release.
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this project by you, as defined in the Apache-2.0 license,
+shall be dual licensed as above, without any additional terms or conditions.
+
+---
+
+<p align="center">
+  Built by <a href="https://stentorian.io">Stentorian</a> — because developers deserve nice things.
+</p>

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# scripts/bench-hot-path.sh — one-command bench runner for docs/BENCH.md.
+# scripts/bench-hot-path.sh — one-command bench runner for hot-path benchmarks.
 #
-# Reproduces docs/BENCH.md numbers on any M-series Apple Silicon Mac.
+# Reproduces hot-path benchmark numbers on any M-series Apple Silicon Mac.
 #
 # Usage:
 #   ./scripts/bench-hot-path.sh
 #
 # Output:
 #   * Progress markers on stderr.
-#   * A markdown table summary on stdout suitable for pasting into docs/BENCH.md.
+#   * A markdown table summary on stdout.
 #
 # Sources:
 #   * CONTEXT D-33 (one-command local runner; no CI gate)
-#   * CONTEXT D-36 (docs/BENCH.md location)
+#   * CONTEXT D-36
 #   * RESEARCH Code Examples A
 #   * RESEARCH Pitfall 7 (--release required for live-wrap E2E bench)
 
@@ -130,13 +130,13 @@ CACHE_HIT_P99_FMT="$(fmt_ns "$CACHE_HIT_P99")"
 LIVE_WRAP_P99_FMT="$(fmt_ns "$LIVE_WRAP_P99")"
 
 # ---------------------------------------------------------------------------
-# Markdown summary table — paste into docs/BENCH.md.
+# Markdown summary table.
 # ---------------------------------------------------------------------------
 cat <<EOF
 
 ## Bench Summary
 
-Paste the row below into docs/BENCH.md under the numbers table.
+Benchmark results:
 
 | machine | RAM | macOS | rustc | git SHA | date (UTC) | cache-hit p99 | live-wrap p99 |
 |---------|-----|-------|-------|---------|------------|----------------|----------------|

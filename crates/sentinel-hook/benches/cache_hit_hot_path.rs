@@ -12,7 +12,7 @@
 //!    We use `b.iter_custom(...)` and record per-iteration `Instant::now()`-bracketed
 //!    deltas into an `hdrhistogram::Histogram::<u64>::new(3)`, then `eprintln!`
 //!    p50/p95/p99/p99.9/max as a separate stderr line that
-//!    `scripts/bench-hot-path.sh` parses for `docs/BENCH.md`.
+//!    `scripts/bench-hot-path.sh` parses.
 //!  * `ALLOWLIST` is a process-global `OnceLock` (sentinel-hook/src/lib.rs:50);
 //!    set it ONCE before the bench loop or the bench measures a noise floor
 //!    (RESEARCH §Pitfall 6). We do this via a single warm-up call to
@@ -154,8 +154,7 @@ fn cache_hit_bench(c: &mut Criterion) {
 
     // Print percentile line — `scripts/bench-hot-path.sh`
     // greps for `p99=` from this. Intentionally NO assertion against a
-    // hard p99 threshold (D-33: no CI gate; binding number lives in
-    // `docs/BENCH.md`).
+    // hard p99 threshold (D-33: no CI gate).
     eprintln!(
         "cache_hit/decide_for_sockaddr  p50={}ns  p95={}ns  p99={}ns  p99.9={}ns  max={}ns",
         hist.value_at_quantile(0.50),

@@ -18,8 +18,8 @@ members = [
 [workspace.package]
 edition = "2024"
 rust-version = "1.85"
-license = "LicenseRef-TBD"
-repository = "https://github.com/sentinel-app/sentinel"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/stentorian-io/sentinel"
 authors = ["Sentinel contributors"]
 
 [workspace.dependencies]

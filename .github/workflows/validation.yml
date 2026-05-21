@@ -25,6 +25,10 @@ name: validation
 on:
   pull_request:
     branches: [main]
+  schedule:
+    # Nightly at 06:15 UTC — catches new advisories in the RustSec DB
+    # even when no lockfile-changing PR is open.
+    - cron: '15 6 * * *'
 
 # Cancel stale runs on the same ref. Avoids piling up macos-14 minutes when
 # developers push quick re-runs.
@@ -39,12 +43,14 @@ jobs:
   # lint-test-env-vars jobs.  Markdown lint and PR-title checks still run.
   changes:
     name: Detect code changes
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      lockfile: ${{ steps.filter.outputs.lockfile }}
       markdown: ${{ steps.filter.outputs.markdown }}
     steps:
       - uses: actions/checkout@v4
@@ -62,11 +68,16 @@ jobs:
               - 'crates/sentinel-core/data/**'
               - 'scripts/*.sh'
               - 'tools/**'
+            lockfile:
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+              - 'rust-toolchain.toml'
             markdown:
               - '**/*.md'
 
   pr-title:
     name: PR title (conventional commit)
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: amannn/action-semantic-pull-request@v5
@@ -92,6 +103,11 @@ jobs:
             watchdog
             e2e
             bench
+            readme
+            llm
+            man
+            help
+            install
           requireScope: false
           subjectPattern: ^(?![A-Z]).+(?<!\.)$
           subjectPatternError: |
@@ -132,10 +148,12 @@ jobs:
       - run: cargo machete --with-metadata
 
   # ── Security checks ─────────────────────────────────────────────────────
-  # Always run on every PR regardless of changed paths — secrets and CVEs
-  # can hide in any file or transitive dependency.
+  # Secret scan: every PR (secrets can hide in any file).
+  # CVE audit: PRs that touch Cargo.toml/Cargo.lock/rust-toolchain, plus
+  # nightly on main to catch newly published advisories.
   secret-scan:
     name: Secret scan
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -147,6 +165,10 @@ jobs:
 
   cargo-audit:
     name: Dependency CVE audit
+    needs: changes
+    if: >-
+      github.event_name == 'schedule'
+      || needs.changes.outputs.lockfile == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

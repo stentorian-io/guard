@@ -31,7 +31,6 @@
   - [Manuals](#manuals)
 - [Coverage](#coverage)
   - [Platform support](#platform-support)
-  - [Hardened deployment](#hardened-deployment)
   - [Threat intelligence](#threat-intelligence)
   - [Security expectations](#security-expectations)
 - [Found Stentorian Guard useful?](#found-stentorian-guard-useful)
@@ -123,7 +122,7 @@ Policy is evaluated in tier order:
 Cache hits resolve in under 100 microseconds with no IPC.
 
 - No kernel extensions or system extensions
-- One-time `sudo stt-guard init` — hardened by default
+- One-time `sudo stt-guard init` — tamper-resistant by default
 - Works with any command or binary run from the terminal, not just package managers
 - Root-owned binaries + `_stt_guard` service user — tamper-resistant
 
@@ -153,8 +152,8 @@ sudo stt-guard init
 The init step creates a `_stt_guard` service user, deploys root-owned
 binaries to `/usr/local/libexec/stt-guard/`, and starts the daemon as a
 LaunchDaemon. This is the only deployment mode — it prevents a compromised
-process from tampering with the guard itself. See
-[Hardened deployment](#hardened-deployment) for details.
+process from tampering with the guard itself. See the
+[deployment model](SECURITY.md#deployment-model) for details.
 
 All other commands (`wrap`, `status`) require initialisation to be complete
 and will refuse to run otherwise.
@@ -334,41 +333,6 @@ man stt-guard-daemon   # daemon internals
 | Linux    | —             | Planned (v2)  | LD_PRELOAD / seccomp-bpf | [Tracking issue](https://github.com/stentorian-io/guard/issues/2)                                                                                                                                                                                      |
 | Windows  | —             | Not planned   | —                        | Windows restricts userspace library injection behind kernel-mode driver signing and security features that require paid enterprise certificates. There is no equivalent to DYLD or LD_PRELOAD available to open-source tools without elevated privileges. |
 
-### Hardened deployment
-
-`stt-guard init` deploys in hardened mode: binaries are root-owned and
-the daemon runs as a dedicated `_stt_guard` service user (no login shell,
-no home directory — same convention as macOS's `_postgres` and `_mysql`).
-This prevents a compromised process from tampering with the guard itself.
-
-| Component | Path | Owner |
-|---|---|---|
-| Binaries | `/usr/local/libexec/stt-guard/` | `root:wheel` (755) |
-| Runtime state (DB, snapshots, HMAC keys) | `/Library/Application Support/Stentorian Guard/` | `_stt_guard:_stt_guard` (700) |
-| Logs | `/var/log/stt-guard/` | `_stt_guard:_stt_guard` (700) |
-| LaunchDaemon | `io.stentorian.guard.daemon` | Root-managed |
-
-**What hardened mode protects against:**
-
-| Attack | Without hardened mode | With hardened mode |
-|---|---|---|
-| Replace binaries on disk | Code signing raises the bar | Root-owned — user can't write |
-| Tamper with rule database | User-owned, writable | `_stt_guard`-owned, user can't write |
-| Modify snapshot contents | HMAC validates integrity | `_stt_guard`-owned, written by daemon only |
-| Delete denial logs | User-owned, deletable | `_stt_guard`-owned |
-| Kill daemon and replace with rogue | Codesign peer auth detects | Can't kill a different UID without root; LaunchDaemon auto-restarts |
-| Steal HMAC key material | User-readable | `_stt_guard`-readable only (700) |
-| `sudo` inside monitored tree | Blocked (setuid check) | Blocked with explicit `PrivilegeEscalation` reason |
-
-The IPC socket is world-writable — any process can connect — but the daemon
-authenticates every connection via macOS audit tokens and codesign identity
-verification (shipped in v0.7). The socket is the door; codesign is the lock.
-
-**Performance and UX impact:** hardened mode has zero runtime overhead. The
-protection is purely ownership and permissions on disk — the daemon, hook, and
-policy engine execute the same code paths regardless. The only user-visible
-difference is the one-time `sudo stt-guard init` during setup.
-
 ### Threat intelligence
 
 Stentorian Guard ships with threat intelligence sourced from
@@ -391,7 +355,7 @@ high-volume attack — supply-chain packages that phone home through standard
 networking calls — which is how the overwhelming majority of these compromises
 work. The goal is to make that attack class fail by default.
 
-In [hardened mode](#hardened-deployment) (the default), a local attacker needs
+With the [standard installation](SECURITY.md#deployment-model), a local attacker needs
 root to tamper with the guard's binaries, database, or logs. Without root, the
 remaining attack surface is DYLD stripping (a parent process removing the
 injection variable before spawning children) and runtime memory patching of the

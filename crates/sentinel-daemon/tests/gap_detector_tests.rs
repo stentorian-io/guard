@@ -1,11 +1,15 @@
 use sentinel_core::AuditToken;
 use sentinel_daemon::gap_detector::{GapDetector, GAP_TIMEOUT_MS};
 use sentinel_daemon::tracked::{CoverageGap, ProcessTree};
+use std::os::unix::process::ExitStatusExt;
+use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
 fn token(pid: u32) -> AuditToken {
-    AuditToken { val: [0, 0, 0, 0, 0, pid, 0, 0] }
+    AuditToken {
+        val: [0, 0, 0, 0, 0, pid, 0, 0],
+    }
 }
 
 fn pending_gap() -> CoverageGap {
@@ -35,7 +39,10 @@ fn timeout_fires_records_gap() {
     // Wait for the timer to fire (500ms + small slack).
     std::thread::sleep(Duration::from_millis(GAP_TIMEOUT_MS + 200));
     let n = tree.get_node(&t).expect("node");
-    assert!(n.coverage_gap.is_some(), "gap should be recorded after timeout");
+    assert!(
+        n.coverage_gap.is_some(),
+        "gap should be recorded after timeout"
+    );
 }
 
 #[test]
@@ -45,10 +52,16 @@ fn cancel_before_timeout_prevents_gap() {
     let det = GapDetector::new();
     det.arm(t, pending_gap(), tree.clone());
     std::thread::sleep(Duration::from_millis(50));
-    assert!(det.cancel(&t), "cancel should return true (pending timer existed)");
+    assert!(
+        det.cancel(&t),
+        "cancel should return true (pending timer existed)"
+    );
     std::thread::sleep(Duration::from_millis(GAP_TIMEOUT_MS + 200));
     let n = tree.get_node(&t).expect("node");
-    assert!(n.coverage_gap.is_none(), "no gap recorded when cancelled in time");
+    assert!(
+        n.coverage_gap.is_none(),
+        "no gap recorded when cancelled in time"
+    );
 }
 
 #[test]
@@ -94,9 +107,43 @@ fn many_concurrent_arms_each_complete() {
     std::thread::sleep(Duration::from_millis(GAP_TIMEOUT_MS + 300));
     let mut count_with_gap = 0;
     for i in 0..32 {
-        if tree.get_node(&token(1000 + i)).unwrap().coverage_gap.is_some() {
+        if tree
+            .get_node(&token(1000 + i))
+            .unwrap()
+            .coverage_gap
+            .is_some()
+        {
             count_with_gap += 1;
         }
     }
-    assert_eq!(count_with_gap, 32, "all 32 timers should have fired and recorded gaps");
+    assert_eq!(
+        count_with_gap, 32,
+        "all 32 timers should have fired and recorded gaps"
+    );
+}
+
+#[test]
+fn enforced_timeout_records_gap_and_kills_process() {
+    let mut child = Command::new("/bin/sleep")
+        .arg("5")
+        .spawn()
+        .expect("spawn sleep");
+    let t = token(child.id());
+    let tree = build_tree(t);
+    let det = GapDetector::new();
+
+    det.arm_enforced_with_forensics(t, pending_gap(), tree.clone(), None, None);
+    std::thread::sleep(Duration::from_millis(GAP_TIMEOUT_MS + 200));
+
+    let n = tree.get_node(&t).expect("node");
+    assert!(
+        n.coverage_gap.is_some(),
+        "gap should be recorded after timeout"
+    );
+
+    let status = child
+        .try_wait()
+        .expect("wait for sleep")
+        .expect("sleep should have exited after enforced timeout");
+    assert_eq!(status.signal(), Some(libc::SIGKILL));
 }

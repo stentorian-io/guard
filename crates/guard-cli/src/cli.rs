@@ -28,6 +28,16 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
+    /// Install Stentorian Guard (hardened mode). Requires root.
+    ///
+    /// Creates the _stt_guard service user, deploys root-owned binaries,
+    /// and starts the daemon as a LaunchDaemon.
+    Install {
+        /// Skip interactive confirmation.
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
     /// Wrap a command under default-deny network enforcement.
     Wrap {
         /// Observe unknown destinations and present them for review after the

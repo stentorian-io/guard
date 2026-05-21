@@ -23,10 +23,21 @@ fn main() {
 
 fn real_main() -> Result<i32, CliError> {
     let cli = Cli::parse();
-    let state = default_state_dir();
-    let sock = socket_path(&state);
 
     match cli.cmd {
+        Cmd::Install { yes } => {
+            guard_cli::install::system::print_plan();
+            if !yes {
+                eprintln!();
+                if !guard_cli::tty::confirm("Proceed?")? {
+                    eprintln!("Aborted.");
+                    return Ok(0);
+                }
+            }
+            eprintln!();
+            guard_cli::install::system::run_install()?;
+            Ok(0)
+        }
         Cmd::Wrap { learn, argv } => {
             if learn && !guard_cli::tty::stdin_is_tty() {
                 eprintln!(
@@ -35,20 +46,30 @@ fn real_main() -> Result<i32, CliError> {
                 );
                 return Ok(64); // EX_USAGE
             }
+            let state = resolve_state_dir();
+            let sock = socket_path(&state);
             guard_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
             run_orchestrator::run(&sock, &state, argv, learn)
         }
         Cmd::Status { sub } => {
+            let state = resolve_state_dir();
+            let sock = socket_path(&state);
             match sub {
-                // Local-only commands: no daemon needed.
-                Some(guard_cli::cli::StatusSub::Logs) => guard_cli::logs::run_logs(),
+                // Local-only commands: install gate but no daemon needed.
+                Some(guard_cli::cli::StatusSub::Logs) => {
+                    guard_cli::ensure_daemon::require_installed()?;
+                    guard_cli::logs::run_logs()
+                }
                 Some(guard_cli::cli::StatusSub::Denials { run_uuid }) => {
+                    guard_cli::ensure_daemon::require_installed()?;
                     guard_cli::status::denials::run(&run_uuid)
                 }
                 Some(guard_cli::cli::StatusSub::Persistence { run_uuid }) => {
+                    guard_cli::ensure_daemon::require_installed()?;
                     guard_cli::status::persistence::run(run_uuid.as_deref())
                 }
                 Some(guard_cli::cli::StatusSub::Advisory { advisory_id }) => {
+                    guard_cli::ensure_daemon::require_installed()?;
                     guard_cli::status::advisory::run(&advisory_id)
                 }
                 // IPC-dependent commands: ensure daemon first.
@@ -72,4 +93,15 @@ fn real_main() -> Result<i32, CliError> {
             }
         }
     }
+}
+
+/// Resolve the state directory. In hardened mode (which is the only mode),
+/// if the system state dir exists, use it; otherwise fall back to the
+/// user-level default (for development/testing via `STT_GUARD_STATE_DIR`).
+fn resolve_state_dir() -> std::path::PathBuf {
+    let system = guard_cli::install::system::system_state_dir();
+    if system.exists() {
+        return system;
+    }
+    default_state_dir()
 }

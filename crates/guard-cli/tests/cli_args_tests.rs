@@ -2,6 +2,41 @@ use clap::Parser;
 use guard_cli::cli::{Cli, Cmd, StatusSub};
 use std::ffi::OsString;
 
+// ---- stt-guard install parser shape --------------------------------------------
+
+#[test]
+fn install_bare_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "install"]).expect("parse");
+    match cli.cmd {
+        Cmd::Install { yes } => {
+            assert!(!yes);
+        }
+        other => panic!("expected Install variant, got {other:?}"),
+    }
+}
+
+#[test]
+fn install_yes_flag_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "install", "--yes"]).expect("parse");
+    match cli.cmd {
+        Cmd::Install { yes } => {
+            assert!(yes);
+        }
+        other => panic!("expected Install variant, got {other:?}"),
+    }
+}
+
+#[test]
+fn install_short_y_flag_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "install", "-y"]).expect("parse");
+    match cli.cmd {
+        Cmd::Install { yes } => {
+            assert!(yes);
+        }
+        other => panic!("expected Install variant, got {other:?}"),
+    }
+}
+
 // ---- stt-guard wrap parser shape -----------------------------------------------
 
 #[test]

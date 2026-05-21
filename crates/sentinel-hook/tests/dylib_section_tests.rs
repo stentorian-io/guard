@@ -8,7 +8,7 @@
 //! M004-S04 added 1 more (getenv) for anti-detection hardening.
 //! M005-S01 added 2 more (getaddrinfo, freeaddrinfo) for daemon-proxied DNS.
 //! open/openat interpose disabled (dispatch_once reentrancy crash on macOS 26+).
-//! syscall() interpose deferred (aarch64 C varargs ABI, Rust c_variadic unstable).
+//! libc syscall() interpose deferred (aarch64 C varargs ABI, Rust c_variadic unstable).
 //! Total: 17 records.
 
 use std::process::Command;

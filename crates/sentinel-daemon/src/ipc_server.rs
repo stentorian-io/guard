@@ -1587,9 +1587,8 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     // Arming on the child after fork closes the TREE-04 transitive
     // coverage gap: if the hardened child fails to inject the dylib (DYLD
     // env stripped), no DylibLoaded arrives within the gap window and the
-    // detector records `ConfirmedHardened`. The dylib's libc enforcement
-    // path is unaffected by this arming — it's purely a forensic / log
-    // signal so the user can see "this process slipped through".
+    // detector records `ConfirmedHardened` and fail-closes the child rather
+    // than letting it continue outside Sentinel enforcement.
     if recorded_ok {
         let child_pid = ev.child_pid as libc::pid_t;
         if is_hardened_runtime(child_pid) {
@@ -1599,7 +1598,7 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
             };
             // v0.3: pass forensic sinks so the gap fire also
             // updates recent_gaps + log_writer.
-            state.gap_detector.arm_with_forensics(
+            state.gap_detector.arm_enforced_with_forensics(
                 child,
                 gap,
                 state.process_tree.clone(),
@@ -1818,7 +1817,7 @@ fn handle_exec_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
         };
         // v0.3: pass forensic sinks so the gap fire also
         // updates recent_gaps + log_writer.
-        state.gap_detector.arm_with_forensics(
+        state.gap_detector.arm_enforced_with_forensics(
             peer_token,
             gap,
             state.process_tree.clone(),

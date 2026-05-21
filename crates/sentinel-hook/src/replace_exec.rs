@@ -77,7 +77,7 @@ fn block_exec_trace_required(
     let mut path_buf = [0u8; 1024];
     let n = copy_cstr_to_buf(path, &mut path_buf);
     let line = format!(
-        "[sentinel-hook] T3 ptrace required for exec-family call reason={} path={}",
+        "[sentinel-hook] T3 fail-closed for exec-family call reason={} path={}",
         reason.as_str(),
         String::from_utf8_lossy(&path_buf[..n])
     );

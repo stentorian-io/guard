@@ -71,8 +71,6 @@ pub use messages::{
     // v0.4 — Threat-intel
     IPC_SCHEMA_V4,
     IntelMatch,
-    // v1.0 — TraceSpawned (tag 0x18)
-    IPC_SCHEMA_V5,
     // v0.7 — ListRules (tag 0x0E)
     ListRules,
     ListRulesReply,
@@ -98,6 +96,4 @@ pub use messages::{
     // v0.5 — Ping (tag 0x15; watchdog liveness)
     Ping,
     PingReply,
-    TraceSpawned,
-    TraceSpawnedAck,
 };

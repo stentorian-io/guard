@@ -31,6 +31,7 @@
   - [Manuals](#manuals)
 - [Coverage](#coverage)
   - [Platform support](#platform-support)
+  - [Hardened deployment](#hardened-deployment)
   - [Threat intelligence](#threat-intelligence)
   - [Security expectations](#security-expectations)
 - [Found Stentorian Guard useful?](#found-stentorian-guard-useful)
@@ -121,10 +122,10 @@ Policy is evaluated in tier order:
 
 Cache hits resolve in under 100 microseconds with no IPC.
 
-- No root privileges required
 - No kernel extensions or system extensions
 - No manual setup — the daemon auto-starts on first use
 - Works with any command or binary run from the terminal, not just package managers
+- Hardened mode by default — root-owned binaries + `_stt_guard` service user
 
 ### Existing alternatives
 
@@ -146,6 +147,21 @@ Socket/Snyk, lockfiles, and more), see [docs/alternatives.md](docs/alternatives.
 
 ```sh
 brew install stentorian-io/tap/stt-guard
+sudo stt-guard install system
+```
+
+The `install system` step creates a `_stt_guard` service user, moves binaries
+to root-owned paths, and starts the daemon as a LaunchDaemon. This is the
+recommended (and default) deployment — it prevents a compromised process from
+tampering with the guard itself. See [Hardened deployment](#hardened-deployment)
+for details.
+
+If you cannot or prefer not to use `sudo`, pass `--user-mode` to skip the
+hardened install and run the daemon as your user via LaunchAgent instead:
+
+```sh
+brew install stentorian-io/tap/stt-guard
+stt-guard install --user-mode
 ```
 
 Or build from source — see [CONTRIBUTING.md](CONTRIBUTING.md#build) for
@@ -297,7 +313,7 @@ Usage: stt-guard <COMMAND>
 Commands:
   wrap     Wrap a command with default-deny network policy
   status   Show daemon health, hook integrity, and run history
-  install  Install the background daemon as a LaunchAgent
+  install  Install the daemon (system mode by default, --user-mode for LaunchAgent)
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -323,6 +339,49 @@ man stt-guard-daemon   # daemon internals
 | Linux    | —             | Planned (v2)  | LD_PRELOAD / seccomp-bpf | [Tracking issue](https://github.com/stentorian-io/guard/issues/2)                                                                                                                                                                                      |
 | Windows  | —             | Not planned   | —                        | Windows restricts userspace library injection behind kernel-mode driver signing and security features that require paid enterprise certificates. There is no equivalent to DYLD or LD_PRELOAD available to open-source tools without elevated privileges. |
 
+### Hardened deployment
+
+By default, `stt-guard install system` deploys in hardened mode: binaries are
+root-owned and the daemon runs as a dedicated `_stt_guard` service user (no
+login shell, no home directory — same convention as macOS's `_postgres` and
+`_mysql`). This prevents a compromised process from tampering with the guard
+itself.
+
+| Component | Path | Owner |
+|---|---|---|
+| Binaries | `/usr/local/libexec/stt-guard/` | `root:wheel` (755) |
+| Runtime state (DB, snapshots, HMAC keys) | `/Library/Application Support/Stentorian Guard/` | `_stt_guard:_stt_guard` (700) |
+| Logs | `/var/log/stt-guard/` | `_stt_guard:_stt_guard` (700) |
+| LaunchDaemon | `io.stentorian.guard.daemon` | Root-managed |
+
+**What hardened mode protects against:**
+
+| Attack | Without hardened mode | With hardened mode |
+|---|---|---|
+| Replace binaries on disk | Code signing raises the bar | Root-owned — user can't write |
+| Tamper with rule database | User-owned, writable | `_stt_guard`-owned, user can't write |
+| Modify snapshot contents | HMAC validates integrity | `_stt_guard`-owned, written by daemon only |
+| Delete denial logs | User-owned, deletable | `_stt_guard`-owned |
+| Kill daemon and replace with rogue | Codesign peer auth detects | Can't kill a different UID without root; LaunchDaemon auto-restarts |
+| Steal HMAC key material | User-readable | `_stt_guard`-readable only (700) |
+| `sudo` inside monitored tree | Blocked (setuid check) | Blocked with explicit `PrivilegeEscalation` reason |
+
+The IPC socket is world-writable — any process can connect — but the daemon
+authenticates every connection via macOS audit tokens and codesign identity
+verification (shipped in v0.7). The socket is the door; codesign is the lock.
+
+**User mode** (`stt-guard install --user-mode`) skips hardened deployment and
+runs the daemon as your user via LaunchAgent. All the network enforcement
+still works, but the guard's own files are user-owned and therefore
+modifiable by a compromised process running as you. Use this if you
+cannot `sudo` or prefer not to create a system user.
+
+**Performance and UX impact:** hardened mode has zero runtime overhead. The
+protection is purely ownership and permissions on disk — the daemon, hook, and
+policy engine execute the same code paths regardless of deployment mode. The
+only user-visible difference is the one-time `sudo stt-guard install system`
+during setup.
+
 ### Threat intelligence
 
 Stentorian Guard ships with threat intelligence sourced from
@@ -344,6 +403,13 @@ Stentorian Guard is defense-in-depth, not a sandbox. It stops the realistic,
 high-volume attack — supply-chain packages that phone home through standard
 networking calls — which is how the overwhelming majority of these compromises
 work. The goal is to make that attack class fail by default.
+
+In [hardened mode](#hardened-deployment) (the default), a local attacker needs
+root to tamper with the guard's binaries, database, or logs. Without root, the
+remaining attack surface is DYLD stripping (a parent process removing the
+injection variable before spawning children) and runtime memory patching of the
+in-process hook — both require deliberate, targeted effort beyond what
+supply-chain malware attempts.
 
 It is not designed to stop a sufficiently determined attacker who can exploit
 the kernel or target infrastructure outside the process tree. On macOS,

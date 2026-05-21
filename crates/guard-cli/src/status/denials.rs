@@ -9,7 +9,7 @@ use crate::denial_log;
 use crate::install::launchagent;
 
 pub fn run(run_uuid: &str) -> Result<i32, CliError> {
-    let log_path = launchagent::logs_dir().join("stt-guard.log");
+    let log_path = launchagent::logs_dir().join(guard_core::paths::LOG_FILENAME);
     let blocks = denial_log::filter_block_destinations(&log_path, run_uuid)?;
 
     if blocks.is_empty() {

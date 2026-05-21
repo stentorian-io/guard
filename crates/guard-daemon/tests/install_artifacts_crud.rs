@@ -5,7 +5,7 @@ use guard_daemon::rule_store::RuleStore;
 
 fn fresh_db() -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let db = dir.path().join("stt-guard.db");
+    let db = guard_core::paths::db_path(dir.path());
     // RuleStore::open runs migrations; we then drop it so the install_artifacts
     // store and the read_via_db helper can open fresh handles.
     {

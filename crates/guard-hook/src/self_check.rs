@@ -13,7 +13,7 @@ use std::io::Read;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-const HASH_FILENAME: &str = "hook.sha256";
+use guard_core::paths::HOOK_HASH_FILENAME as HASH_FILENAME;
 
 #[derive(Debug)]
 pub enum SelfCheckError {

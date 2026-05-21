@@ -100,7 +100,7 @@ fn allow_always_machine_persists_rule_and_allows_next_run() {
     );
 
     // Assert: SQLite rules table contains a row for the host.
-    let db_path = harness.state_dir.join("stt-guard.db");
+    let db_path = guard_core::paths::db_path(&harness.state_dir);
     assert!(db_path.exists(), "stt-guard.db missing");
     let conn = rusqlite::Connection::open(&db_path).expect("open db");
     let count: i64 = conn

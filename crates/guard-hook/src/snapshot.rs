@@ -75,7 +75,10 @@ pub fn well_known_state_dir() -> PathBuf {
         }
     }
     let home = std::env::var_os("HOME").expect("HOME environment variable must be set");
-    PathBuf::from(home).join("Library/Application Support/Stentorian Guard")
+    PathBuf::from(home).join(format!(
+        "Library/Application Support/{}",
+        guard_core::paths::APP_NAME,
+    ))
 }
 
 /// Read STT_GUARD_SNAPSHOT_MANIFEST via libc::getenv to avoid std::env::var
@@ -216,7 +219,7 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
 const HMAC_KEY_LEN: usize = 32;
 
 fn load_hmac_key(state_dir: &Path) -> Option<[u8; HMAC_KEY_LEN]> {
-    let path = state_dir.join("hmac.key");
+    let path = guard_core::paths::hmac_key_path(state_dir);
     let mut f = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW)

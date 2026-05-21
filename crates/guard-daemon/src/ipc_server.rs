@@ -243,7 +243,7 @@ impl DaemonState {
     }
 
     pub fn db_path(&self) -> std::path::PathBuf {
-        self.state_dir.join("stt-guard.db")
+        guard_core::paths::db_path(&self.state_dir)
     }
 }
 

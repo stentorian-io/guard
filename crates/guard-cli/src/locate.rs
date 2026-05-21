@@ -9,10 +9,10 @@
 
 use std::path::PathBuf;
 
-const DYLIB_NAME: &str = "stt-guard-hook.dylib";
-const ENV_HOOK_DYLIB: &str = "STT_GUARD_HOOK_DYLIB";
-const SYSTEM_INSTALL_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook.dylib";
-const HOMEBREW_RELEASE_PATH: &str = "/opt/homebrew/lib/stt-guard/stt-guard-hook.dylib";
+use guard_core::paths::{
+    ENV_HOOK_DYLIB, HOMEBREW_HOOK_PATH as HOMEBREW_RELEASE_PATH, HOOK_DYLIB as DYLIB_NAME,
+    SYSTEM_HOOK_PATH as SYSTEM_INSTALL_PATH,
+};
 
 pub fn find_dylib() -> std::io::Result<PathBuf> {
     // 1. Explicit override for source builds and tests.

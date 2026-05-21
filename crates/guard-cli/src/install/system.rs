@@ -9,17 +9,19 @@ use std::process::Command;
 
 use crate::CliError;
 
-const SERVICE_USER: &str = "_stt_guard";
-const SERVICE_USER_REALNAME: &str = "Stentorian Guard Daemon";
+use guard_core::paths;
 
-const BIN_DIR: &str = "/usr/local/libexec/stt-guard";
-const STATE_DIR: &str = "/Library/Application Support/Stentorian Guard";
-const LOG_DIR: &str = "/var/log/stt-guard";
-const PLIST_LABEL: &str = "io.stentorian.guard.daemon";
-const PLIST_PATH: &str = "/Library/LaunchDaemons/io.stentorian.guard.daemon.plist";
+const SERVICE_USER: &str = paths::SERVICE_USER;
+const SERVICE_USER_REALNAME: &str = paths::SERVICE_USER_REALNAME;
 
-const BINARIES: &[&str] = &["stt-guard", "stt-guard-daemon"];
-const DYLIB: &str = "stt-guard-hook.dylib";
+const BIN_DIR: &str = paths::SYSTEM_BIN_DIR;
+const STATE_DIR: &str = paths::SYSTEM_STATE_DIR;
+const LOG_DIR: &str = paths::SYSTEM_LOG_DIR;
+const PLIST_LABEL: &str = paths::PLIST_LABEL;
+const PLIST_PATH: &str = paths::PLIST_PATH;
+
+const BINARIES: &[&str] = paths::INSTALLED_BINARIES;
+const DYLIB: &str = paths::HOOK_DYLIB;
 
 /// Check whether the hardened installation is present.
 /// Returns true if the deployed daemon binary exists under the system bin dir.

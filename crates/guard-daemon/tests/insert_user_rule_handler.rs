@@ -15,7 +15,7 @@ fn req(kind: &str, match_type: &str, pattern: &str, reason: &str) -> InsertUserR
 #[test]
 fn happy_path_returns_rule_id() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = RuleStore::open(&dir.path().join("stt-guard.db")).expect("open");
+    let store = RuleStore::open(&guard_core::paths::db_path(dir.path())).expect("open");
     let r = handle_insert_user_rule(&req("allow", "exact", "h.example.com", "approved"), &store);
     match r {
         InsertUserRuleReply::Ok { rule_id, .. } => assert!(rule_id > 0),
@@ -26,7 +26,7 @@ fn happy_path_returns_rule_id() {
 #[test]
 fn rejects_bad_kind() {
     let dir = tempfile::tempdir().unwrap();
-    let store = RuleStore::open(&dir.path().join("stt-guard.db")).unwrap();
+    let store = RuleStore::open(&guard_core::paths::db_path(dir.path())).unwrap();
     let r = handle_insert_user_rule(&req("bogus", "exact", "h", "ok"), &store);
     assert!(matches!(r, InsertUserRuleReply::Err { .. }));
 }
@@ -34,7 +34,7 @@ fn rejects_bad_kind() {
 #[test]
 fn rejects_bad_match_type() {
     let dir = tempfile::tempdir().unwrap();
-    let store = RuleStore::open(&dir.path().join("stt-guard.db")).unwrap();
+    let store = RuleStore::open(&guard_core::paths::db_path(dir.path())).unwrap();
     let r = handle_insert_user_rule(&req("allow", "regex", "h", "ok"), &store);
     assert!(matches!(r, InsertUserRuleReply::Err { .. }));
 }
@@ -42,7 +42,7 @@ fn rejects_bad_match_type() {
 #[test]
 fn rejects_empty_reason() {
     let dir = tempfile::tempdir().unwrap();
-    let store = RuleStore::open(&dir.path().join("stt-guard.db")).unwrap();
+    let store = RuleStore::open(&guard_core::paths::db_path(dir.path())).unwrap();
     let r = handle_insert_user_rule(&req("allow", "exact", "h", "   "), &store);
     assert!(matches!(r, InsertUserRuleReply::Err { .. }));
 }
@@ -50,7 +50,7 @@ fn rejects_empty_reason() {
 #[test]
 fn rejects_empty_pattern() {
     let dir = tempfile::tempdir().unwrap();
-    let store = RuleStore::open(&dir.path().join("stt-guard.db")).unwrap();
+    let store = RuleStore::open(&guard_core::paths::db_path(dir.path())).unwrap();
     let r = handle_insert_user_rule(&req("allow", "exact", "  ", "ok"), &store);
     assert!(matches!(r, InsertUserRuleReply::Err { .. }));
 }

@@ -8,6 +8,10 @@ use std::path::{Path, PathBuf};
 
 const SYSTEM_STATE_DIR: &str = "/Library/Application Support/Sentinel";
 
+pub fn is_system_install(state_dir: &Path) -> bool {
+    state_dir == Path::new(SYSTEM_STATE_DIR)
+}
+
 pub fn default_state_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("STT_GUARD_STATE_DIR") {
         return PathBuf::from(dir);
@@ -97,3 +101,28 @@ pub fn ensure_runs_dir(state_dir: &Path) -> std::io::Result<()> {
 }
 
 // --- Per-feed cache directory helpers (v0.4) ----------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_system_install_true_for_system_path() {
+        assert!(is_system_install(Path::new(
+            "/Library/Application Support/Sentinel"
+        )));
+    }
+
+    #[test]
+    fn is_system_install_false_for_user_path() {
+        assert!(!is_system_install(Path::new(
+            "/Users/someone/Library/Application Support/Stentorian Guard"
+        )));
+    }
+
+    #[test]
+    fn is_system_install_false_for_tmpdir() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!is_system_install(tmp.path()));
+    }
+}

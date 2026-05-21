@@ -254,12 +254,22 @@ pub struct IpcServer {
 
 impl IpcServer {
     /// Bind a fresh listener at `socket_path`. Removes any stale socket file
-    /// and sets mode 0600 on the new socket (so only the user can connect).
+    /// and sets socket permissions based on the deployment mode:
+    ///
+    /// - **User mode** (0o600): only the owning user can connect (same-UID).
+    /// - **System mode** (0o666): any user can connect; codesign peer auth
+    ///   is the authentication layer, not filesystem permissions. Required
+    ///   because the daemon runs as `_sentinel` but CLI/hook run as the user.
     pub fn bind(socket_path: &Path, state: Arc<DaemonState>) -> std::io::Result<Self> {
         let _ = std::fs::remove_file(socket_path);
         let listener = UnixListener::bind(socket_path)?;
+        let mode = if crate::state_dir::is_system_install(&state.state_dir) {
+            0o666
+        } else {
+            0o600
+        };
         let mut perms = std::fs::metadata(socket_path)?.permissions();
-        perms.set_mode(0o600);
+        perms.set_mode(mode);
         std::fs::set_permissions(socket_path, perms)?;
         Ok(Self { listener, state })
     }

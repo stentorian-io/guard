@@ -4,7 +4,7 @@
 //! file — the existing test must remain untouched to preserve the v0.2
 //! enforcement contract assertion shape).
 //!
-//! The `.workers.dev` suffix rule in `curated.yaml` has tier `BuiltinDeny`
+//! The `.workers.dev` suffix rule in `malicious-curated.yaml` has tier `BuiltinDeny`
 //! (Tier 0, non-overridable per D-26). The daemon's Resolve handler evaluates
 //! policy BEFORE prompting — `BuiltinDeny` denies without prompting and emits
 //! a JSONL row directly.

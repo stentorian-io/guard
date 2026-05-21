@@ -1,5 +1,6 @@
 // Linker tweaks for the cdylib's __DATA,__interpose section retention.
 fn main() {
+    println!("cargo:rerun-if-changed=../sentinel-core/data/trusted-runtimes.yaml");
     // Prevent ld-prime from dead-stripping module init/term sections.
     println!("cargo:rustc-link-arg=-Wl,-no_dead_strip_inits_and_terms");
     // libobjc link removed: on macOS 26+, explicitly linking libobjc in a

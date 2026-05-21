@@ -193,7 +193,7 @@ impl RuleStore {
     ///
     /// Built-in / curated rules are NOT a parameter here: they live on
     /// `DaemonState.curated: Arc<Vec<AllowlistEntry>>` (loaded from
-    /// `crates/sentinel-core/data/{allow,deny}/` via
+    /// `crates/sentinel-core/data/{trusted-registry,malicious,suspicious}-*.yaml` via
     /// `crates/sentinel-daemon/src/curated.rs::load_curated()`). The
     /// caller (`handle_list_rules`) merges them in.
     pub fn all_rules_with_source(&self) -> SqlResult<Vec<StoredRule>> {

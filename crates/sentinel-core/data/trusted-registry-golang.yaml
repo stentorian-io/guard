@@ -1,13 +1,17 @@
 # Go modules (ALLOW-04)
-- match: exact
+- kind: allow
+  match: exact
   pattern: proxy.golang.org
   reason: "Default GOPROXY module proxy (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: sum.golang.org
   reason: "Go checksum database (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: index.golang.org
   reason: "Module version index (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: storage.googleapis.com
   reason: "GCS backend for proxy.golang.org (ALLOW-04)"

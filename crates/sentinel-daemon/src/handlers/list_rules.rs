@@ -19,7 +19,8 @@ use crate::rule_store::{RuleStore, StoredRule};
 ///      sourced from the in-memory `curated: Arc<Vec<AllowlistEntry>>` on
 ///      `DaemonState`. The slice is loaded once at daemon startup by
 ///      `crates/sentinel-daemon/src/curated.rs::load_curated()` from the
-///      compile-time-embedded YAML from `crates/sentinel-core/data/{allow,deny}/`.
+///      compile-time-embedded YAML from
+///      `crates/sentinel-core/data/{trusted-registry,malicious,suspicious}-*.yaml`.
 ///      This is the authoritative source — `RuleStore` does NOT hold these rows.
 ///      Verified: `ipc_server.rs:190` (`pub curated: Arc<Vec<sentinel_core::AllowlistEntry>>`)
 ///      and `prepare_snapshot.rs:69` (the snapshot handler already merges this

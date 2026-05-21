@@ -1,10 +1,10 @@
 //! Curated default allowlist + abuse-pattern denies + feed IOCs.
 //!
-//! Source: `crates/sentinel-core/data/{allow,deny}/*.yaml` (in-tree YAML
-//! assembled and converted to JSON by build.rs at compile time). Loaded once
-//! at daemon startup. Entries are tagged with the appropriate RuleTier
-//! (BuiltinDeny for kind:deny, CuratedAllow for kind:allow) and the daemon
-//! merges them with project/user rules at PrepareSnapshot time.
+//! Source: `crates/sentinel-core/data/{trusted-registry,malicious,suspicious}-*.yaml`
+//! (in-tree YAML assembled and converted to JSON by build.rs at compile time).
+//! Loaded once at daemon startup. Entries are tagged with the appropriate
+//! RuleTier (BuiltinDeny for kind:deny, CuratedAllow for kind:allow) and the
+//! daemon merges them with project/user rules at PrepareSnapshot time.
 
 use sentinel_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
 use serde::Deserialize;

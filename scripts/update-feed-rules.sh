@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 #
 # Extract host IOCs from OSV.dev malicious-package advisories (MAL-*) and
-# write them to crates/sentinel-core/data/deny/ossf-malicious-packages.yaml.
+# write them to crates/sentinel-core/data/malicious-ossf-packages.yaml.
 #
 # Downloads the combined all-ecosystem bulk ZIP from the public OSV.dev GCS
 # bucket — every advisory across every ecosystem in a single archive.
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 OSV_ALL_ZIP="https://osv-vulnerabilities.storage.googleapis.com/all.zip"
-OUTPUT_FILE="crates/sentinel-core/data/deny/ossf-malicious-packages.yaml"
+OUTPUT_FILE="crates/sentinel-core/data/malicious-ossf-packages.yaml"
 
 cleanup() {
   if [[ -n "${tmpdir:-}" ]]; then
@@ -135,7 +135,8 @@ echo "Found $ioc_count unique host IOCs."
     IFS=$'\t' read -r match_type pattern advisory_id confidence <<< "$entry"
     [[ -z "$pattern" ]] && continue
     cat <<YAML
-- match: $match_type
+- kind: deny
+  match: $match_type
   pattern: $pattern
   reason: "$advisory_id supply-chain IOC (FEED)"
   confidence: ${confidence:-suspect}

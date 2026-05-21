@@ -1,10 +1,8 @@
 //! Direct kernel syscall wrappers using inline assembly.
 //!
-//! These bypass libc::syscall() entirely — libc::syscall is itself an
-//! interposable symbol, so once T04 interposes it, the hook's own calls
-//! through libc::syscall would recurse. These wrappers go straight to
-//! the kernel via `svc #0x80` (aarch64) or the `syscall` instruction
-//! (x86_64), avoiding the interpose chain completely.
+//! These bypass libc::syscall() entirely. The active hooks use them for
+//! allowed call-through so dyld interposition never resolves a "real" libc
+//! symbol back to Sentinel's replacement function.
 //!
 //! macOS/XNU syscall ABI:
 //!   - aarch64: x16 = syscall number, x0-x5 = args, svc #0x80, result in x0
@@ -229,14 +227,8 @@ unsafe fn syscall8(
     {
         // x86_64 XNU syscall convention only has 6 register args (rdi, rsi,
         // rdx, r10, r8, r9). Args 7+ go on the stack via the C calling
-        // convention. Using libc::syscall for this case is acceptable since
-        // connectx is not on the hot path and libc::syscall with 8 args
-        // handles the stack layout correctly.
-        //
-        // IMPORTANT: once T04 interposes libc::syscall, this fallback would
-        // recurse. T04's syscall interpose must detect SYS_CONNECTX and
-        // delegate here, and this function must use the real kernel entry.
-        // For x86_64, we use a local assembly trampoline.
+        // convention, so use a local assembly trampoline instead of
+        // libc::syscall.
         core::arch::asm!(
             // Push args 7 and 8 onto the stack (reverse order for C ABI)
             "push {a8}",
@@ -403,11 +395,4 @@ pub unsafe fn raw_openat(
     mode: libc::mode_t,
 ) -> core::ffi::c_int {
     unsafe { syscall4(SYS_OPENAT, dirfd as u64, path as u64, oflag as u64, mode as u64) as core::ffi::c_int }
-}
-
-/// Passthrough for arbitrary syscall numbers — used by the syscall()
-/// interpose (T04) to forward non-network syscalls to the kernel.
-#[inline(always)]
-pub unsafe fn raw_syscall_passthrough(num: i64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64) -> i64 {
-    unsafe { syscall6(num, a1, a2, a3, a4, a5, a6) }
 }

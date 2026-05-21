@@ -36,14 +36,13 @@ pub mod macho_flags; // M003-S02: Mach-O code-signing flag parser for hardened-r
 pub mod pm_env_filter; // quick-260508-et9 (BLOCKER #1): dylib-side pm_env capture
 pub mod macho_scan; // Issue #1 phase 1: Mach-O tier classification + syscall-byte scan
 pub mod persistence_paths; // M003-S04: persistence-path classifier for open/openat monitoring
-pub mod raw_syscall; // M003-S01: direct kernel syscall wrappers (bypass libc::syscall interpose)
+pub mod raw_syscall; // M003-S01: direct kernel syscall wrappers for hook call-through
 pub mod reentrancy;
 pub mod replace_exec; // v0.2: exec-family shadows
 pub mod replace_fork; // v0.2: fork/vfork/posix_spawn shadows
 pub mod replace_libc; // Filled in by task 2
 pub mod replace_open; // M003-S04: open/openat interpose for persistence monitoring
 pub mod replace_nw; // v0.1: Network.framework dlsym + shadow exports
-pub mod replace_syscall; // M003-S01-T04: libc syscall() interpose to catch bypass attempts
 pub mod self_check; // M004-S03: hook binary self-integrity verification
 pub mod snapshot;
 pub mod trusted_runtime; // Issue #1 phase 2: content-hash trusted runtime registry

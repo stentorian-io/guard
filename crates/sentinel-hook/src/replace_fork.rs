@@ -17,7 +17,7 @@
 use crate::exec_policy::{self, ExecDecision};
 use crate::ipc_client::{
     copy_cstr_to_buf, send_env_not_propagated_gap_sync, send_exec_blocked, send_exec_event_sync,
-    send_fork_event_sync, send_trace_spawned_sync, IpcClientError,
+    send_fork_event_sync, IpcClientError,
 };
 use crate::macho_scan::{BlockReason, SuspiciousReason};
 use crate::reentrancy::IN_HOOK;
@@ -32,89 +32,15 @@ fn report_exec_blocked(path: *const libc::c_char, reason: BlockReason) {
     send_exec_blocked(token, &path_buf[..n], reason.as_str());
 }
 
-struct SuspendedSpawnAttr {
-    attr: libc::posix_spawnattr_t,
-}
-
-impl SuspendedSpawnAttr {
-    fn new() -> Result<Self, libc::c_int> {
-        let mut attr = std::ptr::null_mut();
-        let rc = unsafe { libc::posix_spawnattr_init(&mut attr) };
-        if rc != 0 {
-            return Err(rc);
-        }
-        let rc = unsafe {
-            libc::posix_spawnattr_setflags(
-                &mut attr,
-                libc::POSIX_SPAWN_START_SUSPENDED as libc::c_short,
-            )
-        };
-        if rc != 0 {
-            unsafe {
-                libc::posix_spawnattr_destroy(&mut attr);
-            }
-            return Err(rc);
-        }
-        Ok(Self { attr })
-    }
-
-    fn as_ptr(&self) -> *const libc::posix_spawnattr_t {
-        &self.attr
-    }
-}
-
-impl Drop for SuspendedSpawnAttr {
-    fn drop(&mut self) {
-        unsafe {
-            libc::posix_spawnattr_destroy(&mut self.attr);
-        }
-    }
-}
-
-fn trace_attr_for_t3(
-    attrp: *const libc::posix_spawnattr_t,
-    trace_reason: Option<SuspiciousReason>,
-) -> Result<Option<SuspendedSpawnAttr>, libc::c_int> {
-    if trace_reason.is_none() {
-        return Ok(None);
-    }
-    if !network_syscall_trace_enforcement_available() {
-        // Darwin ptrace can attach/continue/step, but it has no syscall-entry
-        // stop or register get/set API equivalent to Linux PTRACE_SYSCALL.
-        // Until the daemon has a real Mach-backed network syscall filter, T3
-        // posix_spawn must fail before the child is created.
-        return Err(libc::ENOTSUP);
-    }
-    if !attrp.is_null() {
-        // We cannot clone Darwin's opaque posix_spawnattr_t safely. Fail
-        // closed rather than dropping caller-supplied flags.
-        return Err(libc::ENOTSUP);
-    }
-    SuspendedSpawnAttr::new().map(Some)
-}
-
-#[inline]
-fn network_syscall_trace_enforcement_available() -> bool {
-    false
-}
-
 fn report_trace_required(path: *const libc::c_char, reason: SuspiciousReason) {
     let mut path_buf = [0u8; 1024];
     let n = copy_cstr_to_buf(path, &mut path_buf);
     let line = format!(
-        "[sentinel-hook] T3 ptrace handoff required reason={} path={}",
+        "[sentinel-hook] T3 fail-closed reason={} path={}",
         reason.as_str(),
         String::from_utf8_lossy(&path_buf[..n])
     );
     crate::log_buffer::LOG_RING.append(line.as_bytes());
-}
-
-fn resume_untraced_if_needed(pid: libc::pid_t, trace_reason: Option<SuspiciousReason>) {
-    if trace_reason.is_some() {
-        unsafe {
-            libc::kill(pid, libc::SIGCONT);
-        }
-    }
 }
 
 /// BLOCKER-02 fix: distinguish "daemon says I'm not tracked" (do not fail
@@ -359,24 +285,17 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
             return unsafe { libc::posix_spawn(pid_out, path, file_actions, attrp, argv, envp) };
         }
     };
-    let trace_reason = match exec_policy::check_exec_target(path) {
+    match exec_policy::check_exec_target(path) {
         ExecDecision::Block(reason) => {
             report_exec_blocked(path, reason);
             return libc::EACCES;
         }
         ExecDecision::Trace(reason) => {
             report_trace_required(path, reason);
-            Some(reason)
+            return libc::ENOTSUP;
         }
-        ExecDecision::Allow => None,
+        ExecDecision::Allow => {}
     };
-    let trace_attr = match trace_attr_for_t3(attrp, trace_reason) {
-        Ok(attr) => attr,
-        Err(errno) => return errno,
-    };
-    let spawn_attrp = trace_attr
-        .as_ref()
-        .map_or(attrp, SuspendedSpawnAttr::as_ptr);
 
     // TREE-06 (gap-closure 02-09): inspect envp pre-spawn for missing Sentinel
     // env vars. If any are absent, emit a best-effort EnvNotPropagatedGap IPC
@@ -418,7 +337,7 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
     //
     // Call the real posix_spawn via libc — IN_HOOK is set, so any nested hook
     // calls take the pass-through path.
-    let rc = unsafe { libc::posix_spawn(pid_out, path, file_actions, spawn_attrp, argv, envp) };
+    let rc = unsafe { libc::posix_spawn(pid_out, path, file_actions, attrp, argv, envp) };
     if rc != 0 {
         // posix_spawn returns errno on failure; do not send IPC.
         return rc;
@@ -449,7 +368,6 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
             // Pass-through — Sentinel is loaded but this caller is not
             // under `sentinel wrap`. Skip the exec-half best-effort IPC too
             // (the daemon would just reject it).
-            resume_untraced_if_needed(new_pid, trace_reason);
             return 0;
         }
         Err(_) => {
@@ -489,28 +407,6 @@ pub unsafe extern "C" fn sentinel_posix_spawn(
         pm_env,
         IPC_TIMEOUT_MS,
     );
-    if let Some(reason) = trace_reason {
-        match send_trace_spawned_sync(
-            current_audit_token_wire(),
-            new_pid as i32,
-            pv,
-            &path_buf[..n],
-            reason.as_str(),
-            IPC_TIMEOUT_MS,
-        ) {
-            Ok(()) => {}
-            Err(e) if is_untracked_peer(&e) => {
-                resume_untraced_if_needed(new_pid, trace_reason);
-                return 0;
-            }
-            Err(_) => {
-                unsafe {
-                    libc::kill(new_pid, libc::SIGKILL);
-                }
-                return libc::EAGAIN;
-            }
-        }
-    }
     0
 }
 
@@ -529,24 +425,17 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
             return unsafe { libc::posix_spawnp(pid_out, path, file_actions, attrp, argv, envp) };
         }
     };
-    let trace_reason = match exec_policy::check_exec_target(path) {
+    match exec_policy::check_exec_target(path) {
         ExecDecision::Block(reason) => {
             report_exec_blocked(path, reason);
             return libc::EACCES;
         }
         ExecDecision::Trace(reason) => {
             report_trace_required(path, reason);
-            Some(reason)
+            return libc::ENOTSUP;
         }
-        ExecDecision::Allow => None,
+        ExecDecision::Allow => {}
     };
-    let trace_attr = match trace_attr_for_t3(attrp, trace_reason) {
-        Ok(attr) => attr,
-        Err(errno) => return errno,
-    };
-    let spawn_attrp = trace_attr
-        .as_ref()
-        .map_or(attrp, SuspendedSpawnAttr::as_ptr);
 
     // TREE-06 (gap-closure 02-09): same pre-spawn envp inspection as
     // sentinel_posix_spawn. Best-effort — see that function's comment.
@@ -567,7 +456,7 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
 
     // BLOCKER-05: see `sentinel_posix_spawn` for the IN_HOOK-thread-local
     // reentrancy assumption — same logic applies to posix_spawnp.
-    let rc = unsafe { libc::posix_spawnp(pid_out, path, file_actions, spawn_attrp, argv, envp) };
+    let rc = unsafe { libc::posix_spawnp(pid_out, path, file_actions, attrp, argv, envp) };
     if rc != 0 {
         return rc;
     }
@@ -581,7 +470,6 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
     match send_fork_event_sync(parent, new_pid as i32, pv, IPC_TIMEOUT_MS) {
         Ok(()) => {}
         Err(e) if is_untracked_peer(&e) => {
-            resume_untraced_if_needed(new_pid, trace_reason);
             return 0;
         }
         Err(_) => {
@@ -614,45 +502,5 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
         pm_env,
         IPC_TIMEOUT_MS,
     );
-    if let Some(reason) = trace_reason {
-        match send_trace_spawned_sync(
-            current_audit_token_wire(),
-            new_pid as i32,
-            pv,
-            &path_buf[..n],
-            reason.as_str(),
-            IPC_TIMEOUT_MS,
-        ) {
-            Ok(()) => {}
-            Err(e) if is_untracked_peer(&e) => {
-                resume_untraced_if_needed(new_pid, trace_reason);
-                return 0;
-            }
-            Err(_) => {
-                unsafe {
-                    libc::kill(new_pid, libc::SIGKILL);
-                }
-                return libc::EAGAIN;
-            }
-        }
-    }
     0
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn t3_spawn_requires_real_network_syscall_enforcement() {
-        assert!(!network_syscall_trace_enforcement_available());
-        let attr = trace_attr_for_t3(std::ptr::null(), Some(SuspiciousReason::SyscallInstruction));
-        assert!(matches!(attr, Err(errno) if errno == libc::ENOTSUP));
-    }
-
-    #[test]
-    fn non_t3_spawn_keeps_caller_attrs_untouched() {
-        let attr = trace_attr_for_t3(std::ptr::null(), None).expect("non-T3 attr gate");
-        assert!(attr.is_none());
-    }
 }

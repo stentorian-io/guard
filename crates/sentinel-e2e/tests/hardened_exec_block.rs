@@ -158,9 +158,7 @@ fn synthetic_syscall_macho_exec_fails_closed() {
     );
 }
 
-/// T3 posix_spawn handoff intentionally rejects caller-supplied spawn attrs:
-/// Darwin attrs are opaque, and the hook must not silently drop them while
-/// adding POSIX_SPAWN_START_SUSPENDED for tracing.
+/// T3 posix_spawn fails closed before child creation.
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
 fn synthetic_syscall_macho_posix_spawn_with_attrs_fails_closed() {

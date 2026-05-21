@@ -38,7 +38,7 @@ use sentinel_ipc::{
     ListRules, ListRulesReply,
     PersistenceWrite, PersistenceWriteAck, Ping, PingReply, PrepareSnapshot, PromptChannelInit,
     PromptChannelInitAck, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply,
-    Resolve, ResolveReply, SnapshotReply, Status, StatusReply, TraceSpawned, TraceSpawnedAck,
+    Resolve, ResolveReply, SnapshotReply, Status, StatusReply,
 };
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
@@ -453,9 +453,6 @@ impl IpcServer {
             }
             FrameKind::Tagged(MessageTag::ExecBlocked) => {
                 handle_exec_blocked_frame(&mut stream, state);
-            }
-            FrameKind::Tagged(MessageTag::TraceSpawned) => {
-                handle_trace_spawned_frame(&mut stream, peer_token, state);
             }
             FrameKind::Tagged(MessageTag::PersistenceWrite) => {
                 handle_persistence_write_frame(&mut stream, state);
@@ -1609,86 +1606,6 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     }
     if let Err(e) = write_tagged(stream, MessageTag::ForkEvent, &reply) {
         error!(error = %e, "failed to send ForkAck");
-    }
-}
-
-fn handle_trace_spawned_frame(
-    stream: &mut UnixStream,
-    peer_token: AuditToken,
-    state: &Arc<DaemonState>,
-) {
-    let req: TraceSpawned = match read_tagged_body(stream, MessageTag::TraceSpawned) {
-        Ok(m) => m,
-        Err(e) => {
-            warn!(error = %e, "TraceSpawned decode failed");
-            let _ = write_tagged(
-                stream,
-                MessageTag::TraceSpawned,
-                &TraceSpawnedAck::err(format!("decode: {e}")),
-            );
-            return;
-        }
-    };
-    if req.schema_version != sentinel_ipc::IPC_SCHEMA_V5 {
-        let _ = write_tagged(
-            stream,
-            MessageTag::TraceSpawned,
-            &TraceSpawnedAck::err(format!(
-                "schema_version {} != IPC_SCHEMA_V5",
-                req.schema_version
-            )),
-        );
-        return;
-    }
-    if req.target_path.len() > TraceSpawned::MAX_TARGET_PATH {
-        let _ = write_tagged(
-            stream,
-            MessageTag::TraceSpawned,
-            &TraceSpawnedAck::err(format!(
-                "target_path too long: {} > {}",
-                req.target_path.len(),
-                TraceSpawned::MAX_TARGET_PATH
-            )),
-        );
-        return;
-    }
-    if !state.process_tree.is_tracked(&peer_token) {
-        debug!(
-            peer_pid = peer_token.val[5],
-            "TraceSpawned from untracked peer; ignoring"
-        );
-        let _ = write_tagged(
-            stream,
-            MessageTag::TraceSpawned,
-            &TraceSpawnedAck::err("untracked peer; ignoring trace request"),
-        );
-        return;
-    }
-    if req.parent_audit_token.val[5] != peer_token.val[5] {
-        error!(
-            wire_parent_pid = req.parent_audit_token.val[5],
-            kernel_pid = peer_token.val[5],
-            "ENF-08 violation: TraceSpawned wire parent disagrees with peer-auth; trusting peer-auth"
-        );
-    }
-
-    let target_path = String::from_utf8_lossy(&req.target_path).to_string();
-    match crate::ptrace_supervisor::attach_and_supervise(
-        req.child_pid as libc::pid_t,
-        req.reason,
-        target_path,
-    ) {
-        Ok(()) => {
-            let _ = write_tagged(stream, MessageTag::TraceSpawned, &TraceSpawnedAck::ok());
-        }
-        Err(e) => {
-            warn!(error = %e, child_pid = req.child_pid, "TraceSpawned attach failed");
-            let _ = write_tagged(
-                stream,
-                MessageTag::TraceSpawned,
-                &TraceSpawnedAck::err(format!("ptrace: {e}")),
-            );
-        }
     }
 }
 

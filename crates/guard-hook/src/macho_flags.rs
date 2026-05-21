@@ -69,13 +69,19 @@ pub fn is_setuid(path: *const libc::c_char) -> bool {
     stat_buf.st_mode & (libc::S_ISUID | libc::S_ISGID) != 0
 }
 
-pub fn will_shed_dylib(path: *const libc::c_char) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShedReason {
+    Setuid,
+    CodeSign,
+}
+
+pub fn will_shed_dylib(path: *const libc::c_char) -> Option<ShedReason> {
     if is_setuid(path) {
-        return true;
+        return Some(ShedReason::Setuid);
     }
     match check_binary(path) {
-        Some(info) => info.will_shed_dylib(),
-        None => false,
+        Some(info) if info.will_shed_dylib() => Some(ShedReason::CodeSign),
+        _ => None,
     }
 }
 

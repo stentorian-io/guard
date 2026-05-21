@@ -925,7 +925,7 @@ fn handle_exec_blocked_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) 
     info!(
         target_path = %target_path,
         reason = %req.reason,
-        "hardened-runtime exec blocked"
+        "exec blocked"
     );
 
     if let Err(e) = write_tagged(stream, MessageTag::ExecBlocked, &ExecBlockedAck::ok()) {

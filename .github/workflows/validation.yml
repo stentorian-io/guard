@@ -63,9 +63,9 @@ jobs:
               - '**/Cargo.toml'
               - '**/Cargo.lock'
               - 'rust-toolchain.toml'
-              - 'crates/sentinel-e2e/fixtures/**'
-              - 'crates/sentinel-e2e/harness/**'
-              - 'crates/sentinel-core/data/**'
+              - 'crates/guard-e2e/fixtures/**'
+              - 'crates/guard-e2e/harness/**'
+              - 'crates/guard-core/data/**'
               - 'scripts/*.sh'
               - 'tools/**'
             lockfile:
@@ -206,13 +206,13 @@ jobs:
 
       # Verify the sanitized fixture is present and matches the pinned hash.
       # If a PR accidentally drops the .tgz or replaces it with un-sanitized
-      # bytes, this step fails before any Sentinel test runs.
+      # bytes, this step fails before any Stentorian Guard test runs.
       # The sha256sum is fetched from the README's "Pinned Hashes" section
       # at vendor time (Plan 05-01); CI just verifies.
       - name: Verify sanitized fixture present
         run: |
           set -euo pipefail
-          fixture=crates/sentinel-e2e/fixtures/ua-parser-js-0.7.29-sanitized/ua-parser-js-0.7.29-sanitized.tgz
+          fixture=crates/guard-e2e/fixtures/ua-parser-js-0.7.29-sanitized/ua-parser-js-0.7.29-sanitized.tgz
           test -f "$fixture" || { echo "FATAL: sanitized fixture missing"; exit 1; }
           actual=$(shasum -a 256 "$fixture" | awk '{print $1}')
           echo "Fixture SHA-256: $actual"
@@ -260,18 +260,18 @@ jobs:
       # ---------------------------------------------------------------------
 
       - name: VAL-01 — ua-parser-js@0.7.29 demo
-        run: cargo test -p sentinel-e2e --test ua_parser_js_demo --release -- --nocapture
+        run: cargo test -p guard-e2e --test ua_parser_js_demo --release -- --nocapture
 
       - name: VAL-02 — workers.dev allowlist-bleed
-        run: cargo test -p sentinel-e2e --test workers_dev_validation --release -- --nocapture
+        run: cargo test -p guard-e2e --test workers_dev_validation --release -- --nocapture
 
       # VAL-04 D-09 (daemon-killed) skipped: step-1 hostname connect fails in CI harness (peer auth)
 
       - name: VAL-04 D-12 — corrupt snapshot
-        run: cargo test -p sentinel-e2e --test failure_modes_corrupt_snapshot --release -- --nocapture
+        run: cargo test -p guard-e2e --test failure_modes_corrupt_snapshot --release -- --nocapture
 
       - name: VAL-04 D-10 — hardened-binary exec gap
-        run: cargo test -p sentinel-e2e --test failure_modes_hardened_exec --release -- --nocapture
+        run: cargo test -p guard-e2e --test failure_modes_hardened_exec --release -- --nocapture
 
       # On any failure, the previous step's panic message includes the daemon's
       # drained stderr. GHA captures step output by default — no extra

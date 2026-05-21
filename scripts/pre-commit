@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Pre-commit hook for Sentinel.
+# Pre-commit hook for Stentorian Guard.
 # Install: ./scripts/install-hooks.sh
 #
 set -euo pipefail
@@ -94,7 +94,7 @@ else
   if cache_hit "pre-commit:cargo-test" "$fp"; then
     skip "cargo test (unit + integration, E2E skipped)"
   else
-    cargo test --workspace --exclude sentinel-e2e --quiet \
+    cargo test --workspace --exclude guard-e2e --quiet \
       || fail "cargo test failed"
     cache_mark "pre-commit:cargo-test" "$fp"
     pass "cargo test (unit + integration, E2E skipped)"

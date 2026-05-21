@@ -29,7 +29,7 @@ jobs:
       - name: Check for changes
         id: diff
         run: |
-          if git diff --quiet crates/sentinel-core/data/deny/ossf-malicious-packages.yaml; then
+          if git diff --quiet crates/guard-core/data/malicious-ossf-packages.yaml; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -43,13 +43,13 @@ jobs:
           set -euo pipefail
           branch="chore/feed-update-$(date +%Y%m%d)"
           git checkout -b "$branch"
-          git add crates/sentinel-core/data/deny/ossf-malicious-packages.yaml
+          git add crates/guard-core/data/malicious-ossf-packages.yaml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(core): update threat-intel feed IOCs from OSV.dev"
           git push -u origin "$branch"
           gh pr create \
             --title "chore(core): update threat-intel feed IOCs" \
-            --body "Automated nightly update of \`crates/sentinel-core/data/deny/ossf-malicious-packages.yaml\` with host IOCs extracted from [OSV.dev](https://osv.dev) malicious-package advisories (MAL-*)." \
+            --body "Automated nightly update of \`crates/guard-core/data/malicious-ossf-packages.yaml\` with host IOCs extracted from [OSV.dev](https://osv.dev) malicious-package advisories (MAL-*)." \
             --base main \
             --head "$branch"

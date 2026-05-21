@@ -73,7 +73,7 @@ fp=$(fixture_fingerprint)
 if cache_hit "ci-local:fixture" "$fp"; then
   skip "fixture hash check"
 else
-  fixture=crates/sentinel-e2e/fixtures/ua-parser-js-0.7.29-sanitized/ua-parser-js-0.7.29-sanitized.tgz
+  fixture=crates/guard-e2e/fixtures/ua-parser-js-0.7.29-sanitized/ua-parser-js-0.7.29-sanitized.tgz
   test -f "$fixture" || fail "sanitized fixture missing at $fixture"
   actual=$(shasum -a 256 "$fixture" | awk '{print $1}')
   matches=$(grep -c '^EXPECTED_OUTPUT_SHA256="[a-f0-9]\{64\}"$' \
@@ -155,7 +155,7 @@ else
     test_name="${entry%%:*}"
     label="${entry#*:}"
     step "$label"
-    cargo test -p sentinel-e2e --test "$test_name" --release -- --nocapture \
+    cargo test -p guard-e2e --test "$test_name" --release -- --nocapture \
       || fail "$label"
     pass "$label"
   done

@@ -82,7 +82,7 @@ all_md_fingerprint() {
 }
 
 fixture_fingerprint() {
-  local fixture="crates/sentinel-e2e/fixtures/ua-parser-js-0.7.29-sanitized/ua-parser-js-0.7.29-sanitized.tgz"
+  local fixture="crates/guard-e2e/fixtures/ua-parser-js-0.7.29-sanitized/ua-parser-js-0.7.29-sanitized.tgz"
   local vendor="tools/vendor-ua-parser-js.sh"
   { _head_sha; cat "$fixture" "$vendor" 2>/dev/null; } \
     | shasum -a 256 | awk '{print $1}'
@@ -91,8 +91,8 @@ fixture_fingerprint() {
 e2e_fingerprint() {
   { _head_sha
     git diff-index HEAD -- '*.rs' 'Cargo.toml' 'Cargo.lock' 'rust-toolchain.toml' \
-      'crates/sentinel-e2e/fixtures/' 'crates/sentinel-e2e/harness/' \
-      'crates/sentinel-core/data/' 2>/dev/null
+      'crates/guard-e2e/fixtures/' 'crates/guard-e2e/harness/' \
+      'crates/guard-core/data/' 2>/dev/null
   } | shasum -a 256 | awk '{print $1}'
 }
 
@@ -106,7 +106,7 @@ e2e_fingerprint() {
 # $1 = "staged" (pre-commit: --cached) or "all" (ci-local / pre-push: HEAD)
 #
 # Files considered repo-meta (non-code):
-#   *.md, LICENSE*, SECURITY*, .gitignore, .gitattributes, .github/CODEOWNERS,
+#   *.md, LICENSE*, SECURITY*, .gitignore, .gitattributes,
 #   .github/workflows/*.yml, .actrc, Brewfile, cliff.toml, .markdownlint*,
 #   .editorconfig, docs/*.md (man page sources — groff, not Rust)
 #
@@ -118,7 +118,6 @@ _is_repo_meta() {
     *.md)                       return 0 ;;
     LICENSE*|SECURITY*)         return 0 ;;
     .gitignore|.gitattributes)  return 0 ;;
-    .github/CODEOWNERS)         return 0 ;;
     .github/workflows/*.yml)    return 0 ;;
     .actrc|Brewfile|cliff.toml) return 0 ;;
     .markdownlint*)             return 0 ;;

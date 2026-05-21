@@ -34,7 +34,7 @@ pub fn system_state_dir() -> PathBuf {
 
 /// Print the action plan the user is about to confirm.
 pub fn print_plan() {
-    eprintln!("stt-guard install will:");
+    eprintln!("stt-guard init will:");
     eprintln!("  • Create {SERVICE_USER} service user (no login shell, /var/empty home)");
     eprintln!("  • Copy binaries to {BIN_DIR}/ (root:wheel, 755)");
     eprintln!("  • Copy hook dylib to {BIN_DIR}/ (root:wheel, 644)");
@@ -52,14 +52,14 @@ pub fn run_install() -> Result<(), CliError> {
     create_directories()?;
     install_launchdaemon()?;
     start_daemon()?;
-    eprintln!("\nstt-guard: installation complete.");
+    eprintln!("\nstt-guard: initialisation complete.");
     Ok(())
 }
 
 fn require_root() -> Result<(), CliError> {
     if !nix_is_root() {
         return Err(CliError::Other(
-            "stt-guard install requires root. Run: sudo stt-guard install".into(),
+            "stt-guard init requires root. Run: sudo stt-guard init".into(),
         ));
     }
     Ok(())

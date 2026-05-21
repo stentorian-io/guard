@@ -2,38 +2,38 @@ use clap::Parser;
 use guard_cli::cli::{Cli, Cmd, StatusSub};
 use std::ffi::OsString;
 
-// ---- stt-guard install parser shape --------------------------------------------
+// ---- stt-guard init parser shape ------------------------------------------------
 
 #[test]
-fn install_bare_parses() {
-    let cli = Cli::try_parse_from(["stt-guard", "install"]).expect("parse");
+fn init_bare_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "init"]).expect("parse");
     match cli.cmd {
-        Cmd::Install { yes } => {
+        Cmd::Init { yes } => {
             assert!(!yes);
         }
-        other => panic!("expected Install variant, got {other:?}"),
+        other => panic!("expected Init variant, got {other:?}"),
     }
 }
 
 #[test]
-fn install_yes_flag_parses() {
-    let cli = Cli::try_parse_from(["stt-guard", "install", "--yes"]).expect("parse");
+fn init_yes_flag_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "init", "--yes"]).expect("parse");
     match cli.cmd {
-        Cmd::Install { yes } => {
+        Cmd::Init { yes } => {
             assert!(yes);
         }
-        other => panic!("expected Install variant, got {other:?}"),
+        other => panic!("expected Init variant, got {other:?}"),
     }
 }
 
 #[test]
-fn install_short_y_flag_parses() {
-    let cli = Cli::try_parse_from(["stt-guard", "install", "-y"]).expect("parse");
+fn init_short_y_flag_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "init", "-y"]).expect("parse");
     match cli.cmd {
-        Cmd::Install { yes } => {
+        Cmd::Init { yes } => {
             assert!(yes);
         }
-        other => panic!("expected Install variant, got {other:?}"),
+        other => panic!("expected Init variant, got {other:?}"),
     }
 }
 

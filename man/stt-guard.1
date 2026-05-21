@@ -3,7 +3,7 @@
 .SH NAME
 stt-guard \- macOS supply-chain firewall for package installs
 .SH SYNOPSIS
-.B stt-guard install
+.B stt-guard init
 .RI [ FLAGS ]
 .br
 .B stt-guard wrap
@@ -36,15 +36,15 @@ Auto-allow unknown destinations and record them to
 Requires a TTY; refuses to run in non-interactive environments.
 Use this on a known-clean install to build a project baseline.
 .SH COMMANDS
-.SS stt-guard install
-Install Stentorian Guard in hardened mode. Requires root (use
+.SS stt-guard init
+Initialise Stentorian Guard in hardened mode. Requires root (use
 .BR sudo ).
 Creates the
 .B _stt_guard
 service user, deploys root-owned binaries to
 .IR /usr/local/libexec/stt-guard/ ,
 creates state and log directories, installs a LaunchDaemon, and starts
-the daemon. All other commands require this installation to be present.
+the daemon. All other commands require initialisation to be complete.
 .PP
 An interactive confirmation prompt lists all actions before proceeding.
 .PP
@@ -175,7 +175,7 @@ JSONL forensic logs. Owned by
 .TP
 .I /Library/LaunchDaemons/io.stentorian.guard.daemon.plist
 LaunchDaemon plist (installed by
-.BR "stt-guard install" ).
+.BR "stt-guard init" ).
 .TP
 .I .guard.toml
 Per-project policy file.
@@ -187,10 +187,10 @@ Wrapped command exited successfully and no policy violations occurred.
 .B non-zero
 The wrapped command's exit code is forwarded.
 .SH EXAMPLES
-Install Stentorian Guard:
+Initialise Stentorian Guard:
 .RS
 .nf
-$ sudo stt-guard install
+$ sudo stt-guard init
 .fi
 .RE
 .PP

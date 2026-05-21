@@ -123,7 +123,7 @@ Policy is evaluated in tier order:
 Cache hits resolve in under 100 microseconds with no IPC.
 
 - No kernel extensions or system extensions
-- One-time `sudo stt-guard install` — hardened by default
+- One-time `sudo stt-guard init` — hardened by default
 - Works with any command or binary run from the terminal, not just package managers
 - Root-owned binaries + `_stt_guard` service user — tamper-resistant
 
@@ -147,16 +147,16 @@ Socket/Snyk, lockfiles, and more), see [docs/alternatives.md](docs/alternatives.
 
 ```sh
 brew install stentorian-io/tap/stt-guard
-sudo stt-guard install
+sudo stt-guard init
 ```
 
-The install step creates a `_stt_guard` service user, deploys root-owned
+The init step creates a `_stt_guard` service user, deploys root-owned
 binaries to `/usr/local/libexec/stt-guard/`, and starts the daemon as a
 LaunchDaemon. This is the only deployment mode — it prevents a compromised
 process from tampering with the guard itself. See
 [Hardened deployment](#hardened-deployment) for details.
 
-All other commands (`wrap`, `status`) require the installation to be present
+All other commands (`wrap`, `status`) require initialisation to be complete
 and will refuse to run otherwise.
 
 Or build from source — see [CONTRIBUTING.md](CONTRIBUTING.md#build) for
@@ -306,10 +306,10 @@ stt-guard
 Usage: stt-guard <COMMAND>
 
 Commands:
-  wrap     Wrap a command with default-deny network policy
-  status   Show daemon health, hook integrity, and run history
-  install  Install the daemon (system mode by default, --user-mode for LaunchAgent)
-  help     Print this message or the help of the given subcommand(s)
+  init    Initialise Stentorian Guard (hardened mode). Requires root
+  wrap    Wrap a command under default-deny network enforcement
+  status  Inspect daemon health, rules, denials
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help
@@ -336,7 +336,7 @@ man stt-guard-daemon   # daemon internals
 
 ### Hardened deployment
 
-`stt-guard install` deploys in hardened mode: binaries are root-owned and
+`stt-guard init` deploys in hardened mode: binaries are root-owned and
 the daemon runs as a dedicated `_stt_guard` service user (no login shell,
 no home directory — same convention as macOS's `_postgres` and `_mysql`).
 This prevents a compromised process from tampering with the guard itself.
@@ -367,7 +367,7 @@ verification (shipped in v0.7). The socket is the door; codesign is the lock.
 **Performance and UX impact:** hardened mode has zero runtime overhead. The
 protection is purely ownership and permissions on disk — the daemon, hook, and
 policy engine execute the same code paths regardless. The only user-visible
-difference is the one-time `sudo stt-guard install` during setup.
+difference is the one-time `sudo stt-guard init` during setup.
 
 ### Threat intelligence
 

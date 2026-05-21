@@ -25,7 +25,7 @@ fn real_main() -> Result<i32, CliError> {
     let cli = Cli::parse();
 
     match cli.cmd {
-        Cmd::Install { yes } => {
+        Cmd::Init { yes } => {
             guard_cli::install::system::print_plan();
             if !yes {
                 eprintln!();

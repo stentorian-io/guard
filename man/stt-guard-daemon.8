@@ -35,7 +35,7 @@ with
 as a system LaunchDaemon. Users should not need to invoke
 .B stt-guard-daemon
 directly; use
-.BR "stt-guard install" (1)
+.BR "stt-guard init" (1)
 to deploy and start it.
 .SH COMMANDS
 .SS stt-guard-daemon serve
@@ -120,7 +120,7 @@ JSONL forensic log directory. Logs are rotated automatically.
 .TP
 .I /Library/LaunchDaemons/io.stentorian.guard.daemon.plist
 LaunchDaemon plist (installed by
-.BR "stt-guard install" ).
+.BR "stt-guard init" ).
 .SH SECURITY
 .IP \(bu 2
 All IPC connections are authenticated via kernel audit tokens.

@@ -2,7 +2,7 @@
 //!
 //! Called from `main.rs` before any CLI command that needs IPC. Verifies the
 //! hardened installation is present, then checks daemon reachability.
-//! The old auto-spawn behaviour is removed — users must run `stt-guard install`.
+//! The old auto-spawn behaviour is removed — users must run `stt-guard init`.
 
 use std::path::Path;
 use std::time::Duration;
@@ -18,7 +18,7 @@ const RETRY_DELAYS: &[Duration] = &[
 ];
 
 /// Verify the hardened installation is in place and the daemon is reachable.
-/// Refuses to proceed if `stt-guard install` has not been run.
+/// Refuses to proceed if `stt-guard init` has not been run.
 pub fn ensure_daemon(sock: &Path, _state_dir: &Path) -> Result<(), CliError> {
     require_installed()?;
 
@@ -48,7 +48,7 @@ pub fn ensure_daemon(sock: &Path, _state_dir: &Path) -> Result<(), CliError> {
 pub fn require_installed() -> Result<(), CliError> {
     if !crate::install::system::is_installed() {
         return Err(CliError::Other(
-            "Stentorian Guard is not installed. Run: sudo stt-guard install".into(),
+            "Stentorian Guard is not initialised. Run: sudo stt-guard init".into(),
         ));
     }
     Ok(())

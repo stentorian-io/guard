@@ -1,0 +1,6 @@
+# Sentinel trusted runtime registry.
+#
+# Hashes must be SHA-256 content hashes of exact runtime executable files from
+# official release artifacts. Runtime trust is separate from network policy
+# files and is embedded directly into sentinel-hook.
+runtimes: []

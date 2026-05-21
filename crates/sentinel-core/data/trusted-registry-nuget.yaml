@@ -1,10 +1,13 @@
 # .NET / NuGet (ALLOW-04)
-- match: exact
+- kind: allow
+  match: exact
   pattern: api.nuget.org
   reason: "NuGet API v3 endpoint (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: globalcdn.nuget.org
   reason: "NuGet global CDN (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: dist.nuget.org
   reason: "NuGet distribution endpoint (ALLOW-04)"

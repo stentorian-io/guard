@@ -1,10 +1,13 @@
 # Ruby gems (ALLOW-04)
-- match: exact
+- kind: allow
+  match: exact
   pattern: rubygems.org
   reason: "RubyGems main API (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: api.rubygems.org
   reason: "Bundler API endpoint (ALLOW-04)"
-- match: suffix
+- kind: allow
+  match: suffix
   pattern: .rubygems.org
   reason: "Fastly CDN subdomains for rubygems (ALLOW-04)"

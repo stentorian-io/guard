@@ -1,13 +1,17 @@
 # Java / Maven (ALLOW-04)
-- match: exact
+- kind: allow
+  match: exact
   pattern: repo1.maven.org
   reason: "Maven Central primary mirror (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: repo.maven.apache.org
   reason: "Apache Maven repository (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: central.sonatype.com
   reason: "Sonatype Central Portal (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: search.maven.org
   reason: "Maven Central search/metadata (ALLOW-04)"

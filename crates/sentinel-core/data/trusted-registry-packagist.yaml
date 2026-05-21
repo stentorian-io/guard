@@ -1,7 +1,9 @@
 # PHP / Composer / Packagist (ALLOW-04)
-- match: exact
+- kind: allow
+  match: exact
   pattern: packagist.org
   reason: "Packagist package metadata (ALLOW-04)"
-- match: exact
+- kind: allow
+  match: exact
   pattern: repo.packagist.org
   reason: "Packagist repository endpoint (ALLOW-04)"

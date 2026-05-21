@@ -108,7 +108,7 @@ e2e_fingerprint() {
 # Files considered repo-meta (non-code):
 #   *.md, LICENSE*, SECURITY*, .gitignore, .gitattributes, .github/CODEOWNERS,
 #   .github/workflows/*.yml, .actrc, Brewfile, cliff.toml, .markdownlint*,
-#   .editorconfig, CLAUDE.md, docs/*.md (man page sources — groff, not Rust)
+#   .editorconfig, docs/*.md (man page sources — groff, not Rust)
 #
 # Everything else is "code" and causes this to return 1 (false).
 

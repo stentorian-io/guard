@@ -116,6 +116,7 @@ impl Reply {
 pub const IPC_SCHEMA_V2: u16 = 2;
 pub const IPC_SCHEMA_V3: u16 = 3;
 pub const IPC_SCHEMA_V4: u16 = 4;
+pub const IPC_SCHEMA_V5: u16 = 5;
 
 // ============================================================
 // v0.4 — Threat-intel match record + non-fatal feed warning.
@@ -331,6 +332,67 @@ impl ExecAck {
     pub fn err(m: impl Into<String>) -> Self {
         Self::Err {
             schema_version: IPC_SCHEMA_V2,
+            message: m.into(),
+        }
+    }
+}
+
+// --- TraceSpawned / TraceSpawnedAck -----------------------------------------
+
+/// Dylib → daemon: a T3 suspicious child was created suspended and must be
+/// attached by the daemon before it is allowed to run.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TraceSpawned {
+    pub schema_version: u16,
+    pub parent_audit_token: AuditTokenWire,
+    pub child_pid: i32,
+    pub child_pidversion: u32,
+    #[serde(with = "serde_bytes")]
+    pub target_path: Vec<u8>,
+    pub reason: String,
+}
+
+impl TraceSpawned {
+    pub const MAX_TARGET_PATH: usize = 1024;
+
+    pub fn new(
+        parent: AuditTokenWire,
+        child_pid: i32,
+        child_pidversion: u32,
+        target_path: Vec<u8>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V5,
+            parent_audit_token: parent,
+            child_pid,
+            child_pidversion,
+            target_path,
+            reason: reason.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TraceSpawnedAck {
+    Ok {
+        schema_version: u16,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl TraceSpawnedAck {
+    pub fn ok() -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V5,
+        }
+    }
+    pub fn err(m: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V5,
             message: m.into(),
         }
     }

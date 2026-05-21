@@ -7,7 +7,8 @@
 //!          "posix_spawn_curl" — try to posix_spawn /usr/bin/curl
 //!          "posix_spawn_env_delayed" — sleep, then posix_spawn /usr/bin/env
 //!          "exec_synthetic_fat" — exec synthetic fat Mach-O (T0 block)
-//!          "exec_synthetic_syscall" — exec synthetic thin Mach-O with syscall bytes (T3 detection-only)
+//!          "exec_synthetic_syscall" — exec synthetic thin Mach-O with syscall bytes (T3 fail-closed)
+//!          "posix_spawn_synthetic_syscall_attr" — posix_spawn T3 with caller attrs (T3 fail-closed)
 //!
 //! Exit codes:
 //!   0 — exec succeeded (or child ran successfully for posix_spawn)
@@ -41,6 +42,7 @@ fn main() {
         }
         "exec_synthetic_fat" => test_exec_synthetic_fat(),
         "exec_synthetic_syscall" => test_exec_synthetic_syscall(),
+        "posix_spawn_synthetic_syscall_attr" => test_posix_spawn_synthetic_syscall_attr(),
         other => {
             eprintln!("unknown mode: {other}");
             std::process::exit(4);
@@ -183,11 +185,46 @@ fn test_exec_synthetic_syscall() {
     let path = write_executable_fixture("sentinel-syscall", &thin_syscall_fixture());
     let outcome = exec_fixture(&path);
     if outcome == ExecOutcome::Errno(libc::EACCES) {
-        eprintln!("synthetic syscall fixture was blocked, expected detection-only");
+        println!("SYNTHETIC-SYSCALL-BLOCKED-EACCES");
+        std::process::exit(2);
+    }
+    eprintln!("synthetic syscall exec was not blocked; outcome={outcome:?}");
+    std::process::exit(3);
+}
+
+fn test_posix_spawn_synthetic_syscall_attr() {
+    let path = write_executable_fixture("sentinel-syscall-spawn", &thin_syscall_fixture());
+    let c_path = CString::new(path.as_os_str().as_bytes()).expect("fixture path");
+    let arg0 = CString::new("fixture").unwrap();
+    let argv: Vec<*mut libc::c_char> = vec![arg0.as_ptr() as *mut _, std::ptr::null_mut()];
+    let mut attr = std::ptr::null_mut();
+    let attr_init = unsafe { libc::posix_spawnattr_init(&mut attr) };
+    if attr_init != 0 {
+        eprintln!("posix_spawnattr_init failed with errno={attr_init}");
         std::process::exit(3);
     }
-    println!("SYNTHETIC-SYSCALL-DETECTION-ONLY outcome={outcome:?}");
-    std::process::exit(0);
+
+    let mut pid: libc::pid_t = 0;
+    let ret = unsafe {
+        libc::posix_spawn(
+            &mut pid,
+            c_path.as_ptr(),
+            std::ptr::null(),
+            &attr,
+            argv.as_ptr(),
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe {
+        libc::posix_spawnattr_destroy(&mut attr);
+    }
+
+    if ret == libc::ENOTSUP {
+        println!("SYNTHETIC-SYSCALL-POSIX-SPAWN-ATTR-ENOTSUP");
+        std::process::exit(2);
+    }
+    eprintln!("synthetic syscall posix_spawn attr was not rejected; errno={ret}");
+    std::process::exit(3);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

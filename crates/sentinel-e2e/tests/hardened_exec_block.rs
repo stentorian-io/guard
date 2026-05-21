@@ -132,24 +132,55 @@ fn synthetic_fat_macho_blocked() {
     );
 }
 
-/// A native thin Mach-O containing raw syscall bytes is T3. Phase 1 is
-/// detection-only for T3, so exec must proceed to the kernel rather than
-/// returning Sentinel's EACCES block.
+/// A native thin Mach-O containing raw syscall bytes is T3. Direct exec-family
+/// calls cannot safely hand tracing to the daemon, so they fail closed.
 #[cfg_attr(not(target_os = "macos"), ignore)]
 #[test]
-fn synthetic_syscall_macho_detection_only_not_blocked() {
+fn synthetic_syscall_macho_exec_fails_closed() {
     let harness = DaemonHarness::start().expect("start daemon");
     let output = run_probe(&harness, "exec_synthetic_syscall");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
-        output.status.success(),
-        "synthetic syscall probe should exit 0 after non-EACCES kernel failure; \
-         stdout={stdout}\nstderr={stderr}"
+        !output.status.success(),
+        "synthetic syscall probe should be blocked; stdout={stdout}\nstderr={stderr}"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected exit 2 (EACCES block); got {:?}\nstdout={stdout}\nstderr={stderr}",
+        output.status.code()
     );
     assert!(
-        stdout.contains("SYNTHETIC-SYSCALL-DETECTION-ONLY"),
-        "expected detection-only marker; stdout={stdout}\nstderr={stderr}"
+        stdout.contains("SYNTHETIC-SYSCALL-BLOCKED-EACCES"),
+        "expected SYNTHETIC-SYSCALL-BLOCKED-EACCES marker; stdout={stdout}\nstderr={stderr}"
+    );
+}
+
+/// T3 posix_spawn handoff intentionally rejects caller-supplied spawn attrs:
+/// Darwin attrs are opaque, and the hook must not silently drop them while
+/// adding POSIX_SPAWN_START_SUSPENDED for tracing.
+#[cfg_attr(not(target_os = "macos"), ignore)]
+#[test]
+fn synthetic_syscall_macho_posix_spawn_with_attrs_fails_closed() {
+    let harness = DaemonHarness::start().expect("start daemon");
+    let output = run_probe(&harness, "posix_spawn_synthetic_syscall_attr");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !output.status.success(),
+        "synthetic syscall posix_spawn attr probe should fail; stdout={stdout}\nstderr={stderr}"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected exit 2 (ENOTSUP fail-closed); got {:?}\nstdout={stdout}\nstderr={stderr}",
+        output.status.code()
+    );
+    assert!(
+        stdout.contains("SYNTHETIC-SYSCALL-POSIX-SPAWN-ATTR-ENOTSUP"),
+        "expected SYNTHETIC-SYSCALL-POSIX-SPAWN-ATTR-ENOTSUP marker; stdout={stdout}\nstderr={stderr}"
     );
 }

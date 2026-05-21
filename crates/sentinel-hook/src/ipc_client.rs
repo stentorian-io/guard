@@ -16,7 +16,8 @@ use sentinel_ipc::frame::{read_frame, write_frame};
 use sentinel_ipc::{
     AuditTokenWire, DenyNotify, DenyNotifyAck, DylibLoaded, DylibLoadedAck, ExecAck, ExecBlocked,
     ExecBlockedAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4,
-    PersistenceWrite, PersistenceWriteAck, Resolve, ResolveReply, SOCKADDR_WIRE_LEN,
+    PersistenceWrite, PersistenceWriteAck, Resolve, ResolveReply, SOCKADDR_WIRE_LEN, TraceSpawned,
+    TraceSpawnedAck,
 };
 use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
@@ -34,6 +35,7 @@ pub(crate) const TAG_ENV_NOT_PROPAGATED: u8 = 0x08;
 pub(crate) const TAG_DENY_NOTIFY: u8 = 0x12;
 pub(crate) const TAG_EXEC_BLOCKED: u8 = 0x13;
 pub(crate) const TAG_PERSISTENCE_WRITE: u8 = 0x14;
+pub(crate) const TAG_TRACE_SPAWNED: u8 = 0x18;
 
 static DAEMON_SOCKET_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 static IPC_HMAC_KEY: OnceLock<Option<[u8; 32]>> = OnceLock::new();
@@ -52,20 +54,26 @@ static TEST_SOCKET_OVERRIDE: std::sync::Mutex<Option<Option<PathBuf>>> =
 
 /// Override the daemon socket path for the current test. Test-only by convention.
 pub fn _set_daemon_socket_for_test(path: PathBuf) {
-    let mut g = TEST_SOCKET_OVERRIDE.lock().expect("test socket override mutex");
+    let mut g = TEST_SOCKET_OVERRIDE
+        .lock()
+        .expect("test socket override mutex");
     *g = Some(Some(path));
 }
 
 /// Clear the test socket override so daemon_socket_path() returns None
 /// (NotConfigured). Call this to simulate "no daemon" in tests.
 pub fn _clear_daemon_socket_for_test() {
-    let mut g = TEST_SOCKET_OVERRIDE.lock().expect("test socket override mutex");
+    let mut g = TEST_SOCKET_OVERRIDE
+        .lock()
+        .expect("test socket override mutex");
     *g = Some(None);
 }
 
 /// Remove the test override entirely, falling through to the OnceLock.
 pub fn _reset_daemon_socket_for_test() {
-    let mut g = TEST_SOCKET_OVERRIDE.lock().expect("test socket override mutex");
+    let mut g = TEST_SOCKET_OVERRIDE
+        .lock()
+        .expect("test socket override mutex");
     *g = None;
 }
 
@@ -93,7 +101,9 @@ impl From<std::io::Error> for IpcClientError {
 impl std::fmt::Display for IpcClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IpcClientError::NotConfigured => write!(f, "ipc-client: daemon socket path not configured"),
+            IpcClientError::NotConfigured => {
+                write!(f, "ipc-client: daemon socket path not configured")
+            }
             IpcClientError::Timeout => write!(f, "ipc-client: timeout"),
             IpcClientError::Io(e) => write!(f, "ipc-client: io: {e}"),
             IpcClientError::DaemonRejected(m) => write!(f, "ipc-client: daemon-rejected: {m}"),
@@ -144,7 +154,9 @@ fn ipc_hmac_key() -> Option<[u8; 32]> {
 /// is consulted first; in production, the OnceLock value (derived from state dir at ctor
 /// time) is used.
 pub fn daemon_socket_path() -> Option<PathBuf> {
-    let g = TEST_SOCKET_OVERRIDE.lock().expect("test socket override mutex");
+    let g = TEST_SOCKET_OVERRIDE
+        .lock()
+        .expect("test socket override mutex");
     match &*g {
         Some(override_val) => {
             let result = override_val.clone();
@@ -157,7 +169,10 @@ pub fn daemon_socket_path() -> Option<PathBuf> {
     DAEMON_SOCKET_PATH.get().and_then(|o| o.clone())
 }
 
-pub(crate) fn connect_with_timeout(sock: &Path, total_ms: u64) -> Result<UnixStream, IpcClientError> {
+pub(crate) fn connect_with_timeout(
+    sock: &Path,
+    total_ms: u64,
+) -> Result<UnixStream, IpcClientError> {
     let addr = SockAddr::unix(sock).map_err(IpcClientError::Io)?;
     let socket = Socket::new(Domain::UNIX, Type::STREAM, None).map_err(IpcClientError::Io)?;
     // 1/5 of total budget for connect, 2/5 each for read/write.
@@ -204,7 +219,9 @@ where
             .map_err(|e| IpcClientError::Codec(e.to_string()))?;
         // Read the response: tag byte (echoed by daemon) + signed body.
         let mut tag_back = [0u8; 1];
-        stream.read_exact(&mut tag_back).map_err(map_io_to_timeout)?;
+        stream
+            .read_exact(&mut tag_back)
+            .map_err(map_io_to_timeout)?;
         if tag_back[0] != tag {
             return Err(IpcClientError::Codec(format!(
                 "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
@@ -219,15 +236,16 @@ where
         // Unsigned fallback (no HMAC key available).
         write_frame(&mut stream, msg).map_err(|e| IpcClientError::Codec(e.to_string()))?;
         let mut tag_back = [0u8; 1];
-        stream.read_exact(&mut tag_back).map_err(map_io_to_timeout)?;
+        stream
+            .read_exact(&mut tag_back)
+            .map_err(map_io_to_timeout)?;
         if tag_back[0] != tag {
             return Err(IpcClientError::Codec(format!(
                 "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
                 tag_back[0]
             )));
         }
-        let ack: Ack =
-            read_frame(&mut stream).map_err(|e| IpcClientError::Codec(e.to_string()))?;
+        let ack: Ack = read_frame(&mut stream).map_err(|e| IpcClientError::Codec(e.to_string()))?;
         Ok(ack)
     }
 }
@@ -345,7 +363,10 @@ pub fn send_resolve_sync(
     };
     let reply: ResolveReply = send_tagged_and_recv_ack(TAG_RESOLVE, &req, timeout_ms)?;
     match reply {
-        ResolveReply::Addresses { schema_version, addrs } => {
+        ResolveReply::Addresses {
+            schema_version,
+            addrs,
+        } => {
             if schema_version != IPC_SCHEMA_V2 {
                 return Err(IpcClientError::Codec(format!(
                     "ResolveReply schema_version {schema_version} != IPC_SCHEMA_V2"
@@ -421,11 +442,7 @@ pub fn send_deny_notify(
 }
 
 /// Fire-and-forget: tell the daemon a hardened-runtime exec was blocked.
-pub fn send_exec_blocked(
-    audit_token: AuditTokenWire,
-    target_path: &[u8],
-    reason: &str,
-) {
+pub fn send_exec_blocked(audit_token: AuditTokenWire, target_path: &[u8], reason: &str) {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -434,17 +451,40 @@ pub fn send_exec_blocked(
     let _ = send_tagged_and_recv_ack::<ExecBlocked, ExecBlockedAck>(TAG_EXEC_BLOCKED, &ev, 50);
 }
 
-pub fn send_persistence_write(
-    audit_token: AuditTokenWire,
+pub fn send_trace_spawned_sync(
+    parent_token: AuditTokenWire,
+    child_pid: i32,
+    child_pidversion: u32,
     target_path: &[u8],
-    category: &str,
-) {
+    reason: &str,
+    timeout_ms: u64,
+) -> Result<(), IpcClientError> {
+    let len = target_path.len().min(TraceSpawned::MAX_TARGET_PATH);
+    let ev = TraceSpawned::new(
+        parent_token,
+        child_pid,
+        child_pidversion,
+        target_path[..len].to_vec(),
+        reason,
+    );
+    let ack: TraceSpawnedAck = send_tagged_and_recv_ack(TAG_TRACE_SPAWNED, &ev, timeout_ms)?;
+    match ack {
+        TraceSpawnedAck::Ok { .. } => Ok(()),
+        TraceSpawnedAck::Err { message, .. } => Err(IpcClientError::DaemonRejected(message)),
+    }
+}
+
+pub fn send_persistence_write(audit_token: AuditTokenWire, target_path: &[u8], category: &str) {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
     let ev = PersistenceWrite::new(audit_token, target_path, category, now_ms);
-    let _ = send_tagged_and_recv_ack::<PersistenceWrite, PersistenceWriteAck>(TAG_PERSISTENCE_WRITE, &ev, 50);
+    let _ = send_tagged_and_recv_ack::<PersistenceWrite, PersistenceWriteAck>(
+        TAG_PERSISTENCE_WRITE,
+        &ev,
+        50,
+    );
 }
 
 // ---------------------------------------------------------------------------

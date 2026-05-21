@@ -6,9 +6,16 @@
 
 use std::path::{Path, PathBuf};
 
+const SYSTEM_STATE_DIR: &str = "/Library/Application Support/Sentinel";
+
 pub fn default_state_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("STT_GUARD_STATE_DIR") {
         return PathBuf::from(dir);
+    }
+    // Prefer system-mode state dir when a hardened install is active.
+    let sys = PathBuf::from(SYSTEM_STATE_DIR);
+    if sys.exists() {
+        return sys;
     }
     let home = std::env::var_os("HOME").expect("HOME environment variable must be set");
     PathBuf::from(home).join("Library/Application Support/Stentorian Guard")

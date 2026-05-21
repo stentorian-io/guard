@@ -92,6 +92,8 @@ fn real_main() -> Result<i32, CliError> {
                 }
             }
         }
+        Cmd::Install => guard_cli::install::system::run_install(),
+        Cmd::Uninstall => guard_cli::install::system::run_uninstall(),
     }
 }
 

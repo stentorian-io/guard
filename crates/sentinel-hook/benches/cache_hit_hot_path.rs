@@ -43,9 +43,9 @@ use criterion::{criterion_group, criterion_main, Criterion};
 // Everything below is macOS-only because it constructs `libc::sockaddr_in`
 // literals whose `sin_zero` field is `[c_char; 8]`. `c_char` is `i8` on macOS
 // (what we use here) but `u8` on Linux, so `[0i8; 8]` would fail to compile
-// under `cargo check --workspace` on a Linux dev box. Sentinel is macOS-only
-// by charter (see CLAUDE.md); on non-macOS targets the bench group below is
-// an empty stub so `criterion_main!` still produces a runnable binary.
+// under `cargo check --workspace` on a Linux dev box. Sentinel v1 is macOS-only;
+// on non-macOS targets the bench group below is an empty stub so
+// `criterion_main!` still produces a runnable binary.
 #[cfg(target_os = "macos")]
 use hdrhistogram::Histogram;
 #[cfg(target_os = "macos")]

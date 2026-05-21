@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "guard-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "clap",
  "guard-core",
@@ -545,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "guard-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ciborium",
  "libc",
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "guard-daemon"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ciborium",
  "clap",
@@ -583,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "guard-e2e"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "guard-core",
  "guard-daemon",
@@ -601,7 +601,7 @@ dependencies = [
 
 [[package]]
 name = "guard-hook"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "crossbeam-queue",
@@ -621,7 +621,7 @@ dependencies = [
 
 [[package]]
 name = "guard-ipc"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ciborium",
  "guard-core",
@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "guard-watchdog"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "ciborium",
  "clap",

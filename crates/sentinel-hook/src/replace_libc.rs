@@ -1026,8 +1026,8 @@ static SENTINEL_INTERPOSE_FREEADDRINFO: [SyncPtr; 2] = [
 // libc's syscall(int, ...) uses C variadic calling convention. On aarch64
 // macOS, variadic args are passed on the stack (not in registers), so a
 // non-variadic Rust function cannot correctly extract the args. Rust's
-// c_variadic feature is unstable. The experimental replace_syscall module is
-// intentionally not wired into the release __DATA,__interpose record set.
+// c_variadic feature is unstable. No release __DATA,__interpose record exists
+// for libc::syscall.
 //
 // Impact: code that calls libc syscall(SYS_CONNECT, ...) directly bypasses
 // sentinel_connect. Unknown native binaries containing raw syscall instruction

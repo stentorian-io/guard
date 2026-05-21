@@ -4,7 +4,7 @@ Sentinel applies default-deny outbound network enforcement to any command you
 run in your terminal — not just package installs. Supply-chain attacks during
 `npm install` are the motivating example, but the same protection covers build
 scripts, dev servers, test suites, and anything else you wrap with `sentinel
-run`. It's designed to work on your laptop today (macOS), on Linux tomorrow, and
+wrap`. It's designed to work on your laptop today (macOS), on Linux tomorrow, and
 in CI pipelines, giving you a single default-deny layer everywhere. It's not a
 replacement for any of the tools below; it's the layer they're missing.
 

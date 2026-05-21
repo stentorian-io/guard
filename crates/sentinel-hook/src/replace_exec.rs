@@ -70,6 +70,24 @@ fn report_exec_blocked(path: *const c_char, reason: BlockReason) {
     send_exec_blocked(token, &path_buf[..n], reason.as_str());
 }
 
+fn block_exec_trace_required(
+    path: *const c_char,
+    reason: crate::macho_scan::SuspiciousReason,
+) -> c_int {
+    let mut path_buf = [0u8; 1024];
+    let n = copy_cstr_to_buf(path, &mut path_buf);
+    let line = format!(
+        "[sentinel-hook] T3 ptrace required for exec-family call reason={} path={}",
+        reason.as_str(),
+        String::from_utf8_lossy(&path_buf[..n])
+    );
+    crate::log_buffer::LOG_RING.append(line.as_bytes());
+    unsafe {
+        *libc::__error() = libc::EACCES;
+    }
+    -1
+}
+
 /// Send an ExecEvent IPC for `path`. Best-effort: errors are silently dropped
 /// (the exec proceeds regardless — exec is not D-33's failure boundary).
 ///
@@ -95,12 +113,16 @@ pub unsafe extern "C" fn sentinel_execve(
             return unsafe { raw_syscall::raw_execve(path, argv, envp) };
         }
     };
-    if let ExecDecision::Block(reason) = exec_policy::check_exec_target(path) {
-        report_exec_blocked(path, reason);
-        unsafe {
-            *libc::__error() = libc::EACCES;
+    match exec_policy::check_exec_target(path) {
+        ExecDecision::Block(reason) => {
+            report_exec_blocked(path, reason);
+            unsafe {
+                *libc::__error() = libc::EACCES;
+            }
+            return -1;
         }
-        return -1;
+        ExecDecision::Trace(reason) => return block_exec_trace_required(path, reason),
+        ExecDecision::Allow => {}
     }
     let pm_env = unsafe { crate::pm_env_filter::extract_pm_env_from_envp(envp) };
     report_exec(path, pm_env);
@@ -108,20 +130,21 @@ pub unsafe extern "C" fn sentinel_execve(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sentinel_execvp(
-    path: *const c_char,
-    argv: *const *const c_char,
-) -> c_int {
+pub unsafe extern "C" fn sentinel_execvp(path: *const c_char, argv: *const *const c_char) -> c_int {
     let _guard = match InHookGuard::enter() {
         Some(g) => g,
         None => return unsafe { libc::execvp(path, argv) },
     };
-    if let ExecDecision::Block(reason) = exec_policy::check_exec_target(path) {
-        report_exec_blocked(path, reason);
-        unsafe {
-            *libc::__error() = libc::EACCES;
+    match exec_policy::check_exec_target(path) {
+        ExecDecision::Block(reason) => {
+            report_exec_blocked(path, reason);
+            unsafe {
+                *libc::__error() = libc::EACCES;
+            }
+            return -1;
         }
-        return -1;
+        ExecDecision::Trace(reason) => return block_exec_trace_required(path, reason),
+        ExecDecision::Allow => {}
     }
     let pm_env = crate::pm_env_filter::extract_pm_env_from_environ();
     report_exec(path, pm_env);
@@ -134,12 +157,16 @@ pub unsafe extern "C" fn sentinel_execv(path: *const c_char, argv: *const *const
         Some(g) => g,
         None => return unsafe { libc::execv(path, argv) },
     };
-    if let ExecDecision::Block(reason) = exec_policy::check_exec_target(path) {
-        report_exec_blocked(path, reason);
-        unsafe {
-            *libc::__error() = libc::EACCES;
+    match exec_policy::check_exec_target(path) {
+        ExecDecision::Block(reason) => {
+            report_exec_blocked(path, reason);
+            unsafe {
+                *libc::__error() = libc::EACCES;
+            }
+            return -1;
         }
-        return -1;
+        ExecDecision::Trace(reason) => return block_exec_trace_required(path, reason),
+        ExecDecision::Allow => {}
     }
     let pm_env = crate::pm_env_filter::extract_pm_env_from_environ();
     report_exec(path, pm_env);
@@ -163,10 +190,7 @@ pub unsafe extern "C" fn sentinel_execv(path: *const c_char, argv: *const *const
 // ---------------------------------------------------------------------------
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sentinel_execl(
-    _path: *const c_char,
-    _arg0: *const c_char,
-) -> c_int {
+pub unsafe extern "C" fn sentinel_execl(_path: *const c_char, _arg0: *const c_char) -> c_int {
     unsafe {
         *libc::__error() = libc::ENOSYS;
     }
@@ -174,10 +198,7 @@ pub unsafe extern "C" fn sentinel_execl(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sentinel_execlp(
-    _path: *const c_char,
-    _arg0: *const c_char,
-) -> c_int {
+pub unsafe extern "C" fn sentinel_execlp(_path: *const c_char, _arg0: *const c_char) -> c_int {
     unsafe {
         *libc::__error() = libc::ENOSYS;
     }
@@ -185,10 +206,7 @@ pub unsafe extern "C" fn sentinel_execlp(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sentinel_execle(
-    _path: *const c_char,
-    _arg0: *const c_char,
-) -> c_int {
+pub unsafe extern "C" fn sentinel_execle(_path: *const c_char, _arg0: *const c_char) -> c_int {
     unsafe {
         *libc::__error() = libc::ENOSYS;
     }

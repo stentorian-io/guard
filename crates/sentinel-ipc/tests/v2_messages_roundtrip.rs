@@ -19,6 +19,7 @@ fn token() -> AuditTokenWire {
 fn schema_constants() {
     assert_eq!(IPC_SCHEMA_V1, 1);
     assert_eq!(IPC_SCHEMA_V2, 2);
+    assert_eq!(IPC_SCHEMA_V5, 5);
 }
 
 #[test]
@@ -65,6 +66,26 @@ fn exec_event_and_ack_roundtrip() {
 #[test]
 fn exec_event_max_target_path_const_is_1024() {
     assert_eq!(ExecEvent::MAX_TARGET_PATH, 1024);
+}
+
+#[test]
+fn trace_spawned_roundtrip() {
+    let ev = TraceSpawned::new(
+        token(),
+        4242,
+        99,
+        b"/tmp/t3-bin".to_vec(),
+        "syscall-instruction",
+    );
+    assert_eq!(ev.schema_version, IPC_SCHEMA_V5);
+    assert_eq!(TraceSpawned::MAX_TARGET_PATH, 1024);
+    assert_eq!(cbor_roundtrip(&ev), ev);
+    assert_eq!(
+        cbor_roundtrip(&TraceSpawnedAck::ok()),
+        TraceSpawnedAck::ok()
+    );
+    let err = TraceSpawnedAck::err("ptrace attach failed");
+    assert_eq!(cbor_roundtrip(&err), err);
 }
 
 #[test]

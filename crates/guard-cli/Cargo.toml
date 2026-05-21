@@ -1,0 +1,36 @@
+[package]
+name = "guard-cli"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "stt-guard CLI — wraps a command under default-deny network enforcement."
+
+[[bin]]
+name = "stt-guard"
+path = "src/main.rs"
+
+[lib]
+name = "guard_cli"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { workspace = true }
+libc = { workspace = true }
+socket2 = { workspace = true }
+guard-core = { workspace = true }
+guard-ipc = { workspace = true }
+guard-daemon = { path = "../guard-daemon" }
+serde = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+signal-hook = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+guard-core = { workspace = true }
+guard-ipc = { workspace = true }

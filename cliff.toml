@@ -1,11 +1,11 @@
-# git-cliff configuration for Sentinel
+# git-cliff configuration for Stentorian Guard
 # https://git-cliff.org/docs/configuration
 
 [changelog]
 header = """
 # Changelog
 
-All notable changes to Sentinel are documented in this file.
+All notable changes to Stentorian Guard are documented in this file.
 This changelog is generated from [conventional commits](https://www.conventionalcommits.org/).\n
 """
 body = """

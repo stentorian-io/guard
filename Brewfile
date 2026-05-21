@@ -1,4 +1,4 @@
-# Sentinel developer tooling.
+# Stentorian Guard developer tooling.
 # Install with: brew bundle
 
 # Run GitHub Actions locally (lint-markdown / ubuntu jobs).

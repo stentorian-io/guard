@@ -1,26 +1,26 @@
 [workspace]
 resolver = "3"
 members = [
-  "crates/sentinel-cli",
-  "crates/sentinel-daemon",
-  "crates/sentinel-hook",
-  "crates/sentinel-core",
-  "crates/sentinel-ipc",
-  "crates/sentinel-watchdog",
-  "crates/sentinel-e2e",
-  "crates/sentinel-e2e/harness/env_clear_posix_spawn",
-  "crates/sentinel-e2e/harness/pm_env_posix_spawn",
-  "crates/sentinel-e2e/harness/expanded_hooks_probe",
-  "crates/sentinel-e2e/harness/hardened_exec_probe",
-  "crates/sentinel-e2e/harness/persistence_write_probe",
+  "crates/guard-cli",
+  "crates/guard-daemon",
+  "crates/guard-hook",
+  "crates/guard-core",
+  "crates/guard-ipc",
+  "crates/guard-watchdog",
+  "crates/guard-e2e",
+  "crates/guard-e2e/harness/env_clear_posix_spawn",
+  "crates/guard-e2e/harness/pm_env_posix_spawn",
+  "crates/guard-e2e/harness/expanded_hooks_probe",
+  "crates/guard-e2e/harness/hardened_exec_probe",
+  "crates/guard-e2e/harness/persistence_write_probe",
 ]
 
 [workspace.package]
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/stentorian-io/sentinel"
-authors = ["Sentinel contributors"]
+repository = "https://github.com/stentorian-io/guard"
+authors = ["Stentorian Guard contributors"]
 
 [workspace.dependencies]
 # Core (production runtime)
@@ -46,8 +46,8 @@ serde_json = "1.0"
 getrandom = "0.2"
 
 # Internal crates
-sentinel-core = { path = "crates/sentinel-core" }
-sentinel-ipc  = { path = "crates/sentinel-ipc" }
+guard-core = { path = "crates/guard-core" }
+guard-ipc  = { path = "crates/guard-ipc" }
 
 # Cryptography (snapshot + IPC signing)
 sha2 = "0.10"
@@ -65,10 +65,9 @@ panic = "abort"
 strip = "symbols"
 
 [profile.dev]
-# panic = "abort" for all dev builds — dylib code (libsentinel_hook.dylib) must not
+# panic = "abort" for all dev builds — dylib code (stt-guard-hook.dylib) must not
 # attempt to unwind through foreign (Node/libuv) C++ stack frames. An unwind panic
 # inside a cdylib injected into a foreign process causes SIGSEGV. abort is safe:
 # it terminates the host process immediately with a clear diagnostic instead of
 # corrupting the stack. All crates share this profile setting.
 panic = "abort"
-

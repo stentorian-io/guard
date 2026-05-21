@@ -185,7 +185,7 @@ APPENDIX: How to apply the Apache License to your work.
    "application/vnd.apache" media type for your file format and
    add it to https://www.apache.org/media-types/.
 
-   Copyright 2026 Stentorian B.V. and Sentinel contributors
+   Copyright 2026 Stentorian B.V. and Stentorian Guard contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.

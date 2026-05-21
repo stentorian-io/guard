@@ -73,7 +73,7 @@ health, counters, tracked roots, gaps, and risk exposure.
 .TP
 .B logs
 Dump the JSONL forensic log to stdout. For streaming, pipe to
-.BR "tail -f ~/Library/Logs/Stentorian Guard/stt-guard.log" .
+.BR "tail -f /var/log/stt-guard/stt-guard.log" .
 .TP
 .B rules
 List active policy rules.
@@ -137,7 +137,7 @@ Everything else is blocked. In TTY mode, the user is prompted.
 .B STT_GUARD_STATE_DIR
 Override the Stentorian Guard state directory used by the CLI, daemon, and hook.
 Defaults to
-.IR ~/Library/Application\~Support/Stentorian\~Guard/ .
+.IR /Library/Application\~Support/Stentorian\~Guard/ .
 .TP
 .B STT_GUARD_HOOK_DYLIB
 Override the hook dylib path used by

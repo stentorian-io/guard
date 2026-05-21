@@ -23,7 +23,7 @@ use tracing::info;
 #[derive(Parser)]
 #[command(
     name = "stt-guard-daemon",
-    about = "Stentorian Guard user-level daemon"
+    about = "Stentorian Guard system daemon"
 )]
 struct Cli {
     #[command(subcommand)]

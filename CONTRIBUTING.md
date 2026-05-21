@@ -52,7 +52,7 @@ stt-guard status
 ```
 
 A healthy install shows daemon state, counters, tracked roots, gaps, and risk
-exposure. The daemon auto-starts on first use — no manual setup required.
+exposure. The daemon must be installed first via `sudo stt-guard install` — see the [README](README.md#installation) for details.
 
 ## Test
 
@@ -81,7 +81,7 @@ graph LR
         C4[Wait + report]
     end
 
-    subgraph Daemon["stt-guard-daemon (auto-spawned)"]
+    subgraph Daemon["stt-guard-daemon (LaunchDaemon)"]
         direction TB
         IPC["IPC server<br/><small>Unix socket</small>"]
         H["Handlers<br/><small>prepare_snapshot · resolve<br/>prompt_channel · insert_user_rule<br/>status · rules</small>"]
@@ -153,10 +153,10 @@ Stentorian Guard is a defense-in-depth layer, not a sandbox. Known boundaries:
 | Build | Cargo workspaces | Release: LTO thin, codegen-units=1, panic=abort, strip symbols |
 | Enforcement | `DYLD_INSERT_LIBRARIES` | Interposes libc network/exec/fork calls via `dlsym(RTLD_NEXT, ...)` |
 | IPC | Unix domain socket + CBOR frames | Peer auth via kernel audit token (`LOCAL_PEERTOKEN`) |
-| Daemon | Sync 32-thread worker pool | Bounded queue (64); auto-spawned by CLI |
+| Daemon | Sync 32-thread worker pool | Bounded queue (64); managed by LaunchDaemon |
 | Persistence | rusqlite (bundled SQLite) | Migrations in `crates/guard-daemon/migrations/` |
 | Serialization | ciborium (CBOR), serde | Snapshot format and IPC wire protocol |
-| Logging | tracing + tracing-subscriber | JSONL forensic log to `~/Library/Logs/Stentorian Guard/` |
+| Logging | tracing + tracing-subscriber | JSONL forensic log to `/var/log/stt-guard/` |
 | Integrity | HMAC-SHA256 | Snapshot + IPC signing; hook binary self-check |
 | Process tracking | audit_token + pidversion | Fork/exec events; PID-reuse guard |
 

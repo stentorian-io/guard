@@ -5,9 +5,6 @@ stt-guard-daemon \- Stentorian Guard daemon for policy enforcement
 .SH SYNOPSIS
 .B stt-guard-daemon serve
 .RI [ OPTIONS ]
-.br
-.B stt-guard-daemon dev\-install
-.RI [ OPTIONS ]
 .SH DESCRIPTION
 .B stt-guard-daemon
 is the background daemon for Stentorian Guard. It runs as the
@@ -40,26 +37,14 @@ to deploy and start it.
 .SH COMMANDS
 .SS stt-guard-daemon serve
 Start the IPC server and begin accepting connections. This is the main
-operating mode, invoked by the LaunchAgent plist.
+operating mode, invoked by the LaunchDaemon plist.
 .PP
 .B Options:
 .TP
 .BI \-\-state\-dir " PATH"
 Path to the Stentorian Guard state directory. Defaults to the platform-specific
 location (typically
-.IR ~/Library/Application\~Support/Stentorian\~Guard/ ).
-.SS stt-guard-daemon dev\-install
-Write the LaunchAgent plist for development use.
-.PP
-.B Options:
-.TP
-.BI \-\-state\-dir " PATH"
-Path to the Stentorian Guard state directory.
-.TP
-.B \-\-skip\-bootstrap
-Write the plist file without running
-.BR "launchctl bootstrap" .
-Useful for CI environments where launchd bootstrapping is not available.
+.IR /Library/Application\~Support/Stentorian\~Guard/ ).
 .SH IPC PROTOCOL
 The daemon listens on a Unix domain socket. The wire protocol uses
 length-prefixed CBOR frames (4-byte big-endian length + CBOR payload).
@@ -99,7 +84,7 @@ Begins accepting IPC connections
 Override the Stentorian Guard state directory when
 .B \-\-state\-dir
 is not supplied. Defaults to
-.IR ~/Library/Application\~Support/Stentorian\~Guard/ .
+.IR /Library/Application\~Support/Stentorian\~Guard/ .
 .TP
 .B RUST_LOG
 Control logging verbosity. Defaults to
@@ -136,15 +121,15 @@ Threat-intel deny rules are baked into the binary at build time; no data is sent
 The watchdog process
 .RB ( stt-guard\-watchdog )
 pings the daemon every 500ms. Two consecutive missed pings trigger
-SIGTERM followed by SIGKILL. The LaunchAgent's
+SIGTERM followed by SIGKILL. The LaunchDaemon's
 .B KeepAlive
 directive ensures launchd restarts the daemon after any termination.
+
 .PP
 Check daemon health with:
 .RS
 .nf
 stt-guard status
-stt-guard status \-\-verbose
 .fi
 .RE
 .SH SEE ALSO

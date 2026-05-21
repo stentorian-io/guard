@@ -52,7 +52,7 @@ stt-guard status
 ```
 
 A healthy install shows daemon state, counters, tracked roots, gaps, and risk
-exposure. The daemon must be installed first via `sudo stt-guard install` — see the [README](README.md#installation) for details.
+exposure. The daemon must be initialised first via `sudo stt-guard init` — see the [README](README.md#installation) for details.
 
 ## Test
 

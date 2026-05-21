@@ -74,7 +74,6 @@ pub const ENV_STATE_DIR: &str = "STT_GUARD_STATE_DIR";
 pub const ENV_HOOK_DYLIB: &str = "STT_GUARD_HOOK_DYLIB";
 pub const ENV_SNAPSHOT_MANIFEST: &str = "STT_GUARD_SNAPSHOT_MANIFEST";
 pub const ENV_DYLD: &str = "DYLD_INSERT_LIBRARIES";
-pub const ENV_TEST_MARKER: &str = "STT_GUARD_TEST_MARKER";
 
 // ---------------------------------------------------------------------------
 // Path builders (all derive from a state_dir root)

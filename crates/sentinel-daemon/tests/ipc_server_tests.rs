@@ -10,16 +10,22 @@
 
 use sentinel_core::AuditToken;
 use sentinel_daemon::gap_detector::GapDetector;
+use sentinel_daemon::ipc_dispatch::MessageTag;
 use sentinel_daemon::ipc_server::{DaemonState, IpcServer};
+use sentinel_daemon::os_ffi::is_hardened_runtime;
 use sentinel_daemon::rule_store::RuleStore;
 use sentinel_daemon::state_dir::{db_path, ensure_state_dir, socket_path};
-use sentinel_daemon::tracked::ProcessTree;
+use sentinel_daemon::tracked::{CoverageGap, ProcessTree};
 use sentinel_ipc::frame::{read_frame, write_frame};
-use sentinel_ipc::{RegisterRoot, Reply};
+use sentinel_ipc::{AuditTokenWire, ForkAck, ForkEvent, RegisterRoot, Reply};
+use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 fn build_state(state_dir: &Path) -> (Arc<ProcessTree>, Arc<DaemonState>) {
     let tree = Arc::new(ProcessTree::new());
@@ -34,6 +40,18 @@ fn build_state(state_dir: &Path) -> (Arc<ProcessTree>, Arc<DaemonState>) {
         state_dir.to_path_buf(),
     ));
     (tree, state)
+}
+
+fn write_tagged<T: serde::Serialize>(stream: &mut UnixStream, tag: MessageTag, msg: &T) {
+    stream.write_all(&[tag.as_byte()]).expect("write tag");
+    write_frame(stream, msg).expect("write tagged body");
+}
+
+fn read_tagged_fork_ack(stream: &mut UnixStream) -> ForkAck {
+    let mut tag = [0u8; 1];
+    stream.read_exact(&mut tag).expect("read fork ack tag");
+    assert_eq!(tag[0], MessageTag::ForkEvent.as_byte());
+    read_frame(stream).expect("read ForkAck")
 }
 
 /// REGISTER-01 self-registration path: wire_pid == kernel_pid.
@@ -122,7 +140,12 @@ fn kernel_pidversion(pid: u32) -> u32 {
         assert_eq!(kr, KERN_SUCCESS, "task_name_for_pid failed for pid {pid}");
         let mut token_val = [0u32; 8];
         let mut count: u32 = 8;
-        let kr2 = task_info(task_port, TASK_AUDIT_TOKEN, token_val.as_mut_ptr(), &mut count);
+        let kr2 = task_info(
+            task_port,
+            TASK_AUDIT_TOKEN,
+            token_val.as_mut_ptr(),
+            &mut count,
+        );
         mach_port_deallocate(mach_task_self(), task_port);
         assert_eq!(kr2, KERN_SUCCESS, "task_info failed for pid {pid}");
         token_val[7]
@@ -249,6 +272,88 @@ fn register_root_delegation_rejects_wrong_pidversion() {
 
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[cfg_attr(not(target_os = "macos"), ignore)]
+#[test]
+fn fork_event_for_hardened_child_fails_closed_on_dylib_timeout() {
+    let mut child = Command::new("/bin/sleep")
+        .arg("5")
+        .spawn()
+        .expect("spawn sleep child");
+    let child_pid = child.id();
+
+    if !is_hardened_runtime(child_pid as libc::pid_t) {
+        eprintln!(
+            "SKIP: /bin/sleep pid={} is not hardened-runtime on this host",
+            child_pid
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+        return;
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    ensure_state_dir(tmp.path()).unwrap();
+    let sock = socket_path(tmp.path());
+
+    let (tree, state) = build_state(tmp.path());
+    let gap_detector = state.gap_detector.clone();
+    let server = IpcServer::bind(&sock, state).expect("bind");
+
+    let handle = thread::spawn(move || {
+        server.accept_one().expect("accept register");
+        server.accept_one().expect("accept fork");
+    });
+
+    let our_pid = unsafe { libc::getpid() } as u32;
+    let self_wire = AuditToken::synthetic([0, 0, 0, 0, 0, our_pid, 0, 0]);
+    let mut register_stream = UnixStream::connect(&sock).expect("connect register");
+    write_frame(&mut register_stream, &RegisterRoot::new(self_wire)).expect("write RegisterRoot");
+    let reply: Reply = read_frame(&mut register_stream).expect("read Reply");
+    assert!(
+        matches!(reply, Reply::Ack { .. }),
+        "expected Ack, got {reply:?}"
+    );
+    drop(register_stream);
+
+    let fork = ForkEvent::new(AuditTokenWire::from(self_wire), child_pid as i32, 0);
+    let mut fork_stream = UnixStream::connect(&sock).expect("connect fork");
+    write_tagged(&mut fork_stream, MessageTag::ForkEvent, &fork);
+    let ack = read_tagged_fork_ack(&mut fork_stream);
+    assert!(
+        matches!(ack, ForkAck::Ok { .. }),
+        "expected ForkAck::Ok, got {ack:?}"
+    );
+    drop(fork_stream);
+    handle.join().unwrap();
+    assert_eq!(
+        gap_detector.pending_count(),
+        1,
+        "hardened child ForkEvent should arm a DylibLoaded timeout"
+    );
+
+    std::thread::sleep(Duration::from_millis(
+        sentinel_daemon::gap_detector::GAP_TIMEOUT_MS + 300,
+    ));
+
+    let node = tree
+        .find_node_by_pid(child_pid)
+        .expect("child node should be tracked");
+    assert!(
+        matches!(
+            node.coverage_gap,
+            Some(CoverageGap::ConfirmedHardened { .. })
+        ),
+        "expected ConfirmedHardened gap on child node, got {:?}",
+        node.coverage_gap
+    );
+
+    let status = child
+        .try_wait()
+        .expect("wait for child")
+        .expect("child should be killed by gap timeout");
+    assert_eq!(status.signal(), Some(libc::SIGKILL));
 }
 
 #[test]

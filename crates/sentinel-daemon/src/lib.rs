@@ -6,6 +6,7 @@ pub mod curated;
 pub mod daemon_state;
 pub mod log_writer;
 pub mod prompt;
+pub mod ptrace_supervisor;
 pub mod env_capture;
 pub mod gap_detector;
 pub mod install_artifacts;

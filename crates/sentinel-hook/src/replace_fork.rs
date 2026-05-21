@@ -16,8 +16,8 @@
 
 use crate::exec_policy::{self, ExecDecision};
 use crate::ipc_client::{
-    IpcClientError, copy_cstr_to_buf, send_env_not_propagated_gap_sync, send_exec_blocked,
-    send_exec_event_sync, send_fork_event_sync, send_trace_spawned_sync,
+    copy_cstr_to_buf, send_env_not_propagated_gap_sync, send_exec_blocked, send_exec_event_sync,
+    send_fork_event_sync, send_trace_spawned_sync, IpcClientError,
 };
 use crate::macho_scan::{BlockReason, SuspiciousReason};
 use crate::reentrancy::IN_HOOK;
@@ -78,12 +78,24 @@ fn trace_attr_for_t3(
     if trace_reason.is_none() {
         return Ok(None);
     }
+    if !network_syscall_trace_enforcement_available() {
+        // Darwin ptrace can attach/continue/step, but it has no syscall-entry
+        // stop or register get/set API equivalent to Linux PTRACE_SYSCALL.
+        // Until the daemon has a real Mach-backed network syscall filter, T3
+        // posix_spawn must fail before the child is created.
+        return Err(libc::ENOTSUP);
+    }
     if !attrp.is_null() {
         // We cannot clone Darwin's opaque posix_spawnattr_t safely. Fail
         // closed rather than dropping caller-supplied flags.
         return Err(libc::ENOTSUP);
     }
     SuspendedSpawnAttr::new().map(Some)
+}
+
+#[inline]
+fn network_syscall_trace_enforcement_available() -> bool {
+    false
 }
 
 fn report_trace_required(path: *const libc::c_char, reason: SuspiciousReason) {
@@ -625,4 +637,22 @@ pub unsafe extern "C" fn sentinel_posix_spawnp(
         }
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn t3_spawn_requires_real_network_syscall_enforcement() {
+        assert!(!network_syscall_trace_enforcement_available());
+        let attr = trace_attr_for_t3(std::ptr::null(), Some(SuspiciousReason::SyscallInstruction));
+        assert!(matches!(attr, Err(errno) if errno == libc::ENOTSUP));
+    }
+
+    #[test]
+    fn non_t3_spawn_keeps_caller_attrs_untouched() {
+        let attr = trace_attr_for_t3(std::ptr::null(), None).expect("non-T3 attr gate");
+        assert!(attr.is_none());
+    }
 }

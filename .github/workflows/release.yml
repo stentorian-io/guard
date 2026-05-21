@@ -1,0 +1,159 @@
+# Release workflow — builds universal macOS binary, generates changelog and
+# release-meta.json, creates a GitHub Release with all artifacts attached.
+#
+# Triggered by pushing a semver tag (v1.0.0, v1.2.3, etc.).
+# Can also be triggered manually via workflow_dispatch for dry-run testing.
+#
+# Binary: universal macOS (arm64 + x86_64) lipo'd together.
+# Artifacts: stt-guard, stt-guard-daemon, stt-guard-watchdog,
+#            libguard_hook.dylib, release-meta.json
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (skip GitHub Release creation)'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build universal binary
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain + targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+
+      - name: Build arm64
+        run: cargo build --workspace --release --target aarch64-apple-darwin
+
+      - name: Build x86_64
+        run: cargo build --workspace --release --target x86_64-apple-darwin
+
+      - name: Create universal binaries
+        run: |
+          set -euo pipefail
+          mkdir -p target/universal
+          for bin in stt-guard stt-guard-daemon stt-guard-watchdog; do
+            lipo -create \
+              "target/aarch64-apple-darwin/release/${bin}" \
+              "target/x86_64-apple-darwin/release/${bin}" \
+              -output "target/universal/${bin}"
+          done
+          lipo -create \
+            target/aarch64-apple-darwin/release/libguard_hook.dylib \
+            target/x86_64-apple-darwin/release/libguard_hook.dylib \
+            -output target/universal/libguard_hook.dylib
+
+      - name: Verify universal binaries
+        run: |
+          for f in target/universal/*; do
+            echo "=== $(basename "$f") ==="
+            file "$f"
+            lipo -info "$f"
+          done
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: guard-universal
+          path: target/universal/
+          retention-days: 5
+
+  release:
+    name: Create release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: guard-universal
+          path: artifacts/
+
+      - name: Install git-cliff
+        uses: kenji-miyake/setup-git-cliff@v2
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v0.0.0-dryrun"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 "${{ steps.version.outputs.tag }}^" 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            git cliff "${PREV_TAG}..${{ steps.version.outputs.tag }}" --output CHANGELOG.md
+          else
+            git cliff --output CHANGELOG.md
+          fi
+
+      - name: Generate release-meta.json
+        run: |
+          scripts/generate-release-meta.sh "${{ steps.version.outputs.tag }}" > artifacts/release-meta.json
+          cat artifacts/release-meta.json
+
+      - name: Package tarball
+        run: |
+          cd artifacts
+          tar czf "guard-${{ steps.version.outputs.version }}-universal-apple-darwin.tar.gz" \
+            stt-guard stt-guard-daemon stt-guard-watchdog libguard_hook.dylib release-meta.json
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' || inputs.dry_run == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Guard ${{ steps.version.outputs.version }}
+          body_path: CHANGELOG.md
+          files: |
+            artifacts/guard-${{ steps.version.outputs.version }}-universal-apple-darwin.tar.gz
+            artifacts/release-meta.json
+
+      - name: Dry-run summary
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true'
+        run: |
+          echo "## Dry Run Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tag:** ${{ steps.version.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Artifacts:**" >> "$GITHUB_STEP_SUMMARY"
+          ls -lh artifacts/ >> "$GITHUB_STEP_SUMMARY"
+          echo "**Release metadata:**" >> "$GITHUB_STEP_SUMMARY"
+          cat artifacts/release-meta.json >> "$GITHUB_STEP_SUMMARY"

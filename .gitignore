@@ -1,35 +1,25 @@
 /target
-/spike/target
 **/*.rs.bk
 .DS_Store
-.idea/
-.vscode/
 *.swp
-Cargo.lock.bak
-
-# ── GSD baseline (auto-generated) ──
-.gsd
-.gsd-id
-.mcp.json
-.bg-shell/
-Thumbs.db
 *.swo
 *~
+
+# Tooling
+.idea/
+.vscode/
 *.code-workspace
+
+# Environment
 .env
 .env.*
 !.env.example
-node_modules/
-.next/
-dist/
-build/
-__pycache__/
-*.pyc
-.venv/
-venv/
-target/
-vendor/
+
+# GSD / agent workspace
+.gsd/
+.gsd-id
+.mcp.json
+.bg-shell/
+
+# Logs
 *.log
-coverage/
-.cache/
-tmp/

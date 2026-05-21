@@ -27,8 +27,8 @@ const MAX_RESOLVE_ATTEMPTS: usize = 4;
 
 /// Per-Resolve-IPC timeout in milliseconds. One-time cost per (host, port) pair;
 /// subsequent connects to the same sockaddr are cache-hit-only (sub-100µs).
-/// This deviates from the CLAUDE.md <100µs per-intercepted-call budget for
-/// the cache-miss warm-up path — documented in the threat model (T-02-08-02).
+/// This deviates from the README's cache-hit performance expectation for the
+/// cache-miss warm-up path — documented in the threat model (T-02-08-02).
 const RESOLVE_TIMEOUT_MS: u64 = 100;
 
 /// BLOCKER-01 fix (v0.2 review): the libc hot path now delegates to the

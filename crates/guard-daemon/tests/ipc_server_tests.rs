@@ -411,7 +411,7 @@ fn socket_mode_user_install_is_0600() {
 }
 
 /// System-mode socket gets 0o666 (world-writable). In system installs the
-/// daemon runs as `_sentinel` but CLI/hook connect as the user — codesign
+/// daemon runs as `_stt_guard` but CLI/hook connect as the user — codesign
 /// peer auth is the trust boundary, not filesystem permissions.
 ///
 /// We can't bind at the real `/Library/...` path in tests (too long for
@@ -434,7 +434,7 @@ fn socket_mode_system_install_is_0666() {
         det,
         rs,
         curated,
-        std::path::PathBuf::from("/Library/Application Support/Sentinel"),
+        std::path::PathBuf::from("/Library/Application Support/Stentorian Guard"),
     ));
 
     let _server = IpcServer::bind(&sock, state).expect("bind");

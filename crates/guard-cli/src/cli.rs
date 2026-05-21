@@ -22,7 +22,7 @@ USAGE:
                                              Inspect daemon health, rules, denials
   stt-guard status advisory <ID>              Look up threat-intel advisory details
 
-  sudo stt-guard install                      Hardened install: _sentinel service user,
+  sudo stt-guard install                      Hardened install: _stt_guard service user,
                                              root-owned binaries, LaunchDaemon
   sudo stt-guard uninstall                    Reverse a hardened install
 "
@@ -63,13 +63,13 @@ pub enum Cmd {
         sub: Option<StatusSub>,
     },
 
-    /// Hardened system install: create _sentinel service user, set root
+    /// Hardened system install: create _stt_guard service user, set root
     /// ownership on binaries, install LaunchDaemon, and transfer runtime
-    /// state to _sentinel. Requires root (run with sudo).
+    /// state to _stt_guard. Requires root (run with sudo).
     Install,
 
     /// Reverse a previous `stt-guard install`: stop the LaunchDaemon,
-    /// remove the _sentinel service user, and restore user-mode paths.
+    /// remove the _stt_guard service user, and restore user-mode paths.
     /// Requires root (run with sudo).
     Uninstall,
 }

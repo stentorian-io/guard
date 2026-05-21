@@ -4,14 +4,14 @@
 //!   1. `STT_GUARD_HOOK_DYLIB` override
 //!   2. Sibling of CLI binary at `target/{debug,release}/stt-guard-hook.dylib`
 //!   3. Any sibling hook dylib emitted by local development builds
-//!   4. System install path (`/usr/local/libexec/sentinel/`)
+//!   4. System install path (`/usr/local/libexec/stt-guard/`)
 //!   5. Hardcoded Homebrew path
 
 use std::path::PathBuf;
 
 const DYLIB_NAME: &str = "stt-guard-hook.dylib";
 const ENV_HOOK_DYLIB: &str = "STT_GUARD_HOOK_DYLIB";
-const SYSTEM_INSTALL_PATH: &str = "/usr/local/libexec/sentinel/stt-guard-hook.dylib";
+const SYSTEM_INSTALL_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook.dylib";
 const HOMEBREW_RELEASE_PATH: &str = "/opt/homebrew/lib/stt-guard/stt-guard-hook.dylib";
 
 pub fn find_dylib() -> std::io::Result<PathBuf> {

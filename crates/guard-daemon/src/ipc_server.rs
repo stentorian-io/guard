@@ -259,7 +259,7 @@ impl IpcServer {
     /// - **User mode** (0o600): only the owning user can connect (same-UID).
     /// - **System mode** (0o666): any user can connect; codesign peer auth
     ///   is the authentication layer, not filesystem permissions. Required
-    ///   because the daemon runs as `_sentinel` but CLI/hook run as the user.
+    ///   because the daemon runs as `_stt_guard` but CLI/hook run as the user.
     pub fn bind(socket_path: &Path, state: Arc<DaemonState>) -> std::io::Result<Self> {
         let _ = std::fs::remove_file(socket_path);
         let listener = UnixListener::bind(socket_path)?;

@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-const SYSTEM_STATE_DIR: &str = "/Library/Application Support/Sentinel";
+const SYSTEM_STATE_DIR: &str = "/Library/Application Support/Stentorian Guard";
 
 pub fn is_system_install(state_dir: &Path) -> bool {
     state_dir == Path::new(SYSTEM_STATE_DIR)
@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn is_system_install_true_for_system_path() {
         assert!(is_system_install(Path::new(
-            "/Library/Application Support/Sentinel"
+            "/Library/Application Support/Stentorian Guard"
         )));
     }
 

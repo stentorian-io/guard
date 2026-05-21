@@ -1,5 +1,5 @@
-//! M003-S01-T06: verify that exfiltration via send(), write()-to-socket,
-//! and syscall(SYS_CONNECT) is blocked by the expanded hook surface.
+//! M003-S01-T06: verify that exfiltration via send() and write()-to-socket
+//! is blocked by the expanded hook surface.
 //!
 //! Also verifies that write() to regular files and pipes is NOT affected
 //! (no false positives from the write/writev interpose).
@@ -100,11 +100,12 @@ fn write_socket_to_non_allowed_host_denied() {
     );
 }
 
-// syscall(SYS_CONNECT, ...) bypass test: DEFERRED.
+// libc syscall(SYS_CONNECT, ...) bypass test: DEFERRED.
 // libc's syscall(int, ...) uses C variadic calling convention. On aarch64
 // macOS, variadic args go on the stack — a non-variadic Rust interpose
 // function cannot reliably extract them. Rust's c_variadic feature is
-// unstable. Until it stabilizes, direct syscall() bypass is a known gap.
+// unstable. Unknown native binaries containing raw syscall instruction bytes
+// are handled by exec-time T3 fail-closed classification instead.
 
 /// write() to a regular file must NOT be affected by the hook.
 #[cfg_attr(not(target_os = "macos"), ignore)]

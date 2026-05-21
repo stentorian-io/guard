@@ -31,8 +31,8 @@ pub static REAL_SYSCALL: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut(
 ///
 /// THE FIX (v0.1): Use direct kernel syscalls instead of function pointers.
 /// The hot-path replacement functions (sentinel_connect, sentinel_sendto, etc.)
-/// now call libc::syscall(SYS_*, ...) directly in their allow/reentrancy paths.
-/// libc::syscall itself is NOT interposed, so it correctly calls the kernel.
+/// call raw inline-assembly syscall wrappers in their allow/reentrancy paths.
+/// This avoids both dyld interpose recursion and libc::syscall recursion.
 ///
 /// These AtomicPtrs remain for compatibility with probe_self_test and future versions
 /// that may find a way to store the real function pointers (e.g., Mach-O TEXT parsing).
@@ -40,7 +40,8 @@ pub static REAL_SYSCALL: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut(
 pub unsafe fn capture_originals() {
     // NOTE: The values stored here will all equal our replacement functions
     // (sentinel_connect etc.) due to dyld's global interpose patching. They are
-    // NOT used in the hot path — raw syscalls are used instead (see replace_libc.rs).
+    // NOT used in the hot path — raw syscall wrappers are used instead (see
+    // replace_libc.rs and raw_syscall.rs).
     // We still call dlsym to populate the fields for compatibility, knowing they
     // won't be used for call-through.
     let libsystem = unsafe {

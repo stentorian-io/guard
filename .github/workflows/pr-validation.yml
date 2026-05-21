@@ -36,7 +36,7 @@ jobs:
       - uses: amannn/action-semantic-pull-request@v5
         id: lint_pr
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           types: |
             feat
@@ -61,6 +61,8 @@ jobs:
             man
             help
             install
+            release
+            security
           requireScope: false
           subjectPattern: ^(?![A-Z]).+(?<!\.)$
           subjectPatternError: |

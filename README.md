@@ -20,6 +20,7 @@
 - [Why Sentinel?](#why-sentinel)
   - [How exfiltration usually happens](#how-exfiltration-usually-happens)
   - [How Sentinel prevents it](#how-sentinel-prevents-it)
+  - [Existing alternatives](#existing-alternatives)
 - [Usage](#usage)
   - [Installation](#installation)
   - [Manual](#manual)
@@ -30,7 +31,7 @@
 - [Coverage](#coverage)
   - [Platform support](#platform-support)
   - [Threat intelligence](#threat-intelligence)
-  - [Security limitations](#security-limitations)
+  - [Security expectations](#security-expectations)
 - [Found Sentinel useful?](#found-sentinel-useful)
 - [Changelog](#changelog)
 - [Contributing](#contributing)
@@ -123,6 +124,20 @@ Cache hits resolve in under 100 microseconds with no IPC.
 - No kernel extensions or system extensions
 - No manual setup — the daemon auto-starts on first use
 - Works with any command or binary run from the terminal, not just package managers
+
+### Existing alternatives
+
+Sentinel applies default-deny outbound network enforcement to any command you
+run in your terminal — not just package installs. Supply-chain attacks during
+`npm install` are the motivating example, but the same protection covers build
+scripts, dev servers, test suites, and anything else you wrap with `sentinel
+run`. It's designed to work on your laptop today (macOS), on Linux tomorrow, and
+in CI pipelines, giving you a single default-deny layer everywhere. It's not a
+replacement for EDRs, application firewalls, audit tools, SCA scanners, or
+lockfiles; it's the layer they're missing.
+
+For a detailed comparison with specific tools (CrowdStrike, LuLu, npm audit,
+Socket/Snyk, lockfiles, and more), see [docs/alternatives.md](docs/alternatives.md).
 
 ## Usage
 
@@ -305,29 +320,19 @@ hosting domains commonly used for exfiltration) supplement the automated feed.
 | Suspected malicious host    | **Flagged** — surfaces an interactive prompt | Hand-curated abuse patterns      |
 | Known-good registry/CDN     | **Allow**                                    | Curated allowlists per ecosystem |
 
-### Security limitations
+### Security expectations
 
-No security tool provides absolute protection, and any tool claiming 100%
-coverage is either misleading you or naive about how attackers operate.
-Sentinel is defense-in-depth, not a sandbox: it raises the cost of an attack
-rather than eliminating it. Policy is enforced in userspace, so an attacker who
-can run arbitrary native code, issue raw syscalls, or exploit the kernel can
-bypass it — as they can bypass any userspace defense. Advanced techniques like
-return-oriented programming (ROP) can chain existing code gadgets to invoke
-syscalls without ever calling the hooked libc functions. At the extreme, even
-hardware has proven vulnerable (Rowhammer, Spectre).
+Sentinel is defense-in-depth, not a sandbox. It stops the realistic,
+high-volume attack — supply-chain packages that phone home through standard
+networking calls — which is how the overwhelming majority of these compromises
+work. The goal is to make that attack class fail by default.
 
-Sentinel's allowlists are domain-based, which means a compromise of a
-previously trusted domain or subdomain (e.g. a hijacked CDN endpoint or a
-compromised registry mirror) would pass policy checks. Sentinel cannot
-distinguish legitimate traffic from malicious traffic on an allowed host.
-
-What Sentinel handles well is the realistic, high-volume attack class:
-supply-chain packages that phone home through standard networking calls, which
-is how the overwhelming majority of these compromises work. The aim is to lift
-the bar high enough to stop those attacks cold — while being honest that a
-sufficiently funded and determined attacker can still chain vulnerabilities to
-get what they want.
+It is not designed to stop a sufficiently determined attacker who can issue raw
+syscalls, exploit the kernel, or target infrastructure outside the
+process tree. The [security policy](SECURITY.md) documents the full threat
+model, known platform constraints, and what is (and isn't) considered a
+vulnerability. Read it before assuming Sentinel is a sandbox — it isn't one,
+and we are upfront about where the boundaries are.
 
 ## Found Sentinel useful?
 

@@ -1,6 +1,6 @@
-//! Test binary for M003-S01-T06: exercises send(), write()-to-socket,
-//! and syscall(SYS_CONNECT) to verify the expanded hook surface blocks
-//! exfiltration through all three paths.
+//! Test binary for M003-S01-T06: exercises send() and write()-to-socket
+//! coverage. It also keeps a manual libc syscall(SYS_CONNECT) bypass probe
+//! for validating the documented deferred gap.
 //!
 //! Usage: expanded_hooks_probe <mode>
 //!   mode = "send" | "write_socket" | "syscall_connect" | "write_file" | "write_pipe"
@@ -127,8 +127,8 @@ fn test_syscall_connect(host: &str, port: u16) {
     }
 
     let addr = resolve_host(host, port);
-    // Use libc::syscall(SYS_CONNECT, ...) — this is the bypass attempt
-    // that T04's interpose should catch.
+    // Use libc::syscall(SYS_CONNECT, ...) — this is the documented deferred
+    // bypass for libc syscall() interposition.
     const SYS_CONNECT: libc::c_int = 98;
     let ret = unsafe {
         libc::syscall(

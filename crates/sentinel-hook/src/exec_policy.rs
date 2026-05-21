@@ -1,7 +1,8 @@
 //! Exec-time policy for issue #1 layered enforcement.
 //!
 //! Classification is based on structural facts about the target binary. T0
-//! targets are blocked before exec. T3 targets require ptrace enforcement.
+//! targets are blocked before exec. T3 targets fail closed before child
+//! creation; non-fail-closed alternatives are tracked separately.
 
 use crate::macho_scan::{self, BinaryTier, BlockReason, SuspiciousReason};
 

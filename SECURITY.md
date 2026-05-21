@@ -48,9 +48,12 @@ The following are **in scope** as security issues:
 The following are **known limitations**, not vulnerabilities:
 
 - Hardened-runtime binaries (`/bin/bash`, `/usr/bin/python3`, etc.) rejecting
-  DYLD injection — this is a documented platform constraint, not a bug
-- Raw-syscall network access bypassing libc interposition — not a realistic
-  supply-chain attack vector; documented in the threat model
+  DYLD injection — Sentinel treats missing dylib coverage as a fail-closed
+  coverage gap, but the platform restriction itself is not a bug
+- Direct libc `syscall(SYS_CONNECT, ...)` calls bypassing libc symbol
+  interposition — libc `syscall()` interposition is deferred; unknown native
+  binaries containing raw syscall instruction bytes are classified T3 and fail
+  closed before child creation
 - Processes launched outside a `sentinel wrap` subtree — Sentinel is
   process-tree-scoped in v1, not system-wide
 

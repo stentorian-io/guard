@@ -131,8 +131,8 @@ Sentinel applies default-deny outbound network enforcement to any command you
 run in your terminal — not just package installs. Supply-chain attacks during
 `npm install` are the motivating example, but the same protection covers build
 scripts, dev servers, test suites, and anything else you wrap with `sentinel
-run`. It's designed to work on your laptop today (macOS), on Linux tomorrow, and
-in CI pipelines, giving you a single default-deny layer everywhere. It's not a
+wrap`. It's designed to work on your laptop today (macOS), on Linux tomorrow,
+and in CI pipelines, giving you a single default-deny layer everywhere. It's not a
 replacement for EDRs, application firewalls, audit tools, SCA scanners, or
 lockfiles; it's the layer they're missing.
 
@@ -327,9 +327,11 @@ high-volume attack — supply-chain packages that phone home through standard
 networking calls — which is how the overwhelming majority of these compromises
 work. The goal is to make that attack class fail by default.
 
-It is not designed to stop a sufficiently determined attacker who can issue raw
-syscalls, exploit the kernel, or target infrastructure outside the
-process tree. The [security policy](SECURITY.md) documents the full threat
+It is not designed to stop a sufficiently determined attacker who can exploit
+the kernel or target infrastructure outside the process tree. On macOS,
+unknown native binaries that contain raw syscall instruction bytes fail closed
+at exec time; a future design will investigate non-fail-closed alternatives for
+that T3 class. The [security policy](SECURITY.md) documents the full threat
 model, known platform constraints, and what is (and isn't) considered a
 vulnerability. Read it before assuming Sentinel is a sandbox — it isn't one,
 and we are upfront about where the boundaries are.

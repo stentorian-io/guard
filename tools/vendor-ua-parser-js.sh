@@ -1,6 +1,6 @@
 #!/bin/bash
 # tools/vendor-ua-parser-js.sh — deterministic builder for the synthetic
-# ua-parser-js@0.7.29 fixture used by Sentinel's VAL-01 e2e validation.
+# ua-parser-js@0.7.29 fixture used by Stentorian Guard's VAL-01 e2e validation.
 #
 # *** SYNTHETIC MOCK ***
 #
@@ -63,7 +63,7 @@ set -euo pipefail
 # Paths.
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-fixture_dir="$repo_root/crates/sentinel-e2e/fixtures/ua-parser-js-0.7.29-sanitized"
+fixture_dir="$repo_root/crates/guard-e2e/fixtures/ua-parser-js-0.7.29-sanitized"
 tempdir="$(mktemp -d)"
 trap 'rm -rf "$tempdir"' EXIT
 
@@ -95,7 +95,7 @@ cat > "$pkg_dir/package.json" <<'JSON'
 {
   "name": "ua-parser-js",
   "version": "0.7.29",
-  "description": "Synthetic mock of ua-parser-js@0.7.29 for Sentinel VAL-01 e2e validation. Reproduces the postinstall->network-egress supply-chain attack shape; contains no real malicious bytes.",
+  "description": "Synthetic mock of ua-parser-js@0.7.29 for Stentorian Guard VAL-01 e2e validation. Reproduces the postinstall->network-egress supply-chain attack shape; contains no real malicious bytes.",
   "scripts": {
     "preinstall": "node preinstall.js"
   },
@@ -105,12 +105,12 @@ JSON
 
 # preinstall.js — synthetic postinstall hook. Opens an outbound TCP connection
 # to a sink host (c2-sink.test.invalid) on port 443, prints a marker line to
-# stdout, and exits 0 after connect/error/timeout. Sentinel's hook dylib
+# stdout, and exits 0 after connect/error/timeout. Stentorian Guard's hook dylib
 # blocks the connect at libc; the test harness asserts on the JSONL Decision
 # row emitted by the daemon.
 cat > "$pkg_dir/preinstall.js" <<JS
 // Synthetic supply-chain attack shape — reproduces postinstall->network-egress
-// without containing any real malicious bytes. Sentinel VAL-01 asserts that
+// without containing any real malicious bytes. Stentorian Guard VAL-01 asserts that
 // the connection attempt below is intercepted and denied.
 'use strict';
 var net = require('net');
@@ -123,7 +123,7 @@ function finish() {
   try { sock.destroy(); } catch (_) {}
   process.exit(0);
 }
-sock.on('error', finish);   // Sentinel may EHOSTUNREACH us.
+sock.on('error', finish);   // Stentorian Guard may EHOSTUNREACH us.
 sock.on('connect', finish); // A leak should not hang npm forever.
 setTimeout(finish, 1000);
 JS

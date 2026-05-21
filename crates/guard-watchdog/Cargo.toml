@@ -1,0 +1,26 @@
+[package]
+name = "guard-watchdog"
+version = "0.5.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "stt-guard-watchdog"
+path = "src/main.rs"
+
+[dependencies]
+guard-ipc = { path = "../guard-ipc" }
+socket2 = { workspace = true }
+ciborium.workspace = true
+serde.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+libc.workspace = true
+signal-hook.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

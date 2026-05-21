@@ -1,0 +1,40 @@
+[package]
+name = "guard-hook"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "DYLD interpose hook dylib (stt-guard-hook.dylib) for outbound network enforcement."
+
+[lib]
+crate-type = ["cdylib", "rlib"]   # rlib so integration tests can link
+
+[dependencies]
+libc = { workspace = true }
+ctor = { workspace = true }
+memmap2 = { workspace = true }
+crossbeam-queue = { workspace = true }
+serde = { workspace = true }
+guard-core = { workspace = true }
+guard-ipc = { workspace = true }
+socket2 = { workspace = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+# crossbeam-queue (lock-free MPMC) is the BL-03 / D-43 fix for the racy
+# SpscRing log buffer.
+
+[dev-dependencies]
+tempfile = { workspace = true }
+guard-daemon = { path = "../guard-daemon" }
+criterion = { workspace = true }
+hdrhistogram = "7.5.4"
+
+[[bench]]
+name = "hot_path"
+harness = false
+
+[[bench]]
+name = "cache_hit_hot_path"
+harness = false

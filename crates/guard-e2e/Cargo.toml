@@ -1,0 +1,31 @@
+[package]
+name = "guard-e2e"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "End-to-end smoke harness for Stentorian Guard."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "zero_config_probe"
+path = "harness/zero_config_probe.rs"
+
+[dependencies]
+guard-core = { workspace = true }
+guard-daemon = { path = "../guard-daemon" }
+guard-ipc = { workspace = true }
+libc = { workspace = true }
+tempfile = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+portable-pty = "0.9"
+sha2 = { workspace = true }   # plan 05-05: corrupt-snapshot test computes manifest digest
+socket2 = { workspace = true }  # M004-S01: watchdog ping in E2E tests
+guard-hook = { path = "../guard-hook" }  # M004-S06: resilience integration tests

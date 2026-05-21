@@ -10,8 +10,9 @@ stt-guard-daemon \- Stentorian Guard daemon for policy enforcement
 .RI [ OPTIONS ]
 .SH DESCRIPTION
 .B stt-guard-daemon
-is the background daemon for Stentorian Guard. It runs as a user-level LaunchAgent
-(no root required) and provides:
+is the background daemon for Stentorian Guard. It runs as the
+.B _stt_guard
+service user via a system-level LaunchDaemon and provides:
 .IP \(bu 2
 IPC server on a Unix domain socket for the hook library and CLI
 .IP \(bu 2
@@ -31,12 +32,11 @@ The daemon is normally managed by
 .BR launchd (8)
 with
 .B KeepAlive=true
-and monitored by the Stentorian Guard watchdog. Users should not need to invoke
+as a system LaunchDaemon. Users should not need to invoke
 .B stt-guard-daemon
 directly; use
-.BR stt-guard (1)
-.B setup
-to install and manage it.
+.BR "stt-guard install" (1)
+to deploy and start it.
 .SH COMMANDS
 .SS stt-guard-daemon serve
 Start the IPC server and begin accepting connections. This is the main
@@ -106,28 +106,30 @@ Control logging verbosity. Defaults to
 .BR info .
 .SH FILES
 .TP
-.I ~/Library/Application\~Support/Stentorian\~Guard/stt-guard.db
+.I /Library/Application\~Support/Stentorian\~Guard/stt-guard.db
 SQLite database: rules, install artifacts, process roots.
 .TP
-.I ~/Library/Application\~Support/Stentorian\~Guard/stt-guard-daemon.sock
+.I /Library/Application\~Support/Stentorian\~Guard/stt-guard-daemon.sock
 Unix domain socket for IPC.
 .TP
-.I ~/Library/Application\~Support/Stentorian\~Guard/snapshots/
+.I /Library/Application\~Support/Stentorian\~Guard/snapshots/
 CBOR snapshot files (per-run, HMAC-signed).
 .TP
-.I ~/Library/Logs/Stentorian Guard/
+.I /var/log/stt-guard/
 JSONL forensic log directory. Logs are rotated automatically.
 .TP
-.I ~/Library/LaunchAgents/io.stentorian.guard.daemon.plist
-LaunchAgent plist (installed by
-.BR "stt-guard setup" ).
+.I /Library/LaunchDaemons/io.stentorian.guard.daemon.plist
+LaunchDaemon plist (installed by
+.BR "stt-guard install" ).
 .SH SECURITY
 .IP \(bu 2
 All IPC connections are authenticated via kernel audit tokens.
 .IP \(bu 2
 Snapshots are HMAC-SHA256 signed; the hook verifies signatures at load time.
 .IP \(bu 2
-The daemon runs as the current user with no elevated privileges.
+The daemon runs as the
+.B _stt_guard
+service user — isolated from the invoking user.
 .IP \(bu 2
 Threat-intel deny rules are baked into the binary at build time; no data is sent upstream.
 .SH DIAGNOSTICS

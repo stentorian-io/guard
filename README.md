@@ -123,9 +123,9 @@ Policy is evaluated in tier order:
 Cache hits resolve in under 100 microseconds with no IPC.
 
 - No kernel extensions or system extensions
-- No manual setup — the daemon auto-starts on first use
+- One-time `sudo stt-guard install` — hardened by default
 - Works with any command or binary run from the terminal, not just package managers
-- Hardened mode by default — root-owned binaries + `_stt_guard` service user
+- Root-owned binaries + `_stt_guard` service user — tamper-resistant
 
 ### Existing alternatives
 
@@ -147,22 +147,17 @@ Socket/Snyk, lockfiles, and more), see [docs/alternatives.md](docs/alternatives.
 
 ```sh
 brew install stentorian-io/tap/stt-guard
-sudo stt-guard install system
+sudo stt-guard install
 ```
 
-The `install system` step creates a `_stt_guard` service user, moves binaries
-to root-owned paths, and starts the daemon as a LaunchDaemon. This is the
-recommended (and default) deployment — it prevents a compromised process from
-tampering with the guard itself. See [Hardened deployment](#hardened-deployment)
-for details.
+The install step creates a `_stt_guard` service user, deploys root-owned
+binaries to `/usr/local/libexec/stt-guard/`, and starts the daemon as a
+LaunchDaemon. This is the only deployment mode — it prevents a compromised
+process from tampering with the guard itself. See
+[Hardened deployment](#hardened-deployment) for details.
 
-If you cannot or prefer not to use `sudo`, pass `--user-mode` to skip the
-hardened install and run the daemon as your user via LaunchAgent instead:
-
-```sh
-brew install stentorian-io/tap/stt-guard
-stt-guard install --user-mode
-```
+All other commands (`wrap`, `status`) require the installation to be present
+and will refuse to run otherwise.
 
 Or build from source — see [CONTRIBUTING.md](CONTRIBUTING.md#build) for
 prerequisites and detailed instructions.
@@ -341,11 +336,10 @@ man stt-guard-daemon   # daemon internals
 
 ### Hardened deployment
 
-By default, `stt-guard install system` deploys in hardened mode: binaries are
-root-owned and the daemon runs as a dedicated `_stt_guard` service user (no
-login shell, no home directory — same convention as macOS's `_postgres` and
-`_mysql`). This prevents a compromised process from tampering with the guard
-itself.
+`stt-guard install` deploys in hardened mode: binaries are root-owned and
+the daemon runs as a dedicated `_stt_guard` service user (no login shell,
+no home directory — same convention as macOS's `_postgres` and `_mysql`).
+This prevents a compromised process from tampering with the guard itself.
 
 | Component | Path | Owner |
 |---|---|---|
@@ -370,17 +364,10 @@ The IPC socket is world-writable — any process can connect — but the daemon
 authenticates every connection via macOS audit tokens and codesign identity
 verification (shipped in v0.7). The socket is the door; codesign is the lock.
 
-**User mode** (`stt-guard install --user-mode`) skips hardened deployment and
-runs the daemon as your user via LaunchAgent. All the network enforcement
-still works, but the guard's own files are user-owned and therefore
-modifiable by a compromised process running as you. Use this if you
-cannot `sudo` or prefer not to create a system user.
-
 **Performance and UX impact:** hardened mode has zero runtime overhead. The
 protection is purely ownership and permissions on disk — the daemon, hook, and
-policy engine execute the same code paths regardless of deployment mode. The
-only user-visible difference is the one-time `sudo stt-guard install system`
-during setup.
+policy engine execute the same code paths regardless. The only user-visible
+difference is the one-time `sudo stt-guard install` during setup.
 
 ### Threat intelligence
 

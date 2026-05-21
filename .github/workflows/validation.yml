@@ -92,6 +92,11 @@ jobs:
             watchdog
             e2e
             bench
+            readme
+            llm
+            man
+            help
+            install
           requireScope: false
           subjectPattern: ^(?![A-Z]).+(?<!\.)$
           subjectPatternError: |
@@ -132,8 +137,9 @@ jobs:
       - run: cargo machete --with-metadata
 
   # ── Security checks ─────────────────────────────────────────────────────
-  # Always run on every PR regardless of changed paths — secrets and CVEs
-  # can hide in any file or transitive dependency.
+  # Secret scan: always runs — secrets can hide in any file.
+  # CVE audit: only when Cargo.toml/Cargo.lock/rust-toolchain change,
+  # because the advisory DB applies to Rust dependencies, not docs.
   secret-scan:
     name: Secret scan
     runs-on: ubuntu-latest
@@ -147,6 +153,8 @@ jobs:
 
   cargo-audit:
     name: Dependency CVE audit
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

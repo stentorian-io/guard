@@ -121,10 +121,10 @@ Policy is evaluated in tier order:
 
 Cache hits resolve in under 100 microseconds with no IPC.
 
-- No root privileges required
 - No kernel extensions or system extensions
-- No manual setup — the daemon auto-starts on first use
+- One-time `sudo stt-guard init` — tamper-resistant by default
 - Works with any command or binary run from the terminal, not just package managers
+- Root-owned binaries + `_stt_guard` service user — tamper-resistant
 
 ### Existing alternatives
 
@@ -146,7 +146,17 @@ Socket/Snyk, lockfiles, and more), see [docs/alternatives.md](docs/alternatives.
 
 ```sh
 brew install stentorian-io/tap/stt-guard
+sudo stt-guard init
 ```
+
+The init step creates a `_stt_guard` service user, deploys root-owned
+binaries to `/usr/local/libexec/stt-guard/`, and starts the daemon as a
+LaunchDaemon. This is the only deployment mode — it prevents a compromised
+process from tampering with the guard itself. See the
+[deployment model](SECURITY.md#deployment-model) for details.
+
+All other commands (`wrap`, `status`) require initialisation to be complete
+and will refuse to run otherwise.
 
 Or build from source — see [CONTRIBUTING.md](CONTRIBUTING.md#build) for
 prerequisites and detailed instructions.
@@ -295,10 +305,10 @@ stt-guard
 Usage: stt-guard <COMMAND>
 
 Commands:
-  wrap     Wrap a command with default-deny network policy
-  status   Show daemon health, hook integrity, and run history
-  install  Install the background daemon as a LaunchAgent
-  help     Print this message or the help of the given subcommand(s)
+  init    Initialise Stentorian Guard (hardened mode). Requires root
+  wrap    Wrap a command under default-deny network enforcement
+  status  Inspect daemon health, rules, denials
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help
@@ -344,6 +354,13 @@ Stentorian Guard is defense-in-depth, not a sandbox. It stops the realistic,
 high-volume attack — supply-chain packages that phone home through standard
 networking calls — which is how the overwhelming majority of these compromises
 work. The goal is to make that attack class fail by default.
+
+With the [standard installation](SECURITY.md#deployment-model), a local attacker needs
+root to tamper with the guard's binaries, database, or logs. Without root, the
+remaining attack surface is DYLD stripping (a parent process removing the
+injection variable before spawning children) and runtime memory patching of the
+in-process hook — both require deliberate, targeted effort beyond what
+supply-chain malware attempts.
 
 It is not designed to stop a sufficiently determined attacker who can exploit
 the kernel or target infrastructure outside the process tree. On macOS,

@@ -23,7 +23,7 @@ use tracing::info;
 #[derive(Parser)]
 #[command(
     name = "stt-guard-daemon",
-    about = "Stentorian Guard user-level daemon"
+    about = "Stentorian Guard system daemon"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -93,19 +93,17 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     );
 
     // v0.3: log directory + writer.
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| std::io::Error::other("HOME not set — cannot determine log directory"))?;
-    let log_dir = home.join("Library").join("Logs").join("Stentorian Guard");
+    let log_dir = guard_core::paths::user_log_dir();
     std::fs::create_dir_all(&log_dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&log_dir, std::fs::Permissions::from_mode(0o700));
     }
-    let log_writer = LogWriter::spawn(log_dir.join("stt-guard.log"))
+    let log_path = log_dir.join(guard_core::paths::LOG_FILENAME);
+    let log_writer = LogWriter::spawn(log_path.clone())
         .map_err(|e| std::io::Error::other(format!("spawn log_writer: {e}")))?;
-    info!(path = %log_dir.join("stt-guard.log").display(), "log_writer spawned");
+    info!(path = %log_path.display(), "log_writer spawned");
 
     // v0.3: install_artifacts store opens against the same stt-guard.db
     // that RuleStore already migrated above.

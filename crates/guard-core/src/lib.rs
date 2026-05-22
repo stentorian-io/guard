@@ -5,6 +5,7 @@ pub mod env_filter;
 pub mod error;
 pub mod identity;
 pub mod lockfile;
+pub mod paths;
 pub mod policy;
 pub mod snapshot;
 

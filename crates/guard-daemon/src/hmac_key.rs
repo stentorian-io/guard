@@ -9,11 +9,11 @@ use std::io::{Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-pub const KEY_FILENAME: &str = "hmac.key";
+pub use guard_core::paths::HMAC_KEY_FILENAME as KEY_FILENAME;
 pub const KEY_LEN: usize = 32;
 
 pub fn key_path(state_dir: &Path) -> PathBuf {
-    state_dir.join(KEY_FILENAME)
+    guard_core::paths::hmac_key_path(state_dir)
 }
 
 /// Generate a new 32-byte HMAC key and write it to `state_dir/hmac.key`

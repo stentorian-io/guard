@@ -9,7 +9,7 @@ use crate::CliError;
 use crate::install::launchagent::logs_dir;
 
 pub fn run_logs() -> Result<i32, CliError> {
-    let active = logs_dir().join("stt-guard.log");
+    let active = logs_dir().join(guard_core::paths::LOG_FILENAME);
     run_dump(&active)
 }
 

@@ -127,7 +127,7 @@ pub fn spawn_gc_thread(
     tree: Arc<ProcessTree>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
-        .name("stt-guard-daemon-gc".into())
+        .name(guard_core::paths::THREAD_SNAPSHOT_GC.into())
         .spawn(move || {
             loop {
                 gc_sweep(&state_dir, &tree);
@@ -152,7 +152,7 @@ pub fn spawn_gc_thread_with_shutdown(
     shutdown: crossbeam_channel::Receiver<()>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
-        .name("stt-guard-daemon-gc".into())
+        .name(guard_core::paths::THREAD_SNAPSHOT_GC.into())
         .spawn(move || {
             loop {
                 gc_sweep(&state_dir, &tree);

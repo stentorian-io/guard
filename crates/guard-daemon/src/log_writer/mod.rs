@@ -73,7 +73,7 @@ impl LogWriter {
         let allows_t = Arc::clone(&allows);
         let gaps_t = Arc::clone(&gaps);
         std::thread::Builder::new()
-            .name("stt-guard-daemon-log-writer".into())
+            .name(guard_core::paths::THREAD_LOG_WRITER.into())
             .spawn(move || {
                 let mut active = initial_file;
                 while let Ok(row) = rx.recv() {

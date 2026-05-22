@@ -639,6 +639,7 @@ version = "0.5.0"
 dependencies = [
  "ciborium",
  "clap",
+ "guard-core",
  "guard-ipc",
  "libc",
  "serde",

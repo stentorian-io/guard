@@ -115,7 +115,7 @@ impl std::fmt::Display for IpcClientError {
 pub fn cache_daemon_socket_path() {
     DAEMON_SOCKET_PATH.get_or_init(|| {
         let state_dir = crate::snapshot::well_known_state_dir();
-        Some(state_dir.join("stt-guard-daemon.sock"))
+        Some(guard_core::paths::socket_path(&state_dir))
     });
 }
 
@@ -125,7 +125,7 @@ pub fn cache_ipc_hmac_key() {
     use std::os::unix::fs::OpenOptionsExt;
     IPC_HMAC_KEY.get_or_init(|| {
         let state_dir = crate::snapshot::well_known_state_dir();
-        let path = state_dir.join("hmac.key");
+        let path = guard_core::paths::hmac_key_path(&state_dir);
         let mut f = std::fs::OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)

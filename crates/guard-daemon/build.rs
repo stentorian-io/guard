@@ -37,11 +37,7 @@ fn main() {
             if line.starts_with('#') || line.trim().is_empty() {
                 continue;
             }
-            if line.starts_with("- ") {
-                combined.push_str("  ");
-                combined.push_str(line);
-                combined.push('\n');
-            } else if line.starts_with("  ") {
+            if line.starts_with("- ") || line.starts_with("  ") {
                 combined.push_str("  ");
                 combined.push_str(line);
                 combined.push('\n');

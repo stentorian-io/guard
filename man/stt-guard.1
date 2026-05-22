@@ -3,22 +3,16 @@
 .SH NAME
 stt-guard \- macOS supply-chain firewall for package installs
 .SH SYNOPSIS
-.B stt-guard
+.B stt-guard init
+.RI [ FLAGS ]
+.br
+.B stt-guard wrap
 .RI [ OPTIONS ]
 .I command
 .RI [ args... ]
 .br
-.B stt-guard setup
-.RI [ target ]
-.RI [ FLAGS ]
-.br
 .B stt-guard status
 .RI [ subcommand ]
-.RI [ FLAGS ]
-.br
-.B stt-guard repair
-.br
-.B stt-guard unwrap\-all
 .RI [ FLAGS ]
 .SH DESCRIPTION
 .B stt-guard
@@ -42,42 +36,35 @@ Auto-allow unknown destinations and record them to
 Requires a TTY; refuses to run in non-interactive environments.
 Use this on a known-clean install to build a project baseline.
 .SH COMMANDS
-.SS stt-guard \fIcommand\fR [\fIargs...\fR]
-The default action. Wraps
+.SS stt-guard init
+Initialise Stentorian Guard in hardened mode. Requires root (use
+.BR sudo ).
+Creates the
+.B _stt_guard
+service user, deploys root-owned binaries to
+.IR /usr/local/libexec/stt-guard/ ,
+creates state and log directories, installs a LaunchDaemon, and starts
+the daemon. All other commands require initialisation to be complete.
+.PP
+An interactive confirmation prompt lists all actions before proceeding.
+.PP
+.B Flags:
+.TP
+.BR \-y ", " \-\-yes
+Skip interactive confirmation.
+.SS stt-guard wrap \fIcommand\fR [\fIargs...\fR]
+Wrap
 .I command
 under Stentorian Guard enforcement. All arguments are passed verbatim.
 .PP
 .RS
 .nf
-stt-guard npm install
-stt-guard pip install \-r requirements.txt
-stt-guard cargo build
-stt-guard \-\-learn npm install
+stt-guard wrap npm install
+stt-guard wrap pip install \-r requirements.txt
+stt-guard wrap cargo build
+stt-guard wrap \-\-learn npm install
 .fi
 .RE
-.SS stt-guard setup [\fItarget\fR]
-Install Stentorian Guard components. Without a target, installs everything.
-.TP
-.B daemon
-Install the LaunchAgent plist and bootstrap the daemon.
-.TP
-.B shell
-Install shell integration marker blocks in shell RC files.
-.PP
-.B Flags:
-.TP
-.B \-\-remove
-Remove the targeted component(s) instead of installing.
-Cannot be combined with
-.BR \-\-reinstall .
-.TP
-.B \-\-reinstall
-Force-clean reinstall: wipe and re-derive all state.
-Cannot be combined with
-.BR \-\-remove .
-.TP
-.BR \-y ", " \-\-yes
-Skip TTY confirmation prompts.
 .SS stt-guard status [\fIsubcommand\fR]
 Show Stentorian Guard operational status. Without a subcommand, prints daemon
 health, counters, tracked roots, gaps, and risk exposure.
@@ -86,7 +73,7 @@ health, counters, tracked roots, gaps, and risk exposure.
 .TP
 .B logs
 Dump the JSONL forensic log to stdout. For streaming, pipe to
-.BR "tail -f ~/Library/Logs/Stentorian Guard/stt-guard.log" .
+.BR "tail -f /var/log/stt-guard/stt-guard.log" .
 .TP
 .B rules
 List active policy rules.
@@ -110,18 +97,6 @@ Show persistence artifacts (files written during install) for a run.
 .TP
 .BI "advisory " advisory_id
 Look up details for a threat-intel advisory ID (e.g. MAL-2025-3008).
-.SS stt-guard repair
-Verify and repair Stentorian Guard installation integrity. Re-derives the HMAC key
-and hook hash, and re-bootstraps LaunchAgents.
-.SS stt-guard unwrap\-all
-Emergency escape hatch. Boots out the daemon and watchdog LaunchAgents
-and clears all tracked process roots. Use when Stentorian Guard is interfering
-with a critical operation.
-.PP
-.B Flags:
-.TP
-.BR \-y ", " \-\-yes
-Skip TTY confirmation prompt.
 .SH CONFIGURATION
 .SS .guard.toml
 Per-project rules file. Stentorian Guard walks from the current directory upward
@@ -162,7 +137,7 @@ Everything else is blocked. In TTY mode, the user is prompted.
 .B STT_GUARD_STATE_DIR
 Override the Stentorian Guard state directory used by the CLI, daemon, and hook.
 Defaults to
-.IR ~/Library/Application\~Support/Stentorian\~Guard/ .
+.IR /Library/Application\~Support/Stentorian\~Guard/ .
 .TP
 .B STT_GUARD_HOOK_DYLIB
 Override the hook dylib path used by
@@ -187,11 +162,20 @@ Control logging verbosity. Defaults to
 .BR warn .
 .SH FILES
 .TP
-.I ~/Library/Application\~Support/Stentorian\~Guard/
-State directory: database, snapshots, HMAC keys.
+.I /usr/local/libexec/stt-guard/
+Root-owned binaries and hook dylib.
 .TP
-.I ~/Library/Logs/Stentorian Guard/
-JSONL forensic logs.
+.I /Library/Application\~Support/Stentorian\~Guard/
+State directory: database, snapshots, HMAC keys. Owned by
+.BR _stt_guard .
+.TP
+.I /var/log/stt-guard/
+JSONL forensic logs. Owned by
+.BR _stt_guard .
+.TP
+.I /Library/LaunchDaemons/io.stentorian.guard.daemon.plist
+LaunchDaemon plist (installed by
+.BR "stt-guard init" ).
 .TP
 .I .guard.toml
 Per-project policy file.
@@ -203,10 +187,17 @@ Wrapped command exited successfully and no policy violations occurred.
 .B non-zero
 The wrapped command's exit code is forwarded.
 .SH EXAMPLES
+Initialise Stentorian Guard:
+.RS
+.nf
+$ sudo stt-guard init
+.fi
+.RE
+.PP
 Wrap an npm install and review what was blocked:
 .RS
 .nf
-$ stt-guard npm install
+$ stt-guard wrap npm install
 $ stt-guard status denials <run-uuid>
 $ stt-guard status review <run-uuid>
 .fi
@@ -215,15 +206,7 @@ $ stt-guard status review <run-uuid>
 Build a baseline for a known-clean project:
 .RS
 .nf
-$ stt-guard --learn npm install
-.fi
-.RE
-.PP
-Install Stentorian Guard for the first time:
-.RS
-.nf
-$ cargo build --workspace --release
-$ stt-guard setup
+$ stt-guard wrap --learn npm install
 .fi
 .RE
 .SH SEE ALSO

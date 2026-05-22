@@ -45,7 +45,13 @@ pub fn ensure_daemon(sock: &Path, _state_dir: &Path) -> Result<(), CliError> {
 
 /// Check that the hardened installation exists. Returns an actionable error
 /// message if not.
+///
+/// Skipped when `STT_GUARD_STATE_DIR` is set — the caller is explicitly
+/// managing a non-system daemon (dev/test harness).
 pub fn require_installed() -> Result<(), CliError> {
+    if std::env::var_os(guard_core::paths::ENV_STATE_DIR).is_some() {
+        return Ok(());
+    }
     if !crate::install::system::is_installed() {
         return Err(CliError::Other(
             "Stentorian Guard is not initialised. Run: sudo stt-guard init".into(),

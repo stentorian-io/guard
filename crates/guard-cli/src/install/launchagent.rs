@@ -9,8 +9,5 @@ pub fn home_dir() -> PathBuf {
 }
 
 pub fn logs_dir() -> PathBuf {
-    home_dir()
-        .join("Library")
-        .join("Logs")
-        .join("Stentorian Guard")
+    guard_core::paths::user_log_dir()
 }

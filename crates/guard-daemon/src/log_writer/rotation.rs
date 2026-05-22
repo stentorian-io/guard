@@ -9,8 +9,7 @@ use std::path::{Path, PathBuf};
 pub const SIZE_THRESHOLD: u64 = 16 * 1024 * 1024; // 16 MiB
 pub const MAX_ARCHIVES: usize = 7;
 pub const MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024; // 256 MiB
-const ROTATED_GLOB_PREFIX: &str = "stt-guard-";
-const ROTATED_GLOB_SUFFIX_GZ: &str = ".log.gz";
+use guard_core::paths::{ROTATED_LOG_PREFIX as ROTATED_GLOB_PREFIX, ROTATED_LOG_SUFFIX_GZ as ROTATED_GLOB_SUFFIX_GZ};
 
 pub fn should_rotate(active_path: &Path) -> bool {
     fs::metadata(active_path)
@@ -116,7 +115,7 @@ pub fn rotate(active_path: &Path) -> io::Result<()> {
         // Pitfall 5 / R-07: gzip in detached thread.
         let parent_owned = parent.to_path_buf();
         std::thread::Builder::new()
-            .name("stt-guard-daemon-log-rotate".into())
+            .name(guard_core::paths::THREAD_LOG_ROTATE.into())
             .spawn(move || {
                 if let Err(e) = gzip_in_place(&rotated) {
                     tracing::warn!(error = %e, "log rotate gzip failed");

@@ -60,6 +60,42 @@ The following are **known limitations**, not vulnerabilities:
 If you are unsure whether something is in scope, report it anyway.
 We would rather triage a known limitation than miss a real vulnerability.
 
+## Deployment Model
+
+`stt-guard init` deploys root-owned binaries and runs the daemon as a
+dedicated `_stt_guard` service user (no login shell, no home directory — the
+same convention as macOS's `_postgres` and `_mysql`). This is the only
+deployment mode and prevents a compromised process from tampering with the
+guard itself.
+
+| Component | Path | Owner |
+|---|---|---|
+| Binaries | `/usr/local/libexec/stt-guard/` | `root:wheel` (755) |
+| Runtime state (DB, snapshots, HMAC keys) | `/Library/Application Support/Stentorian Guard/` | `_stt_guard:_stt_guard` (700) |
+| Logs | `/var/log/stt-guard/` | `_stt_guard:_stt_guard` (700) |
+| LaunchDaemon | `io.stentorian.guard.daemon` | Root-managed |
+
+**Attack surface with and without the installation:**
+
+| Attack | Without installation | With installation |
+|---|---|---|
+| Replace binaries on disk | Code signing raises the bar | Root-owned — user can't write |
+| Tamper with rule database | User-owned, writable | `_stt_guard`-owned, user can't write |
+| Modify snapshot contents | HMAC validates integrity | `_stt_guard`-owned, written by daemon only |
+| Delete denial logs | User-owned, deletable | `_stt_guard`-owned |
+| Kill daemon and replace with rogue | Codesign peer auth detects | Can't kill a different UID without root; LaunchDaemon auto-restarts |
+| Steal HMAC key material | User-readable | `_stt_guard`-readable only (700) |
+| `sudo` inside monitored tree | Blocked (setuid check) | Blocked with explicit `PrivilegeEscalation` reason |
+
+The IPC socket is world-writable — any process can connect — but the daemon
+authenticates every connection via macOS audit tokens and codesign identity
+verification (shipped in v0.7). The socket is the door; codesign is the lock.
+
+**Performance and UX impact:** the deployment has zero runtime overhead. The
+protection is purely ownership and permissions on disk — the daemon, hook, and
+policy engine execute the same code paths regardless. The only user-visible
+difference is the one-time `sudo stt-guard init` during setup.
+
 ## Disclosure Policy
 
 We follow coordinated disclosure:

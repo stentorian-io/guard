@@ -5,7 +5,7 @@ use tempfile::TempDir;
 
 fn store() -> (TempDir, RuleStore) {
     let tmp = TempDir::new().unwrap();
-    let p = tmp.path().join("stt-guard.db");
+    let p = guard_core::paths::db_path(tmp.path());
     let s = RuleStore::open(&p).expect("open");
     (tmp, s)
 }
@@ -13,14 +13,14 @@ fn store() -> (TempDir, RuleStore) {
 #[test]
 fn open_creates_db_and_runs_migration() {
     let (tmp, _s) = store();
-    let p = tmp.path().join("stt-guard.db");
+    let p = guard_core::paths::db_path(tmp.path());
     assert!(p.exists(), "DB file should exist after open");
 }
 
 #[test]
 fn open_is_idempotent() {
     let tmp = TempDir::new().unwrap();
-    let p = tmp.path().join("stt-guard.db");
+    let p = guard_core::paths::db_path(tmp.path());
     let _s1 = RuleStore::open(&p).expect("open #1");
     drop(_s1); // close
     let _s2 = RuleStore::open(&p).expect("open #2");
@@ -30,7 +30,7 @@ fn open_is_idempotent() {
 #[test]
 fn db_file_has_mode_0600() {
     let (tmp, _s) = store();
-    let p = tmp.path().join("stt-guard.db");
+    let p = guard_core::paths::db_path(tmp.path());
     let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600, "DB file should be mode 0600; got {mode:o}");
 }
@@ -46,7 +46,7 @@ fn all_user_rules_empty_initially() {
 fn all_user_rules_maps_kind_to_user_tier() {
     use rusqlite::{Connection, params};
     let tmp = TempDir::new().unwrap();
-    let p = tmp.path().join("stt-guard.db");
+    let p = guard_core::paths::db_path(tmp.path());
     let _store = RuleStore::open(&p).expect("init schema");
     // Manually insert rows via direct sqlite (the CLI will do this in production).
     {
@@ -92,7 +92,7 @@ fn all_user_rules_maps_kind_to_user_tier() {
 #[test]
 fn insert_user_rule_returns_rowid_and_appears_in_count() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let db = dir.path().join("stt-guard.db");
+    let db = guard_core::paths::db_path(dir.path());
     let store = RuleStore::open(&db).expect("open");
     assert_eq!(store.count_user_rules().unwrap(), 0);
     let id1 = store

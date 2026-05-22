@@ -5,7 +5,7 @@ use guard_ipc::ReadInstallArtifactsReply;
 
 fn fresh_db() -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let db = dir.path().join("stt-guard.db");
+    let db = guard_core::paths::db_path(dir.path());
     {
         let _r = RuleStore::open(&db).expect("migrate");
     }

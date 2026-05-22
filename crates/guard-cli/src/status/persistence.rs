@@ -6,7 +6,7 @@ use crate::install::launchagent;
 use crate::persistence_log;
 
 pub fn run(run_uuid: Option<&str>) -> Result<i32, CliError> {
-    let log_path = launchagent::logs_dir().join("stt-guard.log");
+    let log_path = launchagent::logs_dir().join(guard_core::paths::LOG_FILENAME);
     let entries = persistence_log::filter_persistence_writes(&log_path, run_uuid)?;
 
     if entries.is_empty() {

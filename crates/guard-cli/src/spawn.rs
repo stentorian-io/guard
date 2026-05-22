@@ -7,8 +7,7 @@ use std::ffi::{CString, OsStr};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-const ENV_DYLD: &str = "DYLD_INSERT_LIBRARIES";
-const ENV_MANIFEST: &str = "STT_GUARD_SNAPSHOT_MANIFEST";
+use guard_core::paths::{ENV_DYLD, ENV_SNAPSHOT_MANIFEST as ENV_MANIFEST};
 
 pub fn spawn_wrapped(
     program: &Path,

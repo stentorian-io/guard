@@ -392,6 +392,60 @@ fn idempotent_register_root_for_same_token() {
 
 /// A peer that connects then closes without sending a frame (the connect-only
 /// liveness probe shape that `probe_daemon_alive` produces) MUST be handled
+/// User-mode socket gets 0o600 (owner-only). Tests that the default tempdir
+/// state_dir (not the system path) produces a socket that only the owner can
+/// read/write.
+#[test]
+fn socket_mode_user_install_is_0600() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    ensure_state_dir(tmp.path()).unwrap();
+    let sock = socket_path(tmp.path());
+
+    let (_tree, state) = build_state(tmp.path());
+    let _server = IpcServer::bind(&sock, state).expect("bind");
+
+    let mode = std::fs::metadata(&sock).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "user-mode socket must be 0600");
+}
+
+/// System-mode socket gets 0o666 (world-writable). In system installs the
+/// daemon runs as `_stt_guard` but CLI/hook connect as the user — codesign
+/// peer auth is the trust boundary, not filesystem permissions.
+///
+/// We can't bind at the real `/Library/...` path in tests (too long for
+/// SUN_LEN), so we bind in a tmpdir but construct `DaemonState` with the
+/// system state_dir so `is_system_install` returns true.
+#[test]
+fn socket_mode_system_install_is_0666() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    ensure_state_dir(tmp.path()).unwrap();
+    let sock = socket_path(tmp.path());
+
+    let tree = Arc::new(ProcessTree::new());
+    let det = Arc::new(GapDetector::new());
+    let rs = Arc::new(RuleStore::open(&db_path(tmp.path())).expect("open rule store"));
+    let curated = Arc::new(Vec::new());
+    let state = Arc::new(DaemonState::new(
+        tree,
+        det,
+        rs,
+        curated,
+        std::path::PathBuf::from("/Library/Application Support/Stentorian Guard"),
+    ));
+
+    let _server = IpcServer::bind(&sock, state).expect("bind");
+
+    let mode = std::fs::metadata(&sock).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o666,
+        "system-mode socket must be 0666 (world-writable + codesign auth)"
+    );
+}
+
 /// benignly by the daemon — no state change, no Reply written, no panic.
 /// This locks the schema (RegisterRoot + Reply) — no new wire variant needed
 /// for liveness.

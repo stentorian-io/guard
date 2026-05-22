@@ -12,6 +12,8 @@ use std::ffi::OsString;
 Stentorian Guard sandboxes outbound network egress from a command and its children.
 
 USAGE:
+  sudo stt-guard init                         One-time hardened setup (requires root)
+
   stt-guard wrap <cmd> [args...]              Wrap a command under enforcement
   stt-guard wrap --learn <cmd> [args...]      Record unknown destinations as user rules
                                              (TTY required; fails clear in non-TTY)
@@ -19,6 +21,7 @@ USAGE:
   stt-guard status [logs|rules|denials|review|persistence|advisory]
                                              Inspect daemon health, rules, denials
   stt-guard status advisory <ID>              Look up threat-intel advisory details
+
 "
 )]
 pub struct Cli {
@@ -28,6 +31,16 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
+    /// Initialise Stentorian Guard (hardened mode). Requires root.
+    ///
+    /// Creates the _stt_guard service user, deploys root-owned binaries,
+    /// and starts the daemon as a LaunchDaemon.
+    Init {
+        /// Skip interactive confirmation.
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
     /// Wrap a command under default-deny network enforcement.
     Wrap {
         /// Observe unknown destinations and present them for review after the
@@ -46,6 +59,7 @@ pub enum Cmd {
         #[command(subcommand)]
         sub: Option<StatusSub>,
     },
+
 }
 
 /// Status read sub-verbs.

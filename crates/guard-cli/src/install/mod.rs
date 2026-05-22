@@ -1,3 +1,4 @@
-//! Path helpers for Stentorian Guard's state and log directories.
+//! Install logic and path helpers for Stentorian Guard.
 
 pub mod launchagent;
+pub mod system;

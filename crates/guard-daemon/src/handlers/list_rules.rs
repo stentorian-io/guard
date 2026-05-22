@@ -106,7 +106,7 @@ mod tests {
 
     fn empty_store() -> (TempDir, RuleStore) {
         let tmp = TempDir::new().unwrap();
-        let p = tmp.path().join("stt-guard.db");
+        let p = guard_core::paths::db_path(tmp.path());
         let s = RuleStore::open(&p).expect("open");
         (tmp, s)
     }

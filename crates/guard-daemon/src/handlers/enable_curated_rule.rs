@@ -30,7 +30,7 @@ mod tests {
 
     fn open_store() -> (TempDir, crate::rule_store::RuleStore) {
         let tmp = TempDir::new().unwrap();
-        let p = tmp.path().join("stt-guard.db");
+        let p = guard_core::paths::db_path(tmp.path());
         let s = crate::rule_store::RuleStore::open(&p).expect("open");
         (tmp, s)
     }

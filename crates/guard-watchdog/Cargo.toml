@@ -12,6 +12,7 @@ name = "stt-guard-watchdog"
 path = "src/main.rs"
 
 [dependencies]
+guard-core = { workspace = true }
 guard-ipc = { path = "../guard-ipc" }
 socket2 = { workspace = true }
 ciborium.workspace = true

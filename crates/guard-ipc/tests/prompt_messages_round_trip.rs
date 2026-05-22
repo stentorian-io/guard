@@ -170,7 +170,7 @@ fn status_reply_full_ok_round_trip() {
             installed_at_ms: 1_700_000_000_000,
             artifacts: vec![InstallArtifact {
                 artifact_kind: "launchagent".into(),
-                target_path: "~/Library/LaunchAgents/sh.stt-guard.plist".into(),
+                target_path: "~/Library/LaunchAgents/io.stentorian.guard.agent.plist".into(),
                 installed_at_ms: 1_700_000_000_000,
                 content_hash: Some("abc123".into()),
                 guard_version: "0.3.0".into(),

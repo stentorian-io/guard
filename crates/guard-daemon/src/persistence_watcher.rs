@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
-const THREAD_NAME: &str = "stt-guard-daemon-persist-watch";
+const THREAD_NAME: &str = guard_core::paths::THREAD_PERSIST_WATCH;
 
 /// Spawn the persistence-watcher thread. Returns the join handle (caller
 /// typically drops it — the thread runs for the daemon's lifetime).

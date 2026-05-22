@@ -40,6 +40,7 @@ pub enum BinaryTier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockReason {
     HardenedRuntime,
+    PrivilegeEscalation,
     FatBinary,
     UnsupportedArch,
 }
@@ -48,6 +49,7 @@ impl BlockReason {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::HardenedRuntime => "hardened-runtime",
+            Self::PrivilegeEscalation => "privilege-escalation",
             Self::FatBinary => "fat-binary",
             Self::UnsupportedArch => "unsupported-arch",
         }
@@ -93,8 +95,12 @@ pub fn classify_path_with_registry(
         return BinaryTier::T2CleanUnknown;
     }
 
-    if macho_flags::will_shed_dylib(path) {
-        return BinaryTier::T0Blocked(BlockReason::HardenedRuntime);
+    if let Some(shed_reason) = macho_flags::will_shed_dylib(path) {
+        let reason = match shed_reason {
+            macho_flags::ShedReason::Setuid => BlockReason::PrivilegeEscalation,
+            macho_flags::ShedReason::CodeSign => BlockReason::HardenedRuntime,
+        };
+        return BinaryTier::T0Blocked(reason);
     }
 
     let fd = unsafe { libc::open(path, libc::O_RDONLY) };
@@ -418,5 +424,32 @@ mod tests {
         assert!(contains_syscall_pattern(&[0xaa, 0x0f, 0x05]));
         assert!(contains_syscall_pattern(&[0xaa, 0xcd, 0x80]));
         assert!(!contains_syscall_pattern(&[0xaa, 0x0f, 0x04, 0xcd, 0x81]));
+    }
+
+    #[test]
+    fn block_reason_as_str_privilege_escalation() {
+        assert_eq!(BlockReason::PrivilegeEscalation.as_str(), "privilege-escalation");
+        assert_eq!(BlockReason::HardenedRuntime.as_str(), "hardened-runtime");
+        assert_eq!(BlockReason::FatBinary.as_str(), "fat-binary");
+        assert_eq!(BlockReason::UnsupportedArch.as_str(), "unsupported-arch");
+    }
+
+    #[test]
+    fn classify_system_sudo_blocks_as_privilege_escalation() {
+        // /usr/bin/sudo is setuid on macOS — it should be blocked with
+        // PrivilegeEscalation, not HardenedRuntime.
+        let path = CString::new("/usr/bin/sudo").unwrap();
+        let tier = classify_path(path.as_ptr());
+        // sudo is both setuid AND a platform binary; the setuid check runs
+        // first in will_shed_dylib, so we expect PrivilegeEscalation.
+        assert_eq!(tier, BinaryTier::T0Blocked(BlockReason::PrivilegeEscalation));
+    }
+
+    #[test]
+    fn classify_system_ls_blocks_as_hardened_runtime() {
+        // /bin/ls is a platform binary with CS_RUNTIME but NOT setuid.
+        let path = CString::new("/bin/ls").unwrap();
+        let tier = classify_path(path.as_ptr());
+        assert_eq!(tier, BinaryTier::T0Blocked(BlockReason::HardenedRuntime));
     }
 }

@@ -33,24 +33,19 @@ struct Cli {
 }
 
 fn default_state_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .expect("HOME environment variable must be set");
-    home.join("Library")
-        .join("Application Support")
-        .join("Stentorian Guard")
+    guard_core::paths::default_state_dir()
 }
 
 fn socket_path(state_dir: &std::path::Path) -> PathBuf {
-    state_dir.join("stt-guard-daemon.sock")
+    guard_core::paths::socket_path(state_dir)
 }
 
 fn ready_path(state_dir: &std::path::Path) -> PathBuf {
-    state_dir.join("daemon.ready")
+    guard_core::paths::ready_path(state_dir)
 }
 
 fn watchdog_state_path(state_dir: &std::path::Path) -> PathBuf {
-    state_dir.join("watchdog.state")
+    guard_core::paths::watchdog_state_path(state_dir)
 }
 
 fn read_daemon_pid(state_dir: &std::path::Path) -> Option<u32> {

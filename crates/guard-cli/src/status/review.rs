@@ -35,7 +35,7 @@ pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
         return Ok(64); // EX_USAGE
     }
 
-    let log_path = launchagent::logs_dir().join("stt-guard.log");
+    let log_path = launchagent::logs_dir().join(guard_core::paths::LOG_FILENAME);
 
     // Default uuid = most recent run with denials.
     let uuid = match run_uuid {

@@ -2,6 +2,41 @@ use clap::Parser;
 use guard_cli::cli::{Cli, Cmd, StatusSub};
 use std::ffi::OsString;
 
+// ---- stt-guard init parser shape ------------------------------------------------
+
+#[test]
+fn init_bare_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "init"]).expect("parse");
+    match cli.cmd {
+        Cmd::Init { yes } => {
+            assert!(!yes);
+        }
+        other => panic!("expected Init variant, got {other:?}"),
+    }
+}
+
+#[test]
+fn init_yes_flag_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "init", "--yes"]).expect("parse");
+    match cli.cmd {
+        Cmd::Init { yes } => {
+            assert!(yes);
+        }
+        other => panic!("expected Init variant, got {other:?}"),
+    }
+}
+
+#[test]
+fn init_short_y_flag_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "init", "-y"]).expect("parse");
+    match cli.cmd {
+        Cmd::Init { yes } => {
+            assert!(yes);
+        }
+        other => panic!("expected Init variant, got {other:?}"),
+    }
+}
+
 // ---- stt-guard wrap parser shape -----------------------------------------------
 
 #[test]

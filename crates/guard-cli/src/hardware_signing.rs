@@ -9,7 +9,8 @@
 use std::process::Command;
 
 use guard_core::{
-    canonical_rule_payload_bytes, sha256_hex, RuleSignaturePayloadV1, RuleSignatureV1,
+    canonical_rule_payload_bytes, canonical_snapshot_payload_bytes, sha256_hex,
+    RuleSignaturePayloadV1, RuleSignatureV1, SnapshotSignaturePayloadV1, SnapshotSignatureV1,
     RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256, SIGNER_KIND_SECURE_ENCLAVE,
 };
 
@@ -183,6 +184,28 @@ pub fn sign_rule_payload(payload: &RuleSignaturePayloadV1) -> Result<RuleSignatu
         signature_der,
         signed_payload_sha256: sha256_hex(&payload_bytes),
         signature_created_at_unix_ms: payload.created_at_unix_ms,
+    })
+}
+
+pub fn sign_snapshot_payload(
+    payload: &SnapshotSignaturePayloadV1,
+) -> Result<SnapshotSignatureV1, CliError> {
+    if hardware_signer_disabled() {
+        return Err(unavailable_error());
+    }
+    let payload_bytes = canonical_snapshot_payload_bytes(payload)
+        .map_err(|e| CliError::Other(format!("canonical snapshot payload encode failed: {e}")))?;
+    let output = run_swift_current_user("sign", Some(&hex_lower(&payload_bytes)))?;
+    let public_key_x963 = parse_hex_field(&output, "public_key_x963_hex")?;
+    let signature_der = parse_hex_field(&output, "signature_der_hex")?;
+    Ok(SnapshotSignatureV1 {
+        scheme: RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
+        signer_kind: SIGNER_KIND_SECURE_ENCLAVE.to_string(),
+        public_key_sha256: sha256_hex(&public_key_x963),
+        public_key_x963,
+        signature_der,
+        signed_payload_sha256: sha256_hex(&payload_bytes),
+        signature_created_at_unix_ms: payload.generated_at_unix_ms,
     })
 }
 

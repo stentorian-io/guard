@@ -62,16 +62,18 @@ We would rather triage a known limitation than miss a real vulnerability.
 
 ## Deployment Model
 
-`stt-guard init` deploys root-owned binaries and runs the daemon as a
-dedicated `_stt_guard` service user (no login shell, no home directory — the
-same convention as macOS's `_postgres` and `_mysql`). This is the only
-deployment mode and prevents a compromised process from tampering with the
-guard itself.
+`stt-guard init` deploys root-owned binaries, enrolls the invoking sudo user's
+non-exportable Secure Enclave rule-signing key, registers that public signer
+with daemon state, and runs the daemon as a dedicated `_stt_guard` service user
+(no login shell, no home directory — the same convention as macOS's `_postgres`
+and `_mysql`). This is the only deployment mode and prevents a compromised
+process from tampering with the guard itself.
 
 | Component | Path | Owner |
 |---|---|---|
 | Binaries | `/usr/local/libexec/stt-guard/` | `root:wheel` (755) |
-| Runtime state (DB, snapshots, HMAC keys, public signing metadata) | `/Library/Application Support/Stentorian Guard/` | `_stt_guard:_stt_guard` (700) |
+| Trusted signer manifest | `/usr/local/libexec/stt-guard/trusted-rule-signers.tsv` | `root:wheel` (644) |
+| Runtime state (DB, snapshots, HMAC keys, public signing cache) | `/Library/Application Support/Stentorian Guard/` | `_stt_guard:_stt_guard` (700) |
 | Logs | `/var/log/stt-guard/` | `_stt_guard:_stt_guard` (700) |
 | LaunchDaemon | `io.stentorian.guard.daemon` | Root-managed |
 
@@ -94,8 +96,12 @@ verification (shipped in v0.7). The socket is the door; codesign is the lock.
 Baseline/snapshot authenticity signing has a stricter key-storage requirement
 than snapshot HMAC integrity: private signing keys must be hardware-backed
 (Secure Enclave, security key, TPM-backed key, or an equivalent non-exportable
-platform facility). Software-only private keys are not a supported compatibility
-mode because the daemon must be able to verify signatures without being able to
+platform facility). On macOS, `sudo stt-guard init` creates or locates a
+Secure Enclave P-256 key in the invoking user's keychain, requires user
+presence for signing, records the signer in a root-owned manifest under
+`/usr/local/libexec/stt-guard/`, and mirrors only public signing metadata into
+daemon state for operational lookups. Software-only private keys are not a
+because the daemon must be able to verify signatures without being able to
 forge new trusted baselines if the daemon or its writable state is compromised.
 
 **Performance and UX impact:** the deployment has zero runtime overhead. The

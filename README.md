@@ -154,9 +154,11 @@ sudo stt-guard init
 ```
 
 The init step creates a `_stt_guard` service user, deploys root-owned
-binaries to `/usr/local/libexec/stt-guard/`, and starts the daemon as a
-LaunchDaemon. This is the only supported consumer deployment mode — it prevents
-a compromised process from tampering with the guard itself. See the
+binaries to `/usr/local/libexec/stt-guard/`, enrolls a non-exportable Secure
+Enclave rule-signing key for the invoking sudo user, registers that public
+signer with the daemon state, and starts the daemon as a LaunchDaemon. This is
+the only supported consumer deployment mode — it prevents a compromised process
+from tampering with the guard itself. See the
 [deployment model](SECURITY.md#deployment-model) for details.
 
 All other commands (`wrap`, `status`) require initialisation to be complete

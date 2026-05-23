@@ -10,6 +10,9 @@ fn production_rule_signing_fails_without_hardware_provider() {
         "test",
         None,
     );
+    unsafe {
+        std::env::set_var("STT_GUARD_DISABLE_HARDWARE_SIGNER", "1");
+    }
     let err = guard_cli::rule_signing::sign_rule_payload(&payload)
         .expect_err("production must not fall back to software signing");
     assert!(err

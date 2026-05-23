@@ -31,6 +31,7 @@ pub const LOG_FILENAME: &str = "stt-guard.log";
 pub const READY_FILENAME: &str = "daemon.ready";
 pub const HMAC_KEY_FILENAME: &str = "hmac.key";
 pub const HOOK_HASH_FILENAME: &str = "hook.sha256";
+pub const TRUSTED_RULE_SIGNERS_FILENAME: &str = "trusted-rule-signers.tsv";
 pub const MANIFEST_FILENAME: &str = "snapshot.manifest";
 pub const WATCHDOG_STATE_FILENAME: &str = "watchdog.state";
 pub const RUNS_DIR_NAME: &str = "runs";
@@ -107,6 +108,10 @@ pub fn hmac_key_path(state_dir: &Path) -> PathBuf {
 
 pub fn hook_hash_path(state_dir: &Path) -> PathBuf {
     state_dir.join(HOOK_HASH_FILENAME)
+}
+
+pub fn trusted_rule_signers_path() -> PathBuf {
+    PathBuf::from(SYSTEM_BIN_DIR).join(TRUSTED_RULE_SIGNERS_FILENAME)
 }
 
 pub fn snapshot_path(state_dir: &Path, nonce: u64) -> PathBuf {

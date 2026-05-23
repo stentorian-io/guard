@@ -21,13 +21,14 @@
 //! read contention.
 
 use guard_core::{
-    verify_rule_signature, AllowlistEntry, MatchType, RuleKind, RuleSignaturePayloadV1,
+    paths, verify_rule_signature, AllowlistEntry, MatchType, RuleKind, RuleSignaturePayloadV1,
     RuleSignaturePolicy, RuleSignatureV1, RuleTier,
 };
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Result as SqlResult};
 use rusqlite_migration::{Migrations, M};
 use std::collections::HashSet;
-use std::path::Path;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 #[derive(Debug, thiserror::Error)]
@@ -65,6 +66,7 @@ pub struct RuleStore {
     /// WAL mode (enabled at open time) allows this reader and the writer
     /// to proceed concurrently without blocking each other.
     reader: Mutex<Connection>,
+    trusted_signers_manifest_path: Option<PathBuf>,
 }
 
 impl RuleStore {
@@ -118,9 +120,17 @@ impl RuleStore {
             .pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| RuleStoreError::Migrate(format!("reader foreign_keys pragma: {e}")))?;
 
+        let trusted_signers_manifest_path =
+            if db_path.parent() == Some(Path::new(paths::SYSTEM_STATE_DIR)) {
+                Some(paths::trusted_rule_signers_path())
+            } else {
+                None
+            };
+
         Ok(Self {
             conn: Mutex::new(conn),
             reader: Mutex::new(reader),
+            trusted_signers_manifest_path,
         })
     }
 
@@ -207,15 +217,30 @@ impl RuleStore {
         signature: &RuleSignatureV1,
         label: &str,
     ) -> Result<(), RuleStoreError> {
+        self.register_trusted_rule_signer_key(
+            &signature.public_key_sha256,
+            &signature.signer_kind,
+            &signature.public_key_x963,
+            label,
+        )
+    }
+
+    pub fn register_trusted_rule_signer_key(
+        &self,
+        public_key_sha256: &str,
+        signer_kind: &str,
+        public_key_x963: &[u8],
+        label: &str,
+    ) -> Result<(), RuleStoreError> {
         let conn = self.conn.lock().expect("rule store mutex");
         conn.execute(
             "INSERT OR REPLACE INTO trusted_rule_signers (
                 public_key_sha256, signer_kind, public_key_x963, enrolled_at, label
              ) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                signature.public_key_sha256.as_str(),
-                signature.signer_kind.as_str(),
-                signature.public_key_x963.as_slice(),
+                public_key_sha256,
+                signer_kind,
+                public_key_x963,
                 unix_ms_now(),
                 label,
             ],
@@ -235,7 +260,104 @@ impl RuleStore {
             params![public_key_sha256, signer_kind],
             |r| r.get(0),
         )?;
-        Ok(count == 1)
+        if count != 1 {
+            return Ok(false);
+        }
+        self.trusted_manifest_contains(public_key_sha256, signer_kind, None)
+    }
+
+    fn trusted_manifest_contains(
+        &self,
+        public_key_sha256: &str,
+        signer_kind: &str,
+        public_key_x963: Option<&[u8]>,
+    ) -> Result<bool, RuleStoreError> {
+        let Some(path) = &self.trusted_signers_manifest_path else {
+            return Ok(true);
+        };
+        self.verify_trusted_manifest_path(path)?;
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            RuleStoreError::Signature(format!(
+                "trusted signer manifest unreadable at {}: {e}",
+                path.display()
+            ))
+        })?;
+        let expected_key_hex = public_key_x963.map(hex_lower);
+        for line in contents.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut parts = line.split('\t');
+            let Some(manifest_hash) = parts.next() else {
+                continue;
+            };
+            let Some(manifest_kind) = parts.next() else {
+                continue;
+            };
+            let Some(manifest_public_key_hex) = parts.next() else {
+                continue;
+            };
+            if manifest_hash == public_key_sha256 && manifest_kind == signer_kind {
+                return Ok(expected_key_hex
+                    .as_deref()
+                    .map(|expected| expected == manifest_public_key_hex)
+                    .unwrap_or(true));
+            }
+        }
+        Ok(false)
+    }
+
+    fn verify_trusted_manifest_path(&self, path: &Path) -> Result<(), RuleStoreError> {
+        let meta = std::fs::symlink_metadata(path).map_err(|e| {
+            RuleStoreError::Signature(format!(
+                "trusted signer manifest metadata unreadable at {}: {e}",
+                path.display()
+            ))
+        })?;
+        if !meta.file_type().is_file() {
+            return Err(RuleStoreError::Signature(format!(
+                "trusted signer manifest is not a regular file: {}",
+                path.display()
+            )));
+        }
+        if meta.uid() != 0 || meta.gid() != 0 || meta.mode() & 0o022 != 0 {
+            return Err(RuleStoreError::Signature(format!(
+                "trusted signer manifest has unsafe ownership or permissions: {} uid={} gid={} mode={:o}",
+                path.display(),
+                meta.uid(),
+                meta.gid(),
+                meta.mode() & 0o777
+            )));
+        }
+        let parent = path.parent().ok_or_else(|| {
+            RuleStoreError::Signature(format!(
+                "trusted signer manifest has no parent directory: {}",
+                path.display()
+            ))
+        })?;
+        let parent_meta = std::fs::symlink_metadata(parent).map_err(|e| {
+            RuleStoreError::Signature(format!(
+                "trusted signer manifest parent metadata unreadable at {}: {e}",
+                parent.display()
+            ))
+        })?;
+        if !parent_meta.file_type().is_dir() {
+            return Err(RuleStoreError::Signature(format!(
+                "trusted signer manifest parent is not a directory: {}",
+                parent.display()
+            )));
+        }
+        if parent_meta.uid() != 0 || parent_meta.gid() != 0 || parent_meta.mode() & 0o022 != 0 {
+            return Err(RuleStoreError::Signature(format!(
+                "trusted signer manifest parent has unsafe ownership or permissions: {} uid={} gid={} mode={:o}",
+                parent.display(),
+                parent_meta.uid(),
+                parent_meta.gid(),
+                parent_meta.mode() & 0o777
+            )));
+        }
+        Ok(())
     }
 
     /// Count all rows in the rules table (user-approved rules added via `stt-guard approve`).
@@ -426,7 +548,13 @@ impl RuleStore {
                 ],
                 |r| r.get(0),
             )?;
-            if trusted_count != 1 {
+            if trusted_count != 1
+                || !self.trusted_manifest_contains(
+                    &signature.public_key_sha256,
+                    &signature.signer_kind,
+                    Some(&signature.public_key_x963),
+                )?
+            {
                 return Err(RuleStoreError::Signature(format!(
                     "untrusted rule signer: {}",
                     signature.public_key_sha256
@@ -557,6 +685,16 @@ pub fn unix_ms_now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    s
 }
 
 #[cfg(test)]

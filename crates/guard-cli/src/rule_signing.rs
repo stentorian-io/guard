@@ -19,8 +19,6 @@ fn sign_rule_payload_impl(payload: &RuleSignaturePayloadV1) -> Result<RuleSignat
 }
 
 #[cfg(not(feature = "test-signer"))]
-fn sign_rule_payload_impl(_payload: &RuleSignaturePayloadV1) -> Result<RuleSignatureV1, CliError> {
-    Err(CliError::Other(
-        "hardware-backed signing key unavailable; software-only rule signing is unsupported".into(),
-    ))
+fn sign_rule_payload_impl(payload: &RuleSignaturePayloadV1) -> Result<RuleSignatureV1, CliError> {
+    crate::hardware_signing::sign_rule_payload(payload)
 }

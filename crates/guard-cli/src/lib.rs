@@ -6,6 +6,7 @@ pub mod biometric;
 pub mod cli;
 pub mod denial_log;
 pub mod ensure_daemon;
+pub mod hardware_signing;
 pub mod install;
 pub mod ipc_client;
 pub mod locate;

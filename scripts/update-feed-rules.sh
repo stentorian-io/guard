@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 #
 # Extract host IOCs from OSV.dev malicious-package advisories (MAL-*) and
 # write them to crates/guard-core/data/malicious-ossf-packages.yaml.
@@ -7,7 +7,7 @@
 # bucket — every advisory across every ecosystem in a single archive.
 # No git, no auth, no rate limits.
 #
-# Requires: curl, jq, unzip, shasum
+# Requires: bash, curl, jq, unzip, shasum, awk, sort
 
 set -euo pipefail
 
@@ -93,37 +93,32 @@ raw_iocs=$(find "${tmpdir}/advisories" -name 'MAL-*.json' -print0 \
 
 # Deduplicate by (match_type, pattern), keeping the first advisory ID seen.
 # If a host appears as both confirmed and suspect, promote to confirmed.
-declare -A seen
-declare -A confidence_map
-declare -a entries
-while IFS=$'\t' read -r match_type pattern advisory_id confidence; do
-  [[ -z "$pattern" ]] && continue
-  key="${match_type}:${pattern}"
-  if [[ -z "${seen[$key]:-}" ]]; then
-    seen[$key]=1
-    confidence_map[$key]="${confidence:-suspect}"
-    entries+=("${match_type}"$'\t'"${pattern}"$'\t'"${advisory_id}"$'\t'"${confidence:-suspect}")
-  elif [[ "$confidence" == "confirmed" && "${confidence_map[$key]:-}" != "confirmed" ]]; then
-    # Promote to confirmed: rebuild entry with confirmed confidence
-    confidence_map[$key]="confirmed"
-    local_entries=()
-    for e in "${entries[@]}"; do
-      IFS=$'\t' read -r mt pt ai cf <<< "$e"
-      if [[ "${mt}:${pt}" == "$key" ]]; then
-        local_entries+=("${mt}"$'\t'"${pt}"$'\t'"${ai}"$'\t'"confirmed")
-      else
-        local_entries+=("$e")
-      fi
-    done
-    entries=("${local_entries[@]}")
-  fi
-done <<< "$raw_iocs"
+# This intentionally avoids zsh/bash-4-only array features so the script runs
+# under the bash available on both GitHub Actions and local macOS checkouts.
+sorted_entries=$(printf '%s\n' "$raw_iocs" \
+  | awk -F '\t' '
+      NF >= 4 && $2 != "" {
+        key = $1 FS $2
+        if (!(key in confidence_by_key)) {
+          order[++order_count] = key
+          line_by_key[key] = $0
+          confidence_by_key[key] = $4
+        } else if ($4 == "confirmed" && confidence_by_key[key] != "confirmed") {
+          split(line_by_key[key], fields, FS)
+          fields[4] = "confirmed"
+          line_by_key[key] = fields[1] FS fields[2] FS fields[3] FS fields[4]
+          confidence_by_key[key] = "confirmed"
+        }
+      }
+      END {
+        for (i = 1; i <= order_count; i++) {
+          print line_by_key[order[i]]
+        }
+      }
+    ' \
+  | sort -t $'\t' -k2,2)
 
-# Sort entries by pattern for stable output.
-sorted_entries=("${(@f)$(printf '%s\n' "${entries[@]}" | sort -t$'\t' -k2,2)}")
-[[ ${#sorted_entries[@]} -eq 1 && -z "${sorted_entries[1]}" ]] && sorted_entries=()
-
-ioc_count=${#sorted_entries[@]}
+ioc_count=$(printf '%s\n' "$sorted_entries" | awk 'NF { count++ } END { print count + 0 }')
 echo "Found $ioc_count unique host IOCs."
 
 # Write the output file (full replace).
@@ -131,8 +126,7 @@ echo "Found $ioc_count unique host IOCs."
   echo "# Auto-generated from OSV.dev malicious-package advisories (MAL-*)."
   echo "# Source: ${OSV_ALL_ZIP}"
   echo "# Managed by scripts/update-feed-rules.sh — do not edit manually."
-  for entry in "${sorted_entries[@]}"; do
-    IFS=$'\t' read -r match_type pattern advisory_id confidence <<< "$entry"
+  while IFS=$'\t' read -r match_type pattern advisory_id confidence; do
     [[ -z "$pattern" ]] && continue
     cat <<YAML
 - kind: deny
@@ -141,10 +135,10 @@ echo "Found $ioc_count unique host IOCs."
   reason: "$advisory_id supply-chain IOC (FEED)"
   confidence: ${confidence:-suspect}
 YAML
-  done
+  done <<< "$sorted_entries"
 } > "$OUTPUT_FILE"
 
-confirmed_count=$(printf '%s\n' "${sorted_entries[@]}" | grep -c $'\tconfirmed$' || true)
-suspect_count=$(printf '%s\n' "${sorted_entries[@]}" | grep -c $'\tsuspect$' || true)
+confirmed_count=$(printf '%s\n' "$sorted_entries" | grep -c $'\tconfirmed$' || true)
+suspect_count=$(printf '%s\n' "$sorted_entries" | grep -c $'\tsuspect$' || true)
 echo "Wrote $ioc_count feed IOC entries to $OUTPUT_FILE ($confirmed_count confirmed, $suspect_count suspect)."
 shasum -a 256 "$OUTPUT_FILE"

@@ -10,7 +10,7 @@
 # plist setup can weaken the deployment model.
 #
 # Artifacts per target: stt-guard, stt-guard-daemon, stt-guard-watchdog,
-#                       libguard_hook.dylib, release-meta.json
+#                       stt-guard-hook.dylib, release-meta.json
 
 name: release
 
@@ -71,7 +71,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/stt-guard" "artifacts/${{ matrix.target }}/"
           cp "target/${{ matrix.target }}/release/stt-guard-daemon" "artifacts/${{ matrix.target }}/"
           cp "target/${{ matrix.target }}/release/stt-guard-watchdog" "artifacts/${{ matrix.target }}/"
-          cp "target/${{ matrix.target }}/release/libguard_hook.dylib" "artifacts/${{ matrix.target }}/"
+          cp "target/${{ matrix.target }}/release/libguard_hook.dylib" "artifacts/${{ matrix.target }}/stt-guard-hook.dylib"
 
       - name: Verify target artifacts
         run: |
@@ -143,7 +143,7 @@ jobs:
             tarball="artifacts/guard-${{ steps.version.outputs.version }}-${target}.tar.gz"
             tar -C "${target_dir}" \
               -czf "${tarball}" \
-              stt-guard stt-guard-daemon stt-guard-watchdog libguard_hook.dylib release-meta.json
+              stt-guard stt-guard-daemon stt-guard-watchdog stt-guard-hook.dylib release-meta.json
             sha=$(sha256sum "${tarball}" | awk '{print $1}')
             case "${target}" in
               aarch64-apple-darwin)

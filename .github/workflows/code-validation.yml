@@ -2,7 +2,7 @@
 # workflow passes. Jobs are intentionally sequenced to fail fast and avoid
 # spending macOS/e2e minutes when an earlier phase already failed.
 
-name: validation
+name: code-validation
 
 on:
   workflow_run:
@@ -14,7 +14,7 @@ on:
     - cron: '15 6 * * *'
 
 concurrency:
-  group: validation-${{ github.event.workflow_run.head_branch || github.ref }}
+  group: code-validation-${{ github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: true
 
 permissions:

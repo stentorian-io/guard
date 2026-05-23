@@ -1,0 +1,98 @@
+# PR validation — cheap PR-shape and metadata checks that must pass before the
+# heavier code validation workflow is triggered.
+
+name: PR validation
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect PR changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      markdown: ${{ steps.filter.outputs.markdown }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            markdown:
+              - '**/*.md'
+
+  pr-title:
+    name: PR title (conventional commit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        id: lint_pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            test
+            docs
+            chore
+            ci
+          scopes: |
+            cli
+            daemon
+            hook
+            core
+            ipc
+            watchdog
+            e2e
+            bench
+            readme
+            llm
+            man
+            help
+            install
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+(?<!\.)$
+          subjectPatternError: |
+            The subject "{subject}" found in the pull request title "{title}"
+            must start with a lowercase letter and not end with a period.
+      - if: steps.lint_pr.outputs.type == 'ci' && steps.lint_pr.outputs.scope != ''
+        run: |
+          echo "::error::Scopes are not allowed for the 'ci' type. Use 'ci: ...' not 'ci(scope): ...'"
+          exit 1
+
+  lint-markdown:
+    name: Lint Markdown
+    needs: changes
+    if: needs.changes.outputs.markdown == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npx markdownlint-cli2 "**/*.md" "#target" "#.gsd"
+
+  gate:
+    name: Gate
+    if: always()
+    needs:
+      - changes
+      - pr-title
+      - lint-markdown
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          results='${{ toJSON(needs.*.result) }}'
+          echo "Job results: $results"
+          if echo "$results" | grep -qE '"(failure|cancelled)"'; then
+            echo "::error::One or more PR validation jobs failed or were cancelled"
+            exit 1
+          fi

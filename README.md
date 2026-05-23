@@ -162,10 +162,10 @@ a compromised process from tampering with the guard itself. See the
 All other commands (`wrap`, `status`) require initialisation to be complete
 and will refuse to run otherwise.
 
-GitHub Release artifacts are published for release automation, auditability,
-and Homebrew formula updates. They are not a documented manual install surface.
-Manual placement of binaries, hook libraries, plists, ownership, or permissions
-can silently weaken the security model.
+GitHub Releases are used for changelogs, release metadata, auditability, and
+Homebrew automation inputs. Manual binary installation from a release artifact
+is not a supported install path: a misplaced binary, hook library, plist, or
+ownership bit can silently weaken the deployment model.
 
 ### Updating
 

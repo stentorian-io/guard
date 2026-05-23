@@ -1,12 +1,16 @@
-# Release workflow — builds universal macOS binary, generates changelog and
-# release-meta.json, creates a GitHub Release with all artifacts attached.
+# Release workflow — builds target-specific macOS artifacts, generates
+# changelog and release-meta.json, and creates a GitHub Release for Homebrew
+# automation and maintainer audit trails.
 #
-# Triggered by pushing a semver tag (v1.0.0, v1.2.3, etc.).
+# Triggered by pushing a semver tag (v0.1.0, v0.2.0, etc.).
 # Can also be triggered manually via workflow_dispatch for dry-run testing.
 #
-# Binary: universal macOS (arm64 + x86_64) lipo'd together.
-# Artifacts: stt-guard, stt-guard-daemon, stt-guard-watchdog,
-#            libguard_hook.dylib, release-meta.json
+# Supported install path: Homebrew. GitHub Release artifacts are not a
+# documented manual install surface because incorrect placement, ownership, or
+# plist setup can weaken the deployment model.
+#
+# Artifacts per target: stt-guard, stt-guard-daemon, stt-guard-watchdog,
+#                       libguard_hook.dylib, release-meta.json
 
 name: release
 
@@ -30,9 +34,15 @@ permissions:
 
 jobs:
   build:
-    name: Build universal binary
+    name: Build ${{ matrix.target }}
     runs-on: macos-14
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
 
     steps:
       - name: Checkout
@@ -40,50 +50,41 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust toolchain + targets
+      - name: Install Rust toolchain + target
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: ${{ matrix.target }}
 
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release
+          shared-key: release-${{ matrix.target }}
 
-      - name: Build arm64
-        run: cargo build --workspace --release --target aarch64-apple-darwin
+      - name: Build release binaries
+        run: cargo build --workspace --release --target ${{ matrix.target }}
 
-      - name: Build x86_64
-        run: cargo build --workspace --release --target x86_64-apple-darwin
-
-      - name: Create universal binaries
+      - name: Stage target artifacts
         run: |
           set -euo pipefail
-          mkdir -p target/universal
-          for bin in stt-guard stt-guard-daemon stt-guard-watchdog; do
-            lipo -create \
-              "target/aarch64-apple-darwin/release/${bin}" \
-              "target/x86_64-apple-darwin/release/${bin}" \
-              -output "target/universal/${bin}"
-          done
-          lipo -create \
-            target/aarch64-apple-darwin/release/libguard_hook.dylib \
-            target/x86_64-apple-darwin/release/libguard_hook.dylib \
-            -output target/universal/libguard_hook.dylib
+          mkdir -p "artifacts/${{ matrix.target }}"
+          cp "target/${{ matrix.target }}/release/stt-guard" "artifacts/${{ matrix.target }}/"
+          cp "target/${{ matrix.target }}/release/stt-guard-daemon" "artifacts/${{ matrix.target }}/"
+          cp "target/${{ matrix.target }}/release/stt-guard-watchdog" "artifacts/${{ matrix.target }}/"
+          cp "target/${{ matrix.target }}/release/libguard_hook.dylib" "artifacts/${{ matrix.target }}/"
 
-      - name: Verify universal binaries
+      - name: Verify target artifacts
         run: |
-          for f in target/universal/*; do
+          set -euo pipefail
+          for f in "artifacts/${{ matrix.target }}"/*; do
             echo "=== $(basename "$f") ==="
             file "$f"
-            lipo -info "$f"
           done
 
-      - name: Upload build artifacts
+      - name: Upload target artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: guard-universal
-          path: target/universal/
+          name: guard-${{ matrix.target }}
+          path: artifacts/${{ matrix.target }}/
           retention-days: 5
 
   release:
@@ -100,7 +101,7 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: guard-universal
+          pattern: guard-*
           path: artifacts/
 
       - name: Install git-cliff
@@ -131,11 +132,16 @@ jobs:
           scripts/generate-release-meta.sh "${{ steps.version.outputs.tag }}" > artifacts/release-meta.json
           cat artifacts/release-meta.json
 
-      - name: Package tarball
+      - name: Package target tarballs
         run: |
-          cd artifacts
-          tar czf "guard-${{ steps.version.outputs.version }}-universal-apple-darwin.tar.gz" \
-            stt-guard stt-guard-daemon stt-guard-watchdog libguard_hook.dylib release-meta.json
+          set -euo pipefail
+          for target_dir in artifacts/guard-*; do
+            target="${target_dir#artifacts/guard-}"
+            cp artifacts/release-meta.json "${target_dir}/release-meta.json"
+            tar -C "${target_dir}" \
+              -czf "artifacts/guard-${{ steps.version.outputs.version }}-${target}.tar.gz" \
+              stt-guard stt-guard-daemon stt-guard-watchdog libguard_hook.dylib release-meta.json
+          done
 
       - name: Create GitHub Release
         if: github.event_name == 'push' || inputs.dry_run == 'false'
@@ -145,7 +151,7 @@ jobs:
           name: Guard ${{ steps.version.outputs.version }}
           body_path: CHANGELOG.md
           files: |
-            artifacts/guard-${{ steps.version.outputs.version }}-universal-apple-darwin.tar.gz
+            artifacts/guard-${{ steps.version.outputs.version }}-*.tar.gz
             artifacts/release-meta.json
 
       - name: Dry-run summary

@@ -82,104 +82,139 @@ fn create_service_user() -> Result<(), CliError> {
         .output()
         .map_err(|e| CliError::Other(format!("dscl check: {e}")))?;
 
-    if check.status.success() {
-        eprintln!("  {SERVICE_USER} user already exists, skipping creation");
-        return Ok(());
+    let gid = if check.status.success() {
+        eprintln!("  {SERVICE_USER} user already exists, verifying group");
+        service_gid()?
+    } else {
+        eprintln!("  Creating {SERVICE_USER} service user...");
+
+        // Find an unused UID in the system range (400-499).
+        let uid = find_available_uid()?;
+        let uid_str = uid.to_string();
+
+        let steps: &[(&[&str], &str)] = &[
+            (
+                &[".", "-create", &format!("/Users/{SERVICE_USER}")],
+                "create user record",
+            ),
+            (
+                &[
+                    ".",
+                    "-create",
+                    &format!("/Users/{SERVICE_USER}"),
+                    "UserShell",
+                    "/usr/bin/false",
+                ],
+                "set shell",
+            ),
+            (
+                &[
+                    ".",
+                    "-create",
+                    &format!("/Users/{SERVICE_USER}"),
+                    "RealName",
+                    SERVICE_USER_REALNAME,
+                ],
+                "set realname",
+            ),
+            (
+                &[
+                    ".",
+                    "-create",
+                    &format!("/Users/{SERVICE_USER}"),
+                    "UniqueID",
+                    &uid_str,
+                ],
+                "set uid",
+            ),
+            (
+                &[
+                    ".",
+                    "-create",
+                    &format!("/Users/{SERVICE_USER}"),
+                    "PrimaryGroupID",
+                    &uid_str,
+                ],
+                "set gid",
+            ),
+            (
+                &[
+                    ".",
+                    "-create",
+                    &format!("/Users/{SERVICE_USER}"),
+                    "NFSHomeDirectory",
+                    "/var/empty",
+                ],
+                "set home",
+            ),
+        ];
+
+        for (args, description) in steps {
+            run_cmd("dscl", args, description)?;
+        }
+
+        uid
+    };
+
+    ensure_service_group(gid)?;
+    Ok(())
+}
+
+fn service_gid() -> Result<u32, CliError> {
+    let output = Command::new("id")
+        .args(["-g", SERVICE_USER])
+        .output()
+        .map_err(|e| CliError::Other(format!("read {SERVICE_USER} gid: {e}")))?;
+    if !output.status.success() {
+        return Err(CliError::Other(format!(
+            "read {SERVICE_USER} gid failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
     }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.trim().parse::<u32>().map_err(|e| {
+        CliError::Other(format!(
+            "read {SERVICE_USER} gid returned malformed value {:?}: {e}",
+            stdout.trim()
+        ))
+    })
+}
 
-    eprintln!("  Creating {SERVICE_USER} service user...");
-
-    // Find an unused UID in the system range (400-499).
-    let uid = find_available_uid()?;
-    let uid_str = uid.to_string();
-
-    let steps: &[(&[&str], &str)] = &[
-        (
-            &[".", "-create", &format!("/Users/{SERVICE_USER}")],
-            "create user record",
-        ),
-        (
-            &[
-                ".",
-                "-create",
-                &format!("/Users/{SERVICE_USER}"),
-                "UserShell",
-                "/usr/bin/false",
-            ],
-            "set shell",
-        ),
-        (
-            &[
-                ".",
-                "-create",
-                &format!("/Users/{SERVICE_USER}"),
-                "RealName",
-                SERVICE_USER_REALNAME,
-            ],
-            "set realname",
-        ),
-        (
-            &[
-                ".",
-                "-create",
-                &format!("/Users/{SERVICE_USER}"),
-                "UniqueID",
-                &uid_str,
-            ],
-            "set uid",
-        ),
-        (
-            &[
-                ".",
-                "-create",
-                &format!("/Users/{SERVICE_USER}"),
-                "PrimaryGroupID",
-                &uid_str,
-            ],
-            "set gid",
-        ),
-        (
-            &[
-                ".",
-                "-create",
-                &format!("/Users/{SERVICE_USER}"),
-                "NFSHomeDirectory",
-                "/var/empty",
-            ],
-            "set home",
-        ),
-    ];
-
-    for (args, description) in steps {
-        run_cmd("dscl", args, description)?;
-    }
-
-    // Create the group with the same GID.
+fn ensure_service_group(gid: u32) -> Result<(), CliError> {
+    let gid_str = gid.to_string();
+    let group_path = format!("/Groups/{SERVICE_USER}");
     let group_check = Command::new("dscl")
-        .args([".", "-read", &format!("/Groups/{SERVICE_USER}")])
+        .args([".", "-read", &group_path])
         .output()
         .map_err(|e| CliError::Other(format!("dscl group check: {e}")))?;
 
     if !group_check.status.success() {
-        run_cmd(
-            "dscl",
-            &[".", "-create", &format!("/Groups/{SERVICE_USER}")],
-            "create group",
-        )?;
-        run_cmd(
-            "dscl",
-            &[
-                ".",
-                "-create",
-                &format!("/Groups/{SERVICE_USER}"),
-                "PrimaryGroupID",
-                &uid_str,
-            ],
-            "set group gid",
-        )?;
+        run_cmd("dscl", &[".", "-create", &group_path], "create group")?;
     }
 
-    Ok(())
+    let gid_check = Command::new("dscl")
+        .args([".", "-read", &group_path, "PrimaryGroupID"])
+        .output()
+        .map_err(|e| CliError::Other(format!("dscl group gid check: {e}")))?;
+
+    if gid_check.status.success() {
+        let stdout = String::from_utf8_lossy(&gid_check.stdout);
+        if stdout.lines().any(|line| line.contains(&gid_str)) {
+            return Ok(());
+        }
+        if !stdout.trim().is_empty() {
+            return Err(CliError::Other(format!(
+                "{SERVICE_USER} group has unexpected PrimaryGroupID: {}",
+                stdout.trim()
+            )));
+        }
+    }
+
+    run_cmd(
+        "dscl",
+        &[".", "-create", &group_path, "PrimaryGroupID", &gid_str],
+        "set group gid",
+    )
 }
 
 fn find_available_uid() -> Result<u32, CliError> {

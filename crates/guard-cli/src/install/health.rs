@@ -162,11 +162,11 @@ fn check_service_identity(health: &mut InstallHealth) -> Option<(u32, u32)> {
         Err(err) => health.push(format!("service user record invalid: {err}")),
     }
 
-    if let Err(err) = dscl_read(
+    if let Ok(record) = dscl_read(
         &format!("/Groups/{}", paths::SERVICE_USER),
         &["PrimaryGroupID"],
     ) {
-        health.push(format!("service group record invalid: {err}"));
+        require_record_contains(health, &record, "PrimaryGroupID", &gid.to_string());
     }
 
     Some((uid, gid))

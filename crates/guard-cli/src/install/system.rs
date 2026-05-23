@@ -53,9 +53,9 @@ pub fn print_plan() {
 /// Execute the full hardened installation. Must be run as root.
 pub fn run_install() -> Result<(), CliError> {
     require_root()?;
-    create_service_user()?;
+    let service_gid = create_service_user()?;
     deploy_binaries()?;
-    create_directories()?;
+    create_directories(service_gid)?;
     install_launchdaemon()?;
     start_daemon()?;
     eprintln!("\nstt-guard: initialisation complete.");
@@ -75,7 +75,7 @@ fn nix_is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
-fn create_service_user() -> Result<(), CliError> {
+fn create_service_user() -> Result<u32, CliError> {
     // Check if user already exists.
     let check = Command::new("dscl")
         .args([".", "-read", &format!("/Users/{SERVICE_USER}")])
@@ -156,8 +156,7 @@ fn create_service_user() -> Result<(), CliError> {
         uid
     };
 
-    ensure_service_group(gid)?;
-    Ok(())
+    Ok(gid)
 }
 
 fn service_gid() -> Result<u32, CliError> {
@@ -178,43 +177,6 @@ fn service_gid() -> Result<u32, CliError> {
             stdout.trim()
         ))
     })
-}
-
-fn ensure_service_group(gid: u32) -> Result<(), CliError> {
-    let gid_str = gid.to_string();
-    let group_path = format!("/Groups/{SERVICE_USER}");
-    let group_check = Command::new("dscl")
-        .args([".", "-read", &group_path])
-        .output()
-        .map_err(|e| CliError::Other(format!("dscl group check: {e}")))?;
-
-    if !group_check.status.success() {
-        run_cmd("dscl", &[".", "-create", &group_path], "create group")?;
-    }
-
-    let gid_check = Command::new("dscl")
-        .args([".", "-read", &group_path, "PrimaryGroupID"])
-        .output()
-        .map_err(|e| CliError::Other(format!("dscl group gid check: {e}")))?;
-
-    if gid_check.status.success() {
-        let stdout = String::from_utf8_lossy(&gid_check.stdout);
-        if stdout.lines().any(|line| line.contains(&gid_str)) {
-            return Ok(());
-        }
-        if !stdout.trim().is_empty() {
-            return Err(CliError::Other(format!(
-                "{SERVICE_USER} group has unexpected PrimaryGroupID: {}",
-                stdout.trim()
-            )));
-        }
-    }
-
-    run_cmd(
-        "dscl",
-        &[".", "-create", &group_path, "PrimaryGroupID", &gid_str],
-        "set group gid",
-    )
 }
 
 fn find_available_uid() -> Result<u32, CliError> {
@@ -302,13 +264,15 @@ fn source_bin_dir() -> Result<PathBuf, CliError> {
         .ok_or_else(|| CliError::Other("cannot determine source binary directory".into()))
 }
 
-fn create_directories() -> Result<(), CliError> {
+fn create_directories(service_gid: u32) -> Result<(), CliError> {
+    let service_owner = format!("{SERVICE_USER}:{service_gid}");
+
     eprintln!("  Creating state directory at {STATE_DIR}/...");
     std::fs::create_dir_all(STATE_DIR)
         .map_err(|e| CliError::Other(format!("create {STATE_DIR}: {e}")))?;
     run_cmd(
         "chown",
-        &[&format!("{SERVICE_USER}:{SERVICE_USER}"), STATE_DIR],
+        &[&service_owner, STATE_DIR],
         "set state dir ownership",
     )?;
     run_cmd("chmod", &["700", STATE_DIR], "set state dir permissions")?;
@@ -316,11 +280,7 @@ fn create_directories() -> Result<(), CliError> {
     eprintln!("  Creating log directory at {LOG_DIR}/...");
     std::fs::create_dir_all(LOG_DIR)
         .map_err(|e| CliError::Other(format!("create {LOG_DIR}: {e}")))?;
-    run_cmd(
-        "chown",
-        &[&format!("{SERVICE_USER}:{SERVICE_USER}"), LOG_DIR],
-        "set log dir ownership",
-    )?;
+    run_cmd("chown", &[&service_owner, LOG_DIR], "set log dir ownership")?;
     run_cmd("chmod", &["700", LOG_DIR], "set log dir permissions")?;
 
     Ok(())

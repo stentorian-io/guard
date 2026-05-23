@@ -9,6 +9,7 @@ pub mod paths;
 pub mod policy;
 pub mod rule_signature;
 pub mod snapshot;
+pub mod snapshot_build;
 
 pub use allowlist::{evaluate_rule, AllowlistEntry, MatchType, RuleKind, RuleTier, Verdict};
 pub use error::Error;
@@ -24,3 +25,4 @@ pub use rule_signature::{
     SIGNER_KIND_TEST_SIMULATOR, SIGNER_KIND_TPM,
 };
 pub use snapshot::{Snapshot, SCHEMA_V1, SCHEMA_V2};
+pub use snapshot_build::{build_snapshot, build_snapshot_bytes, SnapshotBuildInput};

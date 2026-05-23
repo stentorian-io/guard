@@ -13,7 +13,7 @@ use crate::rule_store::RuleStore;
 use crate::snapshot::publish_run;
 use crate::state_dir::run_manifest_path;
 use crate::tracked::{ProcessTree, RunRecord};
-use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier, Snapshot, SCHEMA_V2};
+use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier, SnapshotBuildInput};
 use guard_ipc::SnapshotReply;
 use std::path::Path;
 use std::sync::Arc;
@@ -76,7 +76,7 @@ pub fn handle_prepare_snapshot(
     };
     let cwd = cwd.as_path();
 
-    // 0. Load disabled curated patterns and filter curated rules.
+    // 0. Load disabled curated patterns.
     let disabled = match rule_store.disabled_curated_patterns() {
         Ok(d) => d,
         Err(e) => {
@@ -87,25 +87,12 @@ pub fn handle_prepare_snapshot(
             std::collections::HashSet::new()
         }
     };
-    let filtered_curated: Vec<_> = if disabled.is_empty() {
-        // Fast path: no overrides, borrow the slice directly later.
-        Vec::new()
-    } else {
-        curated
-            .iter()
-            .filter(|e| !disabled.contains(&e.pattern))
-            .cloned()
-            .collect()
-    };
-    let effective_curated = if disabled.is_empty() {
-        curated
-    } else {
+    if !disabled.is_empty() {
         info!(
             disabled_count = disabled.len(),
             "PrepareSnapshot: filtering disabled curated rules"
         );
-        &filtered_curated
-    };
+    }
 
     // 1. SQLite user rules.
     let user_entries = match rule_store.all_verified_user_rules(rule_signature_policy) {
@@ -150,21 +137,20 @@ pub fn handle_prepare_snapshot(
         None => Vec::new(),
     };
 
-    // 3. Concatenate + sort by tier.
-    let mut entries: Vec<AllowlistEntry> =
-        Vec::with_capacity(effective_curated.len() + user_entries.len() + lockfile_entries.len());
-    entries.extend_from_slice(effective_curated);
-    entries.extend(user_entries);
-    entries.extend(lockfile_entries);
-    entries.sort_by_key(|e| e.tier);
-
-    // 4. Build snapshot.
-    let snap = Snapshot {
-        schema_version: SCHEMA_V2,
-        generated_at_unix_ms: unix_ms_now(),
-        entries,
-        run_uuid: Some(run_uuid.clone()),
+    // 3. Deterministically build snapshot from verified inputs.
+    let disabled_curated_patterns = if disabled.is_empty() {
+        std::collections::BTreeSet::new()
+    } else {
+        disabled.iter().cloned().collect()
     };
+    let snap = guard_core::build_snapshot(SnapshotBuildInput {
+        run_uuid: run_uuid.clone(),
+        generated_at_unix_ms: unix_ms_now(),
+        curated_entries: curated.to_vec(),
+        disabled_curated_patterns,
+        verified_user_entries: user_entries,
+        lockfile_entries,
+    });
 
     // 5. Publish per-run snapshot.
     let pub_ = match publish_run(state_dir, &snap, &run_uuid) {

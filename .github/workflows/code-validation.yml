@@ -5,25 +5,74 @@
 name: code-validation
 
 on:
-  workflow_run:
-    workflows: [PR validation]
-    types: [completed]
+  pull_request:
+    branches: [main]
   schedule:
     # Nightly at 06:15 UTC — catches new advisories in the RustSec DB even when
     # no lockfile-changing PR is open.
     - cron: '15 6 * * *'
 
 concurrency:
-  group: code-validation-${{ github.event.workflow_run.head_branch || github.ref }}
+  group: code-validation-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
+  pull-requests: read
 
 jobs:
+  pr_validation_gate:
+    name: Wait for PR validation
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require PR validation success for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          for _ in {1..60}; do
+            run_json=$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow pr-validation.yml \
+              --event pull_request \
+              --commit "$HEAD_SHA" \
+              --limit 1 \
+              --json databaseId,status,conclusion,url \
+              --jq '.[0] // empty')
+
+            if [ -z "$run_json" ]; then
+              echo "Waiting for PR validation run for $HEAD_SHA..."
+              sleep 10
+              continue
+            fi
+
+            status=$(jq -r '.status' <<< "$run_json")
+            conclusion=$(jq -r '.conclusion // ""' <<< "$run_json")
+            url=$(jq -r '.url' <<< "$run_json")
+            echo "PR validation: status=$status conclusion=${conclusion:-pending} url=$url"
+
+            if [ "$status" = "completed" ] && [ "$conclusion" = "success" ]; then
+              exit 0
+            fi
+            if [ "$status" = "completed" ]; then
+              echo "::error::PR validation did not pass for $HEAD_SHA: $conclusion"
+              exit 1
+            fi
+            sleep 10
+          done
+
+          echo "::error::Timed out waiting for PR validation for $HEAD_SHA"
+          exit 1
+
   prepare:
     name: Prepare validation context
-    if: github.event_name == 'schedule' || github.event.workflow_run.conclusion == 'success'
+    needs: pr_validation_gate
+    if: >-
+      always()
+      && (github.event_name == 'schedule' || needs.pr_validation_gate.result == 'success')
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.changes.outputs.code }}
@@ -33,11 +82,11 @@ jobs:
       is_pr: ${{ steps.context.outputs.is_pr }}
     steps:
       - name: Checkout PR head
-        if: github.event_name == 'workflow_run'
+        if: github.event_name == 'pull_request'
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.workflow_run.head_repository.full_name }}
-          ref: ${{ github.event.workflow_run.head_sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Checkout scheduled ref
@@ -47,7 +96,7 @@ jobs:
           fetch-depth: 0
 
       - name: Fetch base branch
-        if: github.event_name == 'workflow_run'
+        if: github.event_name == 'pull_request'
         run: |
           git remote add upstream "https://github.com/${{ github.repository }}.git"
           git fetch --no-tags upstream main
@@ -92,7 +141,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
             base=$(git merge-base upstream/main HEAD)
             head=$(git rev-parse HEAD)
             echo "base=$base" >> "$GITHUB_OUTPUT"
@@ -106,7 +155,7 @@ jobs:
       - name: Record event context
         id: context
         run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "is_pr=true" >> "$GITHUB_OUTPUT"
           else
             echo "is_pr=false" >> "$GITHUB_OUTPUT"
@@ -120,8 +169,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.workflow_run.head_repository.full_name }}
-          ref: ${{ github.event.workflow_run.head_sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-machete
@@ -141,8 +190,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.workflow_run.head_repository.full_name }}
-          ref: ${{ github.event.workflow_run.head_sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
       - name: Setup Node 20
         uses: actions/setup-node@v4
@@ -193,8 +242,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.workflow_run.head_repository.full_name }}
-          ref: ${{ github.event.workflow_run.head_sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
@@ -214,8 +263,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.workflow_run.head_repository.full_name }}
-          ref: ${{ github.event.workflow_run.head_sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
@@ -235,8 +284,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.workflow_run.head_repository.full_name }}
-          ref: ${{ github.event.workflow_run.head_sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
       - name: Setup Node 20
         uses: actions/setup-node@v4
@@ -273,8 +322,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.workflow_run.head_repository.full_name }}
-          ref: ${{ github.event.workflow_run.head_sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - name: Fetch base branch
         run: |
@@ -299,8 +348,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
-          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -309,6 +358,7 @@ jobs:
     name: Gate
     if: always()
     needs:
+      - pr_validation_gate
       - prepare
       - lint
       - build
@@ -322,7 +372,7 @@ jobs:
       - run: |
           results='${{ toJSON(needs.*.result) }}'
           echo "Job results: $results"
-          if [ "${{ github.event_name }}" = "workflow_run" ] && [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ needs.pr_validation_gate.result }}" != "success" ]; then
             echo "::error::PR validation did not pass; code validation was skipped"
             exit 1
           fi

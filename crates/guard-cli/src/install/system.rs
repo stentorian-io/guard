@@ -23,10 +23,14 @@ const PLIST_PATH: &str = paths::PLIST_PATH;
 const BINARIES: &[&str] = paths::INSTALLED_BINARIES;
 const DYLIB: &str = paths::HOOK_DYLIB;
 
-/// Check whether the hardened installation is present.
-/// Returns true if the deployed daemon binary exists under the system bin dir.
+/// Check whether the hardened installation is present and internally coherent.
 pub fn is_installed() -> bool {
-    Path::new(BIN_DIR).join("stt-guard-daemon").exists()
+    install_health().is_healthy()
+}
+
+/// Return the full hardened-install health result.
+pub fn install_health() -> crate::install::health::InstallHealth {
+    crate::install::health::check_installation()
 }
 
 /// Return the system-level state directory path.
@@ -257,8 +261,7 @@ fn deploy_binaries() -> Result<(), CliError> {
 
 fn source_bin_dir() -> Result<PathBuf, CliError> {
     // The running stt-guard binary's parent directory contains the build artifacts.
-    let exe = std::env::current_exe()
-        .map_err(|e| CliError::Other(format!("current_exe: {e}")))?;
+    let exe = std::env::current_exe().map_err(|e| CliError::Other(format!("current_exe: {e}")))?;
     exe.parent()
         .map(|p| p.to_path_buf())
         .ok_or_else(|| CliError::Other("cannot determine source binary directory".into()))
@@ -270,10 +273,7 @@ fn create_directories() -> Result<(), CliError> {
         .map_err(|e| CliError::Other(format!("create {STATE_DIR}: {e}")))?;
     run_cmd(
         "chown",
-        &[
-            &format!("{SERVICE_USER}:{SERVICE_USER}"),
-            STATE_DIR,
-        ],
+        &[&format!("{SERVICE_USER}:{SERVICE_USER}"), STATE_DIR],
         "set state dir ownership",
     )?;
     run_cmd("chmod", &["700", STATE_DIR], "set state dir permissions")?;
@@ -294,44 +294,11 @@ fn create_directories() -> Result<(), CliError> {
 fn install_launchdaemon() -> Result<(), CliError> {
     eprintln!("  Installing LaunchDaemon ({PLIST_LABEL})...");
 
-    let plist_content = format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>{PLIST_LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>{BIN_DIR}/stt-guard-daemon</string>
-        <string>serve</string>
-        <string>--state-dir</string>
-        <string>{STATE_DIR}</string>
-    </array>
-    <key>UserName</key>
-    <string>{SERVICE_USER}</string>
-    <key>GroupName</key>
-    <string>{SERVICE_USER}</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>{LOG_DIR}/daemon.out.log</string>
-    <key>StandardErrorPath</key>
-    <string>{LOG_DIR}/daemon.err.log</string>
-</dict>
-</plist>
-"#
-    );
+    let plist_content = crate::install::health::expected_launchdaemon_plist();
 
     std::fs::write(PLIST_PATH, plist_content)
         .map_err(|e| CliError::Other(format!("write {PLIST_PATH}: {e}")))?;
-    run_cmd(
-        "chown",
-        &["root:wheel", PLIST_PATH],
-        "set plist ownership",
-    )?;
+    run_cmd("chown", &["root:wheel", PLIST_PATH], "set plist ownership")?;
     run_cmd("chmod", &["644", PLIST_PATH], "set plist permissions")?;
 
     Ok(())
@@ -362,9 +329,7 @@ fn run_cmd(program: &str, args: &[&str], description: &str) -> Result<(), CliErr
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CliError::Other(format!(
-            "{description} failed: {stderr}"
-        )));
+        return Err(CliError::Other(format!("{description} failed: {stderr}")));
     }
     Ok(())
 }

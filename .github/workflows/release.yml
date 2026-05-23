@@ -31,6 +31,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   build:
@@ -133,15 +134,46 @@ jobs:
           cat artifacts/release-meta.json
 
       - name: Package target tarballs
+        id: package
         run: |
           set -euo pipefail
           for target_dir in artifacts/guard-*; do
             target="${target_dir#artifacts/guard-}"
             cp artifacts/release-meta.json "${target_dir}/release-meta.json"
+            tarball="artifacts/guard-${{ steps.version.outputs.version }}-${target}.tar.gz"
             tar -C "${target_dir}" \
-              -czf "artifacts/guard-${{ steps.version.outputs.version }}-${target}.tar.gz" \
+              -czf "${tarball}" \
               stt-guard stt-guard-daemon stt-guard-watchdog libguard_hook.dylib release-meta.json
+            sha=$(sha256sum "${tarball}" | awk '{print $1}')
+            case "${target}" in
+              aarch64-apple-darwin)
+                echo "arm64_tarball=${tarball}" >> "$GITHUB_OUTPUT"
+                echo "arm64_sha256=${sha}" >> "$GITHUB_OUTPUT"
+                ;;
+              x86_64-apple-darwin)
+                echo "x86_64_tarball=${tarball}" >> "$GITHUB_OUTPUT"
+                echo "x86_64_sha256=${sha}" >> "$GITHUB_OUTPUT"
+                ;;
+              *)
+                echo "unexpected target: ${target}" >&2
+                exit 1
+                ;;
+            esac
           done
+
+      - name: Generate Homebrew formula
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/Formula
+          base_url="https://github.com/stentorian-io/guard/releases/download/${{ steps.version.outputs.tag }}"
+          scripts/generate-homebrew-formula.sh \
+            "${{ steps.version.outputs.version }}" \
+            "${base_url}/$(basename '${{ steps.package.outputs.arm64_tarball }}')" \
+            "${{ steps.package.outputs.arm64_sha256 }}" \
+            "${base_url}/$(basename '${{ steps.package.outputs.x86_64_tarball }}')" \
+            "${{ steps.package.outputs.x86_64_sha256 }}" \
+            > artifacts/Formula/stt-guard.rb
+          ruby -c artifacts/Formula/stt-guard.rb
 
       - name: Create GitHub Release
         if: github.event_name == 'push' || inputs.dry_run == 'false'
@@ -153,6 +185,66 @@ jobs:
           files: |
             artifacts/guard-${{ steps.version.outputs.version }}-*.tar.gz
             artifacts/release-meta.json
+
+      - name: Load GitHub app credentials from 1Password
+        if: github.event_name == 'push'
+        uses: 1password/load-secrets-action@v2
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          GH_APP_ID: op://Stentorian/GitHub Settings App/username
+          GH_APP_PRIVATE_KEY: op://Stentorian/GitHub Settings App/key
+
+      - name: Generate Homebrew tap app token
+        if: github.event_name == 'push'
+        id: tap-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ env.GH_APP_ID }}
+          private-key: ${{ env.GH_APP_PRIVATE_KEY }}
+          owner: stentorian-io
+          repositories: "homebrew-tap"
+
+      - name: Checkout Homebrew tap
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          repository: stentorian-io/homebrew-tap
+          token: ${{ steps.tap-token.outputs.token }}
+          path: homebrew-tap
+
+      - name: Update Homebrew tap formula
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p homebrew-tap/Formula
+          cp artifacts/Formula/stt-guard.rb homebrew-tap/Formula/stt-guard.rb
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap checkout -B "stt-guard-${{ steps.version.outputs.version }}"
+          git -C homebrew-tap add Formula/stt-guard.rb
+          if git -C homebrew-tap diff --cached --quiet; then
+            echo "Homebrew formula is already current."
+            exit 0
+          fi
+          git -C homebrew-tap commit -m "stt-guard ${{ steps.version.outputs.version }}"
+          git -C homebrew-tap push --force-with-lease origin "stt-guard-${{ steps.version.outputs.version }}"
+          if gh pr view "stt-guard-${{ steps.version.outputs.version }}" --repo stentorian-io/homebrew-tap >/dev/null 2>&1; then
+            gh pr edit "stt-guard-${{ steps.version.outputs.version }}" \
+              --repo stentorian-io/homebrew-tap \
+              --title "stt-guard ${{ steps.version.outputs.version }}" \
+              --body "Updates the stt-guard formula for ${{ steps.version.outputs.tag }}."
+          else
+            gh pr create \
+              --repo stentorian-io/homebrew-tap \
+              --base main \
+              --head "stt-guard-${{ steps.version.outputs.version }}" \
+              --title "stt-guard ${{ steps.version.outputs.version }}" \
+              --body "Updates the stt-guard formula for ${{ steps.version.outputs.tag }}."
+          fi
 
       - name: Dry-run summary
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true'

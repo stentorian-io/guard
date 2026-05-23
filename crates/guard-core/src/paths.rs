@@ -47,7 +47,9 @@ pub const CLI_BIN: &str = "stt-guard";
 pub const DAEMON_BIN: &str = "stt-guard-daemon";
 pub const HOOK_DYLIB: &str = "stt-guard-hook.dylib";
 
-pub const INSTALLED_BINARIES: &[&str] = &[CLI_BIN, DAEMON_BIN];
+pub const WATCHDOG_BIN: &str = "stt-guard-watchdog";
+
+pub const INSTALLED_BINARIES: &[&str] = &[CLI_BIN, DAEMON_BIN, WATCHDOG_BIN];
 
 pub const SYSTEM_HOOK_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook.dylib";
 pub const HOMEBREW_HOOK_PATH: &str = "/opt/homebrew/lib/stt-guard/stt-guard-hook.dylib";

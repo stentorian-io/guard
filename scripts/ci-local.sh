@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 #
 # Run local equivalents of the split PR/code validation workflows, with no GH
-# minutes consumed.
+# minutes consumed. Full local CI follows .github/workflows/code-validation.yml;
+# act is only used for the cheap .github/workflows/pr-validation.yml gate.
 #
 # Usage:
-#   scripts/ci-local.sh             # full validation (build + e2e tests + ubuntu jobs via act)
-#   scripts/ci-local.sh --quick     # skip cargo build + e2e (lint + fixture only)
-#   scripts/ci-local.sh --no-act    # skip act for the ubuntu jobs
+#   scripts/ci-local.sh             # code-validation parity (lint + build + tests + e2e)
+#   scripts/ci-local.sh --quick     # skip code-validation build/tests (lint + fixture only)
+#   scripts/ci-local.sh --no-act    # skip act for the cheap PR-validation gate
 #
 # Skip the heavy stuff in a hook: CI_LOCAL_SKIP_E2E=1
 #
@@ -105,10 +106,10 @@ else
   fi
 fi
 
-# ── ubuntu jobs via act (optional) ─────────────────────────────────────────
+# ── PR validation gate via act (optional) ──────────────────────────────────
 if [ "$USE_ACT" -eq 1 ]; then
   if command -v act >/dev/null; then
-    step "Ubuntu jobs via act (lint-markdown)"
+    step "PR validation via act (lint-markdown)"
     event_file="$(mktemp)"
     trap 'rm -f "$event_file"' EXIT
     cat > "$event_file" <<'JSON'
@@ -122,12 +123,12 @@ JSON
   fi
 fi
 
-# ── heavy validation: release build + e2e tests ───────────────────────────
+# ── code-validation workflow parity ───────────────────────────────────────
 if [ "$QUICK" -eq 1 ] || [ "${CI_LOCAL_SKIP_E2E:-0}" -eq 1 ] || [ "$REPO_META_ONLY" -eq 1 ]; then
   if [ "$REPO_META_ONLY" -eq 1 ]; then
-    warn "skipping cargo build + e2e (repo-meta-only change)"
+    warn "skipping code-validation build/tests (repo-meta-only change)"
   else
-    warn "skipping cargo build + e2e (--quick or CI_LOCAL_SKIP_E2E=1)"
+    warn "skipping code-validation build/tests (--quick or CI_LOCAL_SKIP_E2E=1)"
   fi
   echo -e "\n${GREEN}${BOLD}Quick checks passed.${RESET}"
   exit 0
@@ -135,7 +136,11 @@ fi
 
 fp=$(e2e_fingerprint)
 
-step "cargo build --workspace --release"
+step "code-validation lint: test env var hygiene"
+scripts/lint-test-env-vars.sh || fail "lint test env var hygiene"
+pass "lint test env var hygiene"
+
+step "code-validation build: cargo build --workspace --release"
 if cache_hit "ci-local:cargo-build" "$fp"; then
   skip "cargo build"
 else
@@ -144,7 +149,17 @@ else
   pass "cargo build"
 fi
 
-# Tests skipped due to known pre-existing issues:
+step "code-validation unit tests"
+cargo test --workspace --exclude guard-e2e --lib --bins --quiet \
+  || fail "cargo test unit targets"
+pass "cargo test unit targets"
+
+step "code-validation integration tests"
+cargo test --workspace --exclude guard-e2e --tests --quiet \
+  || fail "cargo test integration targets"
+pass "cargo test integration targets"
+
+# E2E tests skipped due to known pre-existing issues:
 #   failure_modes_daemon_killed — step-1 hostname connect fails in CI harness (peer auth)
 E2E_TESTS=(
   "ua_parser_js_demo:VAL-01 ua-parser-js@0.7.29 demo"
@@ -159,7 +174,7 @@ else
   for entry in "${E2E_TESTS[@]}"; do
     test_name="${entry%%:*}"
     label="${entry#*:}"
-    step "$label"
+    step "code-validation e2e: $label"
     cargo test -p guard-e2e --test "$test_name" --release -- --nocapture \
       || fail "$label"
     pass "$label"
@@ -173,14 +188,16 @@ fi
 PRIVILEGED_VAL05_RAN=0
 if [ "${CI_LOCAL_PRIVILEGED_INSTALL:-0}" -eq 1 ]; then
   PRIVILEGED_VAL05_RAN=1
-  step "VAL-05 privileged init and install health"
+  step "code-validation e2e: VAL-05 privileged init and install health"
   STT_GUARD_E2E_PRIVILEGED_INSTALL=1 \
     cargo test -p guard-e2e --test hardened_install_health --release -- --nocapture \
     || fail "VAL-05 privileged init and install health"
   pass "VAL-05 privileged init and install health"
 else
-  warn "skipping VAL-05 privileged install health (set CI_LOCAL_PRIVILEGED_INSTALL=1 and ensure sudo -n works)"
+  warn "skipping code-validation e2e: VAL-05 privileged install health (set CI_LOCAL_PRIVILEGED_INSTALL=1 and ensure sudo -n works)"
 fi
+
+warn "skipping code-validation secret scan locally (GitHub runs trufflehog on PR range)"
 
 if [ "$PRIVILEGED_VAL05_RAN" -eq 1 ]; then
   echo -e "\n${GREEN}${BOLD}All CI checks passed locally.${RESET}"

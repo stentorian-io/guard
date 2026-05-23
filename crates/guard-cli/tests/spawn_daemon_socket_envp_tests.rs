@@ -4,11 +4,22 @@
 
 use std::ffi::OsStr;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+fn built_hook_dylib() -> PathBuf {
+    let mut dir = std::env::current_exe().expect("current test binary path");
+    while dir.pop() {
+        let candidate = dir.join("libguard_hook.dylib");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    panic!("libguard_hook.dylib must be built before spawn tests run");
+}
 
 #[test]
 fn spawn_wrapped_does_not_set_daemon_socket_env_var() {
-    let dylib = tempfile::NamedTempFile::new().unwrap();
+    let dylib = built_hook_dylib();
     let mfst = tempfile::NamedTempFile::new().unwrap();
     let outdir = tempfile::tempdir().unwrap();
     let outfile = outdir.path().join("sock_capture");
@@ -20,7 +31,7 @@ fn spawn_wrapped_does_not_set_daemon_socket_env_var() {
     );
     let args: Vec<&OsStr> = vec![OsStr::new("-c"), OsStr::new(&cmd)];
 
-    let pid = guard_cli::spawn::spawn_wrapped(prog, &args, dylib.path(), mfst.path())
+    let pid = guard_cli::spawn::spawn_wrapped(prog, &args, &dylib, mfst.path())
         .expect("spawn_wrapped");
     assert!(pid > 0);
 

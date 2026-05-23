@@ -30,6 +30,7 @@ tempfile = { workspace = true }
 guard-daemon = { path = "../guard-daemon" }
 criterion = { workspace = true }
 hdrhistogram = "7.5.4"
+p256 = { workspace = true }
 
 [[bench]]
 name = "hot_path"

@@ -10,6 +10,8 @@ use std::path::Path;
 use guard_core::paths::{ENV_DYLD, ENV_SNAPSHOT_MANIFEST as ENV_MANIFEST};
 
 const ENV_DAEMON_SOCKET: &str = "STT_GUARD_DAEMON_SOCKET";
+const ENV_TRUSTED_SIGNERS_MANIFEST: &str = "STT_GUARD_TRUSTED_SIGNERS_MANIFEST";
+const ENV_ALLOW_TEST_SIGNER: &str = "STT_GUARD_ALLOW_TEST_SIGNER";
 
 pub fn spawn_wrapped(
     program: &Path,
@@ -24,6 +26,8 @@ pub fn spawn_wrapped(
             if k_bytes == ENV_DYLD.as_bytes()
                 || k_bytes == ENV_MANIFEST.as_bytes()
                 || k_bytes == ENV_DAEMON_SOCKET.as_bytes()
+                || k_bytes == ENV_TRUSTED_SIGNERS_MANIFEST.as_bytes()
+                || k_bytes == ENV_ALLOW_TEST_SIGNER.as_bytes()
             {
                 return None;
             }
@@ -143,6 +147,8 @@ pub fn spawn_wrapped_with_pgid(
         if kb == ENV_DYLD.as_bytes()
             || kb == ENV_MANIFEST.as_bytes()
             || kb == ENV_DAEMON_SOCKET.as_bytes()
+            || kb == ENV_TRUSTED_SIGNERS_MANIFEST.as_bytes()
+            || kb == ENV_ALLOW_TEST_SIGNER.as_bytes()
         {
             continue;
         }

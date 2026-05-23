@@ -39,6 +39,20 @@ pub enum LoadError {
     },
     Io(std::io::Error),
     Codec(String),
+    SnapshotSignatureMissing,
+    SnapshotSignatureMismatch(String),
+    SnapshotSignerUntrusted,
+    TrustedSignerManifestInvalid(String),
+}
+
+struct ManifestSnapshotSignature {
+    scheme: String,
+    signer_kind: String,
+    public_key_sha256: String,
+    public_key_x963: Vec<u8>,
+    signature_der: Vec<u8>,
+    signed_payload_sha256: String,
+    signature_created_at_unix_ms: i64,
 }
 
 pub struct LoadedSnapshot {
@@ -68,7 +82,11 @@ impl std::fmt::Debug for LoadedSnapshot {
 pub fn well_known_state_dir() -> PathBuf {
     // Check STT_GUARD_STATE_DIR override first (using libc getenv to stay
     // allocation-free on the ctor path).
-    let override_val = unsafe { getenv_libc(c"STT_GUARD_STATE_DIR") };
+    let override_val = unsafe {
+        getenv_libc(CStr::from_bytes_with_nul_unchecked(
+            b"STT_GUARD_STATE_DIR\0",
+        ))
+    };
     if let Some(s) = override_val {
         if !s.is_empty() {
             return PathBuf::from(s);
@@ -93,8 +111,12 @@ unsafe fn getenv_libc(name: &CStr) -> Option<String> {
 }
 
 pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
-    let manifest_env =
-        unsafe { getenv_libc(c"STT_GUARD_SNAPSHOT_MANIFEST") }.ok_or(LoadError::EnvUnset)?;
+    let manifest_env = unsafe {
+        getenv_libc(CStr::from_bytes_with_nul_unchecked(
+            b"STT_GUARD_SNAPSHOT_MANIFEST\0",
+        ))
+    }
+    .ok_or(LoadError::EnvUnset)?;
     let manifest_path = PathBuf::from(&manifest_env);
     let canonical = manifest_path.canonicalize().map_err(LoadError::Io)?;
     let state_dir = well_known_state_dir()
@@ -127,14 +149,51 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
     if manifest_digest.len() != 64 || !manifest_digest.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(LoadError::ManifestParseFailed);
     }
-    let manifest_hmac = lines.next().and_then(|line| {
-        let h = line.strip_prefix("hmac=")?;
-        if h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()) {
-            Some(h.to_string())
-        } else {
-            None
+    let mut manifest_hmac: Option<String> = None;
+    let mut signature_scheme: Option<String> = None;
+    let mut signer_kind: Option<String> = None;
+    let mut public_key_sha256: Option<String> = None;
+    let mut public_key_x963: Option<Vec<u8>> = None;
+    let mut signature_der: Option<Vec<u8>> = None;
+    let mut signed_payload_sha256: Option<String> = None;
+    let mut signature_created_at_unix_ms: Option<i64> = None;
+    for line in lines {
+        if let Some(h) = line.strip_prefix("hmac=") {
+            if h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()) {
+                manifest_hmac = Some(h.to_string());
+            } else {
+                return Err(LoadError::ManifestParseFailed);
+            }
+        } else if let Some(value) = line.strip_prefix("snapshot_signature_scheme=") {
+            signature_scheme = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("snapshot_signer_kind=") {
+            signer_kind = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("snapshot_public_key_sha256=") {
+            public_key_sha256 = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("snapshot_public_key_x963=") {
+            public_key_x963 = Some(decode_hex(value).map_err(|_| LoadError::ManifestParseFailed)?);
+        } else if let Some(value) = line.strip_prefix("snapshot_signature_der=") {
+            signature_der = Some(decode_hex(value).map_err(|_| LoadError::ManifestParseFailed)?);
+        } else if let Some(value) = line.strip_prefix("snapshot_signed_payload_sha256=") {
+            signed_payload_sha256 = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("snapshot_signature_created_at_unix_ms=") {
+            signature_created_at_unix_ms = Some(
+                value
+                    .parse::<i64>()
+                    .map_err(|_| LoadError::ManifestParseFailed)?,
+            );
         }
-    });
+    }
+    let manifest_signature = ManifestSnapshotSignature {
+        scheme: signature_scheme.ok_or(LoadError::SnapshotSignatureMissing)?,
+        signer_kind: signer_kind.ok_or(LoadError::SnapshotSignatureMissing)?,
+        public_key_sha256: public_key_sha256.ok_or(LoadError::SnapshotSignatureMissing)?,
+        public_key_x963: public_key_x963.ok_or(LoadError::SnapshotSignatureMissing)?,
+        signature_der: signature_der.ok_or(LoadError::SnapshotSignatureMissing)?,
+        signed_payload_sha256: signed_payload_sha256.ok_or(LoadError::SnapshotSignatureMissing)?,
+        signature_created_at_unix_ms: signature_created_at_unix_ms
+            .ok_or(LoadError::SnapshotSignatureMissing)?,
+    };
 
     // Validate snapshot path also under state_dir.
     let snapshot_path = Path::new(snapshot_path_str)
@@ -200,6 +259,8 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
         other => LoadError::Codec(other.to_string()),
     })?;
 
+    verify_snapshot_signature(&snap, &computed, &manifest_signature, &state_dir)?;
+
     // mmap from the SAME fd. Mmap::map operates on the file descriptor
     // independent of the file position (position was consumed by read_to_end
     // but mmap works at the inode level, not the cursor).
@@ -235,6 +296,120 @@ fn load_hmac_key(state_dir: &Path) -> Option<[u8; HMAC_KEY_LEN]> {
         return None;
     }
     Some(buf)
+}
+
+fn verify_snapshot_signature(
+    snapshot: &guard_core::Snapshot,
+    snapshot_sha256: &str,
+    manifest_signature: &ManifestSnapshotSignature,
+    state_dir: &Path,
+) -> Result<(), LoadError> {
+    let run_uuid = snapshot
+        .run_uuid
+        .as_ref()
+        .ok_or(LoadError::SnapshotSignatureMissing)?;
+    let payload = guard_core::SnapshotSignaturePayloadV1::new(
+        run_uuid.clone(),
+        snapshot_sha256.to_string(),
+        snapshot.generated_at_unix_ms,
+    );
+    let signature = guard_core::SnapshotSignatureV1 {
+        scheme: manifest_signature.scheme.clone(),
+        signer_kind: manifest_signature.signer_kind.clone(),
+        public_key_x963: manifest_signature.public_key_x963.clone(),
+        public_key_sha256: manifest_signature.public_key_sha256.clone(),
+        signature_der: manifest_signature.signature_der.clone(),
+        signed_payload_sha256: manifest_signature.signed_payload_sha256.clone(),
+        signature_created_at_unix_ms: manifest_signature.signature_created_at_unix_ms,
+    };
+    guard_core::verify_snapshot_signature(
+        &payload,
+        &signature,
+        guard_core::RuleSignaturePolicy::Production,
+    )
+    .map_err(|e| LoadError::SnapshotSignatureMismatch(e.to_string()))?;
+    if !trusted_signer_manifest_contains(&signature, state_dir)? {
+        return Err(LoadError::SnapshotSignerUntrusted);
+    }
+    Ok(())
+}
+
+fn trusted_signer_manifest_contains(
+    signature: &guard_core::SnapshotSignatureV1,
+    state_dir: &Path,
+) -> Result<bool, LoadError> {
+    let mut path = guard_core::paths::trusted_rule_signers_path();
+    if cfg!(debug_assertions) && !path.exists() {
+        path = state_dir.join(guard_core::paths::TRUSTED_RULE_SIGNERS_FILENAME);
+    }
+    verify_trusted_signer_manifest_path(&path)?;
+    let contents = std::fs::read_to_string(&path)
+        .map_err(|e| LoadError::TrustedSignerManifestInvalid(e.to_string()))?;
+    guard_core::trusted_signer_matches(
+        &contents,
+        &signature.public_key_sha256,
+        &signature.signer_kind,
+        Some(&signature.public_key_x963),
+    )
+    .map_err(|e| LoadError::TrustedSignerManifestInvalid(e.to_string()))
+}
+
+fn verify_trusted_signer_manifest_path(path: &Path) -> Result<(), LoadError> {
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|e| LoadError::TrustedSignerManifestInvalid(e.to_string()))?;
+    if !meta.file_type().is_file() {
+        return Err(LoadError::TrustedSignerManifestInvalid(
+            "trusted signer manifest is not a regular file".to_string(),
+        ));
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if meta.uid() != 0 || meta.gid() != 0 || meta.mode() & 0o022 != 0 {
+            return Err(LoadError::TrustedSignerManifestInvalid(
+                "trusted signer manifest has unsafe ownership or permissions".to_string(),
+            ));
+        }
+        let parent = path.parent().ok_or_else(|| {
+            LoadError::TrustedSignerManifestInvalid(
+                "trusted signer manifest has no parent directory".to_string(),
+            )
+        })?;
+        let parent_meta = std::fs::symlink_metadata(parent)
+            .map_err(|e| LoadError::TrustedSignerManifestInvalid(e.to_string()))?;
+        if !parent_meta.file_type().is_dir()
+            || parent_meta.uid() != 0
+            || parent_meta.gid() != 0
+            || parent_meta.mode() & 0o022 != 0
+        {
+            return Err(LoadError::TrustedSignerManifestInvalid(
+                "trusted signer manifest parent has unsafe ownership or permissions".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn decode_hex(s: &str) -> Result<Vec<u8>, ()> {
+    if s.len() % 2 != 0 {
+        return Err(());
+    }
+    let mut out = Vec::with_capacity(s.len() / 2);
+    for pair in s.as_bytes().chunks_exact(2) {
+        let hi = hex_value(pair[0])?;
+        let lo = hex_value(pair[1])?;
+        out.push((hi << 4) | lo);
+    }
+    Ok(out)
+}
+
+fn hex_value(b: u8) -> Result<u8, ()> {
+    match b {
+        b'0'..=b'9' => Ok(b - b'0'),
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
+        _ => Err(()),
+    }
 }
 
 fn hex_lower(bytes: &[u8]) -> String {

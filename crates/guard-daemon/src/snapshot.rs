@@ -84,20 +84,39 @@ pub fn publish_run(
     snap: &Snapshot,
     run_uuid: &str,
 ) -> std::io::Result<PublishedSnapshot> {
+    let bytes = snap
+        .encode()
+        .map_err(|e| std::io::Error::other(format!("encode: {e}")))?;
+    publish_run_bytes(state_dir, &bytes, run_uuid, None)
+}
+
+pub fn publish_run_signed_bytes(
+    state_dir: &Path,
+    bytes: &[u8],
+    run_uuid: &str,
+    signature: &guard_core::SnapshotSignatureV1,
+) -> std::io::Result<PublishedSnapshot> {
+    publish_run_bytes(state_dir, bytes, run_uuid, Some(signature))
+}
+
+fn publish_run_bytes(
+    state_dir: &Path,
+    bytes: &[u8],
+    run_uuid: &str,
+    signature: Option<&guard_core::SnapshotSignatureV1>,
+) -> std::io::Result<PublishedSnapshot> {
     let hmac_key = crate::hmac_key::load(state_dir);
-    publish_run_inner(state_dir, snap, run_uuid, hmac_key.as_ref())
+    publish_run_inner(state_dir, bytes, run_uuid, hmac_key.as_ref(), signature)
 }
 
 fn publish_run_inner(
     state_dir: &Path,
-    snap: &Snapshot,
+    bytes: &[u8],
     run_uuid: &str,
     hmac_key: Option<&[u8; 32]>,
+    signature: Option<&guard_core::SnapshotSignatureV1>,
 ) -> std::io::Result<PublishedSnapshot> {
     ensure_runs_dir(state_dir)?;
-    let bytes = snap
-        .encode()
-        .map_err(|e| std::io::Error::other(format!("encode: {e}")))?;
 
     // Snapshot file: tmp + fsync + rename.
     let tmp = run_snapshot_tmp_path(state_dir, run_uuid);
@@ -137,6 +156,30 @@ fn publish_run_inner(
         let mut body = format!("{}\ndigest={}\n", final_path.display(), digest_hex);
         if let Some(ref h) = hmac_hex {
             body.push_str(&format!("hmac={h}\n"));
+        }
+        if let Some(signature) = signature {
+            body.push_str(&format!("snapshot_signature_scheme={}\n", signature.scheme));
+            body.push_str(&format!("snapshot_signer_kind={}\n", signature.signer_kind));
+            body.push_str(&format!(
+                "snapshot_public_key_sha256={}\n",
+                signature.public_key_sha256
+            ));
+            body.push_str(&format!(
+                "snapshot_public_key_x963={}\n",
+                hex_lower(&signature.public_key_x963)
+            ));
+            body.push_str(&format!(
+                "snapshot_signature_der={}\n",
+                hex_lower(&signature.signature_der)
+            ));
+            body.push_str(&format!(
+                "snapshot_signed_payload_sha256={}\n",
+                signature.signed_payload_sha256
+            ));
+            body.push_str(&format!(
+                "snapshot_signature_created_at_unix_ms={}\n",
+                signature.signature_created_at_unix_ms
+            ));
         }
         f.write_all(body.as_bytes())?;
         f.sync_all()?;

@@ -74,6 +74,7 @@ pub use messages::{
     PromptResponse,
     PromptVerdict,
     ProposedRule,
+    PublishSignedSnapshot,
     // v0.3 — ReadInstallArtifacts (tag 0x0C)
     ReadInstallArtifacts,
     ReadInstallArtifactsReply,
@@ -84,6 +85,7 @@ pub use messages::{
     RulePattern,
     RuleRow,
     SigningInfo,
+    SnapshotInputsReply,
     SnapshotReply,
     Status,
     StatusCounters,

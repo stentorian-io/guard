@@ -1,23 +1,23 @@
 //! PrepareSnapshot handler.
 //!
-//! Flow per `stt-guard wrap`:
-//!   1. CLI sends PrepareSnapshot { cwd } before posix_spawn
-//!   2. Concatenates curated allow/deny YAML + SQLite user rules + lockfile-discovered registries
-//!   3. Sorts by RuleTier
-//!   4. Writes runs/{uuid}.cbor + runs/{uuid}.manifest atomically
-//!   5. Inserts RunRecord into ProcessTree (GC will use it on tracked-root exit)
-//!   6. Returns SnapshotReply::Ok { manifest_path, run_uuid }
+//! Legacy flow still supports daemon-built snapshots for compatibility. The
+//! signed-snapshot flow splits this into collecting verified inputs, letting the
+//! CLI build and hardware-sign exact snapshot bytes, and then publishing those
+//! bytes verbatim.
 
-use crate::ipc_server::DaemonState;
+use crate::ipc_server::{DaemonState, PendingSnapshotInput};
 use crate::rule_store::RuleStore;
-use crate::snapshot::publish_run;
+use crate::snapshot::{publish_run, publish_run_signed_bytes};
 use crate::state_dir::run_manifest_path;
 use crate::tracked::{ProcessTree, RunRecord};
 use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier, SnapshotBuildInput};
-use guard_ipc::SnapshotReply;
+use guard_ipc::{PublishSignedSnapshot, SnapshotInputsReply, SnapshotReply};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
+
+const PENDING_SNAPSHOT_INPUT_TTL: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug, thiserror::Error)]
 pub enum PrepareError {
@@ -29,54 +29,39 @@ pub enum PrepareError {
     Merge(String),
 }
 
-pub fn handle_prepare_snapshot(
+pub struct CollectedSnapshotBuildInput {
+    pub input: SnapshotBuildInput,
+    pub is_tty: bool,
+    pub baseline_mode: bool,
+}
+
+fn new_run_uuid() -> Result<String, String> {
+    let mut buf = [0u8; 16];
+    getrandom::getrandom(&mut buf).map_err(|_| "getrandom failed".to_string())?;
+    buf[6] = (buf[6] & 0x0f) | 0x40; // version 4
+    buf[8] = (buf[8] & 0x3f) | 0x80; // variant 1
+    Ok(format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9],
+        buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
+    ))
+}
+
+fn collect_snapshot_build_input(
     cwd: &Path,
     curated: &[AllowlistEntry],
     rule_store: &RuleStore,
-    process_tree: &Arc<ProcessTree>,
-    state_dir: &Path,
     rule_signature_policy: guard_core::RuleSignaturePolicy,
     is_tty: bool,
     baseline_mode: bool,
-) -> SnapshotReply {
-    let run_uuid = {
-        let mut buf = [0u8; 16];
-        if getrandom::getrandom(&mut buf).is_err() {
-            return SnapshotReply::err("getrandom failed");
-        }
-        buf[6] = (buf[6] & 0x0f) | 0x40; // version 4
-        buf[8] = (buf[8] & 0x3f) | 0x80; // variant 1
-        format!(
-            "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-            buf[0],
-            buf[1],
-            buf[2],
-            buf[3],
-            buf[4],
-            buf[5],
-            buf[6],
-            buf[7],
-            buf[8],
-            buf[9],
-            buf[10],
-            buf[11],
-            buf[12],
-            buf[13],
-            buf[14],
-            buf[15],
-        )
-    };
-
-    let cwd = match validate_cwd(cwd) {
-        Ok(p) => p,
-        Err(e) => {
-            warn!(error = %e, cwd = %cwd.display(), "PrepareSnapshot: rejecting suspicious cwd");
-            return SnapshotReply::err(format!("invalid cwd: {e}"));
-        }
-    };
+) -> Result<CollectedSnapshotBuildInput, String> {
+    let run_uuid = new_run_uuid()?;
+    let cwd = validate_cwd(cwd).map_err(|e| {
+        warn!(error = %e, cwd = %cwd.display(), "PrepareSnapshot: rejecting suspicious cwd");
+        format!("invalid cwd: {e}")
+    })?;
     let cwd = cwd.as_path();
 
-    // 0. Load disabled curated patterns.
     let disabled = match rule_store.disabled_curated_patterns() {
         Ok(d) => d,
         Err(e) => {
@@ -94,19 +79,16 @@ pub fn handle_prepare_snapshot(
         );
     }
 
-    // 1. SQLite user rules.
-    let user_entries = match rule_store.all_verified_user_rules(rule_signature_policy) {
-        Ok(r) => r,
-        Err(e) => {
+    let verified_user_entries = rule_store
+        .all_verified_user_rules(rule_signature_policy)
+        .map_err(|e| {
             warn!(
                 error = %e,
                 "PrepareSnapshot: user rule signature verification failed; failing closed"
             );
-            return SnapshotReply::err(format!("user rule signature verification failed: {e}"));
-        }
-    };
+            format!("user rule signature verification failed: {e}")
+        })?;
 
-    // 2. Discover lockfile near cwd and extract custom registry hostnames.
     let lockfile_entries: Vec<AllowlistEntry> = match guard_core::lockfile::discover_lockfile(cwd) {
         Some(lockfile_path) => match guard_core::lockfile::extract_registries(&lockfile_path) {
             Some(lr) => {
@@ -137,41 +119,77 @@ pub fn handle_prepare_snapshot(
         None => Vec::new(),
     };
 
-    // 3. Deterministically build snapshot from verified inputs.
-    let disabled_curated_patterns = if disabled.is_empty() {
-        std::collections::BTreeSet::new()
-    } else {
-        disabled.iter().cloned().collect()
-    };
-    let snap = guard_core::build_snapshot(SnapshotBuildInput {
-        run_uuid: run_uuid.clone(),
-        generated_at_unix_ms: unix_ms_now(),
-        curated_entries: curated.to_vec(),
-        disabled_curated_patterns,
-        verified_user_entries: user_entries,
-        lockfile_entries,
-    });
+    Ok(CollectedSnapshotBuildInput {
+        input: SnapshotBuildInput {
+            run_uuid,
+            generated_at_unix_ms: unix_ms_now(),
+            curated_entries: curated.to_vec(),
+            disabled_curated_patterns: disabled.iter().cloned().collect(),
+            verified_user_entries,
+            lockfile_entries,
+        },
+        is_tty,
+        baseline_mode,
+    })
+}
 
-    // 5. Publish per-run snapshot.
-    let pub_ = match publish_run(state_dir, &snap, &run_uuid) {
-        Ok(p) => p,
-        Err(e) => {
-            return SnapshotReply::err(format!("publish_run: {e}"));
-        }
-    };
-
-    // 6. Insert RunRecord.
+fn record_run(
+    process_tree: &Arc<ProcessTree>,
+    state_dir: &Path,
+    run_uuid: &str,
+    snapshot_path: std::path::PathBuf,
+    is_tty: bool,
+    baseline_mode: bool,
+) {
     process_tree.insert_run(RunRecord {
-        run_uuid: run_uuid.clone(),
+        run_uuid: run_uuid.to_string(),
         tracked_root: guard_core::AuditToken { val: [0; 8] },
-        snapshot_path: pub_.path.clone(),
-        manifest_path: run_manifest_path(state_dir, &run_uuid),
+        snapshot_path,
+        manifest_path: run_manifest_path(state_dir, run_uuid),
         is_tty,
         baseline_mode,
     });
+    process_tree.set_run_is_tty(run_uuid, is_tty);
+    process_tree.set_run_baseline_mode(run_uuid, baseline_mode);
+}
 
-    process_tree.set_run_is_tty(&run_uuid, is_tty);
-    process_tree.set_run_baseline_mode(&run_uuid, baseline_mode);
+pub fn handle_prepare_snapshot(
+    cwd: &Path,
+    curated: &[AllowlistEntry],
+    rule_store: &RuleStore,
+    process_tree: &Arc<ProcessTree>,
+    state_dir: &Path,
+    rule_signature_policy: guard_core::RuleSignaturePolicy,
+    is_tty: bool,
+    baseline_mode: bool,
+) -> SnapshotReply {
+    let collected = match collect_snapshot_build_input(
+        cwd,
+        curated,
+        rule_store,
+        rule_signature_policy,
+        is_tty,
+        baseline_mode,
+    ) {
+        Ok(collected) => collected,
+        Err(e) => return SnapshotReply::err(e),
+    };
+    let run_uuid = collected.input.run_uuid.clone();
+    let snap = guard_core::build_snapshot(collected.input);
+
+    let pub_ = match publish_run(state_dir, &snap, &run_uuid) {
+        Ok(p) => p,
+        Err(e) => return SnapshotReply::err(format!("publish_run: {e}")),
+    };
+
+    record_run(
+        process_tree,
+        state_dir,
+        &run_uuid,
+        pub_.path.clone(),
+        is_tty,
+        baseline_mode,
+    );
 
     info!(
         run_uuid = %run_uuid,
@@ -188,22 +206,146 @@ pub fn handle_prepare_snapshot(
     )
 }
 
-/// Production entry point used by the IPC dispatcher.
-pub fn handle_prepare_snapshot_v4_full(
+fn prune_pending_snapshot_inputs(state: &Arc<DaemonState>) {
+    state
+        .pending_snapshot_inputs
+        .lock()
+        .expect("pending snapshot inputs mutex")
+        .retain(|_, pending| pending.prepared_at.elapsed() < PENDING_SNAPSHOT_INPUT_TTL);
+}
+
+pub fn handle_prepare_snapshot_inputs_full(
     state: &Arc<DaemonState>,
     cwd: &Path,
     is_tty: bool,
     baseline_mode: bool,
-) -> SnapshotReply {
-    handle_prepare_snapshot(
+) -> SnapshotInputsReply {
+    prune_pending_snapshot_inputs(state);
+    match collect_snapshot_build_input(
         cwd,
         &state.curated,
         &state.rule_store,
-        &state.process_tree,
-        &state.state_dir,
         state.rule_signature_policy,
         is_tty,
         baseline_mode,
+    ) {
+        Ok(collected) => {
+            state
+                .pending_snapshot_inputs
+                .lock()
+                .expect("pending snapshot inputs mutex")
+                .insert(
+                    collected.input.run_uuid.clone(),
+                    PendingSnapshotInput {
+                        input: collected.input.clone(),
+                        is_tty: collected.is_tty,
+                        baseline_mode: collected.baseline_mode,
+                        prepared_at: Instant::now(),
+                    },
+                );
+            SnapshotInputsReply::ok(collected.input, collected.is_tty, collected.baseline_mode)
+        }
+        Err(e) => SnapshotInputsReply::err(e),
+    }
+}
+
+pub fn handle_publish_signed_snapshot_full(
+    state: &Arc<DaemonState>,
+    req: PublishSignedSnapshot,
+) -> SnapshotReply {
+    if req.schema_version != guard_ipc::IPC_SCHEMA_V5 {
+        return SnapshotReply::err(format!(
+            "schema_version {} != IPC_SCHEMA_V5",
+            req.schema_version
+        ));
+    }
+    prune_pending_snapshot_inputs(state);
+    let Some(pending) = state
+        .pending_snapshot_inputs
+        .lock()
+        .expect("pending snapshot inputs mutex")
+        .remove(&req.run_uuid)
+    else {
+        return SnapshotReply::err("signed snapshot was not prepared by daemon");
+    };
+    if pending.is_tty != req.is_tty || pending.baseline_mode != req.baseline_mode {
+        return SnapshotReply::err("signed snapshot run flags mismatch");
+    }
+    let expected_bytes = match guard_core::build_snapshot_bytes(pending.input) {
+        Ok(bytes) => bytes,
+        Err(e) => return SnapshotReply::err(format!("rebuild prepared snapshot: {e}")),
+    };
+    if expected_bytes != req.snapshot_bytes {
+        return SnapshotReply::err("signed snapshot bytes do not match daemon-issued inputs");
+    }
+    let snapshot = match guard_core::Snapshot::decode(&req.snapshot_bytes) {
+        Ok(snapshot) => snapshot,
+        Err(e) => return SnapshotReply::err(format!("decode signed snapshot: {e}")),
+    };
+    if snapshot.run_uuid.as_deref() != Some(req.run_uuid.as_str()) {
+        return SnapshotReply::err("signed snapshot run_uuid mismatch");
+    }
+    let digest_hex = guard_core::sha256_hex(&req.snapshot_bytes);
+    let payload = guard_core::SnapshotSignaturePayloadV1::new(
+        req.run_uuid.clone(),
+        digest_hex,
+        snapshot.generated_at_unix_ms,
+    );
+    if let Err(e) =
+        guard_core::verify_snapshot_signature(&payload, &req.signature, state.rule_signature_policy)
+    {
+        return SnapshotReply::err(format!("snapshot signature verification failed: {e}"));
+    }
+    match state
+        .rule_store
+        .is_trusted_rule_signer(&req.signature.public_key_sha256, &req.signature.signer_kind)
+    {
+        Ok(true) => {}
+        Ok(false) => return SnapshotReply::err("snapshot signer is not trusted"),
+        Err(e) => return SnapshotReply::err(format!("snapshot signer trust check failed: {e}")),
+    }
+    match publish_run_signed_bytes(
+        &state.state_dir,
+        &req.snapshot_bytes,
+        &req.run_uuid,
+        &req.signature,
+    ) {
+        Ok(pub_) => {
+            record_run(
+                &state.process_tree,
+                &state.state_dir,
+                &req.run_uuid,
+                pub_.path.clone(),
+                req.is_tty,
+                req.baseline_mode,
+            );
+            info!(
+                run_uuid = %req.run_uuid,
+                is_tty = req.is_tty,
+                baseline_mode = req.baseline_mode,
+                snapshot = %pub_.path.display(),
+                "PublishSignedSnapshot OK"
+            );
+            SnapshotReply::ok(
+                run_manifest_path(&state.state_dir, &req.run_uuid)
+                    .display()
+                    .to_string(),
+                req.run_uuid,
+            )
+        }
+        Err(e) => SnapshotReply::err(format!("publish signed snapshot: {e}")),
+    }
+}
+
+/// Production entry point used by the IPC dispatcher.
+pub fn handle_prepare_snapshot_v4_full(
+    _state: &Arc<DaemonState>,
+    _cwd: &Path,
+    _is_tty: bool,
+    _baseline_mode: bool,
+) -> SnapshotReply {
+    SnapshotReply::err(
+        "signed snapshot flow required; use PrepareSnapshotInputs and PublishSignedSnapshot",
     )
 }
 

@@ -27,7 +27,7 @@ use crate::prompt::{PromptDedup, RecentGapsRing};
 use crate::tracked::{CoverageGap, ProcessTree};
 use crossbeam_channel::{bounded, TrySendError};
 use guard_core::AuditToken;
-use guard_ipc::frame::{read_frame, write_frame};
+use guard_ipc::frame::write_frame;
 use guard_ipc::{
     BaselineCommit, BaselineCommitReply, DeleteInstallArtifacts, DeleteInstallArtifactsReply,
     DenyNotify, DenyNotifyAck, DisableCuratedRule, DisableCuratedRuleReply, DylibLoaded,
@@ -35,8 +35,9 @@ use guard_ipc::{
     EnvNotPropagatedGapAck, ExecAck, ExecBlocked, ExecBlockedAck, ExecEvent, ForkAck, ForkEvent,
     InsertUserRule, InsertUserRuleReply, IpcError, ListRules, ListRulesReply, PersistenceWrite,
     PersistenceWriteAck, Ping, PingReply, PrepareSnapshot, PromptChannelInit, PromptChannelInitAck,
-    ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply, Resolve, ResolveReply,
-    SnapshotReply, Status, StatusReply, IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4,
+    PublishSignedSnapshot, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply,
+    Resolve, ResolveReply, SnapshotInputsReply, SnapshotReply, Status, StatusReply, IPC_SCHEMA_V2,
+    IPC_SCHEMA_V3, IPC_SCHEMA_V4, IPC_SCHEMA_V5,
 };
 use guard_os::codesign::is_hardened_runtime;
 use guard_os::process::{kernel_pidversion, process_uid};
@@ -47,7 +48,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tracing::{debug, error, info, warn};
 
 // ============================================================================
@@ -177,6 +178,14 @@ impl DeferredResolveTable {
 // threads on user prompts (indefinite hold).
 pub const WORKER_THREADS: usize = 32;
 pub const ACCEPT_QUEUE_DEPTH: usize = 64;
+pub const IPC_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
+
+pub struct PendingSnapshotInput {
+    pub input: guard_core::SnapshotBuildInput,
+    pub is_tty: bool,
+    pub baseline_mode: bool,
+    pub prepared_at: std::time::Instant,
+}
 
 /// Shared daemon state passed to every worker handler.
 ///
@@ -203,6 +212,7 @@ pub struct DaemonState {
     pub startup_instant: std::time::Instant,
     // Per-message HMAC key for IPC frame signing. Reuses the snapshot HMAC key.
     pub ipc_hmac_key: Option<[u8; 32]>,
+    pub pending_snapshot_inputs: Arc<Mutex<HashMap<String, PendingSnapshotInput>>>,
     // Issue #31: production accepts only hardware-backed signer kinds.
     pub rule_signature_policy: guard_core::RuleSignaturePolicy,
 }
@@ -241,6 +251,7 @@ impl DaemonState {
             deferred_resolve: Arc::new(DeferredResolveTable::new()),
             startup_instant: std::time::Instant::now(),
             ipc_hmac_key: None,
+            pending_snapshot_inputs: Arc::new(Mutex::new(HashMap::new())),
             rule_signature_policy: guard_core::RuleSignaturePolicy::Production,
         }
     }
@@ -378,6 +389,9 @@ impl IpcServer {
             }
         };
 
+        let _ = stream.set_read_timeout(Some(IPC_STREAM_TIMEOUT));
+        let _ = stream.set_write_timeout(Some(IPC_STREAM_TIMEOUT));
+
         // M006-S02: codesign peer verification.
         if !crate::codesign::should_accept_peer(&peer_token) {
             warn!(
@@ -476,6 +490,12 @@ impl IpcServer {
             }
             FrameKind::Tagged(MessageTag::EnableCuratedRule) => {
                 handle_enable_curated_rule_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(MessageTag::PrepareSnapshotInputs) => {
+                handle_prepare_snapshot_inputs_frame(&mut stream, state);
+            }
+            FrameKind::Tagged(MessageTag::PublishSignedSnapshot) => {
+                handle_publish_signed_snapshot_frame(&mut stream, state);
             }
         }
         clear_conn_signer();
@@ -1209,6 +1229,8 @@ fn handle_prompt_channel_init_frame(mut stream: UnixStream, state: &Arc<DaemonSt
     };
     let state_clone = state.clone();
     let run_uuid = init.run_uuid.clone();
+    let _ = stream.set_read_timeout(None);
+    let _ = stream.set_write_timeout(None);
     let spawn_result = std::thread::Builder::new()
         .name(format!(
             "stt-guard-daemon-prompt-{}",
@@ -1465,6 +1487,15 @@ fn clear_conn_signer() {
     });
 }
 
+fn max_frame_bytes_for_tag(tag: MessageTag) -> u32 {
+    match tag {
+        MessageTag::PrepareSnapshotInputs | MessageTag::PublishSignedSnapshot => {
+            guard_ipc::frame::MAX_SNAPSHOT_FRAME_BYTES
+        }
+        _ => guard_ipc::frame::MAX_FRAME_BYTES,
+    }
+}
+
 fn read_tagged_body<T>(stream: &mut UnixStream, tag: MessageTag) -> Result<T, IpcError>
 where
     T: serde::de::DeserializeOwned,
@@ -1472,8 +1503,10 @@ where
     CONN_SIGNER.with(|cell| {
         let mut borrow = cell.borrow_mut();
         match borrow.as_mut() {
-            Some(signer) => signer.read_signed(stream, tag.as_byte()),
-            None => read_frame(stream),
+            Some(signer) => {
+                signer.read_signed_with_limit(stream, tag.as_byte(), max_frame_bytes_for_tag(tag))
+            }
+            None => guard_ipc::frame::read_frame_with_limit(stream, max_frame_bytes_for_tag(tag)),
         }
     })
 }
@@ -1488,8 +1521,15 @@ where
     CONN_SIGNER.with(|cell| {
         let mut borrow = cell.borrow_mut();
         match borrow.as_mut() {
-            Some(signer) => signer.write_signed(stream, tag.as_byte(), msg),
-            None => write_frame(stream, msg),
+            Some(signer) => signer.write_signed_with_limit(
+                stream,
+                tag.as_byte(),
+                msg,
+                max_frame_bytes_for_tag(tag),
+            ),
+            None => {
+                guard_ipc::frame::write_frame_with_limit(stream, msg, max_frame_bytes_for_tag(tag))
+            }
         }
     })
 }
@@ -1838,6 +1878,65 @@ fn handle_prepare_snapshot_frame(
     );
     if let Err(e) = write_tagged(stream, MessageTag::PrepareSnapshot, &reply) {
         error!(error = %e, "failed to send SnapshotReply");
+    }
+}
+
+fn handle_prepare_snapshot_inputs_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: PrepareSnapshot = match read_tagged_body(stream, MessageTag::PrepareSnapshotInputs) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, "PrepareSnapshotInputs decode failed");
+            let _ = write_tagged(
+                stream,
+                MessageTag::PrepareSnapshotInputs,
+                &SnapshotInputsReply::err(format!("decode: {e}")),
+            );
+            return;
+        }
+    };
+    if !matches!(
+        req.schema_version,
+        IPC_SCHEMA_V2 | IPC_SCHEMA_V3 | IPC_SCHEMA_V5
+    ) {
+        let _ = write_tagged(
+            stream,
+            MessageTag::PrepareSnapshotInputs,
+            &SnapshotInputsReply::err(format!(
+                "schema_version {} not in [IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V5]",
+                req.schema_version
+            )),
+        );
+        return;
+    }
+    let cwd = std::path::PathBuf::from(req.cwd);
+    let reply = crate::handlers::prepare_snapshot::handle_prepare_snapshot_inputs_full(
+        state,
+        &cwd,
+        req.is_tty,
+        req.baseline_mode,
+    );
+    if let Err(e) = write_tagged(stream, MessageTag::PrepareSnapshotInputs, &reply) {
+        error!(error = %e, "failed to send SnapshotInputsReply");
+    }
+}
+
+fn handle_publish_signed_snapshot_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
+    let req: PublishSignedSnapshot =
+        match read_tagged_body(stream, MessageTag::PublishSignedSnapshot) {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(error = %e, "PublishSignedSnapshot decode failed");
+                let _ = write_tagged(
+                    stream,
+                    MessageTag::PublishSignedSnapshot,
+                    &SnapshotReply::err(format!("decode: {e}")),
+                );
+                return;
+            }
+        };
+    let reply = crate::handlers::prepare_snapshot::handle_publish_signed_snapshot_full(state, req);
+    if let Err(e) = write_tagged(stream, MessageTag::PublishSignedSnapshot, &reply) {
+        error!(error = %e, "failed to send PublishSignedSnapshot reply");
     }
 }
 

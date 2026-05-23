@@ -136,6 +136,9 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         deferred_resolve: std::sync::Arc::new(guard_daemon::ipc_server::DeferredResolveTable::new()),
         startup_instant: std::time::Instant::now(),
         ipc_hmac_key: guard_daemon::hmac_key::load(&state_dir),
+        pending_snapshot_inputs: std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
         rule_signature_policy: guard_core::RuleSignaturePolicy::Production,
     });
 

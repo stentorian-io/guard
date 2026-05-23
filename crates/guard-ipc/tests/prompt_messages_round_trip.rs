@@ -197,6 +197,65 @@ fn status_reply_full_ok_round_trip() {
 }
 
 #[test]
+fn large_signed_snapshot_publish_frame_exceeds_old_64k_cap() {
+    let signature = guard_core::SnapshotSignatureV1 {
+        scheme: guard_core::RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.into(),
+        signer_kind: guard_core::SIGNER_KIND_SECURE_ENCLAVE.into(),
+        public_key_x963: vec![1, 2, 3],
+        public_key_sha256: "abc".into(),
+        signature_der: vec![4, 5, 6],
+        signed_payload_sha256: "def".into(),
+        signature_created_at_unix_ms: 1_700_000_000_000,
+    };
+    let msg =
+        PublishSignedSnapshot::new("large-run", vec![0xAB; 128 * 1024], signature, false, false);
+    let mut frame = Vec::new();
+    guard_ipc::frame::write_frame_with_limit(
+        &mut frame,
+        &msg,
+        guard_ipc::frame::MAX_SNAPSHOT_FRAME_BYTES,
+    )
+    .expect("large signed snapshot frame");
+    let decoded: PublishSignedSnapshot = guard_ipc::frame::read_frame_with_limit(
+        &mut std::io::Cursor::new(frame),
+        guard_ipc::frame::MAX_SNAPSHOT_FRAME_BYTES,
+    )
+    .expect("decode frame");
+    assert_eq!(decoded.snapshot_bytes.len(), 128 * 1024);
+}
+
+#[test]
+fn signed_snapshot_messages_round_trip() {
+    let input = guard_core::SnapshotBuildInput {
+        run_uuid: "run-1".into(),
+        generated_at_unix_ms: 1_700_000_000_000,
+        curated_entries: vec![],
+        disabled_curated_patterns: std::collections::BTreeSet::new(),
+        verified_user_entries: vec![],
+        lockfile_entries: vec![],
+    };
+    round_trip(&SnapshotInputsReply::ok(input, true, false));
+    round_trip(&SnapshotInputsReply::err("bad"));
+
+    let signature = guard_core::SnapshotSignatureV1 {
+        scheme: guard_core::RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.into(),
+        signer_kind: guard_core::SIGNER_KIND_SECURE_ENCLAVE.into(),
+        public_key_x963: vec![1, 2, 3],
+        public_key_sha256: "abc".into(),
+        signature_der: vec![4, 5, 6],
+        signed_payload_sha256: "def".into(),
+        signature_created_at_unix_ms: 1_700_000_000_000,
+    };
+    round_trip(&PublishSignedSnapshot::new(
+        "run-1",
+        vec![0xa1, 0x01, 0x02],
+        signature,
+        true,
+        false,
+    ));
+}
+
+#[test]
 fn disable_curated_rule_round_trip() {
     round_trip(&DisableCuratedRule::new(
         "registry.npmjs.org",

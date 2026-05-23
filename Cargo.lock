@@ -715,6 +715,7 @@ dependencies = [
  "hmac",
  "libc",
  "memmap2",
+ "p256",
  "serde",
  "sha2",
  "tempfile",

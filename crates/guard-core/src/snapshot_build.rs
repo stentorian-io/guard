@@ -8,9 +8,11 @@
 
 use std::collections::BTreeSet;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{AllowlistEntry, Snapshot, SCHEMA_V2};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SnapshotBuildInput {
     pub run_uuid: String,
     pub generated_at_unix_ms: i64,

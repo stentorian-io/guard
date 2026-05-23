@@ -138,6 +138,70 @@ pub struct IntelMatch {
 
 // --- PrepareSnapshot / SnapshotReply ----------------------------------------
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SnapshotInputsReply {
+    Ok {
+        schema_version: u16,
+        input: guard_core::SnapshotBuildInput,
+        is_tty: bool,
+        baseline_mode: bool,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl SnapshotInputsReply {
+    pub fn ok(input: guard_core::SnapshotBuildInput, is_tty: bool, baseline_mode: bool) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V5,
+            input,
+            is_tty,
+            baseline_mode,
+        }
+    }
+
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V5,
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PublishSignedSnapshot {
+    pub schema_version: u16,
+    pub run_uuid: String,
+    #[serde(with = "serde_bytes")]
+    pub snapshot_bytes: Vec<u8>,
+    pub signature: guard_core::SnapshotSignatureV1,
+    pub is_tty: bool,
+    pub baseline_mode: bool,
+}
+
+impl PublishSignedSnapshot {
+    pub fn new(
+        run_uuid: impl Into<String>,
+        snapshot_bytes: Vec<u8>,
+        signature: guard_core::SnapshotSignatureV1,
+        is_tty: bool,
+        baseline_mode: bool,
+    ) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V5,
+            run_uuid: run_uuid.into(),
+            snapshot_bytes,
+            signature,
+            is_tty,
+            baseline_mode,
+        }
+    }
+}
+
+// --- PrepareSnapshot / SnapshotReply ----------------------------------------
+
 /// CLI → daemon: sent BEFORE posix_spawn. Daemon merges curated YAML + SQLite
 /// rules, writes per-run snapshot, returns the manifest path the CLI will set
 /// as STT_GUARD_SNAPSHOT_MANIFEST.

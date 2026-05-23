@@ -1,5 +1,13 @@
 use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier, SCHEMA_V2};
+#[cfg(feature = "test-signer")]
+use guard_daemon::gap_detector::GapDetector;
 use guard_daemon::handlers::prepare_snapshot::handle_prepare_snapshot;
+#[cfg(feature = "test-signer")]
+use guard_daemon::handlers::prepare_snapshot::{
+    handle_prepare_snapshot_inputs_full, handle_publish_signed_snapshot_full,
+};
+#[cfg(feature = "test-signer")]
+use guard_daemon::ipc_server::{DaemonState, PendingSnapshotInput};
 use guard_daemon::rule_store::RuleStore;
 use guard_daemon::tracked::ProcessTree;
 use std::sync::Arc;
@@ -32,6 +40,74 @@ fn insert_signed_allow(rs: &RuleStore, pattern: &str) -> i64 {
         .expect("trust signer");
     rs.insert_signed_user_rule(&payload, &signature)
         .expect("insert signed")
+}
+
+#[cfg(feature = "test-signer")]
+fn signed_snapshot_request(
+    run_uuid: &str,
+) -> (
+    guard_core::SnapshotBuildInput,
+    Vec<u8>,
+    guard_core::SnapshotSignatureV1,
+) {
+    let input = guard_core::SnapshotBuildInput {
+        run_uuid: run_uuid.to_string(),
+        generated_at_unix_ms: 1_700_000_000_000,
+        curated_entries: vec![allow("registry.npmjs.org", RuleTier::CuratedAllow)],
+        disabled_curated_patterns: std::collections::BTreeSet::new(),
+        verified_user_entries: vec![],
+        lockfile_entries: vec![],
+    };
+    let bytes = guard_core::build_snapshot_bytes(input.clone()).expect("build snapshot");
+    let payload = guard_core::SnapshotSignaturePayloadV1::new(
+        run_uuid,
+        guard_core::sha256_hex(&bytes),
+        1_700_000_000_000,
+    );
+    let signature =
+        guard_core::rule_signature::test_support::sign_snapshot_with_test_simulator(&payload)
+            .expect("sign snapshot");
+    (input, bytes, signature)
+}
+
+#[cfg(feature = "test-signer")]
+fn daemon_state_for_publish(
+    state_dir: &std::path::Path,
+    input: &guard_core::SnapshotBuildInput,
+    signature: &guard_core::SnapshotSignatureV1,
+    trust_signer: bool,
+) -> Arc<DaemonState> {
+    guard_daemon::state_dir::ensure_runs_dir(state_dir).unwrap();
+    let rule_store =
+        Arc::new(RuleStore::open(&guard_daemon::state_dir::db_path(state_dir)).unwrap());
+    if trust_signer {
+        rule_store
+            .register_trusted_rule_signer_key(
+                &signature.public_key_sha256,
+                &signature.signer_kind,
+                &signature.public_key_x963,
+                "test snapshot signer",
+            )
+            .expect("trust signer");
+    }
+    let mut state = DaemonState::new(
+        Arc::new(ProcessTree::new()),
+        Arc::new(GapDetector::new()),
+        rule_store,
+        Arc::new(vec![]),
+        state_dir.to_path_buf(),
+    );
+    state.rule_signature_policy = guard_core::RuleSignaturePolicy::AllowTestSimulator;
+    state.pending_snapshot_inputs.lock().unwrap().insert(
+        input.run_uuid.clone(),
+        PendingSnapshotInput {
+            input: input.clone(),
+            is_tty: false,
+            baseline_mode: false,
+            prepared_at: std::time::Instant::now(),
+        },
+    );
+    Arc::new(state)
 }
 
 #[test]
@@ -199,4 +275,116 @@ fn prepare_snapshot_fails_closed_on_tampered_user_rule() {
         guard_ipc::SnapshotReply::Err { message, .. }
             if message.contains("user rule signature verification failed")
     ));
+}
+
+#[cfg(feature = "test-signer")]
+#[test]
+fn prepare_snapshot_inputs_prunes_expired_pending_inputs() {
+    let tmp = TempDir::new().unwrap();
+    let state_dir = tmp.path();
+    let (input, _bytes, signature) = signed_snapshot_request("expired-run");
+    let state = daemon_state_for_publish(state_dir, &input, &signature, true);
+    state.pending_snapshot_inputs.lock().unwrap().insert(
+        "expired-run".to_string(),
+        PendingSnapshotInput {
+            input,
+            is_tty: false,
+            baseline_mode: false,
+            prepared_at: std::time::Instant::now() - std::time::Duration::from_secs(11 * 60),
+        },
+    );
+    let reply = handle_prepare_snapshot_inputs_full(&state, tmp.path(), false, false);
+    assert!(matches!(reply, guard_ipc::SnapshotInputsReply::Ok { .. }));
+    let pending = state.pending_snapshot_inputs.lock().unwrap();
+    assert!(!pending.contains_key("expired-run"));
+    assert_eq!(pending.len(), 1, "new prepare should remain pending");
+}
+
+#[cfg(feature = "test-signer")]
+#[test]
+fn publish_signed_snapshot_writes_exact_bytes_and_signature_manifest() {
+    let tmp = TempDir::new().unwrap();
+    let state_dir = tmp.path();
+    let run_uuid = "signed-publish-ok";
+    let (input, bytes, signature) = signed_snapshot_request(run_uuid);
+    let state = daemon_state_for_publish(state_dir, &input, &signature, true);
+    let reply = handle_publish_signed_snapshot_full(
+        &state,
+        guard_ipc::PublishSignedSnapshot::new(run_uuid, bytes.clone(), signature, false, false),
+    );
+    let guard_ipc::SnapshotReply::Ok {
+        run_uuid: reply_uuid,
+        ..
+    } = reply
+    else {
+        panic!("expected publish ok, got {reply:?}");
+    };
+    assert_eq!(reply_uuid, run_uuid);
+    let snap_path = guard_daemon::state_dir::run_snapshot_path(state_dir, run_uuid);
+    assert_eq!(std::fs::read(snap_path).unwrap(), bytes);
+    let manifest = std::fs::read_to_string(guard_daemon::state_dir::run_manifest_path(
+        state_dir, run_uuid,
+    ))
+    .unwrap();
+    assert!(manifest.contains("snapshot_signature_scheme="));
+    assert!(state.process_tree.get_run(run_uuid).is_some());
+}
+
+#[cfg(feature = "test-signer")]
+#[test]
+fn publish_signed_snapshot_rejects_run_uuid_mismatch() {
+    let tmp = TempDir::new().unwrap();
+    let state_dir = tmp.path();
+    let (input, bytes, signature) = signed_snapshot_request("actual-run");
+    let state = daemon_state_for_publish(state_dir, &input, &signature, true);
+    let reply = handle_publish_signed_snapshot_full(
+        &state,
+        guard_ipc::PublishSignedSnapshot::new("claimed-run", bytes, signature, false, false),
+    );
+    assert!(
+        matches!(reply, guard_ipc::SnapshotReply::Err { message, .. } if message.contains("not prepared") || message.contains("run_uuid mismatch"))
+    );
+}
+
+#[cfg(feature = "test-signer")]
+#[test]
+fn publish_signed_snapshot_rejects_signature_over_different_bytes() {
+    let tmp = TempDir::new().unwrap();
+    let state_dir = tmp.path();
+    let run_uuid = "signed-publish-tampered";
+    let (input, mut bytes, signature) = signed_snapshot_request(run_uuid);
+    let state = daemon_state_for_publish(state_dir, &input, &signature, true);
+    let last = bytes.last_mut().unwrap();
+    *last ^= 0x01;
+    let reply = handle_publish_signed_snapshot_full(
+        &state,
+        guard_ipc::PublishSignedSnapshot::new(run_uuid, bytes, signature, false, false),
+    );
+    match reply {
+        guard_ipc::SnapshotReply::Err { message, .. } => assert!(
+            message.contains("signed snapshot bytes do not match daemon-issued inputs")
+                || message.contains("decode signed snapshot")
+                || message.contains("snapshot signature verification failed")
+                || message.contains("run_uuid mismatch"),
+            "unexpected error: {message}"
+        ),
+        other => panic!("expected tamper rejection, got {other:?}"),
+    }
+}
+
+#[cfg(feature = "test-signer")]
+#[test]
+fn publish_signed_snapshot_rejects_untrusted_signer() {
+    let tmp = TempDir::new().unwrap();
+    let state_dir = tmp.path();
+    let run_uuid = "signed-publish-untrusted";
+    let (input, bytes, signature) = signed_snapshot_request(run_uuid);
+    let state = daemon_state_for_publish(state_dir, &input, &signature, false);
+    let reply = handle_publish_signed_snapshot_full(
+        &state,
+        guard_ipc::PublishSignedSnapshot::new(run_uuid, bytes, signature, false, false),
+    );
+    assert!(
+        matches!(reply, guard_ipc::SnapshotReply::Err { message, .. } if message.contains("not trusted"))
+    );
 }

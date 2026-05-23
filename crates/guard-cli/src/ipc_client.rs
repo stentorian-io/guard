@@ -8,13 +8,13 @@
 
 use crate::CliError;
 use guard_core::AuditToken;
-use guard_ipc::frame::{read_frame, write_frame};
+use guard_ipc::frame::{read_frame, read_frame_with_limit, write_frame, write_frame_with_limit};
 use guard_ipc::{
     BaselineCommit, BaselineCommitReply, DeleteInstallArtifacts, DeleteInstallArtifactsReply,
     DisableCuratedRule, DisableCuratedRuleReply, EnableCuratedRule, EnableCuratedRuleReply,
     InsertUserRule, InsertUserRuleReply, InstallArtifact, ListRules, ListRulesReply,
-    PrepareSnapshot, ProposedRule, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot,
-    Reply, RuleRow, SnapshotReply,
+    PrepareSnapshot, ProposedRule, PublishSignedSnapshot, ReadInstallArtifacts,
+    ReadInstallArtifactsReply, RegisterRoot, Reply, RuleRow, SnapshotInputsReply, SnapshotReply,
 };
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -23,7 +23,6 @@ use std::time::Duration;
 
 // Tag bytes — must match the v0.2 MessageTag values exactly. The dylib
 // uses the same values in `guard_hook::ipc_client`.
-const TAG_PREPARE_SNAPSHOT: u8 = 0x02;
 const TAG_STATUS: u8 = 0x09;
 pub(crate) const TAG_PROMPT_CHANNEL_INIT: u8 = 0x0A;
 const TAG_INSERT_USER_RULE: u8 = 0x0B;
@@ -33,6 +32,17 @@ const TAG_BASELINE_COMMIT: u8 = 0x0D;
 const TAG_DELETE_INSTALL_ARTIFACTS: u8 = 0x11;
 const TAG_DISABLE_CURATED_RULE: u8 = 0x16;
 const TAG_ENABLE_CURATED_RULE: u8 = 0x17;
+const TAG_PREPARE_SNAPSHOT_INPUTS: u8 = 0x18;
+const TAG_PUBLISH_SIGNED_SNAPSHOT: u8 = 0x19;
+
+fn max_frame_bytes_for_tag(tag: u8) -> u32 {
+    match tag {
+        TAG_PREPARE_SNAPSHOT_INPUTS | TAG_PUBLISH_SIGNED_SNAPSHOT => {
+            guard_ipc::frame::MAX_SNAPSHOT_FRAME_BYTES
+        }
+        _ => guard_ipc::frame::MAX_FRAME_BYTES,
+    }
+}
 
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -159,7 +169,7 @@ where
     if let Some(key) = load_ipc_hmac_key(sock) {
         let mut signer = guard_ipc::signed_frame::FrameSigner::new(key);
         signer
-            .write_signed(&mut stream, tag, req)
+            .write_signed_with_limit(&mut stream, tag, req, max_frame_bytes_for_tag(tag))
             .map_err(|e| CliError::DaemonUnreachable(format!("write signed: {e}")))?;
         let mut tag_back = [0u8; 1];
         stream
@@ -172,11 +182,11 @@ where
             )));
         }
         let reply: ReplyT = signer
-            .read_signed(&mut stream, tag)
+            .read_signed_with_limit(&mut stream, tag, max_frame_bytes_for_tag(tag))
             .map_err(|e| CliError::DaemonUnreachable(format!("read signed reply: {e}")))?;
         Ok(reply)
     } else {
-        write_frame(&mut stream, req)
+        write_frame_with_limit(&mut stream, req, max_frame_bytes_for_tag(tag))
             .map_err(|e| CliError::DaemonUnreachable(format!("write frame: {e}")))?;
         let mut tag_back = [0u8; 1];
         stream
@@ -188,7 +198,7 @@ where
                 tag_back[0]
             )));
         }
-        let reply: ReplyT = read_frame(&mut stream)
+        let reply: ReplyT = read_frame_with_limit(&mut stream, max_frame_bytes_for_tag(tag))
             .map_err(|e| CliError::DaemonUnreachable(format!("read reply: {e}")))?;
         Ok(reply)
     }
@@ -200,25 +210,8 @@ where
 /// then sets that manifest path as `STT_GUARD_SNAPSHOT_MANIFEST` in the
 /// wrapped child's envp so the dylib loads the per-run policy.
 pub fn prepare_snapshot(sock: &Path, cwd: &Path) -> Result<(PathBuf, String), CliError> {
-    let req = PrepareSnapshot::new(cwd.display().to_string());
-    // WR-11: use the extended read timeout so the CLI doesn't trip a
-    // false "DaemonUnreachable" while the daemon is mid-fetch.
-    let reply: SnapshotReply = send_tagged_request_with_read_timeout(
-        sock,
-        TAG_PREPARE_SNAPSHOT,
-        &req,
-        PREPARE_SNAPSHOT_READ_TIMEOUT,
-    )?;
-    match reply {
-        SnapshotReply::Ok {
-            manifest_path,
-            run_uuid,
-            ..
-        } => Ok((PathBuf::from(manifest_path), run_uuid)),
-        SnapshotReply::Err { message, .. } => {
-            Err(CliError::Other(format!("PrepareSnapshot: {message}")))
-        }
-    }
+    let outcome = prepare_snapshot_v3(sock, cwd, false, false)?;
+    Ok((outcome.manifest_path, outcome.run_uuid))
 }
 
 #[derive(Debug, Clone)]
@@ -235,16 +228,45 @@ pub fn prepare_snapshot_v3(
     learn_mode: bool,
 ) -> Result<PrepareSnapshotOutcome, CliError> {
     let req = PrepareSnapshot::new_v3(cwd.display().to_string(), is_tty, learn_mode);
-    // WR-11: 150s read timeout (vs the default 5s) so a legitimate
-    // first-run shallow clone (up to ~78s for GHSA on Apple Silicon
-    // per RESEARCH.md Pitfall 1, with the daemon's 120s ceiling)
-    // doesn't surface as DaemonUnreachable. The daemon's own fetch
-    // deadline still fires first on a real timeout, producing a clean
-    // SnapshotReply::Err("feed fetch: ...").
+    let inputs_reply: SnapshotInputsReply = send_tagged_request_with_read_timeout(
+        sock,
+        TAG_PREPARE_SNAPSHOT_INPUTS,
+        &req,
+        PREPARE_SNAPSHOT_READ_TIMEOUT,
+    )?;
+    let (input, is_tty, baseline_mode) = match inputs_reply {
+        SnapshotInputsReply::Ok {
+            input,
+            is_tty,
+            baseline_mode,
+            ..
+        } => (input, is_tty, baseline_mode),
+        SnapshotInputsReply::Err { message, .. } => {
+            return Err(CliError::Other(format!("PrepareSnapshotInputs: {message}")));
+        }
+    };
+    let run_uuid = input.run_uuid.clone();
+    let generated_at_unix_ms = input.generated_at_unix_ms;
+    let snapshot_bytes = guard_core::build_snapshot_bytes(input)
+        .map_err(|e| CliError::Other(format!("build snapshot: {e}")))?;
+    let snapshot_sha256 = guard_core::sha256_hex(&snapshot_bytes);
+    let payload = guard_core::SnapshotSignaturePayloadV1::new(
+        run_uuid.clone(),
+        snapshot_sha256,
+        generated_at_unix_ms,
+    );
+    let signature = crate::rule_signing::sign_snapshot_payload(&payload)?;
+    let publish = PublishSignedSnapshot::new(
+        run_uuid.clone(),
+        snapshot_bytes,
+        signature,
+        is_tty,
+        baseline_mode,
+    );
     let reply: SnapshotReply = send_tagged_request_with_read_timeout(
         sock,
-        TAG_PREPARE_SNAPSHOT,
-        &req,
+        TAG_PUBLISH_SIGNED_SNAPSHOT,
+        &publish,
         PREPARE_SNAPSHOT_READ_TIMEOUT,
     )?;
     match reply {
@@ -257,7 +279,7 @@ pub fn prepare_snapshot_v3(
             run_uuid,
         }),
         SnapshotReply::Err { message, .. } => {
-            Err(CliError::Other(format!("PrepareSnapshot V3: {message}")))
+            Err(CliError::Other(format!("PublishSignedSnapshot: {message}")))
         }
     }
 }

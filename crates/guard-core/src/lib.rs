@@ -19,10 +19,12 @@ pub use policy::{
     is_loopback_host, is_loopback_ip, SourceKind,
 };
 pub use rule_signature::{
-    canonical_rule_payload_bytes, sha256_hex, verify_rule_signature, RuleSignatureError,
-    RuleSignaturePayloadV1, RuleSignaturePolicy, RuleSignatureV1, RULE_SIGNATURE_PAYLOAD_SCHEMA_V1,
-    RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256, SIGNER_KIND_SECURE_ENCLAVE, SIGNER_KIND_SECURITY_KEY,
-    SIGNER_KIND_TEST_SIMULATOR, SIGNER_KIND_TPM,
+    canonical_rule_payload_bytes, canonical_snapshot_payload_bytes, sha256_hex,
+    verify_rule_signature, verify_snapshot_signature, RuleSignatureError, RuleSignaturePayloadV1,
+    RuleSignaturePolicy, RuleSignatureV1, SnapshotSignaturePayloadV1, SnapshotSignatureV1,
+    RULE_SIGNATURE_PAYLOAD_SCHEMA_V1, RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256,
+    SIGNER_KIND_SECURE_ENCLAVE, SIGNER_KIND_SECURITY_KEY, SIGNER_KIND_TEST_SIMULATOR,
+    SIGNER_KIND_TPM, SNAPSHOT_SIGNATURE_PAYLOAD_SCHEMA_V1,
 };
 pub use snapshot::{Snapshot, SCHEMA_V1, SCHEMA_V2};
 pub use snapshot_build::{build_snapshot, build_snapshot_bytes, SnapshotBuildInput};

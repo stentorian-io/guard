@@ -1,7 +1,8 @@
 #![cfg(feature = "test-signer")]
 
 use guard_core::{
-    verify_rule_signature, RuleSignaturePayloadV1, RuleSignaturePolicy, SIGNER_KIND_TEST_SIMULATOR,
+    verify_rule_signature, verify_snapshot_signature, RuleSignaturePayloadV1, RuleSignaturePolicy,
+    SnapshotSignaturePayloadV1, SIGNER_KIND_TEST_SIMULATOR,
 };
 
 fn payload() -> RuleSignaturePayloadV1 {
@@ -13,6 +14,14 @@ fn payload() -> RuleSignaturePayloadV1 {
         1_700_000_000_000,
         "test",
         Some("run-1".into()),
+    )
+}
+
+fn snapshot_payload() -> SnapshotSignaturePayloadV1 {
+    SnapshotSignaturePayloadV1::new(
+        "run-1",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        1_700_000_000_000,
     )
 }
 
@@ -68,6 +77,69 @@ fn tampered_signature_fails_verification() {
         RuleSignaturePolicy::AllowTestSimulator,
     )
     .expect_err("tampered signature must fail");
+    assert!(
+        err.to_string().contains("signature mismatch")
+            || err.to_string().contains("invalid signature encoding")
+    );
+}
+
+#[test]
+fn snapshot_test_simulator_signature_verifies_under_test_policy() {
+    let payload = snapshot_payload();
+    let signature =
+        guard_core::rule_signature::test_support::sign_snapshot_with_test_simulator(&payload)
+            .expect("sign snapshot");
+    assert_eq!(signature.signer_kind, SIGNER_KIND_TEST_SIMULATOR);
+    verify_snapshot_signature(
+        &payload,
+        &signature,
+        RuleSignaturePolicy::AllowTestSimulator,
+    )
+    .expect("verify snapshot");
+}
+
+#[test]
+fn snapshot_test_simulator_signature_is_rejected_under_production_policy() {
+    let payload = snapshot_payload();
+    let signature =
+        guard_core::rule_signature::test_support::sign_snapshot_with_test_simulator(&payload)
+            .expect("sign snapshot");
+    let err = verify_snapshot_signature(&payload, &signature, RuleSignaturePolicy::Production)
+        .expect_err("production must reject simulator");
+    assert!(err.to_string().contains("unsupported rule signer kind"));
+}
+
+#[test]
+fn tampered_snapshot_payload_fails_verification() {
+    let payload = snapshot_payload();
+    let signature =
+        guard_core::rule_signature::test_support::sign_snapshot_with_test_simulator(&payload)
+            .expect("sign snapshot");
+    let mut tampered = payload.clone();
+    tampered.snapshot_sha256 =
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string();
+    let err = verify_snapshot_signature(
+        &tampered,
+        &signature,
+        RuleSignaturePolicy::AllowTestSimulator,
+    )
+    .expect_err("tampered snapshot payload must fail");
+    assert!(err.to_string().contains("payload hash mismatch"));
+}
+
+#[test]
+fn tampered_snapshot_signature_fails_verification() {
+    let payload = snapshot_payload();
+    let mut signature =
+        guard_core::rule_signature::test_support::sign_snapshot_with_test_simulator(&payload)
+            .expect("sign snapshot");
+    signature.signature_der[8] ^= 0x55;
+    let err = verify_snapshot_signature(
+        &payload,
+        &signature,
+        RuleSignaturePolicy::AllowTestSimulator,
+    )
+    .expect_err("tampered snapshot signature must fail");
     assert!(
         err.to_string().contains("signature mismatch")
             || err.to_string().contains("invalid signature encoding")

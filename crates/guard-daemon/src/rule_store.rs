@@ -328,7 +328,29 @@ impl RuleStore {
             }
         };
         let Some((fingerprint, signer_kind, public_key_hex)) =
-            parse_first_manifest_signer(&contents)
+            (match guard_core::first_trusted_signer(&contents) {
+                Ok(signer) => signer.map(|signer| {
+                    (
+                        signer.public_key_sha256,
+                        signer.signer_kind,
+                        signer.public_key_x963_hex,
+                    )
+                }),
+                Err(e) => {
+                    return RuleSigningStatus {
+                        configured: false,
+                        status: "invalid".to_string(),
+                        signer_kind: None,
+                        fingerprint: None,
+                        trust_root_path,
+                        trust_root_ok: false,
+                        reason: Some(e.to_string()),
+                        action: Some(
+                            "rerun sudo stt-guard init to repair signer enrollment".to_string(),
+                        ),
+                    };
+                }
+            })
         else {
             return RuleSigningStatus {
                 configured: false,
@@ -388,30 +410,13 @@ impl RuleStore {
                 path.display()
             ))
         })?;
-        let expected_key_hex = public_key_x963.map(hex_lower);
-        for line in contents.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let mut parts = line.split('\t');
-            let Some(manifest_hash) = parts.next() else {
-                continue;
-            };
-            let Some(manifest_kind) = parts.next() else {
-                continue;
-            };
-            let Some(manifest_public_key_hex) = parts.next() else {
-                continue;
-            };
-            if manifest_hash == public_key_sha256 && manifest_kind == signer_kind {
-                return Ok(expected_key_hex
-                    .as_deref()
-                    .map(|expected| expected == manifest_public_key_hex)
-                    .unwrap_or(true));
-            }
-        }
-        Ok(false)
+        guard_core::trusted_signer_matches(
+            &contents,
+            public_key_sha256,
+            signer_kind,
+            public_key_x963,
+        )
+        .map_err(|e| RuleStoreError::Signature(e.to_string()))
     }
 
     fn trusted_signer_db_matches(
@@ -810,21 +815,6 @@ pub fn unix_ms_now() -> i64 {
         .as_millis() as i64
 }
 
-fn parse_first_manifest_signer(contents: &str) -> Option<(String, String, String)> {
-    for line in contents.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let mut parts = line.split('\t');
-        let fingerprint = parts.next()?.to_string();
-        let signer_kind = parts.next()?.to_string();
-        let public_key_hex = parts.next()?.to_string();
-        return Some((fingerprint, signer_kind, public_key_hex));
-    }
-    None
-}
-
 fn decode_hex(s: &str) -> Result<Vec<u8>, RuleStoreError> {
     if s.len() % 2 != 0 {
         return Err(RuleStoreError::Signature(
@@ -849,16 +839,6 @@ fn hex_value(b: u8) -> Result<u8, RuleStoreError> {
             "trusted signer manifest contains invalid public key hex".into(),
         )),
     }
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8] = b"0123456789abcdef";
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push(HEX[(b >> 4) as usize] as char);
-        s.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    s
 }
 
 #[cfg(test)]

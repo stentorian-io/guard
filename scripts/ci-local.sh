@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Run the CI workflow's checks locally — same commands as
-# .github/workflows/validation.yml, no GH minutes consumed.
+# Run local equivalents of the split PR/code validation workflows, with no GH
+# minutes consumed.
 #
 # Usage:
 #   scripts/ci-local.sh             # full validation (build + e2e tests + ubuntu jobs via act)
@@ -109,7 +109,12 @@ fi
 if [ "$USE_ACT" -eq 1 ]; then
   if command -v act >/dev/null; then
     step "Ubuntu jobs via act (lint-markdown)"
-    act push --job lint-markdown --quiet 2>&1 \
+    event_file="$(mktemp)"
+    trap 'rm -f "$event_file"' EXIT
+    cat > "$event_file" <<'JSON'
+{"repository":{"default_branch":"main","full_name":"stentorian-io/guard"},"pull_request":{"number":29,"base":{"ref":"main","repo":{"full_name":"stentorian-io/guard"}},"head":{"ref":"release-infra","repo":{"full_name":"stentorian-io/guard"}}}}
+JSON
+    act pull_request --workflows .github/workflows/pr-validation.yml --job lint-markdown --eventpath "$event_file" --quiet 2>&1 \
       || fail "act lint-markdown failed"
     pass "act lint-markdown"
   else

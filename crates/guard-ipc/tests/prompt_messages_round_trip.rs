@@ -28,6 +28,7 @@ fn status_reply_ok_round_trip() {
             gaps_today: 0,
         },
         None,
+        None,
     );
     round_trip(&r);
 }
@@ -180,6 +181,16 @@ fn status_reply_full_ok_round_trip() {
                 content_hash: Some("abc123".into()),
                 guard_version: "0.3.0".into(),
             }],
+        }),
+        Some(SigningInfo {
+            configured: true,
+            status: "configured".into(),
+            signer_kind: Some("secure-enclave".into()),
+            fingerprint: Some("abc123".into()),
+            trust_root_path: Some("/usr/local/libexec/stt-guard/trusted-rule-signers.tsv".into()),
+            trust_root_ok: true,
+            reason: None,
+            action: None,
         }),
     );
     round_trip(&r);

@@ -41,6 +41,18 @@ pub enum RuleStoreError {
     Signature(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleSigningStatus {
+    pub configured: bool,
+    pub status: String,
+    pub signer_kind: Option<String>,
+    pub fingerprint: Option<String>,
+    pub trust_root_path: Option<String>,
+    pub trust_root_ok: bool,
+    pub reason: Option<String>,
+    pub action: Option<String>,
+}
+
 /// v0.7 — storage-side row for ListRules. String discriminators
 /// match the wire shape exactly so the handler does no enum mapping.
 #[derive(Debug, Clone)]
@@ -266,6 +278,100 @@ impl RuleStore {
         self.trusted_manifest_contains(public_key_sha256, signer_kind, None)
     }
 
+    pub fn rule_signing_status(&self) -> RuleSigningStatus {
+        let Some(path) = &self.trusted_signers_manifest_path else {
+            return RuleSigningStatus {
+                configured: false,
+                status: "not-configured".to_string(),
+                signer_kind: None,
+                fingerprint: None,
+                trust_root_path: None,
+                trust_root_ok: false,
+                reason: Some(
+                    "system trusted signer manifest is unavailable for this state directory"
+                        .to_string(),
+                ),
+                action: Some(
+                    "run sudo stt-guard init on a supported hardware-backed signing platform"
+                        .to_string(),
+                ),
+            };
+        };
+        let trust_root_path = Some(path.display().to_string());
+        if let Err(e) = self.verify_trusted_manifest_path(path) {
+            return RuleSigningStatus {
+                configured: false,
+                status: "invalid".to_string(),
+                signer_kind: None,
+                fingerprint: None,
+                trust_root_path,
+                trust_root_ok: false,
+                reason: Some(e.to_string()),
+                action: Some("rerun sudo stt-guard init to repair signer enrollment".to_string()),
+            };
+        }
+        let contents = match std::fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(e) => {
+                return RuleSigningStatus {
+                    configured: false,
+                    status: "invalid".to_string(),
+                    signer_kind: None,
+                    fingerprint: None,
+                    trust_root_path,
+                    trust_root_ok: false,
+                    reason: Some(format!("trusted signer manifest unreadable: {e}")),
+                    action: Some(
+                        "rerun sudo stt-guard init to repair signer enrollment".to_string(),
+                    ),
+                };
+            }
+        };
+        let Some((fingerprint, signer_kind, public_key_hex)) =
+            parse_first_manifest_signer(&contents)
+        else {
+            return RuleSigningStatus {
+                configured: false,
+                status: "not-configured".to_string(),
+                signer_kind: None,
+                fingerprint: None,
+                trust_root_path,
+                trust_root_ok: true,
+                reason: Some("trusted signer manifest contains no signer entries".to_string()),
+                action: Some(
+                    "run sudo stt-guard init to enroll a hardware-backed signer".to_string(),
+                ),
+            };
+        };
+        let db_matches = self
+            .trusted_signer_db_matches(&fingerprint, &signer_kind, &public_key_hex)
+            .unwrap_or(false);
+        if !db_matches {
+            return RuleSigningStatus {
+                configured: false,
+                status: "invalid".to_string(),
+                signer_kind: Some(signer_kind),
+                fingerprint: Some(fingerprint),
+                trust_root_path,
+                trust_root_ok: true,
+                reason: Some(
+                    "trusted signer manifest does not match daemon signer cache".to_string(),
+                ),
+                action: Some("rerun sudo stt-guard init to repair signer enrollment".to_string()),
+            };
+        }
+        RuleSigningStatus {
+            configured: true,
+            status: "configured".to_string(),
+            signer_kind: Some(signer_kind),
+            fingerprint: Some(fingerprint),
+            trust_root_path,
+            trust_root_ok: true,
+            reason: None,
+            action: None,
+        }
+    }
+
     fn trusted_manifest_contains(
         &self,
         public_key_sha256: &str,
@@ -306,6 +412,23 @@ impl RuleStore {
             }
         }
         Ok(false)
+    }
+
+    fn trusted_signer_db_matches(
+        &self,
+        public_key_sha256: &str,
+        signer_kind: &str,
+        public_key_hex: &str,
+    ) -> Result<bool, RuleStoreError> {
+        let public_key = decode_hex(public_key_hex)?;
+        let conn = self.reader.lock().expect("rule store reader mutex");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM trusted_rule_signers
+             WHERE public_key_sha256 = ?1 AND signer_kind = ?2 AND public_key_x963 = ?3",
+            params![public_key_sha256, signer_kind, public_key],
+            |r| r.get(0),
+        )?;
+        Ok(count == 1)
     }
 
     fn verify_trusted_manifest_path(&self, path: &Path) -> Result<(), RuleStoreError> {
@@ -685,6 +808,47 @@ pub fn unix_ms_now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+fn parse_first_manifest_signer(contents: &str) -> Option<(String, String, String)> {
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.split('\t');
+        let fingerprint = parts.next()?.to_string();
+        let signer_kind = parts.next()?.to_string();
+        let public_key_hex = parts.next()?.to_string();
+        return Some((fingerprint, signer_kind, public_key_hex));
+    }
+    None
+}
+
+fn decode_hex(s: &str) -> Result<Vec<u8>, RuleStoreError> {
+    if s.len() % 2 != 0 {
+        return Err(RuleStoreError::Signature(
+            "trusted signer manifest contains odd-length public key hex".into(),
+        ));
+    }
+    let mut out = Vec::with_capacity(s.len() / 2);
+    for pair in s.as_bytes().chunks_exact(2) {
+        let hi = hex_value(pair[0])?;
+        let lo = hex_value(pair[1])?;
+        out.push((hi << 4) | lo);
+    }
+    Ok(out)
+}
+
+fn hex_value(b: u8) -> Result<u8, RuleStoreError> {
+    match b {
+        b'0'..=b'9' => Ok(b - b'0'),
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
+        _ => Err(RuleStoreError::Signature(
+            "trusted signer manifest contains invalid public key hex".into(),
+        )),
+    }
 }
 
 fn hex_lower(bytes: &[u8]) -> String {

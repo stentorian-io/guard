@@ -18,9 +18,24 @@ fn verbose_render_produces_output() {
         &[],
         &counters,
         None,
+        Some(&guard_ipc::SigningInfo {
+            configured: true,
+            status: "configured".to_string(),
+            signer_kind: Some("secure-enclave".to_string()),
+            fingerprint: Some("00112233445566778899aabbccddeeff".to_string()),
+            trust_root_path: Some(
+                "/usr/local/libexec/stt-guard/trusted-rule-signers.tsv".to_string(),
+            ),
+            trust_root_ok: true,
+            reason: None,
+            action: None,
+        }),
     );
     let s = String::from_utf8(buf).unwrap();
     assert!(s.contains("State: operational"));
     assert!(s.contains("rules_user:   3"));
     assert!(s.contains("blocks_today: 1"));
+    assert!(s.contains("Signing:"));
+    assert!(s.contains("hardware-backed: configured"));
+    assert!(s.contains("signer kind: secure-enclave"));
 }

@@ -16,7 +16,8 @@ pub mod rules;
 use std::path::Path;
 
 use guard_ipc::{
-    DaemonStateKind, GapInfo, InstallInfo, StatusCounters, StatusReply, TrackedRootInfo,
+    DaemonStateKind, GapInfo, InstallInfo, SigningInfo, StatusCounters, StatusReply,
+    TrackedRootInfo,
 };
 
 use crate::CliError;
@@ -49,6 +50,7 @@ pub fn run_status(sock: &Path, state_dir: &Path) -> Result<i32, CliError> {
             recent_gaps,
             counters,
             install_info,
+            signing_info,
             ..
         } => {
             render_verbose(
@@ -57,6 +59,7 @@ pub fn run_status(sock: &Path, state_dir: &Path) -> Result<i32, CliError> {
                 &recent_gaps,
                 &counters,
                 install_info.as_ref(),
+                signing_info.as_ref(),
             );
             render_risk_exposure(sock);
             if let Some(wd) = read_watchdog_health(state_dir) {
@@ -73,6 +76,7 @@ pub fn render_verbose(
     recent_gaps: &[GapInfo],
     counters: &StatusCounters,
     install_info: Option<&InstallInfo>,
+    signing_info: Option<&SigningInfo>,
 ) {
     render_verbose_to(
         &mut std::io::stdout().lock(),
@@ -81,6 +85,7 @@ pub fn render_verbose(
         recent_gaps,
         counters,
         install_info,
+        signing_info,
     );
 }
 
@@ -91,6 +96,7 @@ pub fn render_verbose_to<W: std::io::Write>(
     recent_gaps: &[GapInfo],
     counters: &StatusCounters,
     install_info: Option<&InstallInfo>,
+    signing_info: Option<&SigningInfo>,
 ) {
     let state_str = match state {
         DaemonStateKind::Operational => "operational",
@@ -110,6 +116,9 @@ pub fn render_verbose_to<W: std::io::Write>(
     } else {
         let _ = writeln!(w, "Install info: (none)");
     }
+
+    render_signing_info_to(w, signing_info);
+
     let _ = writeln!(w, "\nCounters:");
     let _ = writeln!(w, "  rules_user:   {}", counters.rules_user);
     let _ = writeln!(w, "  blocks_today: {}", counters.blocks_today);
@@ -129,6 +138,54 @@ pub fn render_verbose_to<W: std::io::Write>(
             g.run_uuid,
             g.binary_path.as_deref().unwrap_or("-")
         );
+    }
+}
+
+fn render_signing_info_to<W: std::io::Write>(w: &mut W, signing_info: Option<&SigningInfo>) {
+    let _ = writeln!(w, "\nSigning:");
+    let Some(info) = signing_info else {
+        let _ = writeln!(w, "  hardware-backed: unknown");
+        let _ = writeln!(w, "  status: unavailable from daemon");
+        return;
+    };
+    let _ = writeln!(
+        w,
+        "  hardware-backed: {}",
+        if info.configured {
+            "configured"
+        } else {
+            "not configured"
+        }
+    );
+    let _ = writeln!(w, "  status: {}", info.status);
+    if let Some(kind) = &info.signer_kind {
+        let _ = writeln!(w, "  signer kind: {kind}");
+    }
+    if let Some(fingerprint) = &info.fingerprint {
+        let short = if fingerprint.len() > 16 {
+            format!(
+                "{}…{}",
+                &fingerprint[..8],
+                &fingerprint[fingerprint.len() - 8..]
+            )
+        } else {
+            fingerprint.clone()
+        };
+        let _ = writeln!(w, "  fingerprint: {short}");
+    }
+    if let Some(path) = &info.trust_root_path {
+        let _ = writeln!(
+            w,
+            "  trust root: {} ({path})",
+            if info.trust_root_ok { "ok" } else { "invalid" }
+        );
+    }
+    let _ = writeln!(w, "  production fallback: disabled");
+    if let Some(reason) = &info.reason {
+        let _ = writeln!(w, "  reason: {reason}");
+    }
+    if let Some(action) = &info.action {
+        let _ = writeln!(w, "  action: {action}");
     }
 }
 
@@ -226,7 +283,7 @@ mod render_tests {
 
         for (state, expected_first_line) in cases {
             let mut buf = Vec::new();
-            render_verbose_to(&mut buf, *state, &[], &[], &empty_counters(), None);
+            render_verbose_to(&mut buf, *state, &[], &[], &empty_counters(), None, None);
             let s = String::from_utf8(buf).unwrap();
             let first_line = s.lines().next().unwrap_or("");
             assert_eq!(

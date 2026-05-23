@@ -21,6 +21,7 @@ fn render_verbose_includes_state_line() {
         &[],
         &empty_counters(),
         None,
+        None,
     );
     let s = String::from_utf8(buf).unwrap();
     assert!(s.starts_with("State: operational"), "got: {s}");

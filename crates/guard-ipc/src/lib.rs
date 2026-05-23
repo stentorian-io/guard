@@ -83,6 +83,7 @@ pub use messages::{
     ResolveReply,
     RulePattern,
     RuleRow,
+    SigningInfo,
     SnapshotReply,
     Status,
     StatusCounters,

@@ -581,6 +581,19 @@ pub struct InstallInfo {
     pub artifacts: Vec<InstallArtifact>,
 }
 
+/// Hardware-backed signing health reported by daemon status.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SigningInfo {
+    pub configured: bool,
+    pub status: String, // "configured" | "not-configured" | "invalid"
+    pub signer_kind: Option<String>,
+    pub fingerprint: Option<String>,
+    pub trust_root_path: Option<String>,
+    pub trust_root_ok: bool,
+    pub reason: Option<String>,
+    pub action: Option<String>,
+}
+
 /// Daemon → CLI: response to Status request.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StatusReply {
@@ -591,6 +604,8 @@ pub enum StatusReply {
         recent_gaps: Vec<GapInfo>,
         counters: StatusCounters,
         install_info: Option<InstallInfo>,
+        #[serde(default)]
+        signing_info: Option<SigningInfo>,
     },
     Err {
         schema_version: u16,
@@ -605,6 +620,7 @@ impl StatusReply {
         recent_gaps: Vec<GapInfo>,
         counters: StatusCounters,
         install_info: Option<InstallInfo>,
+        signing_info: Option<SigningInfo>,
     ) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V3,
@@ -613,6 +629,7 @@ impl StatusReply {
             recent_gaps,
             counters,
             install_info,
+            signing_info,
         }
     }
     pub fn err(message: impl Into<String>) -> Self {

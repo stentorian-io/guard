@@ -162,4 +162,23 @@ else
   cache_mark "ci-local:e2e-all" "$fp"
 fi
 
-echo -e "\n${GREEN}${BOLD}All CI checks passed locally.${RESET}"
+# Privileged install validation mutates system install paths and requires
+# non-interactive sudo. Keep it explicit for developer machines; CI runs the
+# same test with STT_GUARD_E2E_PRIVILEGED_INSTALL=1.
+PRIVILEGED_VAL05_RAN=0
+if [ "${CI_LOCAL_PRIVILEGED_INSTALL:-0}" -eq 1 ]; then
+  PRIVILEGED_VAL05_RAN=1
+  step "VAL-05 privileged init and install health"
+  STT_GUARD_E2E_PRIVILEGED_INSTALL=1 \
+    cargo test -p guard-e2e --test hardened_install_health --release -- --nocapture \
+    || fail "VAL-05 privileged init and install health"
+  pass "VAL-05 privileged init and install health"
+else
+  warn "skipping VAL-05 privileged install health (set CI_LOCAL_PRIVILEGED_INSTALL=1 and ensure sudo -n works)"
+fi
+
+if [ "$PRIVILEGED_VAL05_RAN" -eq 1 ]; then
+  echo -e "\n${GREEN}${BOLD}All CI checks passed locally.${RESET}"
+else
+  echo -e "\n${GREEN}${BOLD}Non-privileged CI checks passed locally; VAL-05 was skipped.${RESET}"
+fi

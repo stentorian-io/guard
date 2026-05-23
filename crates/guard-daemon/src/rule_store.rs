@@ -20,9 +20,12 @@
 //! on a shared mutex preserves the existing behaviour while removing the
 //! read contention.
 
-use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
-use rusqlite::{Connection, OpenFlags, Result as SqlResult, params};
-use rusqlite_migration::{M, Migrations};
+use guard_core::{
+    verify_rule_signature, AllowlistEntry, MatchType, RuleKind, RuleSignaturePayloadV1,
+    RuleSignaturePolicy, RuleSignatureV1, RuleTier,
+};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Result as SqlResult};
+use rusqlite_migration::{Migrations, M};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
@@ -33,6 +36,8 @@ pub enum RuleStoreError {
     Sql(#[from] rusqlite::Error),
     #[error("migrations: {0}")]
     Migrate(String),
+    #[error("rule signature: {0}")]
+    Signature(String),
 }
 
 /// v0.7 — storage-side row for ListRules. String discriminators
@@ -48,6 +53,7 @@ pub struct StoredRule {
 
 const SQL_001_SCHEMA: &str = include_str!("../migrations/001_schema.sql");
 const SQL_002_CURATED_OVERRIDES: &str = include_str!("../migrations/002_curated_overrides.sql");
+const SQL_003_RULE_SIGNATURES: &str = include_str!("../migrations/003_rule_signatures.sql");
 
 pub struct RuleStore {
     /// Long-lived connection used for migrations + the write path.
@@ -78,10 +84,14 @@ impl RuleStore {
         let migrations = Migrations::new(vec![
             M::up(SQL_001_SCHEMA),
             M::up(SQL_002_CURATED_OVERRIDES),
+            M::up(SQL_003_RULE_SIGNATURES),
         ]);
         migrations
             .to_latest(&mut conn)
             .map_err(|e| RuleStoreError::Migrate(e.to_string()))?;
+
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(|e| RuleStoreError::Migrate(format!("foreign_keys pragma: {e}")))?;
 
         // WAL pragma must be applied outside the migration transaction —
         // rusqlite_migration wraps each M::up in a transaction, which causes
@@ -104,6 +114,9 @@ impl RuleStore {
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(RuleStoreError::Sql)?;
+        reader
+            .pragma_update(None, "foreign_keys", "ON")
+            .map_err(|e| RuleStoreError::Migrate(format!("reader foreign_keys pragma: {e}")))?;
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -111,7 +124,8 @@ impl RuleStore {
         })
     }
 
-    /// Insert a user-approved rule (called by `stt-guard approve` IPC handler).
+    /// Insert a user-approved rule (called by legacy tests and pre-signature paths).
+    /// New persistence paths must use insert_signed_user_rule.
     /// Validates kind/match_type at the boundary; reason must be non-empty.
     /// Returns the new row id.
     pub fn insert_user_rule(
@@ -133,6 +147,97 @@ impl RuleStore {
         Ok(conn.last_insert_rowid())
     }
 
+    /// Insert a signed user rule and its authenticity metadata in one transaction.
+    pub fn insert_signed_user_rule(
+        &self,
+        payload: &RuleSignaturePayloadV1,
+        signature: &RuleSignatureV1,
+    ) -> Result<i64, RuleStoreError> {
+        debug_assert!(matches!(payload.kind.as_str(), "allow" | "deny"));
+        debug_assert!(matches!(
+            payload.match_type.as_str(),
+            "exact" | "suffix" | "ip"
+        ));
+        debug_assert!(
+            !payload.reason.trim().is_empty(),
+            "reason must be non-empty"
+        );
+        let mut conn = self.conn.lock().expect("rule store mutex");
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO rules (kind, match_type, pattern, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                payload.kind,
+                payload.match_type,
+                payload.pattern,
+                payload.reason,
+                payload.created_at_unix_ms
+            ],
+        )?;
+        let rule_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO rule_signatures (
+                rule_id, scheme, signer_kind, public_key_x963, public_key_sha256,
+                signature_der, signed_payload_sha256, signature_created_at,
+                origin, run_uuid, payload_created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                rule_id,
+                signature.scheme,
+                signature.signer_kind,
+                signature.public_key_x963,
+                signature.public_key_sha256,
+                signature.signature_der,
+                signature.signed_payload_sha256,
+                signature.signature_created_at_unix_ms,
+                payload.origin,
+                payload.run_uuid,
+                payload.created_at_unix_ms,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(rule_id)
+    }
+
+    /// Enroll a public rule-signing key as trusted. Production enrollment must
+    /// happen only after hardware attestation; tests use this for the explicit
+    /// test simulator signer.
+    pub fn register_trusted_rule_signer(
+        &self,
+        signature: &RuleSignatureV1,
+        label: &str,
+    ) -> Result<(), RuleStoreError> {
+        let conn = self.conn.lock().expect("rule store mutex");
+        conn.execute(
+            "INSERT OR REPLACE INTO trusted_rule_signers (
+                public_key_sha256, signer_kind, public_key_x963, enrolled_at, label
+             ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                signature.public_key_sha256.as_str(),
+                signature.signer_kind.as_str(),
+                signature.public_key_x963.as_slice(),
+                unix_ms_now(),
+                label,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn is_trusted_rule_signer(
+        &self,
+        public_key_sha256: &str,
+        signer_kind: &str,
+    ) -> Result<bool, RuleStoreError> {
+        let conn = self.reader.lock().expect("rule store reader mutex");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM trusted_rule_signers
+             WHERE public_key_sha256 = ?1 AND signer_kind = ?2",
+            params![public_key_sha256, signer_kind],
+            |r| r.get(0),
+        )?;
+        Ok(count == 1)
+    }
+
     /// Count all rows in the rules table (user-approved rules added via `stt-guard approve`).
     /// Used by StatusReply handler.
     pub fn count_user_rules(&self) -> SqlResult<u64> {
@@ -142,7 +247,8 @@ impl RuleStore {
     }
 
     /// Read all user rules; map each row to an AllowlistEntry with tier
-    /// UserDeny / UserAllow. Used by the PrepareSnapshot handler.
+    /// UserDeny / UserAllow. Legacy helper retained for status/tests; snapshot
+    /// preparation must use all_verified_user_rules.
     pub fn all_user_rules(&self) -> SqlResult<Vec<AllowlistEntry>> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         let mut stmt =
@@ -190,6 +296,175 @@ impl RuleStore {
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Read and verify all signed user rules. Any unsigned or tampered user rule
+    /// is a fail-closed error; callers must not silently proceed without user
+    /// rules when this returns Err.
+    pub fn all_verified_user_rules(
+        &self,
+        policy: RuleSignaturePolicy,
+    ) -> Result<Vec<AllowlistEntry>, RuleStoreError> {
+        let conn = self.reader.lock().expect("rule store reader mutex");
+        if let Some(id) = conn
+            .query_row(
+                "SELECT r.id
+                 FROM rules r
+                 LEFT JOIN rule_signatures s ON s.rule_id = r.id
+                 WHERE s.rule_id IS NULL
+                 LIMIT 1",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+        {
+            return Err(RuleStoreError::Signature(format!(
+                "unsigned user rule present: rule_id={id}"
+            )));
+        }
+        if let Some(id) = conn
+            .query_row(
+                "SELECT s.rule_id
+                 FROM rule_signatures s
+                 LEFT JOIN rules r ON r.id = s.rule_id
+                 WHERE r.id IS NULL
+                 LIMIT 1",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+        {
+            return Err(RuleStoreError::Signature(format!(
+                "orphan rule signature present: rule_id={id}"
+            )));
+        }
+        let total_rules: i64 = conn.query_row("SELECT COUNT(*) FROM rules", [], |r| r.get(0))?;
+
+        let mut stmt = conn.prepare(
+            "SELECT
+                r.kind, r.match_type, r.pattern, r.reason, r.created_at,
+                s.scheme, s.signer_kind, s.public_key_x963, s.public_key_sha256,
+                s.signature_der, s.signed_payload_sha256, s.signature_created_at,
+                s.origin, s.run_uuid, s.payload_created_at
+             FROM rules r
+             JOIN rule_signatures s ON s.rule_id = r.id
+             ORDER BY r.id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Vec<u8>>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, Vec<u8>>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?,
+                row.get::<_, Option<String>>(13)?,
+                row.get::<_, i64>(14)?,
+            ))
+        })?;
+
+        let mut out = Vec::new();
+        let mut verified_rows = 0_i64;
+        for row in rows {
+            let (
+                kind_str,
+                match_str,
+                pattern,
+                reason,
+                created_at,
+                scheme,
+                signer_kind,
+                public_key_x963,
+                public_key_sha256,
+                signature_der,
+                signed_payload_sha256,
+                signature_created_at_unix_ms,
+                origin,
+                run_uuid,
+                payload_created_at,
+            ) = row?;
+            if created_at != payload_created_at {
+                return Err(RuleStoreError::Signature(
+                    "rule created_at does not match signed payload".into(),
+                ));
+            }
+            let payload = RuleSignaturePayloadV1::new(
+                kind_str.clone(),
+                match_str.clone(),
+                pattern.clone(),
+                reason.clone(),
+                created_at,
+                origin,
+                run_uuid,
+            );
+            let signature = RuleSignatureV1 {
+                scheme,
+                signer_kind,
+                public_key_x963,
+                public_key_sha256,
+                signature_der,
+                signed_payload_sha256,
+                signature_created_at_unix_ms,
+            };
+            verify_rule_signature(&payload, &signature, policy)
+                .map_err(|e| RuleStoreError::Signature(e.to_string()))?;
+            let trusted_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM trusted_rule_signers
+                 WHERE public_key_sha256 = ?1 AND signer_kind = ?2",
+                params![
+                    signature.public_key_sha256.as_str(),
+                    signature.signer_kind.as_str()
+                ],
+                |r| r.get(0),
+            )?;
+            if trusted_count != 1 {
+                return Err(RuleStoreError::Signature(format!(
+                    "untrusted rule signer: {}",
+                    signature.public_key_sha256
+                )));
+            }
+
+            let kind = match kind_str.as_str() {
+                "allow" => RuleKind::Allow,
+                "deny" => RuleKind::Deny,
+                other => return Err(RuleStoreError::Signature(format!("invalid kind: {other}"))),
+            };
+            let match_type = match match_str.as_str() {
+                "exact" => MatchType::Exact,
+                "suffix" => MatchType::Suffix,
+                "ip" => MatchType::Ip,
+                other => {
+                    return Err(RuleStoreError::Signature(format!(
+                        "invalid match_type: {other}"
+                    )));
+                }
+            };
+            let tier = match kind {
+                RuleKind::Allow => RuleTier::UserAllow,
+                RuleKind::Deny => RuleTier::UserDeny,
+            };
+            out.push(AllowlistEntry {
+                kind,
+                tier,
+                match_type,
+                pattern,
+                reason,
+            });
+            verified_rows += 1;
+        }
+        if verified_rows != total_rules {
+            return Err(RuleStoreError::Signature(format!(
+                "verified user rule count mismatch: verified={verified_rows}, rules={total_rules}"
+            )));
         }
         Ok(out)
     }

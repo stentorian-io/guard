@@ -15,6 +15,25 @@ fn allow(pattern: &str, tier: RuleTier) -> AllowlistEntry {
     }
 }
 
+#[cfg(feature = "test-signer")]
+fn insert_signed_allow(rs: &RuleStore, pattern: &str) -> i64 {
+    let payload = guard_core::RuleSignaturePayloadV1::new(
+        "allow",
+        "exact",
+        pattern,
+        "approved",
+        1_700_000_000_000,
+        "test",
+        Some("run-1".into()),
+    );
+    let signature =
+        guard_core::rule_signature::test_support::sign_with_test_simulator(&payload).expect("sign");
+    rs.register_trusted_rule_signer(&signature, "test signer")
+        .expect("trust signer");
+    rs.insert_signed_user_rule(&payload, &signature)
+        .expect("insert signed")
+}
+
 #[test]
 fn prepare_snapshot_writes_per_run_files_and_returns_ok() {
     let tmp = TempDir::new().unwrap();
@@ -25,7 +44,16 @@ fn prepare_snapshot_writes_per_run_files_and_returns_ok() {
     let curated = vec![allow("registry.npmjs.org", RuleTier::CuratedAllow)];
 
     let cwd = tmp.path().to_path_buf();
-    let reply = handle_prepare_snapshot(&cwd, &curated, &rs, &pt, &state_dir, false, false);
+    let reply = handle_prepare_snapshot(
+        &cwd,
+        &curated,
+        &rs,
+        &pt,
+        &state_dir,
+        guard_core::RuleSignaturePolicy::AllowTestSimulator,
+        false,
+        false,
+    );
 
     match reply {
         guard_ipc::SnapshotReply::Ok {
@@ -70,7 +98,16 @@ fn prepare_snapshot_includes_curated_entries_sorted_by_tier() {
             reason: "npm registry".into(),
         },
     ];
-    let reply = handle_prepare_snapshot(tmp.path(), &curated, &rs, &pt, &state_dir, false, false);
+    let reply = handle_prepare_snapshot(
+        tmp.path(),
+        &curated,
+        &rs,
+        &pt,
+        &state_dir,
+        guard_core::RuleSignaturePolicy::AllowTestSimulator,
+        false,
+        false,
+    );
     match reply {
         guard_ipc::SnapshotReply::Ok { run_uuid, .. } => {
             let snap_path = guard_daemon::state_dir::run_snapshot_path(&state_dir, &run_uuid);
@@ -85,4 +122,81 @@ fn prepare_snapshot_includes_curated_entries_sorted_by_tier() {
             panic!("expected Ok; got Err: {message}");
         }
     }
+}
+
+#[cfg(feature = "test-signer")]
+#[test]
+fn prepare_snapshot_includes_verified_signed_user_rule() {
+    let tmp = TempDir::new().unwrap();
+    let state_dir = tmp.path().to_path_buf();
+    guard_daemon::state_dir::ensure_runs_dir(&state_dir).unwrap();
+    let rs = RuleStore::open(&guard_daemon::state_dir::db_path(&state_dir)).unwrap();
+    insert_signed_allow(&rs, "signed.example.com");
+    let pt = Arc::new(ProcessTree::new());
+    let curated = Vec::new();
+
+    let reply = handle_prepare_snapshot(
+        tmp.path(),
+        &curated,
+        &rs,
+        &pt,
+        &state_dir,
+        guard_core::RuleSignaturePolicy::AllowTestSimulator,
+        false,
+        false,
+    );
+    match reply {
+        guard_ipc::SnapshotReply::Ok { run_uuid, .. } => {
+            let snap_path = guard_daemon::state_dir::run_snapshot_path(&state_dir, &run_uuid);
+            let bytes = std::fs::read(&snap_path).unwrap();
+            let snap = guard_core::Snapshot::decode(&bytes).expect("decode");
+            assert!(snap
+                .entries
+                .iter()
+                .any(|e| e.pattern == "signed.example.com"));
+        }
+        guard_ipc::SnapshotReply::Err { message, .. } => {
+            panic!("expected Ok; got Err: {message}");
+        }
+    }
+}
+
+#[cfg(feature = "test-signer")]
+#[test]
+fn prepare_snapshot_fails_closed_on_tampered_user_rule() {
+    use rusqlite::{params, Connection};
+
+    let tmp = TempDir::new().unwrap();
+    let state_dir = tmp.path().to_path_buf();
+    guard_daemon::state_dir::ensure_runs_dir(&state_dir).unwrap();
+    let db = guard_daemon::state_dir::db_path(&state_dir);
+    let rs = RuleStore::open(&db).unwrap();
+    let rule_id = insert_signed_allow(&rs, "signed.example.com");
+    drop(rs);
+    let conn = Connection::open(&db).unwrap();
+    conn.execute(
+        "UPDATE rules SET pattern = ?1 WHERE id = ?2",
+        params!["evil.example.com", rule_id],
+    )
+    .unwrap();
+    drop(conn);
+    let rs = RuleStore::open(&db).unwrap();
+    let pt = Arc::new(ProcessTree::new());
+    let curated = Vec::new();
+
+    let reply = handle_prepare_snapshot(
+        tmp.path(),
+        &curated,
+        &rs,
+        &pt,
+        &state_dir,
+        guard_core::RuleSignaturePolicy::AllowTestSimulator,
+        false,
+        false,
+    );
+    assert!(matches!(
+        reply,
+        guard_ipc::SnapshotReply::Err { message, .. }
+            if message.contains("user rule signature verification failed")
+    ));
 }

@@ -13,7 +13,7 @@ use crate::rule_store::RuleStore;
 use crate::snapshot::publish_run;
 use crate::state_dir::run_manifest_path;
 use crate::tracked::{ProcessTree, RunRecord};
-use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier, SCHEMA_V2, Snapshot};
+use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier, Snapshot, SCHEMA_V2};
 use guard_ipc::SnapshotReply;
 use std::path::Path;
 use std::sync::Arc;
@@ -35,6 +35,7 @@ pub fn handle_prepare_snapshot(
     rule_store: &RuleStore,
     process_tree: &Arc<ProcessTree>,
     state_dir: &Path,
+    rule_signature_policy: guard_core::RuleSignaturePolicy,
     is_tty: bool,
     baseline_mode: bool,
 ) -> SnapshotReply {
@@ -107,14 +108,14 @@ pub fn handle_prepare_snapshot(
     };
 
     // 1. SQLite user rules.
-    let user_entries = match rule_store.all_user_rules() {
+    let user_entries = match rule_store.all_verified_user_rules(rule_signature_policy) {
         Ok(r) => r,
         Err(e) => {
             warn!(
                 error = %e,
-                "PrepareSnapshot: rule_store read failed; proceeding without user rules"
+                "PrepareSnapshot: user rule signature verification failed; failing closed"
             );
-            Vec::new()
+            return SnapshotReply::err(format!("user rule signature verification failed: {e}"));
         }
     };
 
@@ -214,6 +215,7 @@ pub fn handle_prepare_snapshot_v4_full(
         &state.rule_store,
         &state.process_tree,
         &state.state_dir,
+        state.rule_signature_policy,
         is_tty,
         baseline_mode,
     )

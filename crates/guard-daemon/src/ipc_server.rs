@@ -20,12 +20,12 @@
 use crate::baseline_staging::BaselineStaging;
 use crate::gap_detector::GapDetector;
 use crate::install_artifacts::InstallArtifactStore;
-use crate::ipc_dispatch::{DispatchError, FrameKind, MessageTag, classify_frame};
+use crate::ipc_dispatch::{classify_frame, DispatchError, FrameKind, MessageTag};
 use crate::log_writer::LogWriter;
 use crate::peer_auth::authenticate;
 use crate::prompt::{PromptDedup, RecentGapsRing};
 use crate::tracked::{CoverageGap, ProcessTree};
-use crossbeam_channel::{TrySendError, bounded};
+use crossbeam_channel::{bounded, TrySendError};
 use guard_core::AuditToken;
 use guard_ipc::frame::{read_frame, write_frame};
 use guard_ipc::{
@@ -33,11 +33,10 @@ use guard_ipc::{
     DenyNotify, DenyNotifyAck, DisableCuratedRule, DisableCuratedRuleReply, DylibLoaded,
     DylibLoadedAck, EnableCuratedRule, EnableCuratedRuleReply, EnvNotPropagatedGap,
     EnvNotPropagatedGapAck, ExecAck, ExecBlocked, ExecBlockedAck, ExecEvent, ForkAck, ForkEvent,
-    IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4, InsertUserRule, InsertUserRuleReply, IpcError,
-    ListRules, ListRulesReply, PersistenceWrite, PersistenceWriteAck, Ping, PingReply,
-    PrepareSnapshot, PromptChannelInit, PromptChannelInitAck, ReadInstallArtifacts,
-    ReadInstallArtifactsReply, RegisterRoot, Reply, Resolve, ResolveReply, SnapshotReply, Status,
-    StatusReply,
+    InsertUserRule, InsertUserRuleReply, IpcError, ListRules, ListRulesReply, PersistenceWrite,
+    PersistenceWriteAck, Ping, PingReply, PrepareSnapshot, PromptChannelInit, PromptChannelInitAck,
+    ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply, Resolve, ResolveReply,
+    SnapshotReply, Status, StatusReply, IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4,
 };
 use guard_os::codesign::is_hardened_runtime;
 use guard_os::process::{kernel_pidversion, process_uid};
@@ -204,6 +203,8 @@ pub struct DaemonState {
     pub startup_instant: std::time::Instant,
     // Per-message HMAC key for IPC frame signing. Reuses the snapshot HMAC key.
     pub ipc_hmac_key: Option<[u8; 32]>,
+    // Issue #31: production accepts only hardware-backed signer kinds.
+    pub rule_signature_policy: guard_core::RuleSignaturePolicy,
 }
 
 impl DaemonState {
@@ -240,6 +241,7 @@ impl DaemonState {
             deferred_resolve: Arc::new(DeferredResolveTable::new()),
             startup_instant: std::time::Instant::now(),
             ipc_hmac_key: None,
+            rule_signature_policy: guard_core::RuleSignaturePolicy::Production,
         }
     }
 
@@ -527,18 +529,22 @@ fn handle_insert_user_rule_frame(stream: &mut UnixStream, state: &Arc<DaemonStat
             return;
         }
     };
-    if req.schema_version != IPC_SCHEMA_V3 {
+    if !matches!(req.schema_version, IPC_SCHEMA_V3 | guard_ipc::IPC_SCHEMA_V5) {
         let _ = write_tagged(
             stream,
             MessageTag::InsertUserRule,
             &InsertUserRuleReply::err(format!(
-                "schema_version {} != IPC_SCHEMA_V3",
+                "schema_version {} not supported for InsertUserRule",
                 req.schema_version
             )),
         );
         return;
     }
-    let reply = crate::handlers::insert_user_rule::handle_insert_user_rule(&req, &state.rule_store);
+    let reply = crate::handlers::insert_user_rule::handle_insert_user_rule(
+        &req,
+        &state.rule_store,
+        state.rule_signature_policy,
+    );
     if let Err(e) = write_tagged(stream, MessageTag::InsertUserRule, &reply) {
         error!(error = %e, "failed to send InsertUserRuleReply");
     }
@@ -688,7 +694,7 @@ fn handle_delete_install_artifacts_frame(stream: &mut UnixStream, state: &Arc<Da
 
 fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
     use crate::log_writer::jsonl_row::{
-        Decision, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
+        now_rfc3339, Decision, LogRow, ProcessCtxLog, RootCtxLog, JSONL_SCHEMA_VERSION,
     };
 
     let req: DenyNotify = match read_tagged_body(stream, MessageTag::DenyNotify) {
@@ -867,7 +873,7 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
 // ============================================================================
 
 fn handle_exec_blocked_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    use crate::log_writer::jsonl_row::{JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, now_rfc3339};
+    use crate::log_writer::jsonl_row::{now_rfc3339, LogRow, ProcessCtxLog, JSONL_SCHEMA_VERSION};
 
     let req: ExecBlocked = match read_tagged_body(stream, MessageTag::ExecBlocked) {
         Ok(m) => m,
@@ -949,7 +955,7 @@ fn handle_exec_blocked_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) 
 // ============================================================================
 
 fn handle_persistence_write_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    use crate::log_writer::jsonl_row::{JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, now_rfc3339};
+    use crate::log_writer::jsonl_row::{now_rfc3339, LogRow, ProcessCtxLog, JSONL_SCHEMA_VERSION};
 
     let req: PersistenceWrite = match read_tagged_body(stream, MessageTag::PersistenceWrite) {
         Ok(m) => m,
@@ -1923,7 +1929,7 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
             guard_core::SourceKind::ConfirmedDeny | guard_core::SourceKind::BuiltinDeny
         ) {
             use crate::log_writer::jsonl_row::{
-                Decision, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
+                now_rfc3339, Decision, LogRow, ProcessCtxLog, RootCtxLog, JSONL_SCHEMA_VERSION,
             };
 
             if matches!(policy_source, guard_core::SourceKind::ConfirmedDeny) {
@@ -2185,7 +2191,7 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
 
     if let Some((run_uuid, source, entries)) = policy_deny {
         use crate::log_writer::jsonl_row::{
-            Decision, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
+            now_rfc3339, Decision, LogRow, ProcessCtxLog, RootCtxLog, JSONL_SCHEMA_VERSION,
         };
 
         let source_kind_str = source.as_label();

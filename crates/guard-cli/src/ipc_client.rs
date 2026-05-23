@@ -277,18 +277,45 @@ pub fn insert_user_rule_request(
     pattern: &str,
     reason: &str,
 ) -> Result<i64, CliError> {
+    insert_user_rule_request_with_origin(sock, kind, match_type, pattern, reason, "manual", None)
+}
+
+pub fn insert_user_rule_request_with_origin(
+    sock: &Path,
+    kind: &str,
+    match_type: &str,
+    pattern: &str,
+    reason: &str,
+    origin: &str,
+    run_uuid: Option<&str>,
+) -> Result<i64, CliError> {
     let bio_reason = format!("Stentorian Guard: {kind} rule for {pattern}");
     if !crate::biometric::authenticate(&bio_reason) {
         return Err(CliError::Other(
             "biometric authentication required to modify rules".into(),
         ));
     }
+    let created_at_unix_ms = unix_ms_now();
+    let payload = guard_core::RuleSignaturePayloadV1::new(
+        kind,
+        match_type,
+        pattern,
+        reason,
+        created_at_unix_ms,
+        origin,
+        run_uuid.map(str::to_string),
+    );
+    let signature = crate::rule_signing::sign_rule_payload(&payload)?;
     let req = InsertUserRule {
-        schema_version: guard_ipc::IPC_SCHEMA_V3,
+        schema_version: guard_ipc::IPC_SCHEMA_V5,
         kind: kind.into(),
         match_type: match_type.into(),
         pattern: pattern.into(),
         reason: reason.into(),
+        created_at_unix_ms,
+        origin: origin.into(),
+        run_uuid: run_uuid.map(str::to_string),
+        signature: Some(signature),
     };
     let reply: InsertUserRuleReply = send_tagged_request(sock, TAG_INSERT_USER_RULE, &req)?;
     match reply {
@@ -401,4 +428,11 @@ pub fn baseline_commit_request(sock: &Path, run_uuid: &str) -> Result<Vec<Propos
             Err(CliError::Other(format!("BaselineCommit: {message}")))
         }
     }
+}
+
+fn unix_ms_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }

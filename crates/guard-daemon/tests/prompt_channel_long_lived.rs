@@ -3,7 +3,7 @@
 use crossbeam_channel::bounded;
 use guard_daemon::handlers::prompt_channel::{ClientChannelFrame, MAX_CONCURRENT_CHANNELS};
 use guard_daemon::tracked::ProcessTree;
-use guard_ipc::{IPC_SCHEMA_V3, PromptCancel, PromptResponse, PromptVerdict};
+use guard_ipc::{PromptCancel, PromptResponse, PromptVerdict, IPC_SCHEMA_V3};
 
 #[test]
 fn channel_frame_round_trip() {
@@ -12,6 +12,7 @@ fn channel_frame_round_trip() {
         prompt_id: "p1".into(),
         verdict: PromptVerdict::AllowOnce,
         rule_pattern: None,
+        signed_rule: None,
     });
     let mut bytes = Vec::new();
     ciborium::into_writer(&r, &mut bytes).unwrap();

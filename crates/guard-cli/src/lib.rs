@@ -13,6 +13,7 @@ pub mod logs;
 pub mod persistence_log;
 pub mod prompt_channel;
 pub mod prompt_render;
+pub mod rule_signing;
 pub mod run_orchestrator;
 pub mod sigint_handler;
 pub mod spawn;

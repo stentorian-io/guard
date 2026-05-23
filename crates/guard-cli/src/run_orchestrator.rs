@@ -110,10 +110,11 @@ pub fn run(
     let render_handle = if let Some(reader) = prompt_reader.take() {
         let shared = Arc::clone(&shared_channel);
         let stop = Arc::clone(&stop_flag);
+        let render_run_uuid = run_uuid.clone();
         Some(
             std::thread::Builder::new()
                 .name("guard-prompt-render".into())
-                .spawn(move || render_loop(reader, shared, stop))
+                .spawn(move || render_loop(reader, shared, stop, render_run_uuid))
                 .map_err(|e| CliError::Other(format!("render thread: {e}")))?,
         )
     } else {
@@ -186,12 +187,14 @@ fn present_learn_review(sock: &Path, run_uuid: &str) {
             match c {
                 'a' => {
                     let reason = format!("user-approved from learn run {run_uuid}");
-                    match crate::ipc_client::insert_user_rule_request(
+                    match crate::ipc_client::insert_user_rule_request_with_origin(
                         sock,
                         "allow",
                         &rule.match_type,
                         &rule.pattern,
                         &reason,
+                        "learn",
+                        Some(run_uuid),
                     ) {
                         Ok(_) => allowed += 1,
                         Err(e) => eprintln!("    failed to insert allow rule: {e}"),
@@ -200,12 +203,14 @@ fn present_learn_review(sock: &Path, run_uuid: &str) {
                 }
                 'd' => {
                     let reason = format!("user-denied from learn run {run_uuid}");
-                    match crate::ipc_client::insert_user_rule_request(
+                    match crate::ipc_client::insert_user_rule_request_with_origin(
                         sock,
                         "deny",
                         &rule.match_type,
                         &rule.pattern,
                         &reason,
+                        "learn",
+                        Some(run_uuid),
                     ) {
                         Ok(_) => denied += 1,
                         Err(e) => eprintln!("    failed to insert deny rule: {e}"),
@@ -256,6 +261,7 @@ fn render_loop(
     mut reader: crate::prompt_channel::PromptReader,
     shared_channel: crate::sigint_handler::SharedChannel,
     stop: Arc<AtomicBool>,
+    run_uuid: String,
 ) {
     while !stop.load(Ordering::SeqCst) {
         // CR-02: blocking read happens on the exclusively-owned reader half;
@@ -266,7 +272,7 @@ fn render_loop(
             Ok(r) => r,
             Err(_) => break, // EOF / disconnect / channel teardown
         };
-        match crate::prompt_render::render_and_choose(&req) {
+        match crate::prompt_render::render_and_choose(&req, &run_uuid) {
             Ok(resp) => {
                 if let Ok(mut g) = shared_channel.lock() {
                     if let Some(c) = g.as_mut() {

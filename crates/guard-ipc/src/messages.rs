@@ -116,6 +116,7 @@ impl Reply {
 pub const IPC_SCHEMA_V2: u16 = 2;
 pub const IPC_SCHEMA_V3: u16 = 3;
 pub const IPC_SCHEMA_V4: u16 = 4;
+pub const IPC_SCHEMA_V5: u16 = 5;
 
 // ============================================================
 // v0.4 — Threat-intel match record + non-fatal feed warning.
@@ -728,10 +729,12 @@ pub struct RulePattern {
 /// CLI → daemon (prompt channel): user's decision on a PromptRequest.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptResponse {
-    pub schema_version: u16, // V3
+    pub schema_version: u16, // V5 when signed_rule is present
     pub prompt_id: String,
     pub verdict: PromptVerdict,
     pub rule_pattern: Option<RulePattern>,
+    #[serde(default)]
+    pub signed_rule: Option<InsertUserRule>,
 }
 
 /// CLI → daemon (prompt channel): cancel an outstanding prompt (e.g. timeout or Ctrl-C).
@@ -746,13 +749,25 @@ pub struct PromptCancel {
 // ============================================================
 
 /// CLI → daemon: insert a user-authored rule into the SQLite rule store.
+///
+/// v0.8 / issue #31: persistent user rules must carry an asymmetric rule
+/// signature. Legacy unsigned requests decode for compatibility but daemon
+/// handlers reject them for persistence.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InsertUserRule {
-    pub schema_version: u16, // V3
+    pub schema_version: u16, // V5 for signed persistence
     pub kind: String,        // "allow"|"deny"
     pub match_type: String,  // "exact"|"suffix"|"ip"
     pub pattern: String,
     pub reason: String, // non-empty
+    #[serde(default)]
+    pub created_at_unix_ms: i64,
+    #[serde(default)]
+    pub origin: String,
+    #[serde(default)]
+    pub run_uuid: Option<String>,
+    #[serde(default)]
+    pub signature: Option<guard_core::RuleSignatureV1>,
 }
 
 /// Daemon → CLI: response to InsertUserRule.
@@ -771,13 +786,13 @@ pub enum InsertUserRuleReply {
 impl InsertUserRuleReply {
     pub fn ok(rule_id: i64) -> Self {
         Self::Ok {
-            schema_version: IPC_SCHEMA_V3,
+            schema_version: IPC_SCHEMA_V5,
             rule_id,
         }
     }
     pub fn err(message: impl Into<String>) -> Self {
         Self::Err {
-            schema_version: IPC_SCHEMA_V3,
+            schema_version: IPC_SCHEMA_V5,
             message: message.into(),
         }
     }

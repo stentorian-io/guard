@@ -17,11 +17,11 @@
 
 use std::path::Path;
 
-use crate::CliError;
 use crate::denial_log;
 use crate::install::launchagent;
 use crate::ipc_client;
 use crate::tty;
+use crate::CliError;
 
 pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
     // TTY-required gate. Refuse to run from a non-interactive
@@ -98,14 +98,30 @@ pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
                 'a' => {
                     // Allow rules also go to machine-wide SQLite.
                     let reason = format!("user-approved from review of run {uuid}");
-                    ipc_client::insert_user_rule_request(sock, "allow", "exact", &b.host, &reason)?;
+                    ipc_client::insert_user_rule_request_with_origin(
+                        sock,
+                        "allow",
+                        "exact",
+                        &b.host,
+                        &reason,
+                        "review",
+                        Some(&uuid),
+                    )?;
                     allowed += 1;
                     break;
                 }
                 'd' => {
                     // Deny rules ALWAYS go to machine-wide.
                     let reason = format!("user-denied from review of run {uuid}");
-                    ipc_client::insert_user_rule_request(sock, "deny", "exact", &b.host, &reason)?;
+                    ipc_client::insert_user_rule_request_with_origin(
+                        sock,
+                        "deny",
+                        "exact",
+                        &b.host,
+                        &reason,
+                        "review",
+                        Some(&uuid),
+                    )?;
                     denied += 1;
                     break;
                 }

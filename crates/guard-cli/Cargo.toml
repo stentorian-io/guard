@@ -16,6 +16,9 @@ path = "src/main.rs"
 name = "guard_cli"
 path = "src/lib.rs"
 
+[features]
+test-signer = ["guard-core/test-signer"]
+
 [dependencies]
 clap = { workspace = true }
 libc = { workspace = true }

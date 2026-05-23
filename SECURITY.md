@@ -71,7 +71,7 @@ guard itself.
 | Component | Path | Owner |
 |---|---|---|
 | Binaries | `/usr/local/libexec/stt-guard/` | `root:wheel` (755) |
-| Runtime state (DB, snapshots, HMAC keys) | `/Library/Application Support/Stentorian Guard/` | `_stt_guard:_stt_guard` (700) |
+| Runtime state (DB, snapshots, HMAC keys, public signing metadata) | `/Library/Application Support/Stentorian Guard/` | `_stt_guard:_stt_guard` (700) |
 | Logs | `/var/log/stt-guard/` | `_stt_guard:_stt_guard` (700) |
 | LaunchDaemon | `io.stentorian.guard.daemon` | Root-managed |
 
@@ -84,12 +84,19 @@ guard itself.
 | Modify snapshot contents | HMAC validates integrity | `_stt_guard`-owned, written by daemon only |
 | Delete denial logs | User-owned, deletable | `_stt_guard`-owned |
 | Kill daemon and replace with rogue | Codesign peer auth detects | Can't kill a different UID without root; LaunchDaemon auto-restarts |
-| Steal HMAC key material | User-readable | `_stt_guard`-readable only (700) |
+| Steal HMAC key material | User-readable | `_stt_guard`-readable only (700); baseline/snapshot authenticity signing must use hardware-backed private keys that the daemon cannot export or forge with |
 | `sudo` inside monitored tree | Blocked (setuid check) | Blocked with explicit `PrivilegeEscalation` reason |
 
 The IPC socket is world-writable — any process can connect — but the daemon
 authenticates every connection via macOS audit tokens and codesign identity
 verification (shipped in v0.7). The socket is the door; codesign is the lock.
+
+Baseline/snapshot authenticity signing has a stricter key-storage requirement
+than snapshot HMAC integrity: private signing keys must be hardware-backed
+(Secure Enclave, security key, TPM-backed key, or an equivalent non-exportable
+platform facility). Software-only private keys are not a supported compatibility
+mode because the daemon must be able to verify signatures without being able to
+forge new trusted baselines if the daemon or its writable state is compromised.
 
 **Performance and UX impact:** the deployment has zero runtime overhead. The
 protection is purely ownership and permissions on disk — the daemon, hook, and

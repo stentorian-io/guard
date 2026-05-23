@@ -93,6 +93,7 @@ fn prompt_response_round_trip() {
             match_type: "exact".into(),
             pattern: "h".into(),
         }),
+        signed_rule: None,
     });
 }
 
@@ -107,11 +108,15 @@ fn prompt_cancel_round_trip() {
 #[test]
 fn insert_user_rule_round_trip() {
     round_trip(&InsertUserRule {
-        schema_version: IPC_SCHEMA_V3,
+        schema_version: IPC_SCHEMA_V5,
         kind: "allow".into(),
         match_type: "exact".into(),
         pattern: "h".into(),
         reason: "user-approved".into(),
+        created_at_unix_ms: 1_700_000_000_000,
+        origin: "test".into(),
+        run_uuid: Some("r1".into()),
+        signature: None,
     });
     round_trip(&InsertUserRuleReply::ok(42));
     round_trip(&InsertUserRuleReply::err("bad"));

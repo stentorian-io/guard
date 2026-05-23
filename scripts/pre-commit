@@ -28,13 +28,53 @@ skip() {
 
 cache_prune
 
+branch_scan_base() {
+  git merge-base --fork-point '@{upstream}' HEAD 2>/dev/null \
+    || git merge-base origin/main HEAD 2>/dev/null \
+    || git merge-base main HEAD 2>/dev/null
+}
+
 # ── 0. Skip build/test when only repo-meta files changed ────────────────────
 REPO_META_ONLY=0
 if changes_only_repo_meta staged; then
   REPO_META_ONLY=1
 fi
 
-# ── 1. Reject Co-Authored-By lines ──────────────────────────────────────────
+# ── 1. Secret scan ──────────────────────────────────────────────────────────
+#
+# CI scans only commits added by the PR branch. Mirror that locally instead of
+# scanning the entire repository history, and also scan the staged patch because
+# the commit being created is not reachable from HEAD yet.
+if ! command -v trufflehog &>/dev/null; then
+  fail "trufflehog not found — install with 'brew install trufflehog'"
+fi
+
+scan_base=$(branch_scan_base) \
+  || fail "could not determine branch base for secret scan"
+
+if [ -n "$(git rev-list --max-count=1 "$scan_base..HEAD")" ]; then
+  trufflehog git "file://$REPO_ROOT" \
+    --since-commit "$scan_base" \
+    --branch HEAD \
+    --results=verified \
+    --fail \
+    --no-update \
+    || fail "secret scan failed for commits added on this branch"
+fi
+
+staged_patch=$(mktemp)
+trap 'rm -f "$staged_patch"' EXIT
+git diff --cached --binary > "$staged_patch"
+if [ -s "$staged_patch" ]; then
+  trufflehog filesystem "$staged_patch" \
+    --results=verified \
+    --fail \
+    --no-update \
+    || fail "secret scan failed for staged changes"
+fi
+pass "secret scan"
+
+# ── 2. Reject Co-Authored-By lines ──────────────────────────────────────────
 #
 # Check the staged diff for Co-Authored-By trailers. The commit message isn't
 # available yet in a pre-commit hook, so we check it via the prepare-commit-msg
@@ -43,7 +83,7 @@ fi
 #
 # For the commit message itself, we install a companion commit-msg check below.
 
-# ── 2. Markdown lint ────────────────────────────────────────────────────────
+# ── 3. Markdown lint ────────────────────────────────────────────────────────
 if command -v npx &>/dev/null; then
   MD_FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.md' || true)
   if [ -n "$MD_FILES" ]; then
@@ -61,11 +101,11 @@ else
   echo "⚠ npx not found — skipping markdown lint"
 fi
 
-# ── 3–5. Cargo check / machete / test — skip when only repo-meta changed ────
+# ── 4–6. Cargo check / machete / test — skip when only repo-meta changed ────
 if [ "$REPO_META_ONLY" -eq 1 ]; then
   skip "cargo check, machete, test (repo-meta-only change)"
 else
-  # ── 3. Cargo check (fast type/borrow check, no codegen) ───────────────────
+  # ── 4. Cargo check (fast type/borrow check, no codegen) ───────────────────
   fp=$(rust_fingerprint)
   if cache_hit "pre-commit:cargo-check" "$fp"; then
     skip "cargo check"
@@ -76,7 +116,7 @@ else
     pass "cargo check"
   fi
 
-  # ── 4. Unused dependency lint (cargo-machete — stable, no compilation) ────
+  # ── 5. Unused dependency lint (cargo-machete — stable, no compilation) ────
   if cache_hit "pre-commit:machete" "$fp"; then
     skip "cargo machete"
   else
@@ -90,7 +130,7 @@ else
     fi
   fi
 
-  # ── 5. Cargo test — unit + integration tests (excludes E2E) ───────────────
+  # ── 6. Cargo test — unit + integration tests (excludes E2E) ───────────────
   if cache_hit "pre-commit:cargo-test" "$fp"; then
     skip "cargo test (unit + integration, E2E skipped)"
   else

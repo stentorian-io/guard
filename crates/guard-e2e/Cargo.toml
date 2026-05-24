@@ -21,6 +21,10 @@ guard-ipc = { workspace = true }
 libc = { workspace = true }
 tempfile = { workspace = true }
 
+[features]
+default = []
+test-signer = ["guard-core/test-signer", "guard-daemon/test-signer"]
+
 [dev-dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }

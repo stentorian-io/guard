@@ -77,6 +77,8 @@ impl DaemonHarness {
             .tempdir_in("/tmp")?;
         let state_dir = state_tmp.path().to_path_buf();
 
+        setup_test_signer(&state_dir)?;
+
         let (socket, manifest, child) = spawn_daemon_into(&state_dir, home.path(), extra)?;
 
         Ok(Self {
@@ -389,6 +391,29 @@ pub fn resolve_probe() -> PathBuf {
 /// CREATION is the caller's responsibility; this helper takes pre-existing
 /// state_dir + home_path borrows and returns the (socket, manifest, child)
 /// triple the caller assembles into a DaemonHarness.
+#[cfg(feature = "test-signer")]
+fn setup_test_signer(state_dir: &Path) -> std::io::Result<()> {
+    let (fingerprint, signer_kind, public_key_x963) =
+        guard_core::rule_signature::test_support::test_simulator_public_signer()
+            .map_err(|e| std::io::Error::other(format!("test signer setup: {e}")))?;
+    let db_path = guard_daemon::state_dir::db_path(state_dir);
+    let store = guard_daemon::rule_store::RuleStore::open(&db_path)
+        .map_err(|e| std::io::Error::other(format!("open e2e rule store: {e}")))?;
+    store
+        .register_trusted_rule_signer_key(
+            &fingerprint,
+            &signer_kind,
+            &public_key_x963,
+            "e2e test-signer simulator",
+        )
+        .map_err(|e| std::io::Error::other(format!("register e2e test signer: {e}")))
+}
+
+#[cfg(not(feature = "test-signer"))]
+fn setup_test_signer(_state_dir: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 fn spawn_daemon_into(
     state_dir: &Path,
     home_path: &Path,
@@ -422,6 +447,8 @@ fn spawn_daemon_into(
         .env("HOME", home_path)
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("RUST_LOG", "info");
+    #[cfg(feature = "test-signer")]
+    cmd.env("STT_GUARD_ALLOW_TEST_SIGNER", "1");
     for (k, v) in extra {
         cmd.env(*k, *v);
     }
@@ -531,6 +558,8 @@ impl StoppedHarness {
             home,
             _state_tmp,
         } = self;
+        setup_test_signer(&state_dir)?;
+
         let (socket, manifest, child) = spawn_daemon_into(&state_dir, home.path(), extra_env)?;
         Ok(DaemonHarness {
             state_dir,

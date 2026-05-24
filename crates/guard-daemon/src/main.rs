@@ -54,6 +54,18 @@ fn main() -> std::io::Result<()> {
     }
 }
 
+fn rule_signature_policy() -> guard_core::RuleSignaturePolicy {
+    #[cfg(feature = "test-signer")]
+    {
+        if std::env::var_os("STT_GUARD_ALLOW_TEST_SIGNER").as_deref()
+            == Some(std::ffi::OsStr::new("1"))
+        {
+            return guard_core::RuleSignaturePolicy::AllowTestSimulator;
+        }
+    }
+    guard_core::RuleSignaturePolicy::Production
+}
+
 fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     ensure_state_dir(&state_dir)?;
     ensure_runs_dir(&state_dir)?;
@@ -139,7 +151,7 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         pending_snapshot_inputs: std::sync::Arc::new(std::sync::Mutex::new(
             std::collections::HashMap::new(),
         )),
-        rule_signature_policy: guard_core::RuleSignaturePolicy::Production,
+        rule_signature_policy: rule_signature_policy(),
     });
 
     // Spawn the per-run snapshot GC sweeper (v0.2).

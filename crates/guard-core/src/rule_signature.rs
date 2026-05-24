@@ -257,6 +257,21 @@ pub mod test_support {
     use p256::ecdsa::signature::Signer;
     use p256::ecdsa::SigningKey;
 
+    pub fn test_simulator_public_signer() -> Result<(String, String, Vec<u8>), RuleSignatureError> {
+        let signing_key =
+            SigningKey::from_slice(&[7u8; 32]).map_err(|_| RuleSignatureError::InvalidPublicKey)?;
+        let public_key_x963 = signing_key
+            .verifying_key()
+            .to_encoded_point(false)
+            .as_bytes()
+            .to_vec();
+        Ok((
+            sha256_hex(&public_key_x963),
+            SIGNER_KIND_TEST_SIMULATOR.to_string(),
+            public_key_x963,
+        ))
+    }
+
     pub fn sign_with_test_simulator(
         payload: &RuleSignaturePayloadV1,
     ) -> Result<RuleSignatureV1, RuleSignatureError> {

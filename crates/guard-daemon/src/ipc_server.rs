@@ -40,7 +40,7 @@ use guard_ipc::{
     StatusReply,
 };
 use guard_os::codesign::is_hardened_runtime;
-use guard_os::process::kernel_pidversion;
+use guard_os::process::{kernel_pidversion, process_uid};
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -1277,9 +1277,8 @@ fn handle_legacy_register_root(
     // ENF-08 + RegisterRoot asymmetry:
     // RegisterRoot is a DELEGATION operation: the CLI (the connecting peer)
     // is vouching for an EXTERNAL process (the wrapped child it just spawned).
-    // The wire-claimed token is the child's kernel-sourced audit token —
-    // obtained by the CLI via task_name_for_pid + task_info(TASK_AUDIT_TOKEN),
-    // which is a same-UID kernel operation on macOS.
+    // The wire-claimed token is the child's audit token, obtained by the CLI
+    // through guard-os' process-audit-token capability.
     //
     // Unlike fork/exec IPC (where the dylib in process X should not be able
     // to impersonate process Y), RegisterRoot is an explicit CLI-to-daemon
@@ -1328,8 +1327,7 @@ fn handle_legacy_register_root(
             kernel_pid,
             wire_pid, "RegisterRoot: CLI delegating child registration (REGISTER-01)"
         );
-        // Use the full wire-claimed audit token — it was obtained by the CLI
-        // via task_info(TASK_AUDIT_TOKEN) which is kernel-sourced.
+        // Use the full wire-claimed audit token obtained by the CLI.
         msg.audit_token.into()
     } else {
         peer_token
@@ -1372,62 +1370,51 @@ fn handle_legacy_register_root(
 /// Checks:
 ///   (a) wire pid exists in the OS process table
 ///   (b) owned by a uid-bearing field in the connecting peer's kernel token
-///   (c) TREE-07: wire-claimed pidversion matches the kernel's pidversion
-///       for that pid (via task_info TASK_AUDIT_TOKEN). This closes the
-///       PID-reuse race: if a child dies and its PID is recycled between
-///       the CLI's task_info call and this verification, the recycled
-///       process has a different kernel pidversion → registration rejected.
+///   (c) TREE-07: wire-claimed pidversion matches the OS pidversion for that
+///       pid. This closes the PID-reuse race: if a child dies and its PID is
+///       recycled between the CLI's lookup and this verification, the recycled
+///       process has a different pidversion and registration is rejected.
 ///
-/// The Mach task_info path (c) may fail on future macOS if Apple tightens
-/// task-port access — in that case the function falls back to uid-only
-/// validation (the v0.2 behaviour).
+/// The OS pidversion lookup may fail if the platform does not expose it or
+/// denies access. In that case the function falls back to uid-only validation
+/// (the v0.2 behaviour).
 fn verify_wire_pid_matches_token(
     wire_pid: libc::pid_t,
     token_val: &[u32; 8],
     wire_pidversion: u32,
 ) -> bool {
-    // Step 1: proc_pidinfo for uid check (fast, always available).
-    let uid_ok = unsafe {
-        let mut info: libc::proc_bsdinfo = std::mem::zeroed();
-        let info_size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-        let n = libc::proc_pidinfo(
-            wire_pid,
-            libc::PROC_PIDTBSDINFO,
-            0,
-            &mut info as *mut _ as *mut libc::c_void,
-            info_size,
-        );
-        if n != info_size {
+    // Step 1: uid check via guard-os process inspection.
+    let uid_ok = match process_uid(wire_pid) {
+        Ok(proc_uid) => {
+            let uid_ok =
+                token_val[0] == proc_uid || token_val[1] == proc_uid || token_val[3] == proc_uid;
+            if !uid_ok {
+                warn!(
+                    wire_pid,
+                    proc_uid,
+                    token0 = token_val[0],
+                    token1 = token_val[1],
+                    token3 = token_val[3],
+                    "WR-08: wire pid uid did not match peer token uid fields"
+                );
+            }
+            uid_ok
+        }
+        Err(err) => {
             warn!(
                 wire_pid,
-                returned_size = n,
-                expected_size = info_size,
-                "WR-08: proc_pidinfo failed for wire pid"
+                error = %err,
+                "WR-08: process uid lookup failed for wire pid"
             );
-            return pid_exists(wire_pid);
+            pid_exists(wire_pid)
         }
-        let uid_ok = token_val[0] == info.pbi_uid
-            || token_val[1] == info.pbi_uid
-            || token_val[3] == info.pbi_uid;
-        if !uid_ok {
-            warn!(
-                wire_pid,
-                proc_uid = info.pbi_uid,
-                token0 = token_val[0],
-                token1 = token_val[1],
-                token3 = token_val[3],
-                "WR-08: wire pid uid did not match peer token uid fields"
-            );
-        }
-        uid_ok
     };
     if !uid_ok {
         return false;
     }
 
-    // Step 2 (TREE-07): cross-check pidversion via task_info(TASK_AUDIT_TOKEN).
-    // If the Mach call fails (entitlement restrictions, etc.), fall through
-    // and accept uid-only validation — same as v0.2 behaviour.
+    // Step 2 (TREE-07): cross-check pidversion through guard-os.
+    // If the lookup fails, fall through and accept uid-only validation.
     if wire_pidversion != 0 {
         if let Some(actual_pidversion) = kernel_pidversion(wire_pid) {
             if actual_pidversion != wire_pidversion {
@@ -1564,8 +1551,7 @@ fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Ar
     }
     // Construct child audit token from wire pid + pidversion.
     // The kernel-sourced peer token tells us the parent; the wire tells us the
-    // child's identity (which must be obtained by the dylib via proc_pidinfo
-    // before sending).
+    // child's identity.
     let child = AuditToken {
         val: [0, 0, 0, 0, 0, ev.child_pid as u32, 0, ev.child_pidversion],
     };

@@ -69,11 +69,11 @@ pub fn run(
     // the dylib's IPC succeeds at the wire layer but is rejected at the
     // handler-level untracked-peer gate.
     //
-    // We obtain the wrapped child's audit token via task_info(TASK_AUDIT_TOKEN)
-    // (kernel-sourced; same-uid only). REGISTER-01 delegation: peer_token
-    // is the CLI's own kernel-sourced token, wire-claimed token is the
-    // child's — daemon trusts the wire token after verify_wire_pid_same_uid
-    // (WR-08). See ipc_server.rs handle_legacy_register comment block.
+    // We obtain the wrapped child's audit token through guard-os'
+    // process-audit-token capability. REGISTER-01 delegation: peer_token is
+    // the CLI's own kernel-sourced token, wire-claimed token is the child's.
+    // The daemon trusts the wire token after verify_wire_pid_same_uid (WR-08).
+    // See ipc_server.rs handle_legacy_register comment block.
     let child_pid = child.id() as libc::pid_t;
     let token = crate::audit_token::audit_token_for_pid(child_pid)
         .map_err(|e| CliError::DaemonUnreachable(format!("audit_token: {e}")))?;

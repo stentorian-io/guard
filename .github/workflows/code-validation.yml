@@ -228,11 +228,11 @@ jobs:
         run: cargo check -p guard-os -p guard-watchdog --quiet
       - name: cargo test OS boundary
         run: cargo test -p guard-os --quiet
-      - name: cargo test portable core
+      - name: cargo test agnostic core
         run: cargo test -p guard-core --lib --tests --quiet
-      - name: cargo test portable IPC
+      - name: cargo test agnostic IPC
         run: cargo test -p guard-ipc --lib --tests --quiet
-      - name: cargo test portable watchdog
+      - name: cargo test agnostic watchdog
         run: cargo test -p guard-watchdog --bins --quiet
 
   secret_scan:

@@ -532,6 +532,7 @@ dependencies = [
  "guard-core",
  "guard-daemon",
  "guard-ipc",
+ "guard-os",
  "libc",
  "serde",
  "serde_json",

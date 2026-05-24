@@ -5,6 +5,9 @@
 //! queries.
 
 use crate::OsError;
+use guard_core::AuditToken;
+#[cfg(target_os = "macos")]
+use std::ffi::c_void;
 
 /// macOS syscall number for csops. Verified from MacOSX15.4.sdk syscall.h.
 pub const SYS_CSOPS: libc::c_int = 169;
@@ -19,6 +22,94 @@ pub const CS_REQUIRE_LV: u32 = 0x0000_2000; // require library validation
 pub const CS_RUNTIME: u32 = 0x0001_0000; // hardened runtime
 
 const CSOPS_STATUS: &str = "csops status";
+
+#[cfg(target_os = "macos")]
+type SecCodeRef = *const c_void;
+#[cfg(target_os = "macos")]
+type CFDataRef = *const c_void;
+#[cfg(target_os = "macos")]
+type CFDictionaryRef = *const c_void;
+#[cfg(target_os = "macos")]
+type CFStringRef = *const c_void;
+#[cfg(target_os = "macos")]
+type CFAllocatorRef = *const c_void;
+
+#[cfg(target_os = "macos")]
+const ERR_SEC_SUCCESS: i32 = 0;
+#[cfg(target_os = "macos")]
+const KCF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+
+#[cfg(target_os = "macos")]
+#[link(name = "Security", kind = "framework")]
+unsafe extern "C" {
+    fn SecCodeCopyGuestWithAttributes(
+        host: SecCodeRef,
+        attributes: CFDictionaryRef,
+        flags: u32,
+        guest: *mut SecCodeRef,
+    ) -> i32;
+
+    fn SecCodeCheckValidity(code: SecCodeRef, flags: u32, requirement: *const c_void) -> i32;
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    fn CFStringCreateWithCString(
+        alloc: CFAllocatorRef,
+        c_str: *const u8,
+        encoding: u32,
+    ) -> CFStringRef;
+
+    fn CFDataCreate(alloc: CFAllocatorRef, bytes: *const u8, length: isize) -> CFDataRef;
+
+    fn CFDictionaryCreate(
+        alloc: CFAllocatorRef,
+        keys: *const *const c_void,
+        values: *const *const c_void,
+        num_values: isize,
+        key_callbacks: *const c_void,
+        value_callbacks: *const c_void,
+    ) -> CFDictionaryRef;
+
+    fn CFRelease(cf: *const c_void);
+
+    static kCFTypeDictionaryKeyCallBacks: c_void;
+    static kCFTypeDictionaryValueCallBacks: c_void;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodesignVerdict {
+    Valid,
+    Invalid(i32),
+    LookupFailed(i32),
+    CfError(&'static str),
+    Unsupported,
+}
+
+impl std::fmt::Display for CodesignVerdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Valid => write!(f, "valid"),
+            Self::Invalid(s) => write!(f, "invalid (OSStatus {s})"),
+            Self::LookupFailed(s) => write!(f, "lookup failed (OSStatus {s})"),
+            Self::CfError(msg) => write!(f, "CF error: {msg}"),
+            Self::Unsupported => write!(f, "unsupported"),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct CfGuard(*const c_void);
+
+#[cfg(target_os = "macos")]
+impl Drop for CfGuard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { CFRelease(self.0) };
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 mod imp {
@@ -75,6 +166,69 @@ pub fn has_hardened_bits(flags: u32) -> bool {
         || (flags & CS_REQUIRE_LV) != 0
 }
 
+/// Verify the code signature of the process identified by `token`.
+///
+/// Returns `CodesignVerdict::Valid` if the signature checks out. This function
+/// does not make policy decisions.
+#[cfg(target_os = "macos")]
+pub fn verify_peer_signature(token: &AuditToken) -> CodesignVerdict {
+    unsafe {
+        let key = CFStringCreateWithCString(
+            std::ptr::null(),
+            b"audit\0".as_ptr(),
+            KCF_STRING_ENCODING_UTF8,
+        );
+        if key.is_null() {
+            return CodesignVerdict::CfError("CFStringCreateWithCString failed");
+        }
+        let _key_guard = CfGuard(key);
+
+        let token_data = CFDataCreate(
+            std::ptr::null(),
+            token.val.as_ptr() as *const u8,
+            std::mem::size_of_val(&token.val) as isize,
+        );
+        if token_data.is_null() {
+            return CodesignVerdict::CfError("CFDataCreate failed");
+        }
+        let _data_guard = CfGuard(token_data);
+
+        let keys = [key];
+        let values = [token_data];
+        let dict = CFDictionaryCreate(
+            std::ptr::null(),
+            keys.as_ptr() as *const *const c_void,
+            values.as_ptr() as *const *const c_void,
+            1,
+            &kCFTypeDictionaryKeyCallBacks as *const c_void,
+            &kCFTypeDictionaryValueCallBacks as *const c_void,
+        );
+        if dict.is_null() {
+            return CodesignVerdict::CfError("CFDictionaryCreate failed");
+        }
+        let _dict_guard = CfGuard(dict);
+
+        let mut code_ref: SecCodeRef = std::ptr::null();
+        let status = SecCodeCopyGuestWithAttributes(std::ptr::null(), dict, 0, &mut code_ref);
+        if status != ERR_SEC_SUCCESS || code_ref.is_null() {
+            return CodesignVerdict::LookupFailed(status);
+        }
+        let _code_guard = CfGuard(code_ref);
+
+        let check = SecCodeCheckValidity(code_ref, 0, std::ptr::null());
+        if check == ERR_SEC_SUCCESS {
+            CodesignVerdict::Valid
+        } else {
+            CodesignVerdict::Invalid(check)
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn verify_peer_signature(_token: &AuditToken) -> CodesignVerdict {
+    CodesignVerdict::Unsupported
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +257,37 @@ mod tests {
     fn has_hardened_bits_detects_combinations() {
         assert!(has_hardened_bits(CS_RESTRICT | CS_RUNTIME));
         assert!(has_hardened_bits(CS_HARD | CS_REQUIRE_LV | 0x4000));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn verify_own_process_returns_known_verdict() {
+        let pid = unsafe { libc::getpid() } as u32;
+        let token = AuditToken::synthetic([0, 0, 0, 0, 0, pid, 0, 0]);
+        let verdict = verify_peer_signature(&token);
+        match verdict {
+            CodesignVerdict::Valid
+            | CodesignVerdict::Invalid(_)
+            | CodesignVerdict::LookupFailed(_) => {}
+            CodesignVerdict::CfError(msg) => {
+                panic!("unexpected CF error on own pid: {msg}");
+            }
+            CodesignVerdict::Unsupported => panic!("macOS codesign should be supported"),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn verify_dead_process_returns_lookup_failed_or_invalid() {
+        let token = AuditToken::synthetic([0, 0, 0, 0, 0, 99999, 0, 0]);
+        let verdict = verify_peer_signature(&token);
+        assert!(
+            matches!(
+                verdict,
+                CodesignVerdict::LookupFailed(_) | CodesignVerdict::Invalid(_)
+            ),
+            "expected LookupFailed or Invalid for dead pid, got {verdict}"
+        );
     }
 
     #[cfg(not(target_os = "macos"))]

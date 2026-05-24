@@ -1305,9 +1305,13 @@ impl PersistenceWriteAck {
 /// immediately revoke the curated allowlist entry.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DisableCuratedRule {
-    pub schema_version: u16, // V3
+    pub schema_version: u16, // V5 when signature is present
     pub pattern: String,
     pub reason: String, // non-empty
+    #[serde(default)]
+    pub created_at_unix_ms: i64,
+    #[serde(default)]
+    pub signature: Option<guard_core::RuleSignatureV1>,
 }
 
 impl DisableCuratedRule {
@@ -1316,6 +1320,23 @@ impl DisableCuratedRule {
             schema_version: IPC_SCHEMA_V3,
             pattern: pattern.into(),
             reason: reason.into(),
+            created_at_unix_ms: 0,
+            signature: None,
+        }
+    }
+
+    pub fn new_signed(
+        pattern: impl Into<String>,
+        reason: impl Into<String>,
+        created_at_unix_ms: i64,
+        signature: guard_core::RuleSignatureV1,
+    ) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V5,
+            pattern: pattern.into(),
+            reason: reason.into(),
+            created_at_unix_ms,
+            signature: Some(signature),
         }
     }
 }
@@ -1353,8 +1374,12 @@ impl DisableCuratedRuleReply {
 /// CLI → daemon: re-enable a previously disabled curated rule.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EnableCuratedRule {
-    pub schema_version: u16, // V3
+    pub schema_version: u16, // V5 when signature is present
     pub pattern: String,
+    #[serde(default)]
+    pub created_at_unix_ms: i64,
+    #[serde(default)]
+    pub signature: Option<guard_core::RuleSignatureV1>,
 }
 
 impl EnableCuratedRule {
@@ -1362,6 +1387,21 @@ impl EnableCuratedRule {
         Self {
             schema_version: IPC_SCHEMA_V3,
             pattern: pattern.into(),
+            created_at_unix_ms: 0,
+            signature: None,
+        }
+    }
+
+    pub fn new_signed(
+        pattern: impl Into<String>,
+        created_at_unix_ms: i64,
+        signature: guard_core::RuleSignatureV1,
+    ) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V5,
+            pattern: pattern.into(),
+            created_at_unix_ms,
+            signature: Some(signature),
         }
     }
 }

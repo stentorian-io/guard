@@ -61,6 +61,8 @@ jobs:
             man
             help
             install
+            release
+            security
           requireScope: false
           subjectPattern: ^(?![A-Z]).+(?<!\.)$
           subjectPatternError: |

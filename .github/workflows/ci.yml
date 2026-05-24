@@ -1,8 +1,8 @@
-# Code validation — expensive checks run only after the cheap PR validation
-# workflow passes. Jobs are intentionally sequenced to fail fast and avoid
-# spending macOS/e2e minutes when an earlier phase already failed.
+# Code validation — cheap Linux checks run before macOS build/test work to keep
+# paid macOS minutes focused on changes that already passed repository hygiene
+# and platform-boundary checks.
 
-name: code-validation
+name: CI
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ on:
     - cron: '15 6 * * *'
 
 concurrency:
-  group: code-validation-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -22,61 +22,13 @@ permissions:
   pull-requests: read
 
 jobs:
-  pr_validation_gate:
-    name: Wait for PR validation
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require PR validation success for this commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          for _ in {1..60}; do
-            run_json=$(gh run list \
-              --repo "$GITHUB_REPOSITORY" \
-              --workflow pr-validation.yml \
-              --event pull_request \
-              --commit "$HEAD_SHA" \
-              --limit 1 \
-              --json databaseId,status,conclusion,url \
-              --jq '.[0] // empty')
-
-            if [ -z "$run_json" ]; then
-              echo "Waiting for PR validation run for $HEAD_SHA..."
-              sleep 10
-              continue
-            fi
-
-            status=$(jq -r '.status' <<< "$run_json")
-            conclusion=$(jq -r '.conclusion // ""' <<< "$run_json")
-            url=$(jq -r '.url' <<< "$run_json")
-            echo "PR validation: status=$status conclusion=${conclusion:-pending} url=$url"
-
-            if [ "$status" = "completed" ] && [ "$conclusion" = "success" ]; then
-              exit 0
-            fi
-            if [ "$status" = "completed" ]; then
-              echo "::error::PR validation did not pass for $HEAD_SHA: $conclusion"
-              exit 1
-            fi
-            sleep 10
-          done
-
-          echo "::error::Timed out waiting for PR validation for $HEAD_SHA"
-          exit 1
-
   prepare:
     name: Prepare validation context
-    needs: pr_validation_gate
-    if: >-
-      always()
-      && (github.event_name == 'schedule' || needs.pr_validation_gate.result == 'success')
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.changes.outputs.code }}
       lockfile: ${{ steps.changes.outputs.lockfile }}
+      markdown: ${{ steps.changes.outputs.markdown }}
       scan_base: ${{ steps.range.outputs.base }}
       scan_head: ${{ steps.range.outputs.head }}
       is_pr: ${{ steps.context.outputs.is_pr }}
@@ -108,8 +60,11 @@ jobs:
           set -euo pipefail
 
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "code=false" >> "$GITHUB_OUTPUT"
-            echo "lockfile=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "code=false"
+              echo "lockfile=true"
+              echo "markdown=false"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -119,6 +74,7 @@ jobs:
 
           code=false
           lockfile=false
+          markdown=false
           while IFS= read -r path; do
             [ -n "$path" ] || continue
             case "$path" in
@@ -131,10 +87,18 @@ jobs:
                 lockfile=true
                 ;;
             esac
+            case "$path" in
+              *.md)
+                markdown=true
+                ;;
+            esac
           done <<< "$changed"
 
-          echo "code=$code" >> "$GITHUB_OUTPUT"
-          echo "lockfile=$lockfile" >> "$GITHUB_OUTPUT"
+          {
+            echo "code=$code"
+            echo "lockfile=$lockfile"
+            echo "markdown=$markdown"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Compute secret scan range
         id: range
@@ -161,10 +125,88 @@ jobs:
             echo "is_pr=false" >> "$GITHUB_OUTPUT"
           fi
 
+  pr_title:
+    name: PR title
+    needs: prepare
+    if: needs.prepare.outputs.is_pr == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        id: lint_pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            test
+            docs
+            chore
+            ci
+          scopes: |
+            cli
+            daemon
+            hook
+            core
+            ipc
+            watchdog
+            e2e
+            bench
+            readme
+            llm
+            man
+            help
+            install
+            release
+            security
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+(?<!\.)$
+          subjectPatternError: |
+            The subject "{subject}" found in the pull request title "{title}"
+            must start with a lowercase letter and not end with a period.
+      - if: steps.lint_pr.outputs.type == 'ci' && steps.lint_pr.outputs.scope != ''
+        run: |
+          echo "::error::Scopes are not allowed for the 'ci' type. Use 'ci: ...' not 'ci(scope): ...'"
+          exit 1
+
+  markdown_lint:
+    name: Markdown lint
+    needs: prepare
+    if: needs.prepare.outputs.markdown == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - run: npx markdownlint-cli2 "**/*.md" "#target" "#.gsd"
+
+  pr_checks:
+    name: PR checks
+    if: always()
+    needs:
+      - prepare
+      - pr_title
+      - markdown_lint
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          results='${{ toJSON(needs.*.result) }}'
+          echo "PR check results: $results"
+          if echo "$results" | grep -qE '"(failure|cancelled)"'; then
+            echo "::error::One or more PR checks failed or were cancelled"
+            exit 1
+          fi
+
   lint:
     name: Lint
-    needs: prepare
-    if: needs.prepare.outputs.code == 'true'
+    needs:
+      - prepare
+      - pr_checks
+    if: needs.prepare.outputs.code == 'true' && needs.pr_checks.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -452,8 +494,8 @@ jobs:
     name: Gate
     if: always()
     needs:
-      - pr_validation_gate
       - prepare
+      - pr_checks
       - lint
       - linux_compile_gate
       - build
@@ -467,10 +509,6 @@ jobs:
       - run: |
           results='${{ toJSON(needs.*.result) }}'
           echo "Job results: $results"
-          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ needs.pr_validation_gate.result }}" != "success" ]; then
-            echo "::error::PR validation did not pass; code validation was skipped"
-            exit 1
-          fi
           if echo "$results" | grep -qE '"(failure|cancelled)"'; then
             echo "::error::One or more validation jobs failed or were cancelled"
             exit 1

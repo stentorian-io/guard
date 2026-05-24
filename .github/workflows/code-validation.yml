@@ -226,6 +226,8 @@ jobs:
           echo "Fixture hash matches script pin."
       - name: cargo check agnostic support crates
         run: cargo check -p guard-os -p guard-watchdog --quiet
+      - name: cargo check agnostic app crates
+        run: cargo check -p guard-hook -p guard-daemon -p guard-cli --quiet
       - name: cargo test OS boundary
         run: cargo test -p guard-os --quiet
       - name: cargo test agnostic core

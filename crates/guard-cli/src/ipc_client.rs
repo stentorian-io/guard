@@ -1,11 +1,10 @@
 //! Connect to the daemon socket, send messages, await Replies.
 //!
-//! ISS-08 remediation: explicit 5-second connect timeout (rather than relying
-//! on the OS-default connect(2) timeout, which is implementation-defined on
-//! macOS for unix-domain sockets). We achieve this with the documented Rust
-//! pattern: build a non-blocking socket via the `socket2` crate (already in
-//! the workspace), call `connect_timeout`, then convert to a blocking
-//! `UnixStream` for the read/write phase.
+//! ISS-08 remediation: bounded read/write timeouts around Unix-domain IPC.
+//! AF_UNIX connect failures are local and immediate on Darwin for the daemon
+//! states we care about (missing socket, refused dead socket, permission
+//! denied). `socket2::connect_timeout` is not reliable for this macOS Unix
+//! socket path, so connect uses `UnixStream::connect` directly.
 
 use crate::CliError;
 use guard_core::AuditToken;
@@ -17,7 +16,6 @@ use guard_ipc::{
     PrepareSnapshot, ProposedRule, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot,
     Reply, RuleRow, SnapshotReply,
 };
-use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -36,7 +34,6 @@ const TAG_DELETE_INSTALL_ARTIFACTS: u8 = 0x11;
 const TAG_DISABLE_CURATED_RULE: u8 = 0x16;
 const TAG_ENABLE_CURATED_RULE: u8 = 0x17;
 
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -49,27 +46,12 @@ fn load_ipc_hmac_key(sock: &Path) -> Option<[u8; 32]> {
 /// generation on large rule sets.
 const PREPARE_SNAPSHOT_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Connect to the daemon socket with an explicit 5s connect timeout. Returns
-/// a blocking `UnixStream` on success. ISS-08: the prior implementation used
-/// `UnixStream::connect` which has no documented timeout and could block
-/// indefinitely on certain Darwin states.
+/// Connect to the daemon socket and configure bounded read/write timeouts.
 pub(crate) fn connect_with_timeout(sock: &Path) -> Result<UnixStream, CliError> {
-    let addr = SockAddr::unix(sock)
-        .map_err(|e| CliError::DaemonUnreachable(format!("sockaddr({}): {e}", sock.display())))?;
-    let socket = Socket::new(Domain::UNIX, Type::STREAM, None)
-        .map_err(|e| CliError::DaemonUnreachable(format!("socket: {e}")))?;
-    socket
-        .connect_timeout(&addr, CONNECT_TIMEOUT)
+    let stream = UnixStream::connect(sock)
         .map_err(|e| CliError::DaemonUnreachable(format!("connect({}): {e}", sock.display())))?;
-    socket.set_read_timeout(Some(READ_TIMEOUT)).ok();
-    socket.set_write_timeout(Some(WRITE_TIMEOUT)).ok();
-    // WR-02: socket2 0.5+ implements `From<Socket> for UnixStream` on Unix.
-    // The previous `into_raw_fd` + `unsafe { from_raw_fd }` dance was correct
-    // in the happy path but had no guard against future fallible code being
-    // inserted between the two operations — `into_raw_fd` consumes the
-    // Socket (so its Drop no longer runs) and a panic before `from_raw_fd`
-    // would leak the fd. The safe `Into` conversion has no such risk.
-    let stream: UnixStream = socket.into();
+    stream.set_read_timeout(Some(READ_TIMEOUT)).ok();
+    stream.set_write_timeout(Some(WRITE_TIMEOUT)).ok();
     Ok(stream)
 }
 

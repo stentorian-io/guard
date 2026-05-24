@@ -9,6 +9,8 @@ use std::path::Path;
 
 use guard_core::paths::{ENV_DYLD, ENV_SNAPSHOT_MANIFEST as ENV_MANIFEST};
 
+const ENV_DAEMON_SOCKET: &str = "STT_GUARD_DAEMON_SOCKET";
+
 pub fn spawn_wrapped(
     program: &Path,
     args: &[&OsStr],
@@ -19,7 +21,10 @@ pub fn spawn_wrapped(
     let mut env: Vec<CString> = std::env::vars_os()
         .filter_map(|(k, v)| {
             let k_bytes = k.as_bytes();
-            if k_bytes == ENV_DYLD.as_bytes() || k_bytes == ENV_MANIFEST.as_bytes() {
+            if k_bytes == ENV_DYLD.as_bytes()
+                || k_bytes == ENV_MANIFEST.as_bytes()
+                || k_bytes == ENV_DAEMON_SOCKET.as_bytes()
+            {
                 return None;
             }
             let mut s = k_bytes.to_vec();
@@ -135,7 +140,10 @@ pub fn spawn_wrapped_with_pgid(
 
     for (k, v) in std::env::vars_os() {
         let kb = k.as_bytes();
-        if kb == ENV_DYLD.as_bytes() || kb == ENV_MANIFEST.as_bytes() {
+        if kb == ENV_DYLD.as_bytes()
+            || kb == ENV_MANIFEST.as_bytes()
+            || kb == ENV_DAEMON_SOCKET.as_bytes()
+        {
             continue;
         }
         cmd.env(k, v);

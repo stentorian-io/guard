@@ -428,7 +428,10 @@ mod tests {
 
     #[test]
     fn block_reason_as_str_privilege_escalation() {
-        assert_eq!(BlockReason::PrivilegeEscalation.as_str(), "privilege-escalation");
+        assert_eq!(
+            BlockReason::PrivilegeEscalation.as_str(),
+            "privilege-escalation"
+        );
         assert_eq!(BlockReason::HardenedRuntime.as_str(), "hardened-runtime");
         assert_eq!(BlockReason::FatBinary.as_str(), "fat-binary");
         assert_eq!(BlockReason::UnsupportedArch.as_str(), "unsupported-arch");
@@ -442,7 +445,10 @@ mod tests {
         let tier = classify_path(path.as_ptr());
         // sudo is both setuid AND a platform binary; the setuid check runs
         // first in will_shed_dylib, so we expect PrivilegeEscalation.
-        assert_eq!(tier, BinaryTier::T0Blocked(BlockReason::PrivilegeEscalation));
+        assert_eq!(
+            tier,
+            BinaryTier::T0Blocked(BlockReason::PrivilegeEscalation)
+        );
     }
 
     #[test]

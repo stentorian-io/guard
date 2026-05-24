@@ -19,7 +19,6 @@ path = "src/lib.rs"
 [dependencies]
 clap = { workspace = true }
 libc = { workspace = true }
-socket2 = { workspace = true }
 guard-core = { workspace = true }
 guard-ipc = { workspace = true }
 guard-daemon = { path = "../guard-daemon" }

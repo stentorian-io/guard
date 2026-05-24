@@ -10,5 +10,6 @@ pub mod error;
 pub mod fs_watch;
 pub mod peer;
 pub mod process;
+pub mod system;
 
 pub use error::OsError;

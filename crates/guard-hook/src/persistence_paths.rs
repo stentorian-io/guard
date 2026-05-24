@@ -3,35 +3,7 @@
 //! S06 extends the classifier with an OS-version-aware persistence-path
 //! matrix covering macOS 13 (Ventura) through 15+ (Sequoia).
 
-/// Cached macOS major version, detected once at first use.
-pub fn macos_major_version() -> u32 {
-    use std::sync::OnceLock;
-    static VER: OnceLock<u32> = OnceLock::new();
-    *VER.get_or_init(|| detect_macos_major())
-}
-
-fn detect_macos_major() -> u32 {
-    let mut buf = [0u8; 32];
-    let mut len = buf.len();
-    let name = c"kern.osproductversion";
-    let rc = unsafe {
-        libc::sysctlbyname(
-            name.as_ptr(),
-            buf.as_mut_ptr() as *mut libc::c_void,
-            &mut len,
-            core::ptr::null_mut(),
-            0,
-        )
-    };
-    if rc != 0 || len == 0 {
-        return 14; // safe default: macOS Sonoma
-    }
-    let s = &buf[..len.saturating_sub(1)]; // strip NUL
-    // Parse "15.4.1" → 15
-    let dot = s.iter().position(|&b| b == b'.').unwrap_or(s.len());
-    let major_str = core::str::from_utf8(&s[..dot]).unwrap_or("14");
-    major_str.parse().unwrap_or(14)
-}
+pub use guard_os::system::macos_major_version;
 
 /// Check if `path` targets a macOS persistence location.
 /// Returns the persistence category if matched, None otherwise.

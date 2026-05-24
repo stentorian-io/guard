@@ -22,6 +22,7 @@
 use crate::snapshot::gc_run;
 use crate::state_dir::runs_dir;
 use crate::tracked::ProcessTree;
+use guard_os::errno::last_errno;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -95,7 +96,7 @@ pub fn gc_sweep(state_dir: &Path, tree: &ProcessTree) {
                     let alive = if r == 0 {
                         true
                     } else {
-                        let err = unsafe { *libc::__error() };
+                        let err = last_errno();
                         err != libc::ESRCH
                     };
                     !alive

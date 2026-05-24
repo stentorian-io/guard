@@ -5,6 +5,7 @@ members = [
   "crates/guard-daemon",
   "crates/guard-hook",
   "crates/guard-core",
+  "crates/guard-os",
   "crates/guard-ipc",
   "crates/guard-watchdog",
   "crates/guard-e2e",
@@ -47,6 +48,7 @@ getrandom = "0.2"
 
 # Internal crates
 guard-core = { path = "crates/guard-core" }
+guard-os   = { path = "crates/guard-os" }
 guard-ipc  = { path = "crates/guard-ipc" }
 
 # Cryptography (snapshot + IPC signing)

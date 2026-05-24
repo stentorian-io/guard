@@ -1,4 +1,6 @@
-use guard_core::identity::{AuditToken, ProcessIdentity, audit_token_to_pid};
+#[cfg(target_os = "macos")]
+use guard_core::identity::audit_token_to_pid;
+use guard_core::identity::{AuditToken, ProcessIdentity};
 
 #[test]
 fn unverified_returns_none_as_policy_key() {

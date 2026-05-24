@@ -6,7 +6,7 @@
   </p>
   <p align="center">
     <a href="https://github.com/stentorian-io/guard/releases/latest"><img src="https://img.shields.io/github/v/release/stentorian-io/guard?label=release" alt="Latest release"></a>
-    <a href="https://github.com/stentorian-io/guard/actions/workflows/code-validation.yml"><img src="https://github.com/stentorian-io/guard/actions/workflows/code-validation.yml/badge.svg?branch=main" alt="CI"></a>
+    <a href="https://github.com/stentorian-io/guard/actions/workflows/ci.yml"><img src="https://github.com/stentorian-io/guard/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
     <a href="#license"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License"></a>
   </p>
 </p>

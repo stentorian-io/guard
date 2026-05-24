@@ -89,7 +89,7 @@ while IFS= read -r f; do
       has_src=true ;;
     docs/*|*.md)
       has_doc=true ;;
-    cliff.toml|.markdownlint*|.actrc|Brewfile|.gitignore)
+    cliff.toml|.markdownlint*|Brewfile|.gitignore)
       has_build=true ;;
     scripts/*)
       has_build=true ;;

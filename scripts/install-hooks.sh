@@ -2,7 +2,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HOOKS_DIR="$REPO_ROOT/.git/hooks"
+HOOKS_DIR="$(git -C "$REPO_ROOT" rev-parse --git-path hooks)"
+mkdir -p "$HOOKS_DIR"
 
 install_hook() {
   local name="$1"
@@ -22,3 +23,4 @@ install_hook() {
 install_hook prepare-commit-msg
 install_hook commit-msg
 install_hook pre-commit
+install_hook pre-push

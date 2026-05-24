@@ -12,12 +12,13 @@ use guard_core::AuditToken;
 use guard_daemon::gap_detector::GapDetector;
 use guard_daemon::ipc_dispatch::MessageTag;
 use guard_daemon::ipc_server::{DaemonState, IpcServer};
-use guard_daemon::os_ffi::is_hardened_runtime;
 use guard_daemon::rule_store::RuleStore;
 use guard_daemon::state_dir::{db_path, ensure_state_dir, socket_path};
 use guard_daemon::tracked::{CoverageGap, ProcessTree};
 use guard_ipc::frame::{read_frame, write_frame};
 use guard_ipc::{AuditTokenWire, ForkAck, ForkEvent, RegisterRoot, Reply};
+use guard_os::codesign::is_hardened_runtime;
+use guard_os::process::kernel_pidversion;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::ExitStatusExt;
@@ -110,48 +111,6 @@ fn register_root_round_trip_records_kernel_sourced_token() {
     // (The node key is the full 8-field kernel AuditToken from LOCAL_PEERTOKEN.)
 }
 
-/// Query kernel pidversion via Mach task_info(TASK_AUDIT_TOKEN).
-fn kernel_pidversion(pid: u32) -> u32 {
-    type MachPortT = u32;
-    type KernReturnT = i32;
-    const MACH_PORT_NULL: MachPortT = 0;
-    const KERN_SUCCESS: KernReturnT = 0;
-    const TASK_AUDIT_TOKEN: u32 = 15;
-
-    unsafe extern "C" {
-        fn mach_task_self() -> MachPortT;
-        fn task_name_for_pid(
-            target_tport: MachPortT,
-            pid: libc::pid_t,
-            t: *mut MachPortT,
-        ) -> KernReturnT;
-        fn task_info(
-            target_task: MachPortT,
-            flavor: u32,
-            task_info_out: *mut u32,
-            task_info_count: *mut u32,
-        ) -> KernReturnT;
-        fn mach_port_deallocate(task: MachPortT, name: MachPortT) -> KernReturnT;
-    }
-
-    unsafe {
-        let mut task_port: MachPortT = MACH_PORT_NULL;
-        let kr = task_name_for_pid(mach_task_self(), pid as libc::pid_t, &mut task_port);
-        assert_eq!(kr, KERN_SUCCESS, "task_name_for_pid failed for pid {pid}");
-        let mut token_val = [0u32; 8];
-        let mut count: u32 = 8;
-        let kr2 = task_info(
-            task_port,
-            TASK_AUDIT_TOKEN,
-            token_val.as_mut_ptr(),
-            &mut count,
-        );
-        mach_port_deallocate(mach_task_self(), task_port);
-        assert_eq!(kr2, KERN_SUCCESS, "task_info failed for pid {pid}");
-        token_val[7]
-    }
-}
-
 /// REGISTER-01 delegation path: wire_pid != kernel_pid.
 ///
 /// When the connecting process (the CLI, with kernel_pid=X) sends RegisterRoot
@@ -195,7 +154,8 @@ fn register_root_delegation_stores_wire_claimed_child_token() {
     );
     // TREE-07: use the child's real kernel pidversion so the daemon's
     // pidversion cross-check passes.
-    let child_pv = kernel_pidversion(child_pid_real);
+    let child_pv = kernel_pidversion(child_pid_real as libc::pid_t)
+        .expect("kernel pidversion for child process");
     let uid = unsafe { libc::getuid() };
     let child_wire = AuditToken::synthetic([0, uid, 0, uid, 0, child_pid_real, 0, child_pv]);
     let mut stream = UnixStream::connect(&sock).expect("connect");
@@ -244,7 +204,8 @@ fn register_root_delegation_rejects_wrong_pidversion() {
         .spawn()
         .expect("spawn sleep child");
     let child_pid_real = child.id();
-    let real_pv = kernel_pidversion(child_pid_real);
+    let real_pv = kernel_pidversion(child_pid_real as libc::pid_t)
+        .expect("kernel pidversion for child process");
 
     // Send a wire token with a wrong pidversion (real + 1).
     let bad_pv = real_pv.wrapping_add(1);

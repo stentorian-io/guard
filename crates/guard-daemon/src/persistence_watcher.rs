@@ -10,6 +10,8 @@
 
 use crate::log_writer::{GapRecord, JSONL_SCHEMA_VERSION, LogRow, LogWriter, ProcessCtxLog};
 use crate::tracked::ProcessTree;
+use guard_os::fs_watch::{WatchEvent, WatchSet, open_dir_for_events};
+use guard_os::process::process_path;
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::path::PathBuf;
@@ -164,17 +166,7 @@ fn attribute_write(process_tree: &ProcessTree) -> (u32, u32, String) {
         if ret != 0 {
             continue;
         }
-        // Get the binary path via proc_pidpath.
-        let mut buf = [0u8; libc::MAXPATHLEN as usize];
-        let n = unsafe {
-            libc::proc_pidpath(
-                *pid as i32,
-                buf.as_mut_ptr() as *mut libc::c_void,
-                buf.len() as u32,
-            )
-        };
-        if n > 0 {
-            let binary = String::from_utf8_lossy(&buf[..n as usize]).to_string();
+        if let Some(binary) = process_path(*pid as libc::pid_t) {
             return (*pid, *pidversion, binary);
         }
         return (*pid, *pidversion, String::new());
@@ -189,10 +181,13 @@ fn run_watcher(process_tree: Arc<ProcessTree>, log_writer: LogWriter) -> std::io
         return Ok(());
     }
 
-    let kq = unsafe { libc::kqueue() };
-    if kq < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
+    let mut watch_set = match WatchSet::new() {
+        Ok(watch_set) => watch_set,
+        Err(err) => {
+            info!(error = %err, "persistence watcher unsupported");
+            return Ok(());
+        }
+    };
 
     let mut watched: Vec<WatchedDir> = Vec::new();
 
@@ -204,88 +199,62 @@ fn run_watcher(process_tree: Arc<ProcessTree>, log_writer: LogWriter) -> std::io
 
     if watched.is_empty() {
         info!("no persistence directories could be opened for watching");
-        unsafe { libc::close(kq) };
         return Ok(());
     }
 
-    register_watches(kq, &watched)?;
+    register_watches(&watch_set, &watched)?;
 
     info!(dirs = watched.len(), "persistence watcher started");
 
     let mut fd_to_idx: HashMap<RawFd, usize> =
         watched.iter().enumerate().map(|(i, w)| (w.fd, i)).collect();
 
-    let mut eventlist = vec![unsafe { std::mem::zeroed::<libc::kevent>() }; 16];
-
     loop {
-        let timeout = libc::timespec {
-            tv_sec: 30,
-            tv_nsec: 0,
-        };
-        let n = unsafe {
-            libc::kevent(
-                kq,
-                std::ptr::null(),
-                0,
-                eventlist.as_mut_ptr(),
-                eventlist.len() as i32,
-                &timeout,
-            )
-        };
-
-        if n < 0 {
-            let err = std::io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::EINTR) {
-                continue;
+        let event = match watch_set.wait(30) {
+            Ok(event) => event,
+            Err(err) => {
+                error!(error = %err, "filesystem watch wait failed");
+                break;
             }
-            error!(error = %err, "kevent wait failed");
-            break;
-        }
+        };
 
         // On timeout (n==0), try to pick up newly-created directories.
-        if n == 0 {
-            for (path, category) in persistence_dirs_with_create() {
-                if fd_to_idx.values().any(|&idx| watched[idx].path == path) {
-                    continue;
-                }
-                if let Some(w) = open_watch(&path, category) {
-                    let new_idx = watched.len();
-                    let new_fd = w.fd;
-                    watched.push(w);
-                    fd_to_idx.insert(new_fd, new_idx);
-                    // Register the new fd with kqueue.
-                    let kev = libc::kevent {
-                        ident: new_fd as usize,
-                        filter: libc::EVFILT_VNODE,
-                        flags: libc::EV_ADD | libc::EV_CLEAR,
-                        fflags: libc::NOTE_WRITE | libc::NOTE_EXTEND,
-                        data: 0,
-                        udata: std::ptr::null_mut(),
-                    };
-                    unsafe {
-                        libc::kevent(kq, &kev, 1, std::ptr::null_mut(), 0, std::ptr::null());
+        let event_fds = match event {
+            WatchEvent::Timeout => {
+                for (path, category) in persistence_dirs_with_create() {
+                    if fd_to_idx.values().any(|&idx| watched[idx].path == path) {
+                        continue;
                     }
-                    info!(path = %path.display(), "added new persistence dir watch");
+                    if let Some(w) = open_watch(&path, category) {
+                        let new_idx = watched.len();
+                        let new_fd = w.fd;
+                        watched.push(w);
+                        fd_to_idx.insert(new_fd, new_idx);
+                        if let Err(err) = watch_set.add(new_fd) {
+                            error!(error = %err, path = %path.display(), "failed to add persistence dir watch");
+                        }
+                        info!(path = %path.display(), "added new persistence dir watch");
+                    }
                 }
+                continue;
             }
-            continue;
-        }
+            WatchEvent::Fds(fds) if fds.is_empty() => continue,
+            WatchEvent::Fds(fds) => fds,
+        };
 
         let active_runs = process_tree.list_runs();
         if active_runs.is_empty() {
             // No active runs — update baselines silently.
-            for i in 0..(n as usize) {
-                let ev = &eventlist[i];
-                if let Some(&idx) = fd_to_idx.get(&(ev.ident as RawFd)) {
+            for fd in &event_fds {
+                if let Some(&idx) = fd_to_idx.get(fd) {
                     watched[idx].baseline = scan_dir(&watched[idx].path);
                 }
             }
             continue;
         }
 
-        for i in 0..(n as usize) {
-            let ev = &eventlist[i];
-            let idx = match fd_to_idx.get(&(ev.ident as RawFd)) {
+        for fd in &event_fds {
+            let idx = match fd_to_idx.get(fd) {
                 Some(&i) => i,
                 None => continue,
             };
@@ -349,17 +318,17 @@ fn run_watcher(process_tree: Arc<ProcessTree>, log_writer: LogWriter) -> std::io
         }
     }
 
-    unsafe { libc::close(kq) };
     Ok(())
 }
 
 fn open_watch(path: &PathBuf, category: &'static str) -> Option<WatchedDir> {
-    let c_path = std::ffi::CString::new(path.to_string_lossy().as_bytes()).ok()?;
-    let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDONLY | libc::O_EVTONLY) };
-    if fd < 0 {
-        debug!(path = %path.display(), "cannot open persistence dir for watching");
-        return None;
-    }
+    let fd = match open_dir_for_events(path) {
+        Ok(fd) => fd,
+        Err(err) => {
+            debug!(path = %path.display(), error = %err, "cannot open persistence dir for watching");
+            return None;
+        }
+    };
     let baseline = scan_dir(path);
     Some(WatchedDir {
         fd,
@@ -369,33 +338,10 @@ fn open_watch(path: &PathBuf, category: &'static str) -> Option<WatchedDir> {
     })
 }
 
-fn register_watches(kq: RawFd, watched: &[WatchedDir]) -> std::io::Result<()> {
-    let changelist: Vec<libc::kevent> = watched
-        .iter()
-        .map(|w| libc::kevent {
-            ident: w.fd as usize,
-            filter: libc::EVFILT_VNODE,
-            flags: libc::EV_ADD | libc::EV_CLEAR,
-            fflags: libc::NOTE_WRITE | libc::NOTE_EXTEND,
-            data: 0,
-            udata: std::ptr::null_mut(),
-        })
-        .collect();
-
-    let ret = unsafe {
-        libc::kevent(
-            kq,
-            changelist.as_ptr(),
-            changelist.len() as i32,
-            std::ptr::null_mut(),
-            0,
-            std::ptr::null(),
-        )
-    };
-    if ret < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+fn register_watches(watch_set: &WatchSet, watched: &[WatchedDir]) -> std::io::Result<()> {
+    watch_set
+        .add_many(watched.iter().map(|w| w.fd))
+        .map_err(std::io::Error::other)
 }
 
 #[cfg(test)]

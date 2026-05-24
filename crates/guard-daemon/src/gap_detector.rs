@@ -21,6 +21,8 @@ use crate::tracked::{CoverageGap, ProcessTree};
 use crossbeam_channel::{Sender, bounded};
 use guard_core::AuditToken;
 use guard_ipc::GapInfo;
+use guard_os::errno::last_errno;
+use guard_os::process::kernel_pidversion;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -300,71 +302,8 @@ fn pidversion_still_matches(pid: libc::pid_t, expected_pidversion: u32) -> bool 
     if expected_pidversion == 0 {
         return true;
     }
-    match query_kernel_pidversion(pid) {
+    match kernel_pidversion(pid) {
         Some(actual) => actual == expected_pidversion,
         None => true,
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn query_kernel_pidversion(pid: libc::pid_t) -> Option<u32> {
-    type MachPortT = u32;
-    type KernReturnT = i32;
-    const MACH_PORT_NULL: MachPortT = 0;
-    const KERN_SUCCESS: KernReturnT = 0;
-    const TASK_AUDIT_TOKEN: u32 = 15;
-
-    unsafe extern "C" {
-        fn mach_task_self() -> MachPortT;
-        fn task_name_for_pid(
-            target_tport: MachPortT,
-            pid: libc::pid_t,
-            t: *mut MachPortT,
-        ) -> KernReturnT;
-        fn task_info(
-            target_task: MachPortT,
-            flavor: u32,
-            task_info_out: *mut u32,
-            task_info_count: *mut u32,
-        ) -> KernReturnT;
-        fn mach_port_deallocate(task: MachPortT, name: MachPortT) -> KernReturnT;
-    }
-
-    unsafe {
-        let mut task_port: MachPortT = MACH_PORT_NULL;
-        let kr = task_name_for_pid(mach_task_self(), pid, &mut task_port);
-        if kr != KERN_SUCCESS {
-            return None;
-        }
-        let mut token_val = [0u32; 8];
-        let mut count: u32 = 8;
-        let kr2 = task_info(
-            task_port,
-            TASK_AUDIT_TOKEN,
-            token_val.as_mut_ptr(),
-            &mut count,
-        );
-        mach_port_deallocate(mach_task_self(), task_port);
-        if kr2 != KERN_SUCCESS {
-            return None;
-        }
-        Some(token_val[7])
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn query_kernel_pidversion(_pid: libc::pid_t) -> Option<u32> {
-    None
-}
-
-fn last_errno() -> i32 {
-    #[cfg(target_os = "macos")]
-    unsafe {
-        *libc::__error()
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
     }
 }

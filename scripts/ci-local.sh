@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 #
-# Run local equivalents of the split PR/code validation workflows, with no
-# GitHub Actions minutes consumed. The default path mirrors the
-# .github/workflows/code-validation.yml pull_request path end to end: lint,
-# build, unit tests, integration tests, e2e tests, secret scan, and dependency
-# CVE audit when lockfiles/toolchain inputs changed.
+# Run local equivalents of the CI workflow, with no GitHub Actions minutes
+# consumed. The default path mirrors the .github/workflows/ci.yml pull_request
+# path end to end: lint, Linux compile gate, macOS-equivalent build/tests,
+# secret scan, and dependency CVE audit when lockfiles/toolchain inputs changed.
 #
 # Usage:
-#   scripts/ci-local.sh             # code-validation parity, fully local
-#   scripts/ci-local.sh --quick     # skip code-validation build/tests/audit (lint + fixture only)
-#   scripts/ci-local.sh --no-act    # skip act for the cheap PR-validation gate
+#   scripts/ci-local.sh             # CI parity, fully local
+#   scripts/ci-local.sh --quick     # skip CI build/tests/audit (lint + fixture only)
+#   scripts/ci-local.sh --no-docker # run Linux gate checks on the host instead of fresh containers
 #   scripts/ci-local.sh --no-privileged
 #                                  # skip VAL-05 on developer machines
 #
@@ -28,12 +27,12 @@ BOLD='\033[1m'
 RESET='\033[0m'
 
 QUICK=0
-USE_ACT=1
 RUN_PRIVILEGED=1
+USE_DOCKER=1
 for arg in "$@"; do
   case "$arg" in
     --quick)         QUICK=1 ;;
-    --no-act)        USE_ACT=0 ;;
+    --no-docker)     USE_DOCKER=0 ;;
     --no-privileged) RUN_PRIVILEGED=0 ;;
     *)               echo "unknown flag: $arg" >&2; exit 64 ;;
   esac
@@ -45,6 +44,29 @@ fail() { echo -e "${RED}${BOLD}FAIL: $1${RESET}" >&2; exit 1; }
 warn() { echo -e "${YELLOW}⚠${RESET} $1"; }
 skip() { echo -e "${GREEN}✓${RESET} $1 ${BOLD}(cached)${RESET}"; }
 cache_enabled() { [ "${CI_LOCAL_USE_CACHE:-0}" -eq 1 ]; }
+
+docker_available() {
+  command -v docker >/dev/null && docker info >/dev/null 2>&1
+}
+
+run_linux_stage() {
+  local label="$1"
+  local command="$2"
+
+  step "$label"
+  if [ "$USE_DOCKER" -eq 1 ]; then
+    docker_available || fail "docker is required for Linux CI parity; rerun with --no-docker to use host checks"
+    docker run --rm \
+      -v "$REPO_ROOT:/work" \
+      -w /work \
+      rust:1.85-bookworm \
+      bash -lc "set -euo pipefail; export PATH=/usr/local/cargo/bin:\$PATH; export CARGO_TARGET_DIR=/tmp/stt-guard-target; $command" \
+      || fail "$label"
+  else
+    bash -lc "set -euo pipefail; $command" || fail "$label"
+  fi
+  pass "$label"
+}
 
 cache_prune
 
@@ -141,6 +163,20 @@ validation_diff_base() {
   branch_scan_base 2>/dev/null || git rev-parse HEAD
 }
 
+trufflehog_git_repo_url() {
+  local common_dir repo_dir
+  common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+  case "$common_dir" in
+    */.git)
+      repo_dir="${common_dir%/.git}"
+      ;;
+    *)
+      repo_dir="$REPO_ROOT"
+      ;;
+  esac
+  printf 'file://%s\n' "$repo_dir"
+}
+
 changed_since_base() {
   local base="$1"
   { git diff --name-only "$base...HEAD" 2>/dev/null || true
@@ -192,6 +228,9 @@ node_bin="$(command -v node || true)"
 if [ -x /opt/homebrew/bin/node ]; then
   node_bin=/opt/homebrew/bin/node
 fi
+if [ -x /opt/homebrew/opt/node@20/bin/node ]; then
+  node_bin=/opt/homebrew/opt/node@20/bin/node
+fi
 if [ -n "$node_bin" ]; then
   fp=$(all_md_fingerprint)
   if cache_enabled && cache_hit "ci-local:mdlint" "$fp"; then
@@ -226,6 +265,24 @@ else
   pass "fixture matches pinned hash"
 fi
 
+# ── Linux compile gate (fresh container per CI stage) ──────────────────────
+if [ "$CODE_CHANGED" -eq 1 ]; then
+  run_linux_stage "Linux compile gate: cargo check shared crates" \
+    "cargo check -p guard-os -p guard-watchdog --quiet"
+  run_linux_stage "Linux compile gate: cargo check boundary consumers" \
+    "cargo check -p guard-hook -p guard-daemon -p guard-cli --quiet"
+  run_linux_stage "Linux compile gate: cargo test OS boundary crate" \
+    "cargo test -p guard-os --quiet"
+  run_linux_stage "Linux compile gate: cargo test shared core" \
+    "cargo test -p guard-core --lib --tests --quiet"
+  run_linux_stage "Linux compile gate: cargo test shared IPC" \
+    "cargo test -p guard-ipc --lib --tests --quiet"
+  run_linux_stage "Linux compile gate: cargo test watchdog" \
+    "cargo test -p guard-watchdog --bins --quiet"
+else
+  skip "Linux compile gate (repo-meta-only change)"
+fi
+
 # ── lint-unused-deps (cargo-machete — stable toolchain, no compilation) ────
 if [ "$CODE_CHANGED" -ne 1 ]; then
   skip "cargo-machete (repo-meta-only change)"
@@ -245,37 +302,21 @@ else
   fi
 fi
 
-# ── PR validation gate via act (optional) ──────────────────────────────────
-if [ "$USE_ACT" -eq 1 ]; then
-  if command -v act >/dev/null; then
-    step "PR validation via act (lint-markdown)"
-    event_file="$(mktemp_tracked)"
-    cat > "$event_file" <<'JSON'
-{"repository":{"default_branch":"main","full_name":"stentorian-io/guard"},"pull_request":{"number":29,"base":{"ref":"main","repo":{"full_name":"stentorian-io/guard"}},"head":{"ref":"release-infra","repo":{"full_name":"stentorian-io/guard"}}}}
-JSON
-    act pull_request --workflows .github/workflows/pr-validation.yml --job lint-markdown --eventpath "$event_file" --quiet 2>&1 \
-      || fail "act lint-markdown failed"
-    pass "act lint-markdown"
-  else
-    warn "act not installed — skipping ubuntu-job parity check (brew install act)"
-  fi
-fi
-
-# ── code-validation workflow parity ───────────────────────────────────────
+# ── CI workflow parity ────────────────────────────────────────────────────
 if [ "$QUICK" -eq 1 ] || [ "${CI_LOCAL_SKIP_E2E:-0}" -eq 1 ] || [ "$CODE_CHANGED" -ne 1 ]; then
   if [ "$CODE_CHANGED" -ne 1 ]; then
-    warn "skipping code-validation build/tests (repo-meta-only change)"
+    warn "skipping CI build/tests (repo-meta-only change)"
   else
-    warn "skipping code-validation build/tests (--quick or CI_LOCAL_SKIP_E2E=1)"
+    warn "skipping CI build/tests (--quick or CI_LOCAL_SKIP_E2E=1)"
   fi
 else
   fp=$(e2e_fingerprint)
 
-  step "code-validation lint: test env var hygiene"
+  step "CI lint: test env var hygiene"
   scripts/lint-test-env-vars.sh || fail "lint test env var hygiene"
   pass "lint test env var hygiene"
 
-  step "code-validation build: cargo build --workspace --release"
+  step "CI build: cargo build --workspace --release"
   if cache_enabled && cache_hit "ci-local:cargo-build" "$fp"; then
     skip "cargo build"
   else
@@ -284,12 +325,12 @@ else
     pass "cargo build"
   fi
 
-  step "code-validation unit tests"
+  step "CI unit tests"
   cargo test --workspace --exclude guard-e2e --lib --bins --quiet \
     || fail "cargo test unit targets"
   pass "cargo test unit targets"
 
-  step "code-validation integration tests"
+  step "CI integration tests"
   cargo test --workspace --exclude guard-e2e --tests --quiet \
     || fail "cargo test integration targets"
   pass "cargo test integration targets"
@@ -309,7 +350,7 @@ else
     for entry in "${E2E_TESTS[@]}"; do
       test_name="${entry%%:*}"
       label="${entry#*:}"
-      step "code-validation e2e: $label"
+      step "CI e2e: $label"
       cargo test -p guard-e2e --test "$test_name" --release -- --nocapture \
         || fail "$label"
       pass "$label"
@@ -321,24 +362,24 @@ else
   # non-interactive sudo. GitHub runs it on an ephemeral macOS runner; local
   # parity runs it by default and offers --no-privileged as the explicit opt-out.
   if [ "$RUN_PRIVILEGED" -eq 1 ]; then
-    step "code-validation e2e: VAL-05 privileged init and install health"
+    step "CI e2e: VAL-05 privileged init and install health"
     STT_GUARD_E2E_PRIVILEGED_INSTALL=1 \
       cargo test -p guard-e2e --test hardened_install_health --release -- --nocapture \
       || fail "VAL-05 privileged init and install health"
     pass "VAL-05 privileged init and install health"
   else
-    warn "skipping code-validation e2e: VAL-05 privileged install health (--no-privileged)"
+    warn "skipping CI e2e: VAL-05 privileged install health (--no-privileged)"
   fi
 fi
 
-step "code-validation secret scan"
+step "CI secret scan"
 if ! command -v trufflehog >/dev/null; then
   fail "trufflehog not found; install it locally (for example: brew install trufflehog)"
 fi
 if [ -n "$(git rev-list --max-count=1 "$DIFF_BASE..HEAD" 2>/dev/null || true)" ]; then
-  trufflehog git "file://$REPO_ROOT" \
+  trufflehog git "$(trufflehog_git_repo_url)" \
     --since-commit "$DIFF_BASE" \
-    --branch HEAD \
+    --branch "$(git rev-parse --abbrev-ref HEAD)" \
     --results=verified \
     --fail \
     --no-update \
@@ -365,7 +406,7 @@ pass "secret scan"
 if [ "$QUICK" -eq 1 ]; then
   warn "skipping dependency CVE audit (--quick)"
 elif [ "$LOCKFILE_CHANGED" -eq 1 ] || [ "${CI_LOCAL_AUDIT_ALWAYS:-0}" -eq 1 ]; then
-  step "code-validation dependency CVE audit"
+  step "CI dependency CVE audit"
   if ! command -v cargo-audit >/dev/null; then
     fail "cargo-audit not found; install it locally (for example: cargo install cargo-audit)"
   fi
@@ -375,4 +416,4 @@ else
   skip "dependency CVE audit (no lockfile/toolchain changes; set CI_LOCAL_AUDIT_ALWAYS=1 to force)"
 fi
 
-echo -e "\n${GREEN}${BOLD}Code validation passed locally.${RESET}"
+echo -e "\n${GREEN}${BOLD}CI validation passed locally.${RESET}"

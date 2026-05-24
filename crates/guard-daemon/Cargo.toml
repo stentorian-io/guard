@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [features]
 test-yaml = ["dep:serde_yml"]
+test-signer = ["guard-core/test-signer"]
 
 [dependencies]
 guard-core = { workspace = true }

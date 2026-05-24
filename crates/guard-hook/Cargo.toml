@@ -25,11 +25,16 @@ hmac = { workspace = true }
 # crossbeam-queue (lock-free MPMC) is the BL-03 / D-43 fix for the racy
 # SpscRing log buffer.
 
+[features]
+default = []
+test-signer = []
+
 [dev-dependencies]
 tempfile = { workspace = true }
 guard-daemon = { path = "../guard-daemon" }
 criterion = { workspace = true }
 hdrhistogram = "7.5.4"
+p256 = { workspace = true }
 
 [[bench]]
 name = "hot_path"

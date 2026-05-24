@@ -28,6 +28,7 @@ fn status_reply_ok_round_trip() {
             gaps_today: 0,
         },
         None,
+        None,
     );
     round_trip(&r);
 }
@@ -93,6 +94,7 @@ fn prompt_response_round_trip() {
             match_type: "exact".into(),
             pattern: "h".into(),
         }),
+        signed_rule: None,
     });
 }
 
@@ -107,11 +109,15 @@ fn prompt_cancel_round_trip() {
 #[test]
 fn insert_user_rule_round_trip() {
     round_trip(&InsertUserRule {
-        schema_version: IPC_SCHEMA_V3,
+        schema_version: IPC_SCHEMA_V5,
         kind: "allow".into(),
         match_type: "exact".into(),
         pattern: "h".into(),
         reason: "user-approved".into(),
+        created_at_unix_ms: 1_700_000_000_000,
+        origin: "test".into(),
+        run_uuid: Some("r1".into()),
+        signature: None,
     });
     round_trip(&InsertUserRuleReply::ok(42));
     round_trip(&InsertUserRuleReply::err("bad"));
@@ -176,8 +182,77 @@ fn status_reply_full_ok_round_trip() {
                 guard_version: "0.3.0".into(),
             }],
         }),
+        Some(SigningInfo {
+            configured: true,
+            status: "configured".into(),
+            signer_kind: Some("secure-enclave".into()),
+            fingerprint: Some("abc123".into()),
+            trust_root_path: Some("/usr/local/libexec/stt-guard/trusted-rule-signers.tsv".into()),
+            trust_root_ok: true,
+            reason: None,
+            action: None,
+        }),
     );
     round_trip(&r);
+}
+
+#[test]
+fn large_signed_snapshot_publish_frame_exceeds_old_64k_cap() {
+    let signature = guard_core::SnapshotSignatureV1 {
+        scheme: guard_core::RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.into(),
+        signer_kind: guard_core::SIGNER_KIND_SECURE_ENCLAVE.into(),
+        public_key_x963: vec![1, 2, 3],
+        public_key_sha256: "abc".into(),
+        signature_der: vec![4, 5, 6],
+        signed_payload_sha256: "def".into(),
+        signature_created_at_unix_ms: 1_700_000_000_000,
+    };
+    let msg =
+        PublishSignedSnapshot::new("large-run", vec![0xAB; 128 * 1024], signature, false, false);
+    let mut frame = Vec::new();
+    guard_ipc::frame::write_frame_with_limit(
+        &mut frame,
+        &msg,
+        guard_ipc::frame::MAX_SNAPSHOT_FRAME_BYTES,
+    )
+    .expect("large signed snapshot frame");
+    let decoded: PublishSignedSnapshot = guard_ipc::frame::read_frame_with_limit(
+        &mut std::io::Cursor::new(frame),
+        guard_ipc::frame::MAX_SNAPSHOT_FRAME_BYTES,
+    )
+    .expect("decode frame");
+    assert_eq!(decoded.snapshot_bytes.len(), 128 * 1024);
+}
+
+#[test]
+fn signed_snapshot_messages_round_trip() {
+    let input = guard_core::SnapshotBuildInput {
+        run_uuid: "run-1".into(),
+        generated_at_unix_ms: 1_700_000_000_000,
+        curated_entries: vec![],
+        disabled_curated_patterns: std::collections::BTreeSet::new(),
+        verified_user_entries: vec![],
+        lockfile_entries: vec![],
+    };
+    round_trip(&SnapshotInputsReply::ok(input, true, false));
+    round_trip(&SnapshotInputsReply::err("bad"));
+
+    let signature = guard_core::SnapshotSignatureV1 {
+        scheme: guard_core::RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.into(),
+        signer_kind: guard_core::SIGNER_KIND_SECURE_ENCLAVE.into(),
+        public_key_x963: vec![1, 2, 3],
+        public_key_sha256: "abc".into(),
+        signature_der: vec![4, 5, 6],
+        signed_payload_sha256: "def".into(),
+        signature_created_at_unix_ms: 1_700_000_000_000,
+    };
+    round_trip(&PublishSignedSnapshot::new(
+        "run-1",
+        vec![0xa1, 0x01, 0x02],
+        signature,
+        true,
+        false,
+    ));
 }
 
 #[test]

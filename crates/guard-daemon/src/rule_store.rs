@@ -20,11 +20,15 @@
 //! on a shared mutex preserves the existing behaviour while removing the
 //! read contention.
 
-use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
-use rusqlite::{Connection, OpenFlags, Result as SqlResult, params};
-use rusqlite_migration::{M, Migrations};
+use guard_core::{
+    paths, verify_rule_signature, AllowlistEntry, MatchType, RuleKind, RuleSignaturePayloadV1,
+    RuleSignaturePolicy, RuleSignatureV1, RuleTier,
+};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Result as SqlResult};
+use rusqlite_migration::{Migrations, M};
 use std::collections::HashSet;
-use std::path::Path;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 #[derive(Debug, thiserror::Error)]
@@ -33,6 +37,20 @@ pub enum RuleStoreError {
     Sql(#[from] rusqlite::Error),
     #[error("migrations: {0}")]
     Migrate(String),
+    #[error("rule signature: {0}")]
+    Signature(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleSigningStatus {
+    pub configured: bool,
+    pub status: String,
+    pub signer_kind: Option<String>,
+    pub fingerprint: Option<String>,
+    pub trust_root_path: Option<String>,
+    pub trust_root_ok: bool,
+    pub reason: Option<String>,
+    pub action: Option<String>,
 }
 
 /// v0.7 — storage-side row for ListRules. String discriminators
@@ -48,6 +66,7 @@ pub struct StoredRule {
 
 const SQL_001_SCHEMA: &str = include_str!("../migrations/001_schema.sql");
 const SQL_002_CURATED_OVERRIDES: &str = include_str!("../migrations/002_curated_overrides.sql");
+const SQL_003_RULE_SIGNATURES: &str = include_str!("../migrations/003_rule_signatures.sql");
 
 pub struct RuleStore {
     /// Long-lived connection used for migrations + the write path.
@@ -59,6 +78,7 @@ pub struct RuleStore {
     /// WAL mode (enabled at open time) allows this reader and the writer
     /// to proceed concurrently without blocking each other.
     reader: Mutex<Connection>,
+    trusted_signers_manifest_path: Option<PathBuf>,
 }
 
 impl RuleStore {
@@ -78,10 +98,14 @@ impl RuleStore {
         let migrations = Migrations::new(vec![
             M::up(SQL_001_SCHEMA),
             M::up(SQL_002_CURATED_OVERRIDES),
+            M::up(SQL_003_RULE_SIGNATURES),
         ]);
         migrations
             .to_latest(&mut conn)
             .map_err(|e| RuleStoreError::Migrate(e.to_string()))?;
+
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(|e| RuleStoreError::Migrate(format!("foreign_keys pragma: {e}")))?;
 
         // WAL pragma must be applied outside the migration transaction —
         // rusqlite_migration wraps each M::up in a transaction, which causes
@@ -104,14 +128,26 @@ impl RuleStore {
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(RuleStoreError::Sql)?;
+        reader
+            .pragma_update(None, "foreign_keys", "ON")
+            .map_err(|e| RuleStoreError::Migrate(format!("reader foreign_keys pragma: {e}")))?;
+
+        let trusted_signers_manifest_path =
+            if db_path.parent() == Some(Path::new(paths::SYSTEM_STATE_DIR)) {
+                Some(paths::trusted_rule_signers_path())
+            } else {
+                None
+            };
 
         Ok(Self {
             conn: Mutex::new(conn),
             reader: Mutex::new(reader),
+            trusted_signers_manifest_path,
         })
     }
 
-    /// Insert a user-approved rule (called by `stt-guard approve` IPC handler).
+    /// Insert a user-approved rule (called by legacy tests and pre-signature paths).
+    /// New persistence paths must use insert_signed_user_rule.
     /// Validates kind/match_type at the boundary; reason must be non-empty.
     /// Returns the new row id.
     pub fn insert_user_rule(
@@ -133,6 +169,325 @@ impl RuleStore {
         Ok(conn.last_insert_rowid())
     }
 
+    /// Insert a signed user rule and its authenticity metadata in one transaction.
+    pub fn insert_signed_user_rule(
+        &self,
+        payload: &RuleSignaturePayloadV1,
+        signature: &RuleSignatureV1,
+    ) -> Result<i64, RuleStoreError> {
+        debug_assert!(matches!(payload.kind.as_str(), "allow" | "deny"));
+        debug_assert!(matches!(
+            payload.match_type.as_str(),
+            "exact" | "suffix" | "ip"
+        ));
+        debug_assert!(
+            !payload.reason.trim().is_empty(),
+            "reason must be non-empty"
+        );
+        let mut conn = self.conn.lock().expect("rule store mutex");
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO rules (kind, match_type, pattern, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                payload.kind,
+                payload.match_type,
+                payload.pattern,
+                payload.reason,
+                payload.created_at_unix_ms
+            ],
+        )?;
+        let rule_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO rule_signatures (
+                rule_id, scheme, signer_kind, public_key_x963, public_key_sha256,
+                signature_der, signed_payload_sha256, signature_created_at,
+                origin, run_uuid, payload_created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                rule_id,
+                signature.scheme,
+                signature.signer_kind,
+                signature.public_key_x963,
+                signature.public_key_sha256,
+                signature.signature_der,
+                signature.signed_payload_sha256,
+                signature.signature_created_at_unix_ms,
+                payload.origin,
+                payload.run_uuid,
+                payload.created_at_unix_ms,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(rule_id)
+    }
+
+    /// Enroll a public rule-signing key as trusted. Production enrollment must
+    /// happen only after hardware attestation; tests use this for the explicit
+    /// test simulator signer.
+    pub fn register_trusted_rule_signer(
+        &self,
+        signature: &RuleSignatureV1,
+        label: &str,
+    ) -> Result<(), RuleStoreError> {
+        self.register_trusted_rule_signer_key(
+            &signature.public_key_sha256,
+            &signature.signer_kind,
+            &signature.public_key_x963,
+            label,
+        )
+    }
+
+    pub fn register_trusted_rule_signer_key(
+        &self,
+        public_key_sha256: &str,
+        signer_kind: &str,
+        public_key_x963: &[u8],
+        label: &str,
+    ) -> Result<(), RuleStoreError> {
+        let conn = self.conn.lock().expect("rule store mutex");
+        conn.execute(
+            "INSERT OR REPLACE INTO trusted_rule_signers (
+                public_key_sha256, signer_kind, public_key_x963, enrolled_at, label
+             ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                public_key_sha256,
+                signer_kind,
+                public_key_x963,
+                unix_ms_now(),
+                label,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn is_trusted_rule_signer(
+        &self,
+        public_key_sha256: &str,
+        signer_kind: &str,
+    ) -> Result<bool, RuleStoreError> {
+        let conn = self.reader.lock().expect("rule store reader mutex");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM trusted_rule_signers
+             WHERE public_key_sha256 = ?1 AND signer_kind = ?2",
+            params![public_key_sha256, signer_kind],
+            |r| r.get(0),
+        )?;
+        if count != 1 {
+            return Ok(false);
+        }
+        self.trusted_manifest_contains(public_key_sha256, signer_kind, None)
+    }
+
+    pub fn rule_signing_status(&self) -> RuleSigningStatus {
+        let Some(path) = &self.trusted_signers_manifest_path else {
+            return RuleSigningStatus {
+                configured: false,
+                status: "not-configured".to_string(),
+                signer_kind: None,
+                fingerprint: None,
+                trust_root_path: None,
+                trust_root_ok: false,
+                reason: Some(
+                    "system trusted signer manifest is unavailable for this state directory"
+                        .to_string(),
+                ),
+                action: Some(
+                    "run sudo stt-guard init on a supported hardware-backed signing platform"
+                        .to_string(),
+                ),
+            };
+        };
+        let trust_root_path = Some(path.display().to_string());
+        if let Err(e) = self.verify_trusted_manifest_path(path) {
+            return RuleSigningStatus {
+                configured: false,
+                status: "invalid".to_string(),
+                signer_kind: None,
+                fingerprint: None,
+                trust_root_path,
+                trust_root_ok: false,
+                reason: Some(e.to_string()),
+                action: Some("rerun sudo stt-guard init to repair signer enrollment".to_string()),
+            };
+        }
+        let contents = match std::fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(e) => {
+                return RuleSigningStatus {
+                    configured: false,
+                    status: "invalid".to_string(),
+                    signer_kind: None,
+                    fingerprint: None,
+                    trust_root_path,
+                    trust_root_ok: false,
+                    reason: Some(format!("trusted signer manifest unreadable: {e}")),
+                    action: Some(
+                        "rerun sudo stt-guard init to repair signer enrollment".to_string(),
+                    ),
+                };
+            }
+        };
+        let Some((fingerprint, signer_kind, public_key_hex)) =
+            (match guard_core::first_trusted_signer(&contents) {
+                Ok(signer) => signer.map(|signer| {
+                    (
+                        signer.public_key_sha256,
+                        signer.signer_kind,
+                        signer.public_key_x963_hex,
+                    )
+                }),
+                Err(e) => {
+                    return RuleSigningStatus {
+                        configured: false,
+                        status: "invalid".to_string(),
+                        signer_kind: None,
+                        fingerprint: None,
+                        trust_root_path,
+                        trust_root_ok: false,
+                        reason: Some(e.to_string()),
+                        action: Some(
+                            "rerun sudo stt-guard init to repair signer enrollment".to_string(),
+                        ),
+                    };
+                }
+            })
+        else {
+            return RuleSigningStatus {
+                configured: false,
+                status: "not-configured".to_string(),
+                signer_kind: None,
+                fingerprint: None,
+                trust_root_path,
+                trust_root_ok: true,
+                reason: Some("trusted signer manifest contains no signer entries".to_string()),
+                action: Some(
+                    "run sudo stt-guard init to enroll a hardware-backed signer".to_string(),
+                ),
+            };
+        };
+        let db_matches = self
+            .trusted_signer_db_matches(&fingerprint, &signer_kind, &public_key_hex)
+            .unwrap_or(false);
+        if !db_matches {
+            return RuleSigningStatus {
+                configured: false,
+                status: "invalid".to_string(),
+                signer_kind: Some(signer_kind),
+                fingerprint: Some(fingerprint),
+                trust_root_path,
+                trust_root_ok: true,
+                reason: Some(
+                    "trusted signer manifest does not match daemon signer cache".to_string(),
+                ),
+                action: Some("rerun sudo stt-guard init to repair signer enrollment".to_string()),
+            };
+        }
+        RuleSigningStatus {
+            configured: true,
+            status: "configured".to_string(),
+            signer_kind: Some(signer_kind),
+            fingerprint: Some(fingerprint),
+            trust_root_path,
+            trust_root_ok: true,
+            reason: None,
+            action: None,
+        }
+    }
+
+    fn trusted_manifest_contains(
+        &self,
+        public_key_sha256: &str,
+        signer_kind: &str,
+        public_key_x963: Option<&[u8]>,
+    ) -> Result<bool, RuleStoreError> {
+        let Some(path) = &self.trusted_signers_manifest_path else {
+            return Ok(true);
+        };
+        self.verify_trusted_manifest_path(path)?;
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            RuleStoreError::Signature(format!(
+                "trusted signer manifest unreadable at {}: {e}",
+                path.display()
+            ))
+        })?;
+        guard_core::trusted_signer_matches(
+            &contents,
+            public_key_sha256,
+            signer_kind,
+            public_key_x963,
+        )
+        .map_err(|e| RuleStoreError::Signature(e.to_string()))
+    }
+
+    fn trusted_signer_db_matches(
+        &self,
+        public_key_sha256: &str,
+        signer_kind: &str,
+        public_key_hex: &str,
+    ) -> Result<bool, RuleStoreError> {
+        let public_key = decode_hex(public_key_hex)?;
+        let conn = self.reader.lock().expect("rule store reader mutex");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM trusted_rule_signers
+             WHERE public_key_sha256 = ?1 AND signer_kind = ?2 AND public_key_x963 = ?3",
+            params![public_key_sha256, signer_kind, public_key],
+            |r| r.get(0),
+        )?;
+        Ok(count == 1)
+    }
+
+    fn verify_trusted_manifest_path(&self, path: &Path) -> Result<(), RuleStoreError> {
+        let meta = std::fs::symlink_metadata(path).map_err(|e| {
+            RuleStoreError::Signature(format!(
+                "trusted signer manifest metadata unreadable at {}: {e}",
+                path.display()
+            ))
+        })?;
+        if !meta.file_type().is_file() {
+            return Err(RuleStoreError::Signature(format!(
+                "trusted signer manifest is not a regular file: {}",
+                path.display()
+            )));
+        }
+        if meta.uid() != 0 || meta.gid() != 0 || meta.mode() & 0o022 != 0 {
+            return Err(RuleStoreError::Signature(format!(
+                "trusted signer manifest has unsafe ownership or permissions: {} uid={} gid={} mode={:o}",
+                path.display(),
+                meta.uid(),
+                meta.gid(),
+                meta.mode() & 0o777
+            )));
+        }
+        let parent = path.parent().ok_or_else(|| {
+            RuleStoreError::Signature(format!(
+                "trusted signer manifest has no parent directory: {}",
+                path.display()
+            ))
+        })?;
+        let parent_meta = std::fs::symlink_metadata(parent).map_err(|e| {
+            RuleStoreError::Signature(format!(
+                "trusted signer manifest parent metadata unreadable at {}: {e}",
+                parent.display()
+            ))
+        })?;
+        if !parent_meta.file_type().is_dir() {
+            return Err(RuleStoreError::Signature(format!(
+                "trusted signer manifest parent is not a directory: {}",
+                parent.display()
+            )));
+        }
+        if parent_meta.uid() != 0 || parent_meta.gid() != 0 || parent_meta.mode() & 0o022 != 0 {
+            return Err(RuleStoreError::Signature(format!(
+                "trusted signer manifest parent has unsafe ownership or permissions: {} uid={} gid={} mode={:o}",
+                parent.display(),
+                parent_meta.uid(),
+                parent_meta.gid(),
+                parent_meta.mode() & 0o777
+            )));
+        }
+        Ok(())
+    }
+
     /// Count all rows in the rules table (user-approved rules added via `stt-guard approve`).
     /// Used by StatusReply handler.
     pub fn count_user_rules(&self) -> SqlResult<u64> {
@@ -142,7 +497,8 @@ impl RuleStore {
     }
 
     /// Read all user rules; map each row to an AllowlistEntry with tier
-    /// UserDeny / UserAllow. Used by the PrepareSnapshot handler.
+    /// UserDeny / UserAllow. Legacy helper retained for status/tests; snapshot
+    /// preparation must use all_verified_user_rules.
     pub fn all_user_rules(&self) -> SqlResult<Vec<AllowlistEntry>> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         let mut stmt =
@@ -190,6 +546,181 @@ impl RuleStore {
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Read and verify all signed user rules. Any unsigned or tampered user rule
+    /// is a fail-closed error; callers must not silently proceed without user
+    /// rules when this returns Err.
+    pub fn all_verified_user_rules(
+        &self,
+        policy: RuleSignaturePolicy,
+    ) -> Result<Vec<AllowlistEntry>, RuleStoreError> {
+        let conn = self.reader.lock().expect("rule store reader mutex");
+        if let Some(id) = conn
+            .query_row(
+                "SELECT r.id
+                 FROM rules r
+                 LEFT JOIN rule_signatures s ON s.rule_id = r.id
+                 WHERE s.rule_id IS NULL
+                 LIMIT 1",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+        {
+            return Err(RuleStoreError::Signature(format!(
+                "unsigned user rule present: rule_id={id}"
+            )));
+        }
+        if let Some(id) = conn
+            .query_row(
+                "SELECT s.rule_id
+                 FROM rule_signatures s
+                 LEFT JOIN rules r ON r.id = s.rule_id
+                 WHERE r.id IS NULL
+                 LIMIT 1",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+        {
+            return Err(RuleStoreError::Signature(format!(
+                "orphan rule signature present: rule_id={id}"
+            )));
+        }
+        let total_rules: i64 = conn.query_row("SELECT COUNT(*) FROM rules", [], |r| r.get(0))?;
+
+        let mut stmt = conn.prepare(
+            "SELECT
+                r.kind, r.match_type, r.pattern, r.reason, r.created_at,
+                s.scheme, s.signer_kind, s.public_key_x963, s.public_key_sha256,
+                s.signature_der, s.signed_payload_sha256, s.signature_created_at,
+                s.origin, s.run_uuid, s.payload_created_at
+             FROM rules r
+             JOIN rule_signatures s ON s.rule_id = r.id
+             ORDER BY r.id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Vec<u8>>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, Vec<u8>>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?,
+                row.get::<_, Option<String>>(13)?,
+                row.get::<_, i64>(14)?,
+            ))
+        })?;
+
+        let mut out = Vec::new();
+        let mut verified_rows = 0_i64;
+        for row in rows {
+            let (
+                kind_str,
+                match_str,
+                pattern,
+                reason,
+                created_at,
+                scheme,
+                signer_kind,
+                public_key_x963,
+                public_key_sha256,
+                signature_der,
+                signed_payload_sha256,
+                signature_created_at_unix_ms,
+                origin,
+                run_uuid,
+                payload_created_at,
+            ) = row?;
+            if created_at != payload_created_at {
+                return Err(RuleStoreError::Signature(
+                    "rule created_at does not match signed payload".into(),
+                ));
+            }
+            let payload = RuleSignaturePayloadV1::new(
+                kind_str.clone(),
+                match_str.clone(),
+                pattern.clone(),
+                reason.clone(),
+                created_at,
+                origin,
+                run_uuid,
+            );
+            let signature = RuleSignatureV1 {
+                scheme,
+                signer_kind,
+                public_key_x963,
+                public_key_sha256,
+                signature_der,
+                signed_payload_sha256,
+                signature_created_at_unix_ms,
+            };
+            verify_rule_signature(&payload, &signature, policy)
+                .map_err(|e| RuleStoreError::Signature(e.to_string()))?;
+            let trusted_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM trusted_rule_signers
+                 WHERE public_key_sha256 = ?1 AND signer_kind = ?2",
+                params![
+                    signature.public_key_sha256.as_str(),
+                    signature.signer_kind.as_str()
+                ],
+                |r| r.get(0),
+            )?;
+            if trusted_count != 1
+                || !self.trusted_manifest_contains(
+                    &signature.public_key_sha256,
+                    &signature.signer_kind,
+                    Some(&signature.public_key_x963),
+                )?
+            {
+                return Err(RuleStoreError::Signature(format!(
+                    "untrusted rule signer: {}",
+                    signature.public_key_sha256
+                )));
+            }
+
+            let kind = match kind_str.as_str() {
+                "allow" => RuleKind::Allow,
+                "deny" => RuleKind::Deny,
+                other => return Err(RuleStoreError::Signature(format!("invalid kind: {other}"))),
+            };
+            let match_type = match match_str.as_str() {
+                "exact" => MatchType::Exact,
+                "suffix" => MatchType::Suffix,
+                "ip" => MatchType::Ip,
+                other => {
+                    return Err(RuleStoreError::Signature(format!(
+                        "invalid match_type: {other}"
+                    )));
+                }
+            };
+            let tier = match kind {
+                RuleKind::Allow => RuleTier::UserAllow,
+                RuleKind::Deny => RuleTier::UserDeny,
+            };
+            out.push(AllowlistEntry {
+                kind,
+                tier,
+                match_type,
+                pattern,
+                reason,
+            });
+            verified_rows += 1;
+        }
+        if verified_rows != total_rules {
+            return Err(RuleStoreError::Signature(format!(
+                "verified user rule count mismatch: verified={verified_rows}, rules={total_rules}"
+            )));
         }
         Ok(out)
     }
@@ -282,6 +813,32 @@ pub fn unix_ms_now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+fn decode_hex(s: &str) -> Result<Vec<u8>, RuleStoreError> {
+    if s.len() % 2 != 0 {
+        return Err(RuleStoreError::Signature(
+            "trusted signer manifest contains odd-length public key hex".into(),
+        ));
+    }
+    let mut out = Vec::with_capacity(s.len() / 2);
+    for pair in s.as_bytes().chunks_exact(2) {
+        let hi = hex_value(pair[0])?;
+        let lo = hex_value(pair[1])?;
+        out.push((hi << 4) | lo);
+    }
+    Ok(out)
+}
+
+fn hex_value(b: u8) -> Result<u8, RuleStoreError> {
+    match b {
+        b'0'..=b'9' => Ok(b - b'0'),
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
+        _ => Err(RuleStoreError::Signature(
+            "trusted signer manifest contains invalid public key hex".into(),
+        )),
+    }
 }
 
 #[cfg(test)]

@@ -54,6 +54,7 @@ guard-ipc  = { path = "crates/guard-ipc" }
 # Cryptography (snapshot + IPC signing)
 sha2 = "0.10"
 hmac = "0.12"
+p256 = { version = "0.13", features = ["ecdsa"] }
 
 # Dev / test
 criterion = "0.8.2"

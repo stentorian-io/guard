@@ -33,10 +33,14 @@ warn() {
 run_e2e() {
   local test_name="$1"
   local label="$2"
-  cargo test -p guard-e2e --test "$test_name" --release -- --nocapture \
+  cargo test -p guard-e2e --features test-signer --test "$test_name" --release -- --nocapture \
     || fail "$label"
   pass "$label"
 }
+
+cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer \
+  || fail "build release binaries with test signer"
+pass "build release binaries with test signer"
 
 run_e2e ua_parser_js_demo "VAL-01 ua-parser-js@0.7.29 demo"
 run_e2e workers_dev_validation "VAL-02 workers.dev allowlist-bleed"
@@ -45,7 +49,7 @@ run_e2e failure_modes_hardened_exec "VAL-04 D-10 hardened-binary exec gap"
 
 if [ "${STT_GUARD_PRE_PUSH_RUN_PRIVILEGED:-0}" = "1" ]; then
   STT_GUARD_E2E_PRIVILEGED_INSTALL=1 \
-    cargo test -p guard-e2e --test hardened_install_health --release -- --nocapture \
+    cargo test -p guard-e2e --features test-signer --test hardened_install_health --release -- --nocapture \
     || fail "VAL-05 privileged init and install health"
   pass "VAL-05 privileged init and install health"
 else

@@ -4,9 +4,12 @@
 //! `/usr/local/libexec/stt-guard/`, creates state and log directories owned
 //! by `_stt_guard`, installs a LaunchDaemon, and starts it.
 
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::hardware_signing::HardwareSignerEnrollment;
 use crate::CliError;
 
 use guard_core::paths;
@@ -46,6 +49,8 @@ pub fn print_plan() {
     eprintln!("  • Copy hook dylib to {BIN_DIR}/ (root:wheel, 644)");
     eprintln!("  • Create state directory at {STATE_DIR}/");
     eprintln!("  • Create log directory at {LOG_DIR}/");
+    eprintln!("  • Enroll a non-exportable Secure Enclave rule-signing key");
+    eprintln!("  • Register the hardware-backed public signer with the daemon state");
     eprintln!("  • Install LaunchDaemon ({PLIST_LABEL})");
     eprintln!("  • Start the daemon");
 }
@@ -56,6 +61,8 @@ pub fn run_install() -> Result<(), CliError> {
     let service_gid = create_service_user()?;
     deploy_binaries()?;
     create_directories(service_gid)?;
+    let enrollment = crate::hardware_signing::enroll_secure_enclave_for_init()?;
+    register_rule_signer(&enrollment, service_gid)?;
     install_launchdaemon()?;
     start_daemon()?;
     eprintln!("\nstt-guard: initialisation complete.");
@@ -285,6 +292,7 @@ fn deploy_binaries() -> Result<(), CliError> {
         &["-R", "root:wheel", BIN_DIR],
         "set binary ownership",
     )?;
+    run_cmd("chmod", &["755", BIN_DIR], "set binary dir permissions")?;
     for bin_name in BINARIES {
         let path = Path::new(BIN_DIR).join(bin_name);
         run_cmd(
@@ -333,6 +341,86 @@ fn create_directories(service_gid: u32) -> Result<(), CliError> {
     run_cmd("chmod", &["711", LOG_DIR], "set log dir permissions")?;
 
     Ok(())
+}
+
+fn register_rule_signer(
+    enrollment: &HardwareSignerEnrollment,
+    service_gid: u32,
+) -> Result<(), CliError> {
+    eprintln!(
+        "  Registering hardware-backed rule signer {}...",
+        enrollment.public_key_sha256
+    );
+    write_trusted_signer_manifest(enrollment)?;
+    let db_path = paths::db_path(Path::new(STATE_DIR));
+    let store = guard_daemon::rule_store::RuleStore::open(&db_path)
+        .map_err(|e| CliError::Other(format!("open rule store for signer enrollment: {e}")))?;
+    store
+        .register_trusted_rule_signer_key(
+            &enrollment.public_key_sha256,
+            &enrollment.signer_kind,
+            &enrollment.public_key_x963,
+            &enrollment.label,
+        )
+        .map_err(|e| CliError::Other(format!("register trusted rule signer: {e}")))?;
+    let service_owner = format!("{SERVICE_USER}:{service_gid}");
+    run_cmd(
+        "chown",
+        &["-R", &service_owner, STATE_DIR],
+        "set state dir ownership after signer enrollment",
+    )?;
+    Ok(())
+}
+
+fn write_trusted_signer_manifest(enrollment: &HardwareSignerEnrollment) -> Result<(), CliError> {
+    let path = paths::trusted_rule_signers_path();
+    let content = format!(
+        "# stt-guard trusted hardware-backed rule signers v1\n{}\t{}\t{}\t{}\n",
+        enrollment.public_key_sha256,
+        enrollment.signer_kind,
+        hex_lower(&enrollment.public_key_x963),
+        enrollment.label.replace(['\t', '\n'], " "),
+    );
+    if let Ok(meta) = std::fs::symlink_metadata(&path) {
+        if meta.file_type().is_dir() {
+            return Err(CliError::Other(format!(
+                "trusted signer manifest path is a directory: {}",
+                path.display()
+            )));
+        }
+        std::fs::remove_file(&path)
+            .map_err(|e| CliError::Other(format!("remove existing {}: {e}", path.display())))?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o644)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)
+        .map_err(|e| CliError::Other(format!("create {}: {e}", path.display())))?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| CliError::Other(format!("write {}: {e}", path.display())))?;
+    run_cmd(
+        "chown",
+        &["root:wheel", &path.to_string_lossy()],
+        "set trusted signer manifest ownership",
+    )?;
+    run_cmd(
+        "chmod",
+        &["644", &path.to_string_lossy()],
+        "set trusted signer manifest permissions",
+    )?;
+    Ok(())
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    s
 }
 
 fn install_launchdaemon() -> Result<(), CliError> {

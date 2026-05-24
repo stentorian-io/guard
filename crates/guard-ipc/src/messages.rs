@@ -116,6 +116,7 @@ impl Reply {
 pub const IPC_SCHEMA_V2: u16 = 2;
 pub const IPC_SCHEMA_V3: u16 = 3;
 pub const IPC_SCHEMA_V4: u16 = 4;
+pub const IPC_SCHEMA_V5: u16 = 5;
 
 // ============================================================
 // v0.4 — Threat-intel match record + non-fatal feed warning.
@@ -133,6 +134,70 @@ pub struct IntelMatch {
     pub severity: Option<String>,
     pub tag: Option<String>,
     pub first_seen_ms: u64,
+}
+
+// --- PrepareSnapshot / SnapshotReply ----------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SnapshotInputsReply {
+    Ok {
+        schema_version: u16,
+        input: guard_core::SnapshotBuildInput,
+        is_tty: bool,
+        baseline_mode: bool,
+    },
+    Err {
+        schema_version: u16,
+        message: String,
+    },
+}
+
+impl SnapshotInputsReply {
+    pub fn ok(input: guard_core::SnapshotBuildInput, is_tty: bool, baseline_mode: bool) -> Self {
+        Self::Ok {
+            schema_version: IPC_SCHEMA_V5,
+            input,
+            is_tty,
+            baseline_mode,
+        }
+    }
+
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::Err {
+            schema_version: IPC_SCHEMA_V5,
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PublishSignedSnapshot {
+    pub schema_version: u16,
+    pub run_uuid: String,
+    #[serde(with = "serde_bytes")]
+    pub snapshot_bytes: Vec<u8>,
+    pub signature: guard_core::SnapshotSignatureV1,
+    pub is_tty: bool,
+    pub baseline_mode: bool,
+}
+
+impl PublishSignedSnapshot {
+    pub fn new(
+        run_uuid: impl Into<String>,
+        snapshot_bytes: Vec<u8>,
+        signature: guard_core::SnapshotSignatureV1,
+        is_tty: bool,
+        baseline_mode: bool,
+    ) -> Self {
+        Self {
+            schema_version: IPC_SCHEMA_V5,
+            run_uuid: run_uuid.into(),
+            snapshot_bytes,
+            signature,
+            is_tty,
+            baseline_mode,
+        }
+    }
 }
 
 // --- PrepareSnapshot / SnapshotReply ----------------------------------------
@@ -580,6 +645,19 @@ pub struct InstallInfo {
     pub artifacts: Vec<InstallArtifact>,
 }
 
+/// Hardware-backed signing health reported by daemon status.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SigningInfo {
+    pub configured: bool,
+    pub status: String, // "configured" | "not-configured" | "invalid"
+    pub signer_kind: Option<String>,
+    pub fingerprint: Option<String>,
+    pub trust_root_path: Option<String>,
+    pub trust_root_ok: bool,
+    pub reason: Option<String>,
+    pub action: Option<String>,
+}
+
 /// Daemon → CLI: response to Status request.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StatusReply {
@@ -590,6 +668,8 @@ pub enum StatusReply {
         recent_gaps: Vec<GapInfo>,
         counters: StatusCounters,
         install_info: Option<InstallInfo>,
+        #[serde(default)]
+        signing_info: Option<SigningInfo>,
     },
     Err {
         schema_version: u16,
@@ -604,6 +684,7 @@ impl StatusReply {
         recent_gaps: Vec<GapInfo>,
         counters: StatusCounters,
         install_info: Option<InstallInfo>,
+        signing_info: Option<SigningInfo>,
     ) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V3,
@@ -612,6 +693,7 @@ impl StatusReply {
             recent_gaps,
             counters,
             install_info,
+            signing_info,
         }
     }
     pub fn err(message: impl Into<String>) -> Self {
@@ -728,10 +810,12 @@ pub struct RulePattern {
 /// CLI → daemon (prompt channel): user's decision on a PromptRequest.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptResponse {
-    pub schema_version: u16, // V3
+    pub schema_version: u16, // V5 when signed_rule is present
     pub prompt_id: String,
     pub verdict: PromptVerdict,
     pub rule_pattern: Option<RulePattern>,
+    #[serde(default)]
+    pub signed_rule: Option<InsertUserRule>,
 }
 
 /// CLI → daemon (prompt channel): cancel an outstanding prompt (e.g. timeout or Ctrl-C).
@@ -746,13 +830,25 @@ pub struct PromptCancel {
 // ============================================================
 
 /// CLI → daemon: insert a user-authored rule into the SQLite rule store.
+///
+/// v0.8 / issue #31: persistent user rules must carry an asymmetric rule
+/// signature. Legacy unsigned requests decode for compatibility but daemon
+/// handlers reject them for persistence.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InsertUserRule {
-    pub schema_version: u16, // V3
+    pub schema_version: u16, // V5 for signed persistence
     pub kind: String,        // "allow"|"deny"
     pub match_type: String,  // "exact"|"suffix"|"ip"
     pub pattern: String,
     pub reason: String, // non-empty
+    #[serde(default)]
+    pub created_at_unix_ms: i64,
+    #[serde(default)]
+    pub origin: String,
+    #[serde(default)]
+    pub run_uuid: Option<String>,
+    #[serde(default)]
+    pub signature: Option<guard_core::RuleSignatureV1>,
 }
 
 /// Daemon → CLI: response to InsertUserRule.
@@ -771,13 +867,13 @@ pub enum InsertUserRuleReply {
 impl InsertUserRuleReply {
     pub fn ok(rule_id: i64) -> Self {
         Self::Ok {
-            schema_version: IPC_SCHEMA_V3,
+            schema_version: IPC_SCHEMA_V5,
             rule_id,
         }
     }
     pub fn err(message: impl Into<String>) -> Self {
         Self::Err {
-            schema_version: IPC_SCHEMA_V3,
+            schema_version: IPC_SCHEMA_V5,
             message: message.into(),
         }
     }

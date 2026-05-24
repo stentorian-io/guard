@@ -4,7 +4,9 @@
 
 use std::io::{BufRead, Write};
 
-use guard_ipc::{IPC_SCHEMA_V3, PromptRequest, PromptResponse, PromptVerdict, RulePattern};
+use guard_ipc::{
+    PromptRequest, PromptResponse, PromptVerdict, RulePattern, IPC_SCHEMA_V3, IPC_SCHEMA_V5,
+};
 
 use crate::CliError;
 
@@ -12,7 +14,7 @@ use crate::CliError;
 /// Blocks until the user enters a valid choice (1/2/3) or ? for help.
 ///
 /// Returns the PromptResponse (with the user's verdict and optional rule_pattern).
-pub fn render_and_choose(req: &PromptRequest) -> Result<PromptResponse, CliError> {
+pub fn render_and_choose(req: &PromptRequest, run_uuid: &str) -> Result<PromptResponse, CliError> {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     writeln!(out).ok();
@@ -124,11 +126,51 @@ pub fn render_and_choose(req: &PromptRequest) -> Result<PromptResponse, CliError
             }),
             _ => None,
         };
+        let signed_rule =
+            if let (PromptVerdict::AllowAlwaysMachine, Some(rp)) = (&verdict, &rule_pattern) {
+                let created_at_unix_ms = unix_ms_now();
+                let reason = format!("user-approved via prompt run {run_uuid}");
+                let payload = guard_core::RuleSignaturePayloadV1::new(
+                    "allow",
+                    rp.match_type.clone(),
+                    rp.pattern.clone(),
+                    reason.clone(),
+                    created_at_unix_ms,
+                    "prompt",
+                    Some(run_uuid.to_string()),
+                );
+                let signature = crate::rule_signing::sign_rule_payload(&payload)?;
+                Some(guard_ipc::InsertUserRule {
+                    schema_version: IPC_SCHEMA_V5,
+                    kind: "allow".into(),
+                    match_type: rp.match_type.clone(),
+                    pattern: rp.pattern.clone(),
+                    reason,
+                    created_at_unix_ms,
+                    origin: "prompt".into(),
+                    run_uuid: Some(run_uuid.to_string()),
+                    signature: Some(signature),
+                })
+            } else {
+                None
+            };
         return Ok(PromptResponse {
-            schema_version: IPC_SCHEMA_V3,
+            schema_version: if signed_rule.is_some() {
+                IPC_SCHEMA_V5
+            } else {
+                IPC_SCHEMA_V3
+            },
             prompt_id: req.prompt_id.clone(),
             verdict,
             rule_pattern,
+            signed_rule,
         });
     }
+}
+
+fn unix_ms_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }

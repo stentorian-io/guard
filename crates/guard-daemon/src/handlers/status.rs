@@ -5,7 +5,8 @@
 use std::sync::atomic::Ordering;
 
 use guard_ipc::{
-    DaemonStateKind, GapInfo, InstallInfo, StatusCounters, StatusReply, TrackedRootInfo,
+    DaemonStateKind, GapInfo, InstallInfo, SigningInfo, StatusCounters, StatusReply,
+    TrackedRootInfo,
 };
 
 use crate::ipc_server::DaemonState;
@@ -54,7 +55,20 @@ pub fn handle_status(state: &DaemonState) -> StatusReply {
     };
 
     let snapshot_failed = state.last_snapshot_publish_failed.load(Ordering::Relaxed);
-    let daemon_state = compute_daemon_state(&recent_gaps, snapshot_failed, now_ms);
+    let signing_status = state.rule_store.rule_signing_status();
+    let signing_problem = !signing_status.configured;
+    let signing_info = SigningInfo {
+        configured: signing_status.configured,
+        status: signing_status.status,
+        signer_kind: signing_status.signer_kind,
+        fingerprint: signing_status.fingerprint,
+        trust_root_path: signing_status.trust_root_path,
+        trust_root_ok: signing_status.trust_root_ok,
+        reason: signing_status.reason,
+        action: signing_status.action,
+    };
+    let daemon_state =
+        compute_daemon_state(&recent_gaps, snapshot_failed || signing_problem, now_ms);
 
     StatusReply::ok(
         daemon_state,
@@ -62,6 +76,7 @@ pub fn handle_status(state: &DaemonState) -> StatusReply {
         recent_gaps,
         counters,
         install_info,
+        Some(signing_info),
     )
 }
 

@@ -8,11 +8,16 @@ repository.workspace = true
 authors.workspace = true
 description = "Stentorian Guard domain types: ProcessIdentity, allowlist matcher, snapshot codec."
 
+[features]
+test-signer = []
+
 [dependencies]
 libc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ciborium = { workspace = true }
+sha2 = { workspace = true }
+p256 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

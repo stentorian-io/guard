@@ -182,12 +182,17 @@ fn hook_dylib_env_override_takes_precedence() {
     let dylib = tmp.path().join("custom-stt-guard-hook.dylib");
     std::fs::write(&dylib, []).expect("write placeholder dylib");
 
-    let _restore = RestoreEnv {
+    let _restore_hook = RestoreEnv {
         key: "STT_GUARD_HOOK_DYLIB",
         previous: std::env::var_os("STT_GUARD_HOOK_DYLIB"),
     };
+    let _restore_state = RestoreEnv {
+        key: "STT_GUARD_STATE_DIR",
+        previous: std::env::var_os("STT_GUARD_STATE_DIR"),
+    };
     unsafe {
         std::env::set_var("STT_GUARD_HOOK_DYLIB", &dylib);
+        std::env::set_var("STT_GUARD_STATE_DIR", tmp.path());
     }
 
     let found = guard_cli::locate::find_dylib().expect("find dylib");

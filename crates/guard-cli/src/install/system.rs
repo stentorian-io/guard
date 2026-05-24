@@ -23,10 +23,14 @@ const PLIST_PATH: &str = paths::PLIST_PATH;
 const BINARIES: &[&str] = paths::INSTALLED_BINARIES;
 const DYLIB: &str = paths::HOOK_DYLIB;
 
-/// Check whether the hardened installation is present.
-/// Returns true if the deployed daemon binary exists under the system bin dir.
+/// Check whether the hardened installation is present and internally coherent.
 pub fn is_installed() -> bool {
-    Path::new(BIN_DIR).join("stt-guard-daemon").exists()
+    install_health().is_healthy()
+}
+
+/// Return the full hardened-install health result.
+pub fn install_health() -> crate::install::health::InstallHealth {
+    crate::install::health::check_installation()
 }
 
 /// Return the system-level state directory path.
@@ -49,9 +53,9 @@ pub fn print_plan() {
 /// Execute the full hardened installation. Must be run as root.
 pub fn run_install() -> Result<(), CliError> {
     require_root()?;
-    create_service_user()?;
+    let service_gid = create_service_user()?;
     deploy_binaries()?;
-    create_directories()?;
+    create_directories(service_gid)?;
     install_launchdaemon()?;
     start_daemon()?;
     eprintln!("\nstt-guard: initialisation complete.");
@@ -71,111 +75,157 @@ fn nix_is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
-fn create_service_user() -> Result<(), CliError> {
+fn create_service_user() -> Result<u32, CliError> {
     // Check if user already exists.
     let check = Command::new("dscl")
         .args([".", "-read", &format!("/Users/{SERVICE_USER}")])
         .output()
         .map_err(|e| CliError::Other(format!("dscl check: {e}")))?;
 
-    if check.status.success() {
-        eprintln!("  {SERVICE_USER} user already exists, skipping creation");
-        return Ok(());
-    }
+    let gid = if check.status.success() {
+        eprintln!("  {SERVICE_USER} user already exists, verifying attributes");
+        let gid = service_gid()?;
+        set_service_user_attributes(gid)?;
+        gid
+    } else {
+        eprintln!("  Creating {SERVICE_USER} service user...");
 
-    eprintln!("  Creating {SERVICE_USER} service user...");
+        // Find an unused UID in the system range (400-499).
+        let uid = find_available_uid()?;
+        let uid_str = uid.to_string();
 
-    // Find an unused UID in the system range (400-499).
-    let uid = find_available_uid()?;
-    let uid_str = uid.to_string();
+        let steps: &[(&[&str], &str)] = &[
+            (
+                &[".", "-create", &format!("/Users/{SERVICE_USER}")],
+                "create user record",
+            ),
+            (
+                &[
+                    ".",
+                    "-create",
+                    &format!("/Users/{SERVICE_USER}"),
+                    "UniqueID",
+                    &uid_str,
+                ],
+                "set uid",
+            ),
+            (
+                &[
+                    ".",
+                    "-create",
+                    &format!("/Users/{SERVICE_USER}"),
+                    "PrimaryGroupID",
+                    &uid_str,
+                ],
+                "set gid",
+            ),
+        ];
 
-    let steps: &[(&[&str], &str)] = &[
-        (
-            &[".", "-create", &format!("/Users/{SERVICE_USER}")],
-            "create user record",
-        ),
-        (
-            &[
-                ".",
-                "-create",
-                &format!("/Users/{SERVICE_USER}"),
-                "UserShell",
-                "/usr/bin/false",
-            ],
-            "set shell",
-        ),
-        (
-            &[
-                ".",
-                "-create",
-                &format!("/Users/{SERVICE_USER}"),
-                "RealName",
-                SERVICE_USER_REALNAME,
-            ],
-            "set realname",
-        ),
-        (
-            &[
-                ".",
-                "-create",
-                &format!("/Users/{SERVICE_USER}"),
-                "UniqueID",
-                &uid_str,
-            ],
-            "set uid",
-        ),
-        (
-            &[
-                ".",
-                "-create",
-                &format!("/Users/{SERVICE_USER}"),
-                "PrimaryGroupID",
-                &uid_str,
-            ],
-            "set gid",
-        ),
-        (
-            &[
-                ".",
-                "-create",
-                &format!("/Users/{SERVICE_USER}"),
-                "NFSHomeDirectory",
-                "/var/empty",
-            ],
-            "set home",
-        ),
+        for (args, description) in steps {
+            run_cmd("dscl", args, description)?;
+        }
+
+        set_service_user_attributes(uid)?;
+        uid
+    };
+
+    Ok(gid)
+}
+
+fn set_service_user_attributes(gid: u32) -> Result<(), CliError> {
+    let gid_str = gid.to_string();
+    let user = format!("/Users/{SERVICE_USER}");
+    let steps: &[(&str, &str, &str)] = &[
+        ("UserShell", "/usr/bin/false", "set shell"),
+        ("RealName", SERVICE_USER_REALNAME, "set realname"),
+        ("PrimaryGroupID", &gid_str, "set gid"),
+        ("NFSHomeDirectory", "/var/empty", "set home"),
     ];
 
-    for (args, description) in steps {
-        run_cmd("dscl", args, description)?;
-    }
-
-    // Create the group with the same GID.
-    let group_check = Command::new("dscl")
-        .args([".", "-read", &format!("/Groups/{SERVICE_USER}")])
-        .output()
-        .map_err(|e| CliError::Other(format!("dscl group check: {e}")))?;
-
-    if !group_check.status.success() {
-        run_cmd(
-            "dscl",
-            &[".", "-create", &format!("/Groups/{SERVICE_USER}")],
-            "create group",
-        )?;
-        run_cmd(
-            "dscl",
-            &[
-                ".",
-                "-create",
-                &format!("/Groups/{SERVICE_USER}"),
-                "PrimaryGroupID",
-                &uid_str,
-            ],
-            "set group gid",
-        )?;
+    for (attr, value, description) in steps {
+        ensure_record_attr(&user, attr, value, description)?;
     }
 
     Ok(())
+}
+
+fn ensure_record_attr(
+    record: &str,
+    attr: &str,
+    expected: &str,
+    description: &str,
+) -> Result<(), CliError> {
+    if service_record_attr_matches(record, attr, expected)? {
+        return Ok(());
+    }
+
+    let _ = Command::new("dscl")
+        .args([".", "-delete", record, attr])
+        .output();
+    run_cmd(
+        "dscl",
+        &[".", "-create", record, attr, expected],
+        description,
+    )
+}
+
+fn service_record_attr_matches(record: &str, attr: &str, expected: &str) -> Result<bool, CliError> {
+    let output = Command::new("dscl")
+        .args([".", "-read", record, attr])
+        .output()
+        .map_err(|e| CliError::Other(format!("read {record} {attr}: {e}")))?;
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    Ok(
+        dscl_attribute_values(&String::from_utf8_lossy(&output.stdout), attr)
+            .iter()
+            .any(|value| value == expected),
+    )
+}
+
+fn dscl_attribute_values(output: &str, attr: &str) -> Vec<String> {
+    let Some(first_line) = output.lines().next() else {
+        return Vec::new();
+    };
+    let Some(rest) = first_line.strip_prefix(&format!("{attr}:")) else {
+        return Vec::new();
+    };
+
+    let inline = rest.trim();
+    if !inline.is_empty() {
+        return vec![inline.to_string()];
+    }
+
+    output
+        .lines()
+        .skip(1)
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn service_gid() -> Result<u32, CliError> {
+    let output = Command::new("id")
+        .args(["-g", SERVICE_USER])
+        .output()
+        .map_err(|e| CliError::Other(format!("read {SERVICE_USER} gid: {e}")))?;
+    if !output.status.success() {
+        return Err(CliError::Other(format!(
+            "read {SERVICE_USER} gid failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.trim().parse::<u32>().map_err(|e| {
+        CliError::Other(format!(
+            "read {SERVICE_USER} gid returned malformed value {:?}: {e}",
+            stdout.trim()
+        ))
+    })
 }
 
 fn find_available_uid() -> Result<u32, CliError> {
@@ -257,36 +307,30 @@ fn deploy_binaries() -> Result<(), CliError> {
 
 fn source_bin_dir() -> Result<PathBuf, CliError> {
     // The running stt-guard binary's parent directory contains the build artifacts.
-    let exe = std::env::current_exe()
-        .map_err(|e| CliError::Other(format!("current_exe: {e}")))?;
+    let exe = std::env::current_exe().map_err(|e| CliError::Other(format!("current_exe: {e}")))?;
     exe.parent()
         .map(|p| p.to_path_buf())
         .ok_or_else(|| CliError::Other("cannot determine source binary directory".into()))
 }
 
-fn create_directories() -> Result<(), CliError> {
+fn create_directories(service_gid: u32) -> Result<(), CliError> {
+    let service_owner = format!("{SERVICE_USER}:{service_gid}");
+
     eprintln!("  Creating state directory at {STATE_DIR}/...");
     std::fs::create_dir_all(STATE_DIR)
         .map_err(|e| CliError::Other(format!("create {STATE_DIR}: {e}")))?;
     run_cmd(
         "chown",
-        &[
-            &format!("{SERVICE_USER}:{SERVICE_USER}"),
-            STATE_DIR,
-        ],
+        &[&service_owner, STATE_DIR],
         "set state dir ownership",
     )?;
-    run_cmd("chmod", &["700", STATE_DIR], "set state dir permissions")?;
+    run_cmd("chmod", &["711", STATE_DIR], "set state dir permissions")?;
 
     eprintln!("  Creating log directory at {LOG_DIR}/...");
     std::fs::create_dir_all(LOG_DIR)
         .map_err(|e| CliError::Other(format!("create {LOG_DIR}: {e}")))?;
-    run_cmd(
-        "chown",
-        &[&format!("{SERVICE_USER}:{SERVICE_USER}"), LOG_DIR],
-        "set log dir ownership",
-    )?;
-    run_cmd("chmod", &["700", LOG_DIR], "set log dir permissions")?;
+    run_cmd("chown", &[&service_owner, LOG_DIR], "set log dir ownership")?;
+    run_cmd("chmod", &["711", LOG_DIR], "set log dir permissions")?;
 
     Ok(())
 }
@@ -294,44 +338,11 @@ fn create_directories() -> Result<(), CliError> {
 fn install_launchdaemon() -> Result<(), CliError> {
     eprintln!("  Installing LaunchDaemon ({PLIST_LABEL})...");
 
-    let plist_content = format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>{PLIST_LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>{BIN_DIR}/stt-guard-daemon</string>
-        <string>serve</string>
-        <string>--state-dir</string>
-        <string>{STATE_DIR}</string>
-    </array>
-    <key>UserName</key>
-    <string>{SERVICE_USER}</string>
-    <key>GroupName</key>
-    <string>{SERVICE_USER}</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>{LOG_DIR}/daemon.out.log</string>
-    <key>StandardErrorPath</key>
-    <string>{LOG_DIR}/daemon.err.log</string>
-</dict>
-</plist>
-"#
-    );
+    let plist_content = crate::install::health::expected_launchdaemon_plist();
 
     std::fs::write(PLIST_PATH, plist_content)
         .map_err(|e| CliError::Other(format!("write {PLIST_PATH}: {e}")))?;
-    run_cmd(
-        "chown",
-        &["root:wheel", PLIST_PATH],
-        "set plist ownership",
-    )?;
+    run_cmd("chown", &["root:wheel", PLIST_PATH], "set plist ownership")?;
     run_cmd("chmod", &["644", PLIST_PATH], "set plist permissions")?;
 
     Ok(())
@@ -362,9 +373,7 @@ fn run_cmd(program: &str, args: &[&str], description: &str) -> Result<(), CliErr
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CliError::Other(format!(
-            "{description} failed: {stderr}"
-        )));
+        return Err(CliError::Other(format!("{description} failed: {stderr}")));
     }
     Ok(())
 }

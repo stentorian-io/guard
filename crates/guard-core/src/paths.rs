@@ -47,7 +47,9 @@ pub const CLI_BIN: &str = "stt-guard";
 pub const DAEMON_BIN: &str = "stt-guard-daemon";
 pub const HOOK_DYLIB: &str = "stt-guard-hook.dylib";
 
-pub const INSTALLED_BINARIES: &[&str] = &[CLI_BIN, DAEMON_BIN];
+pub const WATCHDOG_BIN: &str = "stt-guard-watchdog";
+
+pub const INSTALLED_BINARIES: &[&str] = &[CLI_BIN, DAEMON_BIN, WATCHDOG_BIN];
 
 pub const SYSTEM_HOOK_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook.dylib";
 pub const HOMEBREW_HOOK_PATH: &str = "/opt/homebrew/lib/stt-guard/stt-guard-hook.dylib";
@@ -169,6 +171,15 @@ pub fn user_log_dir() -> PathBuf {
         .map(PathBuf::from)
         .expect("HOME environment variable must be set");
     home.join("Library/Logs/Stentorian Guard")
+}
+
+/// Runtime JSONL log directory for a daemon using `state_dir`.
+pub fn log_dir_for_state(state_dir: &Path) -> PathBuf {
+    if is_system_install(state_dir) {
+        PathBuf::from(SYSTEM_LOG_DIR)
+    } else {
+        user_log_dir()
+    }
 }
 
 /// Ensure `state_dir` exists with mode 0700. Idempotent.

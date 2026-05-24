@@ -30,20 +30,21 @@ Build output lands in `target/release/`. The installable artifacts are:
 | `stt-guard` | CLI |
 | `stt-guard-daemon` | Background daemon |
 | `stt-guard-watchdog` | Daemon liveness monitor |
-| `stt-guard-hook.dylib` | Installed DYLD-injected interposition library |
+| `libguard_hook.dylib` | Cargo-built DYLD-injected interposition library. Release packaging and `stt-guard init` install it as `stt-guard-hook.dylib`. |
 
-## Install to PATH
+## Development install
 
-Copy the release binaries to a directory in your `$PATH`:
+Consumer installs should use Homebrew and then run `sudo stt-guard init`; see
+the [README](README.md#installation). For source-build development, either add
+`target/release/` to your `$PATH` or copy the CLI somewhere convenient:
 
 ```sh
 cp target/release/stt-guard /usr/local/bin/
-cp target/release/stt-guard-daemon /usr/local/bin/
-cp target/release/stt-guard-watchdog /usr/local/bin/
-install -m 0644 "$(find target/release -maxdepth 1 -name '*hook*.dylib' -print -quit)" /usr/local/lib/stt-guard-hook.dylib
 ```
 
-Or add `target/release/` to your `$PATH` for development.
+`sudo stt-guard init` deploys the daemon, watchdog, and hook to the root-owned
+system install under `/usr/local/libexec/stt-guard/`. `wrap` and `status` refuse
+to run until that hardened install is present and healthy.
 
 Verify the install:
 
@@ -52,7 +53,7 @@ stt-guard status
 ```
 
 A healthy install shows daemon state, counters, tracked roots, gaps, and risk
-exposure. The daemon must be initialised first via `sudo stt-guard init` — see the [README](README.md#installation) for details.
+exposure.
 
 ## Test
 
@@ -63,10 +64,21 @@ cargo test --workspace --release
 # E2E validation suite only
 cargo test -p guard-e2e --release
 
+# Full local CI parity run (includes privileged VAL-05 by default)
+scripts/ci-local.sh
+
 # Single crate unit tests (faster iteration)
 cargo test -p guard-core
 cargo test -p guard-daemon
 ```
+
+The local CI script mirrors the split PR/code-validation workflows. It compares
+the branch against `origin/${GITHUB_BASE_REF:-main}` to decide whether
+code-validation is required. VAL-05 mutates `/usr/local/libexec/stt-guard`,
+`/Library/Application Support/Stentorian Guard`, `/var/log/stt-guard`, and the
+LaunchDaemon plist, so the script installs a narrow temporary sudoers drop-in
+for the test and removes it on exit. Use `scripts/ci-local.sh --no-privileged`
+only when you intentionally want to skip that system-install check.
 
 Benchmark infrastructure lives in `crates/guard-hook/benches/` (criterion) and `crates/guard-e2e/tests/bench_hot_path_e2e.rs` (live-wrap). Run `./scripts/bench-hot-path.sh` to reproduce locally.
 
@@ -202,10 +214,16 @@ chore: update ciborium to 0.2.2
 
 ## CI
 
-GitHub Actions (`.github/workflows/validation.yml`):
+GitHub Actions are split into cheap PR-shape validation and heavier code
+validation:
 
-- **Runner:** macOS-14
-- **Steps:** checkout -> Node 20 -> cargo cache -> verify fixture SHA-256 -> `cargo build --workspace --release` -> E2E validation tests
+- `.github/workflows/pr-validation.yml` runs metadata and markdown checks first.
+- `.github/workflows/code-validation.yml` waits for PR validation, detects
+  validation-relevant changes, then runs lint, release build, unit tests,
+  integration tests, E2E tests, secret scan, dependency audit, and a final gate.
+- The release build uploads the macOS binaries as a short-lived artifact; the
+  E2E job downloads those exact binaries so install-health tests exercise the
+  same payload produced by the build job.
 
 PRs must pass the full CI suite before merging.
 

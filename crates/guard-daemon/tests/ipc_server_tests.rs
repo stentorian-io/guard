@@ -179,8 +179,8 @@ fn register_root_delegation_stores_wire_claimed_child_token() {
     // Send RegisterRoot with a wire pid that differs from the connecting
     // peer's kernel pid (simulating the CLI registering a child process).
     // WR-08: the daemon now sanity-checks that the wire pid (a) exists and
-    // (b) has the same uid as the daemon. Spawn a real child process so the
-    // pid passes the existence check, then register that pid. The child runs
+    // (b) has the same uid as the wire audit token. Spawn a real child process
+    // so the pid passes the existence check, then register that pid. The child runs
     // `sleep 30` which is more than enough time for the test to send the
     // RegisterRoot and read the Ack.
     let mut child = std::process::Command::new("sleep")
@@ -196,7 +196,8 @@ fn register_root_delegation_stores_wire_claimed_child_token() {
     // TREE-07: use the child's real kernel pidversion so the daemon's
     // pidversion cross-check passes.
     let child_pv = kernel_pidversion(child_pid_real);
-    let child_wire = AuditToken::synthetic([0, 0, 0, 0, 0, child_pid_real, 0, child_pv]);
+    let uid = unsafe { libc::getuid() };
+    let child_wire = AuditToken::synthetic([0, uid, 0, uid, 0, child_pid_real, 0, child_pv]);
     let mut stream = UnixStream::connect(&sock).expect("connect");
     write_frame(&mut stream, &RegisterRoot::new(child_wire)).expect("write RegisterRoot");
     let reply: Reply = read_frame(&mut stream).expect("read Reply");

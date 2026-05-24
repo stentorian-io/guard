@@ -9,5 +9,6 @@ pub fn home_dir() -> PathBuf {
 }
 
 pub fn logs_dir() -> PathBuf {
-    guard_core::paths::user_log_dir()
+    let state_dir = guard_core::paths::default_state_dir();
+    guard_core::paths::log_dir_for_state(&state_dir)
 }

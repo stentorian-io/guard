@@ -51,15 +51,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust toolchain + target
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-rust
         with:
           shared-key: release-${{ matrix.target }}
+          targets: ${{ matrix.target }}
 
       - name: Build release binaries
         run: cargo build --workspace --release --target ${{ matrix.target }}
@@ -135,31 +130,7 @@ jobs:
 
       - name: Package target tarballs
         id: package
-        run: |
-          set -euo pipefail
-          for target_dir in artifacts/guard-*; do
-            target="${target_dir#artifacts/guard-}"
-            cp artifacts/release-meta.json "${target_dir}/release-meta.json"
-            tarball="artifacts/guard-${{ steps.version.outputs.version }}-${target}.tar.gz"
-            tar -C "${target_dir}" \
-              -czf "${tarball}" \
-              stt-guard stt-guard-daemon stt-guard-watchdog stt-guard-hook.dylib release-meta.json
-            sha=$(sha256sum "${tarball}" | awk '{print $1}')
-            case "${target}" in
-              aarch64-apple-darwin)
-                echo "arm64_tarball=${tarball}" >> "$GITHUB_OUTPUT"
-                echo "arm64_sha256=${sha}" >> "$GITHUB_OUTPUT"
-                ;;
-              x86_64-apple-darwin)
-                echo "x86_64_tarball=${tarball}" >> "$GITHUB_OUTPUT"
-                echo "x86_64_sha256=${sha}" >> "$GITHUB_OUTPUT"
-                ;;
-              *)
-                echo "unexpected target: ${target}" >&2
-                exit 1
-                ;;
-            esac
-          done
+        run: scripts/ci-package-release-tarballs.sh "${{ steps.version.outputs.version }}"
 
       - name: Generate Homebrew formula
         run: |
@@ -248,10 +219,4 @@ jobs:
 
       - name: Dry-run summary
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true'
-        run: |
-          echo "## Dry Run Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Tag:** ${{ steps.version.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Artifacts:**" >> "$GITHUB_STEP_SUMMARY"
-          ls -lh artifacts/ >> "$GITHUB_STEP_SUMMARY"
-          echo "**Release metadata:**" >> "$GITHUB_STEP_SUMMARY"
-          cat artifacts/release-meta.json >> "$GITHUB_STEP_SUMMARY"
+        run: scripts/ci-write-release-dry-run-summary.sh "${{ steps.version.outputs.tag }}"

@@ -20,7 +20,5 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: validation
+      - uses: ./.github/actions/setup-rust
       - run: cargo check --workspace --release

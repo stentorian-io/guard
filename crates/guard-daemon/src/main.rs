@@ -21,10 +21,7 @@ use std::sync::Arc;
 use tracing::info;
 
 #[derive(Parser)]
-#[command(
-    name = "stt-guard-daemon",
-    about = "Stentorian Guard system daemon"
-)]
+#[command(name = "stt-guard-daemon", about = "Stentorian Guard system daemon")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -93,12 +90,17 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     );
 
     // v0.3: log directory + writer.
-    let log_dir = guard_core::paths::user_log_dir();
+    let log_dir = guard_core::paths::log_dir_for_state(&state_dir);
     std::fs::create_dir_all(&log_dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&log_dir, std::fs::Permissions::from_mode(0o700));
+        let mode = if guard_core::paths::is_system_install(&state_dir) {
+            0o711
+        } else {
+            0o700
+        };
+        let _ = std::fs::set_permissions(&log_dir, std::fs::Permissions::from_mode(mode));
     }
     let log_path = log_dir.join(guard_core::paths::LOG_FILENAME);
     let log_writer = LogWriter::spawn(log_path.clone())

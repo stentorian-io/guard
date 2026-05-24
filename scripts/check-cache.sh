@@ -92,7 +92,7 @@ e2e_fingerprint() {
   { _head_sha
     git diff-index HEAD -- '*.rs' 'Cargo.toml' 'Cargo.lock' 'rust-toolchain.toml' \
       'crates/guard-e2e/fixtures/' 'crates/guard-e2e/harness/' \
-      'crates/guard-core/data/' 2>/dev/null
+      'crates/guard-core/data/' 'scripts/*.sh' 'tools/' 2>/dev/null
   } | shasum -a 256 | awk '{print $1}'
 }
 

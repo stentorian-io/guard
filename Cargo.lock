@@ -536,7 +536,6 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-hook",
- "socket2",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -615,7 +614,6 @@ dependencies = [
  "memmap2",
  "serde",
  "sha2",
- "socket2",
  "tempfile",
 ]
 

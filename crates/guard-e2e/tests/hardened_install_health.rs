@@ -126,6 +126,11 @@ mod macos {
         let symlinked_watchdog = run_cli(&cli, ["status", "logs"]);
         assert_health_failure_contains(&symlinked_watchdog, "must not be a symlink");
         sudo_ok([
+            OsStr::new("rm"),
+            OsStr::new("-f"),
+            OsStr::new(&format!("{BIN_DIR}/stt-guard-watchdog")),
+        ]);
+        sudo_ok([
             OsStr::new("cp"),
             target_dir.join("stt-guard-watchdog").as_os_str(),
             OsStr::new(&format!("{BIN_DIR}/stt-guard-watchdog")),
@@ -146,7 +151,9 @@ mod macos {
         std::fs::write(fake_hook.path(), b"not a dylib").expect("write fake hook");
         let env_override = Command::new(&cli)
             .arg("wrap")
-            .arg("/usr/bin/true")
+            .arg("/bin/sleep")
+            .arg("1")
+            .current_dir("/tmp")
             .env_clear()
             .env("HOME", test_home())
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())

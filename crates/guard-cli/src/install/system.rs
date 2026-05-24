@@ -83,8 +83,10 @@ fn create_service_user() -> Result<u32, CliError> {
         .map_err(|e| CliError::Other(format!("dscl check: {e}")))?;
 
     let gid = if check.status.success() {
-        eprintln!("  {SERVICE_USER} user already exists, verifying group");
-        service_gid()?
+        eprintln!("  {SERVICE_USER} user already exists, verifying attributes");
+        let gid = service_gid()?;
+        set_service_user_attributes(gid)?;
+        gid
     } else {
         eprintln!("  Creating {SERVICE_USER} service user...");
 
@@ -96,26 +98,6 @@ fn create_service_user() -> Result<u32, CliError> {
             (
                 &[".", "-create", &format!("/Users/{SERVICE_USER}")],
                 "create user record",
-            ),
-            (
-                &[
-                    ".",
-                    "-create",
-                    &format!("/Users/{SERVICE_USER}"),
-                    "UserShell",
-                    "/usr/bin/false",
-                ],
-                "set shell",
-            ),
-            (
-                &[
-                    ".",
-                    "-create",
-                    &format!("/Users/{SERVICE_USER}"),
-                    "RealName",
-                    SERVICE_USER_REALNAME,
-                ],
-                "set realname",
             ),
             (
                 &[
@@ -137,26 +119,93 @@ fn create_service_user() -> Result<u32, CliError> {
                 ],
                 "set gid",
             ),
-            (
-                &[
-                    ".",
-                    "-create",
-                    &format!("/Users/{SERVICE_USER}"),
-                    "NFSHomeDirectory",
-                    "/var/empty",
-                ],
-                "set home",
-            ),
         ];
 
         for (args, description) in steps {
             run_cmd("dscl", args, description)?;
         }
 
+        set_service_user_attributes(uid)?;
         uid
     };
 
     Ok(gid)
+}
+
+fn set_service_user_attributes(gid: u32) -> Result<(), CliError> {
+    let gid_str = gid.to_string();
+    let user = format!("/Users/{SERVICE_USER}");
+    let steps: &[(&str, &str, &str)] = &[
+        ("UserShell", "/usr/bin/false", "set shell"),
+        ("RealName", SERVICE_USER_REALNAME, "set realname"),
+        ("PrimaryGroupID", &gid_str, "set gid"),
+        ("NFSHomeDirectory", "/var/empty", "set home"),
+    ];
+
+    for (attr, value, description) in steps {
+        ensure_record_attr(&user, attr, value, description)?;
+    }
+
+    Ok(())
+}
+
+fn ensure_record_attr(
+    record: &str,
+    attr: &str,
+    expected: &str,
+    description: &str,
+) -> Result<(), CliError> {
+    if service_record_attr_matches(record, attr, expected)? {
+        return Ok(());
+    }
+
+    let _ = Command::new("dscl")
+        .args([".", "-delete", record, attr])
+        .output();
+    run_cmd(
+        "dscl",
+        &[".", "-create", record, attr, expected],
+        description,
+    )
+}
+
+fn service_record_attr_matches(record: &str, attr: &str, expected: &str) -> Result<bool, CliError> {
+    let output = Command::new("dscl")
+        .args([".", "-read", record, attr])
+        .output()
+        .map_err(|e| CliError::Other(format!("read {record} {attr}: {e}")))?;
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    Ok(
+        dscl_attribute_values(&String::from_utf8_lossy(&output.stdout), attr)
+            .iter()
+            .any(|value| value == expected),
+    )
+}
+
+fn dscl_attribute_values(output: &str, attr: &str) -> Vec<String> {
+    let Some(first_line) = output.lines().next() else {
+        return Vec::new();
+    };
+    let Some(rest) = first_line.strip_prefix(&format!("{attr}:")) else {
+        return Vec::new();
+    };
+
+    let inline = rest.trim();
+    if !inline.is_empty() {
+        return vec![inline.to_string()];
+    }
+
+    output
+        .lines()
+        .skip(1)
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 fn service_gid() -> Result<u32, CliError> {
@@ -275,13 +324,13 @@ fn create_directories(service_gid: u32) -> Result<(), CliError> {
         &[&service_owner, STATE_DIR],
         "set state dir ownership",
     )?;
-    run_cmd("chmod", &["700", STATE_DIR], "set state dir permissions")?;
+    run_cmd("chmod", &["711", STATE_DIR], "set state dir permissions")?;
 
     eprintln!("  Creating log directory at {LOG_DIR}/...");
     std::fs::create_dir_all(LOG_DIR)
         .map_err(|e| CliError::Other(format!("create {LOG_DIR}: {e}")))?;
     run_cmd("chown", &[&service_owner, LOG_DIR], "set log dir ownership")?;
-    run_cmd("chmod", &["700", LOG_DIR], "set log dir permissions")?;
+    run_cmd("chmod", &["711", LOG_DIR], "set log dir permissions")?;
 
     Ok(())
 }

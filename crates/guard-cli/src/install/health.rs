@@ -101,7 +101,7 @@ pub fn check_installation() -> InstallHealth {
             ExpectedKind::Directory,
             uid,
             gid,
-            0o700,
+            0o711,
         );
         check_path(
             &mut health,
@@ -109,7 +109,7 @@ pub fn check_installation() -> InstallHealth {
             ExpectedKind::Directory,
             uid,
             gid,
-            0o700,
+            0o711,
         );
     } else {
         check_path_exists_only(&mut health, Path::new(paths::SYSTEM_STATE_DIR));
@@ -143,33 +143,38 @@ fn check_service_identity(health: &mut InstallHealth) -> Option<(u32, u32)> {
         health,
     )?;
 
-    let user_record = dscl_read(
-        &format!("/Users/{}", paths::SERVICE_USER),
-        &[
-            "UserShell",
-            "NFSHomeDirectory",
-            "RealName",
-            "PrimaryGroupID",
-        ],
-    );
-    match user_record {
-        Ok(record) => {
-            require_record_contains(health, &record, "UserShell", "/usr/bin/false");
-            require_record_contains(health, &record, "NFSHomeDirectory", "/var/empty");
-            require_record_contains(health, &record, "RealName", paths::SERVICE_USER_REALNAME);
-            require_record_contains(health, &record, "PrimaryGroupID", &gid.to_string());
-        }
-        Err(err) => health.push(format!("service user record invalid: {err}")),
-    }
-
-    if let Ok(record) = dscl_read(
-        &format!("/Groups/{}", paths::SERVICE_USER),
-        &["PrimaryGroupID"],
-    ) {
-        require_record_contains(health, &record, "PrimaryGroupID", &gid.to_string());
-    }
+    check_service_user_cache_record(health, uid, gid);
 
     Some((uid, gid))
+}
+
+fn check_service_user_cache_record(health: &mut InstallHealth, uid: u32, gid: u32) {
+    let output = Command::new("dscacheutil")
+        .args(["-q", "user", "-a", "name", paths::SERVICE_USER])
+        .output();
+    let output = match output {
+        Ok(output) => output,
+        Err(err) => {
+            health.push(format!(
+                "service user record invalid: cannot execute dscacheutil: {err}"
+            ));
+            return;
+        }
+    };
+    if !output.status.success() {
+        health.push(format!(
+            "service user record invalid: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+        return;
+    }
+
+    let record = String::from_utf8_lossy(&output.stdout);
+    require_cache_field(health, &record, "uid", &uid.to_string());
+    require_cache_field(health, &record, "gid", &gid.to_string());
+    require_cache_field(health, &record, "dir", "/var/empty");
+    require_cache_field(health, &record, "shell", "/usr/bin/false");
+    require_cache_field(health, &record, "gecos", paths::SERVICE_USER_REALNAME);
 }
 
 fn numeric_id(
@@ -206,29 +211,25 @@ fn numeric_id(
     }
 }
 
-fn dscl_read(record: &str, attrs: &[&str]) -> Result<String, String> {
-    let output = Command::new("dscl")
-        .arg(".")
-        .arg("-read")
-        .arg(record)
-        .args(attrs)
-        .output()
-        .map_err(|e| format!("cannot execute dscl: {e}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-fn require_record_contains(health: &mut InstallHealth, record: &str, key: &str, value: &str) {
-    if !record
-        .lines()
-        .any(|line| line.starts_with(key) && line.contains(value))
+fn require_cache_field(health: &mut InstallHealth, record: &str, key: &str, value: &str) {
+    if !cache_field_values(record, key)
+        .iter()
+        .any(|actual| actual == value)
     {
         health.push(format!(
             "service user {key} does not match expected {value:?}"
         ));
     }
+}
+
+fn cache_field_values(record: &str, key: &str) -> Vec<String> {
+    record
+        .lines()
+        .filter_map(|line| line.strip_prefix(&format!("{key}:")))
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 fn check_path_exists_only(health: &mut InstallHealth, path: &Path) {
@@ -338,8 +339,6 @@ pub fn expected_launchdaemon_plist() -> String {
     </array>
     <key>UserName</key>
     <string>{}</string>
-    <key>GroupName</key>
-    <string>{}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -354,7 +353,6 @@ pub fn expected_launchdaemon_plist() -> String {
         paths::PLIST_LABEL,
         paths::SYSTEM_BIN_DIR,
         paths::SYSTEM_STATE_DIR,
-        paths::SERVICE_USER,
         paths::SERVICE_USER,
         paths::SYSTEM_LOG_DIR,
         paths::SYSTEM_LOG_DIR,

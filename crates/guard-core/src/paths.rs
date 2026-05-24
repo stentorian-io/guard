@@ -173,6 +173,15 @@ pub fn user_log_dir() -> PathBuf {
     home.join("Library/Logs/Stentorian Guard")
 }
 
+/// Runtime JSONL log directory for a daemon using `state_dir`.
+pub fn log_dir_for_state(state_dir: &Path) -> PathBuf {
+    if is_system_install(state_dir) {
+        PathBuf::from(SYSTEM_LOG_DIR)
+    } else {
+        user_log_dir()
+    }
+}
+
 /// Ensure `state_dir` exists with mode 0700. Idempotent.
 pub fn ensure_state_dir(state_dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;

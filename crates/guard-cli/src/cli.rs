@@ -59,7 +59,6 @@ pub enum Cmd {
         #[command(subcommand)]
         sub: Option<StatusSub>,
     },
-
 }
 
 /// Status read sub-verbs.

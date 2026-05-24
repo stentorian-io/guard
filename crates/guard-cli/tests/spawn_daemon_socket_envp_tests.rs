@@ -31,8 +31,8 @@ fn spawn_wrapped_does_not_set_daemon_socket_env_var() {
     );
     let args: Vec<&OsStr> = vec![OsStr::new("-c"), OsStr::new(&cmd)];
 
-    let pid = guard_cli::spawn::spawn_wrapped(prog, &args, &dylib, mfst.path())
-        .expect("spawn_wrapped");
+    let pid =
+        guard_cli::spawn::spawn_wrapped(prog, &args, &dylib, mfst.path()).expect("spawn_wrapped");
     assert!(pid > 0);
 
     let mut status: libc::c_int = 0;

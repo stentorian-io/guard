@@ -179,34 +179,30 @@ jobs:
       - name: Lint unused dependencies
         run: cargo machete --with-metadata
 
-  build:
-    name: Build
+  portable_checks:
+    name: Portable checks
     needs:
       - prepare
       - lint
     if: needs.prepare.outputs.code == 'true' && needs.lint.result == 'success'
-    runs-on: macos-14
-    timeout-minutes: 15
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
-      - name: Setup Node 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      - uses: dtolnay/rust-toolchain@stable
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: validation
+          shared-key: linux-portable
       - name: Verify sanitized fixture present
         run: |
           set -euo pipefail
           fixture=crates/guard-e2e/fixtures/ua-parser-js-0.7.29-sanitized/ua-parser-js-0.7.29-sanitized.tgz
           test -f "$fixture" || { echo "FATAL: sanitized fixture missing"; exit 1; }
-          actual=$(shasum -a 256 "$fixture" | awk '{print $1}')
+          actual=$(sha256sum "$fixture" | awk '{print $1}')
           echo "Fixture SHA-256: $actual"
           matches=$(grep -c '^EXPECTED_OUTPUT_SHA256="[a-f0-9]\{64\}"$' \
                     tools/vendor-ua-parser-js.sh || true)
@@ -228,6 +224,124 @@ jobs:
             exit 1
           fi
           echo "Fixture hash matches script pin."
+      - name: cargo test portable core
+        run: cargo test -p guard-core --lib --tests --quiet
+      - name: cargo test portable IPC schemas
+        run: >-
+          cargo test -p guard-ipc --lib
+          --test frame_tests
+          --test v2_messages_roundtrip
+          --test prompt_messages_round_trip
+          --test schema_v3_backward_compat
+          --quiet
+
+  secret_scan:
+    name: Secret scan
+    needs:
+      - prepare
+    if: needs.prepare.outputs.is_pr == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Fetch base branch
+        run: |
+          git remote add upstream "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags upstream main
+      - uses: trufflesecurity/trufflehog@v3.88.26
+        with:
+          base: ${{ needs.prepare.outputs.scan_base }}
+          head: ${{ needs.prepare.outputs.scan_head }}
+          extra_args: --only-verified
+
+  cargo_audit:
+    name: Dependency CVE audit
+    needs:
+      - prepare
+      - secret_scan
+    if: >-
+      always()
+      && (github.event_name == 'schedule'
+          || (needs.prepare.outputs.lockfile == 'true' && needs.secret_scan.result == 'success'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - name: Compute daily audit cache key
+        id: audit_cache_key
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "scope=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "scope=main" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check daily audit marker
+        id: audit_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .audit-cache-marker
+          key: >-
+            cargo-audit-${{ steps.audit_cache_key.outputs.scope }}-${{ steps.audit_cache_key.outputs.date }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
+          lookup-only: true
+      - uses: rustsec/audit-check@v2.0.0
+        if: steps.audit_cache.outputs.cache-hit != 'true'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Write daily audit marker
+        if: steps.audit_cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .audit-cache-marker
+          {
+            echo "event=${{ github.event_name }}"
+            echo "scope=${{ steps.audit_cache_key.outputs.scope }}"
+            echo "date=${{ steps.audit_cache_key.outputs.date }}"
+            echo "sha=${{ github.sha }}"
+          } > .audit-cache-marker/last-run.txt
+      - name: Save daily audit marker
+        if: steps.audit_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .audit-cache-marker
+          key: ${{ steps.audit_cache.outputs.cache-primary-key }}
+
+  build:
+    name: Build
+    needs:
+      - prepare
+      - lint
+      - portable_checks
+      - secret_scan
+      - cargo_audit
+    if: >-
+      needs.prepare.outputs.code == 'true'
+      && needs.lint.result == 'success'
+      && needs.portable_checks.result == 'success'
+      && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
+      && (needs.cargo_audit.result == 'success' || needs.cargo_audit.result == 'skipped')
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: validation
       - name: cargo build workspace (release)
         run: cargo build --workspace --release
       - name: Upload release binaries for E2E
@@ -332,87 +446,6 @@ jobs:
         env:
           STT_GUARD_E2E_PRIVILEGED_INSTALL: '1'
 
-  secret_scan:
-    name: Secret scan
-    needs:
-      - prepare
-      - e2e_tests
-    if: >-
-      always()
-      && needs.prepare.outputs.is_pr == 'true'
-      && (needs.prepare.outputs.code != 'true' || needs.e2e_tests.result == 'success')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-      - name: Fetch base branch
-        run: |
-          git remote add upstream "https://github.com/${{ github.repository }}.git"
-          git fetch --no-tags upstream main
-      - uses: trufflesecurity/trufflehog@v3.88.26
-        with:
-          base: ${{ needs.prepare.outputs.scan_base }}
-          head: ${{ needs.prepare.outputs.scan_head }}
-          extra_args: --only-verified
-
-  cargo_audit:
-    name: Dependency CVE audit
-    needs:
-      - prepare
-      - secret_scan
-    if: >-
-      always()
-      && (github.event_name == 'schedule'
-          || (needs.prepare.outputs.lockfile == 'true' && needs.secret_scan.result == 'success'))
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.ref }}
-      - name: Compute daily audit cache key
-        id: audit_cache_key
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "scope=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "scope=main" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Check daily audit marker
-        id: audit_cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .audit-cache-marker
-          key: >-
-            cargo-audit-${{ steps.audit_cache_key.outputs.scope }}-${{ steps.audit_cache_key.outputs.date }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
-          lookup-only: true
-      - uses: rustsec/audit-check@v2.0.0
-        if: steps.audit_cache.outputs.cache-hit != 'true'
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Write daily audit marker
-        if: steps.audit_cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p .audit-cache-marker
-          {
-            echo "event=${{ github.event_name }}"
-            echo "scope=${{ steps.audit_cache_key.outputs.scope }}"
-            echo "date=${{ steps.audit_cache_key.outputs.date }}"
-            echo "sha=${{ github.sha }}"
-          } > .audit-cache-marker/last-run.txt
-      - name: Save daily audit marker
-        if: steps.audit_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .audit-cache-marker
-          key: ${{ steps.audit_cache.outputs.cache-primary-key }}
-
   gate:
     name: Gate
     if: always()
@@ -420,6 +453,7 @@ jobs:
       - pr_validation_gate
       - prepare
       - lint
+      - portable_checks
       - build
       - unit_tests
       - integration_tests

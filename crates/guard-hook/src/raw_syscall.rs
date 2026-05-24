@@ -230,7 +230,7 @@ unsafe fn syscall8(
         );
     }
     #[cfg(target_arch = "x86_64")]
-    {
+    unsafe {
         // x86_64 XNU syscall convention only has 6 register args (rdi, rsi,
         // rdx, r10, r8, r9). Args 7+ go on the stack via the C calling
         // convention, so use a local assembly trampoline instead of

@@ -8,7 +8,7 @@
 # Usage:
 #   scripts/ci-local.sh             # CI parity, fully local
 #   scripts/ci-local.sh --quick     # skip CI build/tests/audit (lint + fixture only)
-#   scripts/ci-local.sh --no-act    # skip act for optional Markdown lint parity
+#   scripts/ci-local.sh --no-docker # run Linux gate checks on the host instead of fresh containers
 #   scripts/ci-local.sh --no-privileged
 #                                  # skip VAL-05 on developer machines
 #
@@ -27,12 +27,12 @@ BOLD='\033[1m'
 RESET='\033[0m'
 
 QUICK=0
-USE_ACT=1
 RUN_PRIVILEGED=1
+USE_DOCKER=1
 for arg in "$@"; do
   case "$arg" in
     --quick)         QUICK=1 ;;
-    --no-act)        USE_ACT=0 ;;
+    --no-docker)     USE_DOCKER=0 ;;
     --no-privileged) RUN_PRIVILEGED=0 ;;
     *)               echo "unknown flag: $arg" >&2; exit 64 ;;
   esac
@@ -44,6 +44,29 @@ fail() { echo -e "${RED}${BOLD}FAIL: $1${RESET}" >&2; exit 1; }
 warn() { echo -e "${YELLOW}⚠${RESET} $1"; }
 skip() { echo -e "${GREEN}✓${RESET} $1 ${BOLD}(cached)${RESET}"; }
 cache_enabled() { [ "${CI_LOCAL_USE_CACHE:-0}" -eq 1 ]; }
+
+docker_available() {
+  command -v docker >/dev/null && docker info >/dev/null 2>&1
+}
+
+run_linux_stage() {
+  local label="$1"
+  local command="$2"
+
+  step "$label"
+  if [ "$USE_DOCKER" -eq 1 ]; then
+    docker_available || fail "docker is required for Linux CI parity; rerun with --no-docker to use host checks"
+    docker run --rm \
+      -v "$REPO_ROOT:/work" \
+      -w /work \
+      rust:1.85-bookworm \
+      bash -lc "set -euo pipefail; export PATH=/usr/local/cargo/bin:\$PATH; export CARGO_TARGET_DIR=/tmp/stt-guard-target; $command" \
+      || fail "$label"
+  else
+    bash -lc "set -euo pipefail; $command" || fail "$label"
+  fi
+  pass "$label"
+}
 
 cache_prune
 
@@ -140,6 +163,20 @@ validation_diff_base() {
   branch_scan_base 2>/dev/null || git rev-parse HEAD
 }
 
+trufflehog_git_repo_url() {
+  local common_dir repo_dir
+  common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+  case "$common_dir" in
+    */.git)
+      repo_dir="${common_dir%/.git}"
+      ;;
+    *)
+      repo_dir="$REPO_ROOT"
+      ;;
+  esac
+  printf 'file://%s\n' "$repo_dir"
+}
+
 changed_since_base() {
   local base="$1"
   { git diff --name-only "$base...HEAD" 2>/dev/null || true
@@ -191,6 +228,9 @@ node_bin="$(command -v node || true)"
 if [ -x /opt/homebrew/bin/node ]; then
   node_bin=/opt/homebrew/bin/node
 fi
+if [ -x /opt/homebrew/opt/node@20/bin/node ]; then
+  node_bin=/opt/homebrew/opt/node@20/bin/node
+fi
 if [ -n "$node_bin" ]; then
   fp=$(all_md_fingerprint)
   if cache_enabled && cache_hit "ci-local:mdlint" "$fp"; then
@@ -225,6 +265,24 @@ else
   pass "fixture matches pinned hash"
 fi
 
+# ── Linux compile gate (fresh container per CI stage) ──────────────────────
+if [ "$CODE_CHANGED" -eq 1 ]; then
+  run_linux_stage "Linux compile gate: cargo check shared crates" \
+    "cargo check -p guard-os -p guard-watchdog --quiet"
+  run_linux_stage "Linux compile gate: cargo check boundary consumers" \
+    "cargo check -p guard-hook -p guard-daemon -p guard-cli --quiet"
+  run_linux_stage "Linux compile gate: cargo test OS boundary crate" \
+    "cargo test -p guard-os --quiet"
+  run_linux_stage "Linux compile gate: cargo test shared core" \
+    "cargo test -p guard-core --lib --tests --quiet"
+  run_linux_stage "Linux compile gate: cargo test shared IPC" \
+    "cargo test -p guard-ipc --lib --tests --quiet"
+  run_linux_stage "Linux compile gate: cargo test watchdog" \
+    "cargo test -p guard-watchdog --bins --quiet"
+else
+  skip "Linux compile gate (repo-meta-only change)"
+fi
+
 # ── lint-unused-deps (cargo-machete — stable toolchain, no compilation) ────
 if [ "$CODE_CHANGED" -ne 1 ]; then
   skip "cargo-machete (repo-meta-only change)"
@@ -241,22 +299,6 @@ else
     else
       warn "cargo-machete not found — skipping (cargo install cargo-machete)"
     fi
-  fi
-fi
-
-# ── Markdown lint via act (optional) ───────────────────────────────────────
-if [ "$USE_ACT" -eq 1 ]; then
-  if command -v act >/dev/null; then
-    step "CI via act (markdown_lint)"
-    event_file="$(mktemp_tracked)"
-    cat > "$event_file" <<'JSON'
-{"repository":{"default_branch":"main","full_name":"stentorian-io/guard"},"pull_request":{"number":29,"base":{"ref":"main","repo":{"full_name":"stentorian-io/guard"}},"head":{"ref":"release-infra","repo":{"full_name":"stentorian-io/guard"}}}}
-JSON
-    act pull_request --workflows .github/workflows/ci.yml --job markdown_lint --eventpath "$event_file" --quiet 2>&1 \
-      || fail "act markdown_lint failed"
-    pass "act markdown_lint"
-  else
-    warn "act not installed — skipping ubuntu-job parity check (brew install act)"
   fi
 fi
 
@@ -335,9 +377,9 @@ if ! command -v trufflehog >/dev/null; then
   fail "trufflehog not found; install it locally (for example: brew install trufflehog)"
 fi
 if [ -n "$(git rev-list --max-count=1 "$DIFF_BASE..HEAD" 2>/dev/null || true)" ]; then
-  trufflehog git "file://$REPO_ROOT" \
+  trufflehog git "$(trufflehog_git_repo_url)" \
     --since-commit "$DIFF_BASE" \
-    --branch HEAD \
+    --branch "$(git rev-parse --abbrev-ref HEAD)" \
     --results=verified \
     --fail \
     --no-update \

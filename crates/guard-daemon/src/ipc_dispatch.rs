@@ -66,6 +66,8 @@ pub enum MessageTag {
     // v1.0 — curated rule overrides:
     DisableCuratedRule = 0x16,
     EnableCuratedRule = 0x17,
+    PrepareSnapshotInputs = 0x18,
+    PublishSignedSnapshot = 0x19,
 }
 
 impl MessageTag {
@@ -97,6 +99,8 @@ impl MessageTag {
             // v1.0:
             0x16 => Some(Self::DisableCuratedRule),
             0x17 => Some(Self::EnableCuratedRule),
+            0x18 => Some(Self::PrepareSnapshotInputs),
+            0x19 => Some(Self::PublishSignedSnapshot),
             _ => None,
         }
     }
@@ -188,6 +192,8 @@ mod tests {
             // v1.0:
             MessageTag::DisableCuratedRule,
             MessageTag::EnableCuratedRule,
+            MessageTag::PrepareSnapshotInputs,
+            MessageTag::PublishSignedSnapshot,
         ] {
             let b = tag.as_byte();
             assert_eq!(MessageTag::from_byte(b), Some(tag));
@@ -204,9 +210,15 @@ mod tests {
         assert!(MessageTag::from_byte(0x07).is_none());
         assert!(MessageTag::from_byte(0x0F).is_none());
         assert!(MessageTag::from_byte(0x10).is_none());
-        // 0x18+ — unassigned tag space.
-        assert!(MessageTag::from_byte(0x18).is_none());
-        assert!(MessageTag::from_byte(0x19).is_none());
+        // 0x18+ — snapshot signing flow.
+        assert_eq!(
+            MessageTag::from_byte(0x18),
+            Some(MessageTag::PrepareSnapshotInputs)
+        );
+        assert_eq!(
+            MessageTag::from_byte(0x19),
+            Some(MessageTag::PublishSignedSnapshot)
+        );
         assert!(MessageTag::from_byte(0xff).is_none());
     }
 
@@ -287,6 +299,16 @@ mod tests {
         assert_eq!(
             MessageTag::from_byte(0x17),
             Some(MessageTag::EnableCuratedRule)
+        );
+        assert_eq!(MessageTag::PrepareSnapshotInputs as u8, 0x18);
+        assert_eq!(
+            MessageTag::from_byte(0x18),
+            Some(MessageTag::PrepareSnapshotInputs)
+        );
+        assert_eq!(MessageTag::PublishSignedSnapshot as u8, 0x19);
+        assert_eq!(
+            MessageTag::from_byte(0x19),
+            Some(MessageTag::PublishSignedSnapshot)
         );
     }
 }

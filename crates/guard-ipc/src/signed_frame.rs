@@ -46,13 +46,23 @@ impl FrameSigner {
         tag: u8,
         value: &T,
     ) -> Result<(), IpcError> {
+        self.write_signed_with_limit(w, tag, value, crate::frame::MAX_FRAME_BYTES)
+    }
+
+    pub fn write_signed_with_limit<W: Write, T: serde::Serialize>(
+        &mut self,
+        w: &mut W,
+        tag: u8,
+        value: &T,
+        max_frame_bytes: u32,
+    ) -> Result<(), IpcError> {
         let mut cbor_buf = Vec::with_capacity(256);
         ciborium::ser::into_writer(value, &mut cbor_buf).map_err(IpcError::codec)?;
         let len = cbor_buf.len();
-        if len as u64 > crate::frame::MAX_FRAME_BYTES as u64 {
+        if len as u64 > max_frame_bytes as u64 {
             return Err(IpcError::FrameTooLarge {
                 got: len as u32,
-                max: crate::frame::MAX_FRAME_BYTES,
+                max: max_frame_bytes,
             });
         }
         let length_prefix = (len as u32).to_be_bytes();
@@ -77,6 +87,15 @@ impl FrameSigner {
         r: &mut R,
         tag: u8,
     ) -> Result<T, IpcError> {
+        self.read_signed_with_limit(r, tag, crate::frame::MAX_FRAME_BYTES)
+    }
+
+    pub fn read_signed_with_limit<R: Read, T: serde::de::DeserializeOwned>(
+        &mut self,
+        r: &mut R,
+        tag: u8,
+        max_frame_bytes: u32,
+    ) -> Result<T, IpcError> {
         let mut nonce_buf = [0u8; NONCE_BYTES];
         r.read_exact(&mut nonce_buf)?;
         let nonce = u64::from_le_bytes(nonce_buf);
@@ -95,10 +114,10 @@ impl FrameSigner {
         let mut length_prefix = [0u8; 4];
         r.read_exact(&mut length_prefix)?;
         let len = u32::from_be_bytes(length_prefix);
-        if len > crate::frame::MAX_FRAME_BYTES {
+        if len > max_frame_bytes {
             return Err(IpcError::FrameTooLarge {
                 got: len,
-                max: crate::frame::MAX_FRAME_BYTES,
+                max: max_frame_bytes,
             });
         }
 

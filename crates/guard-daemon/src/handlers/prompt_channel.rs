@@ -18,7 +18,7 @@ use guard_ipc::{PackageContext, PromptCancel, PromptRequest, PromptResponse, Pro
 
 use crate::ipc_server::DaemonState;
 use crate::log_writer::{
-    self, Decision, GapRecord, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
+    self, now_rfc3339, Decision, GapRecord, LogRow, ProcessCtxLog, RootCtxLog, JSONL_SCHEMA_VERSION,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -223,25 +223,107 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
             guard_core::Verdict::Allow
         }
         PromptVerdict::AllowAlwaysMachine => {
-            if let Some(rp) = resp.rule_pattern.as_ref() {
-                let _ = state.rule_store.insert_user_rule(
-                    "allow",
-                    &rp.match_type,
-                    &rp.pattern,
-                    &format!("user-approved via prompt run {run_uuid}"),
-                );
+            match (resp.signed_rule.as_ref(), resp.rule_pattern.as_ref()) {
+                (None, _) => {
+                    tracing::warn!(
+                        run_uuid = %run_uuid,
+                        host = %dest_host,
+                        "prompt allow-always missing signed rule attestation; denying fail-closed"
+                    );
+                    emit_decision_row(
+                        state,
+                        run_uuid,
+                        &now,
+                        "Deny",
+                        "prompt_allow_machine_missing_signature",
+                        &dest_host,
+                        dest_port,
+                        entry_pkg.as_ref(),
+                    );
+                    guard_core::Verdict::Deny
+                }
+                (Some(_), None) => {
+                    tracing::warn!(
+                        run_uuid = %run_uuid,
+                        host = %dest_host,
+                        "prompt allow-always missing rule pattern; denying fail-closed"
+                    );
+                    emit_decision_row(
+                        state,
+                        run_uuid,
+                        &now,
+                        "Deny",
+                        "prompt_allow_machine_missing_pattern",
+                        &dest_host,
+                        dest_port,
+                        entry_pkg.as_ref(),
+                    );
+                    guard_core::Verdict::Deny
+                }
+                (Some(signed_rule), Some(rp)) => {
+                    if signed_rule.kind != "allow"
+                        || signed_rule.match_type != rp.match_type
+                        || signed_rule.pattern != rp.pattern
+                        || signed_rule.run_uuid.as_deref() != Some(run_uuid)
+                    {
+                        tracing::warn!(
+                            run_uuid = %run_uuid,
+                            host = %dest_host,
+                            "prompt allow-always signed rule does not match prompt response; denying fail-closed"
+                        );
+                        emit_decision_row(
+                            state,
+                            run_uuid,
+                            &now,
+                            "Deny",
+                            "prompt_allow_machine_signature_mismatch",
+                            &dest_host,
+                            dest_port,
+                            entry_pkg.as_ref(),
+                        );
+                        guard_core::Verdict::Deny
+                    } else {
+                        match crate::handlers::insert_user_rule::handle_insert_user_rule(
+                            signed_rule,
+                            &state.rule_store,
+                            state.rule_signature_policy,
+                        ) {
+                            guard_ipc::InsertUserRuleReply::Ok { .. } => {
+                                emit_decision_row(
+                                    state,
+                                    run_uuid,
+                                    &now,
+                                    "Allow",
+                                    "prompt_allow_machine",
+                                    &dest_host,
+                                    dest_port,
+                                    entry_pkg.as_ref(),
+                                );
+                                guard_core::Verdict::Allow
+                            }
+                            guard_ipc::InsertUserRuleReply::Err { message, .. } => {
+                                tracing::warn!(
+                                    run_uuid = %run_uuid,
+                                    host = %dest_host,
+                                    error = %message,
+                                    "prompt allow-always signed rule rejected; denying fail-closed"
+                                );
+                                emit_decision_row(
+                                    state,
+                                    run_uuid,
+                                    &now,
+                                    "Deny",
+                                    "prompt_allow_machine_signature_rejected",
+                                    &dest_host,
+                                    dest_port,
+                                    entry_pkg.as_ref(),
+                                );
+                                guard_core::Verdict::Deny
+                            }
+                        }
+                    }
+                }
             }
-            emit_decision_row(
-                state,
-                run_uuid,
-                &now,
-                "Allow",
-                "prompt_allow_machine",
-                &dest_host,
-                dest_port,
-                entry_pkg.as_ref(),
-            );
-            guard_core::Verdict::Allow
         }
         PromptVerdict::Deny => {
             emit_decision_row(

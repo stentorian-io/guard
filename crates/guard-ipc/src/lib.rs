@@ -47,12 +47,6 @@ pub use messages::{
     ForkAck,
     ForkEvent,
     GapInfo,
-    IPC_SCHEMA_V1,
-    IPC_SCHEMA_V2,
-    // v0.3
-    IPC_SCHEMA_V3,
-    // v0.4 — Threat-intel
-    IPC_SCHEMA_V4,
     // v0.3 — InsertUserRule (tag 0x0B)
     InsertUserRule,
     InsertUserRuleReply,
@@ -80,6 +74,7 @@ pub use messages::{
     PromptResponse,
     PromptVerdict,
     ProposedRule,
+    PublishSignedSnapshot,
     // v0.3 — ReadInstallArtifacts (tag 0x0C)
     ReadInstallArtifacts,
     ReadInstallArtifactsReply,
@@ -89,11 +84,21 @@ pub use messages::{
     ResolveReply,
     RulePattern,
     RuleRow,
-    SOCKADDR_WIRE_LEN,
+    SigningInfo,
+    SnapshotInputsReply,
     SnapshotReply,
     Status,
     StatusCounters,
     StatusReply,
     SuggestedRule,
     TrackedRootInfo,
+    IPC_SCHEMA_V1,
+    IPC_SCHEMA_V2,
+    // v0.3
+    IPC_SCHEMA_V3,
+    // v0.4 — Threat-intel
+    IPC_SCHEMA_V4,
+    // v0.8 — signed persistent user rules
+    IPC_SCHEMA_V5,
+    SOCKADDR_WIRE_LEN,
 };

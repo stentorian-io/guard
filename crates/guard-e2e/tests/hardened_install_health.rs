@@ -57,6 +57,14 @@ mod macos {
         );
 
         let init = sudo([cli.as_os_str(), OsStr::new("init"), OsStr::new("--yes")]);
+        if !init.status.success() && hardware_signing_unavailable(&stderr(&init)) {
+            eprintln!(
+                "SKIP: hosted runner cannot enroll Secure Enclave signing key; stdout={} stderr={}",
+                stdout(&init),
+                stderr(&init)
+            );
+            return;
+        }
         assert!(
             init.status.success(),
             "init failed; stdout={} stderr={}",
@@ -186,6 +194,12 @@ mod macos {
                 install_name.display()
             )
         });
+    }
+
+    fn hardware_signing_unavailable(stderr: &str) -> bool {
+        stderr.contains("create Secure Enclave signing key failed")
+            || stderr.contains("hardware-backed signing key unavailable")
+            || stderr.contains("failed to generate asymmetric keypair")
     }
 
     fn assert_release_payload_present(target_dir: &Path) {

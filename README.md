@@ -154,9 +154,11 @@ sudo stt-guard init
 ```
 
 The init step creates a `_stt_guard` service user, deploys root-owned
-binaries to `/usr/local/libexec/stt-guard/`, and starts the daemon as a
-LaunchDaemon. This is the only supported consumer deployment mode — it prevents
-a compromised process from tampering with the guard itself. See the
+binaries to `/usr/local/libexec/stt-guard/`, enrolls a non-exportable Secure
+Enclave rule-signing key for the invoking sudo user, registers that public
+signer with the daemon state, and starts the daemon as a LaunchDaemon. This is
+the only supported consumer deployment mode — it prevents a compromised process
+from tampering with the guard itself. See the
 [deployment model](SECURITY.md#deployment-model) for details.
 
 All other commands (`wrap`, `status`) require initialisation to be complete
@@ -344,12 +346,12 @@ man stt-guard-daemon   # daemon internals
 
 ### Platform support
 
-| Platform | Version       | Status        | Mechanism                | Notes                                                                                                                                                                                                                                                     |
-| -------- | ------------- | ------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| macOS    | 13+ (Ventura) | **Supported** | DYLD injection           | Primary platform, tested in CI                                                                                                                                                                                                                            |
-| macOS    | 12 (Monterey) | Best-effort   | DYLD injection           | Not tested in CI                                                                                                                                                                                                                                          |
-| Linux    | —             | Planned (v2)  | LD_PRELOAD / seccomp-bpf | [Tracking issue](https://github.com/stentorian-io/guard/issues/2)                                                                                                                                                                                      |
-| Windows  | —             | Not planned   | —                        | Windows restricts userspace library injection behind kernel-mode driver signing and security features that require paid enterprise certificates. There is no equivalent to DYLD or LD_PRELOAD available to open-source tools without elevated privileges. |
+| Platform | Version       | Status        | Enforcement mechanism    | Hardware-backed signing support | Notes                                                                                                                                                                                                                                                     |
+| -------- | ------------- | ------------- | ------------------------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS    | 13+ (Ventura) | **Supported** | DYLD injection           | Required: Secure Enclave or security key for baseline/snapshot signing | Primary platform, tested in CI                                                                                                                                                                                                                            |
+| macOS    | 12 (Monterey) | Best-effort   | DYLD injection           | Required: Secure Enclave or security key for baseline/snapshot signing | Not tested in CI                                                                                                                                                                                                                                          |
+| Linux    | —             | Planned (v2)  | LD_PRELOAD / seccomp-bpf | Required: hardware-backed signer such as FIDO2/security key or TPM-backed key | [Tracking issue](https://github.com/stentorian-io/guard/issues/2)                                                                                                                                                                                      |
+| Windows  | —             | Not planned   | —                        | Unsupported                     | Windows restricts userspace library injection behind kernel-mode driver signing and security features that require paid enterprise certificates. There is no equivalent to DYLD or LD_PRELOAD available to open-source tools without elevated privileges. |
 
 ### Threat intelligence
 

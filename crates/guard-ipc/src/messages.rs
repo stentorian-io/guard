@@ -659,6 +659,7 @@ pub struct SigningInfo {
 }
 
 /// Daemon → CLI: response to Status request.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StatusReply {
     Ok {

@@ -3,15 +3,12 @@ use guard_cli::status::run_status;
 use guard_cli::status::{denials, review, rules};
 use std::path::Path;
 
+type RulesRunFn =
+    fn(&Path, bool, Option<String>, Option<String>, Option<String>) -> Result<i32, CliError>;
+
 #[test]
 fn status_rules_run_signature_pinned() {
-    let _: fn(
-        &Path,
-        bool,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    ) -> Result<i32, CliError> = rules::run;
+    let _: RulesRunFn = rules::run;
 }
 
 #[test]

@@ -97,11 +97,7 @@ fn workers_dev_deny_emits_jsonl_with_builtin_deny_and_no_intel() {
         let source_kind = v.get("source_kind").and_then(|x| x.as_str());
         let host = v.get("dest_host").and_then(|x| x.as_str()).unwrap_or("");
         let intel_field = v.get("intel");
-        let intel_is_none = match intel_field {
-            None => true,
-            Some(serde_json::Value::Null) => true,
-            _ => false,
-        };
+        let intel_is_none = matches!(intel_field, None | Some(serde_json::Value::Null));
         verdict == Some("Deny")
             && source_kind == Some("builtin-deny")
             && intel_is_none

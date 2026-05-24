@@ -24,8 +24,14 @@ use std::time::{Duration, Instant};
 
 use guard_e2e::{DaemonHarness, resolve_cli, resolve_dylib, resolve_node};
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
-#[ignore = "live-wrap bench — opt-in via scripts/bench-hot-path.sh"]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "macOS-only; live-wrap bench opt-in via scripts/bench-hot-path.sh"
+)]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "live-wrap bench — opt-in via scripts/bench-hot-path.sh"
+)]
 #[test]
 fn live_wrap_npmjs_loop_p99_context() {
     let cli = resolve_cli();

@@ -12,24 +12,24 @@ pub mod snapshot;
 pub mod snapshot_build;
 pub mod trusted_signers;
 
-pub use allowlist::{evaluate_rule, AllowlistEntry, MatchType, RuleKind, RuleTier, Verdict};
+pub use allowlist::{AllowlistEntry, MatchType, RuleKind, RuleTier, Verdict, evaluate_rule};
 pub use error::Error;
-pub use identity::{audit_token_to_pid, audit_token_to_pidversion, AuditToken, ProcessIdentity};
+pub use identity::{AuditToken, ProcessIdentity, audit_token_to_pid, audit_token_to_pidversion};
 pub use policy::{
-    evaluate_policy, has_user_allow, is_cloud_metadata_host, is_cloud_metadata_ip,
-    is_loopback_host, is_loopback_ip, SourceKind,
+    SourceKind, evaluate_policy, has_user_allow, is_cloud_metadata_host, is_cloud_metadata_ip,
+    is_loopback_host, is_loopback_ip,
 };
 pub use rule_signature::{
+    RULE_SIGNATURE_PAYLOAD_SCHEMA_V1, RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256, RuleSignatureError,
+    RuleSignaturePayloadV1, RuleSignaturePolicy, RuleSignatureV1, SIGNER_KIND_SECURE_ENCLAVE,
+    SIGNER_KIND_SECURITY_KEY, SIGNER_KIND_TEST_SIMULATOR, SIGNER_KIND_TPM,
+    SNAPSHOT_SIGNATURE_PAYLOAD_SCHEMA_V1, SnapshotSignaturePayloadV1, SnapshotSignatureV1,
     canonical_rule_payload_bytes, canonical_snapshot_payload_bytes, sha256_hex,
-    verify_rule_signature, verify_snapshot_signature, RuleSignatureError, RuleSignaturePayloadV1,
-    RuleSignaturePolicy, RuleSignatureV1, SnapshotSignaturePayloadV1, SnapshotSignatureV1,
-    RULE_SIGNATURE_PAYLOAD_SCHEMA_V1, RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256,
-    SIGNER_KIND_SECURE_ENCLAVE, SIGNER_KIND_SECURITY_KEY, SIGNER_KIND_TEST_SIMULATOR,
-    SIGNER_KIND_TPM, SNAPSHOT_SIGNATURE_PAYLOAD_SCHEMA_V1,
+    verify_rule_signature, verify_snapshot_signature,
 };
-pub use snapshot::{Snapshot, SCHEMA_V1, SCHEMA_V2};
-pub use snapshot_build::{build_snapshot, build_snapshot_bytes, SnapshotBuildInput};
+pub use snapshot::{SCHEMA_V1, SCHEMA_V2, Snapshot};
+pub use snapshot_build::{SnapshotBuildInput, build_snapshot, build_snapshot_bytes};
 pub use trusted_signers::{
-    first_trusted_signer, parse_trusted_signers, trusted_signer_matches, TrustedSigner,
-    TrustedSignerManifestError,
+    TrustedSigner, TrustedSignerManifestError, first_trusted_signer, parse_trusted_signers,
+    trusted_signer_matches,
 };

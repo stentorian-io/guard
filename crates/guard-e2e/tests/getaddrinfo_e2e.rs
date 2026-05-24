@@ -215,8 +215,14 @@ fn getaddrinfo_resolve_only_succeeds_for_non_allowlisted_host() {
 // Test 3: getaddrinfo for an allowlisted host resolves and connect succeeds
 // ============================================================================
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
-#[ignore = "live-network: requires real DNS + reachable registry.npmjs.org"]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "macOS-only; live-network requires real DNS + reachable registry.npmjs.org"
+)]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "live-network: requires real DNS + reachable registry.npmjs.org"
+)]
 #[test]
 fn getaddrinfo_allowlisted_host_resolves_and_connects() {
     if !allow_target_resolves() {

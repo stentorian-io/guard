@@ -7,22 +7,33 @@
 //! Biometric auth is CLI-side only, so IPC tests exercise the daemon
 //! handlers directly via tagged IPC frames on the Unix socket.
 
+#[cfg(target_os = "macos")]
 use std::io::{Read, Write};
+#[cfg(target_os = "macos")]
 use std::os::unix::net::UnixStream;
+#[cfg(target_os = "macos")]
 use std::process::Command;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
 use guard_e2e::{DaemonHarness, resolve_cli};
+#[cfg(target_os = "macos")]
 use guard_ipc::frame::{read_frame, write_frame};
+#[cfg(target_os = "macos")]
 use guard_ipc::{
     DisableCuratedRule, DisableCuratedRuleReply, EnableCuratedRule, EnableCuratedRuleReply,
     ListRules, ListRulesReply,
 };
 
+#[cfg(target_os = "macos")]
 const TAG_LIST_RULES: u8 = 0x0E;
+#[cfg(target_os = "macos")]
 const TAG_DISABLE_CURATED_RULE: u8 = 0x16;
+#[cfg(target_os = "macos")]
 const TAG_ENABLE_CURATED_RULE: u8 = 0x17;
 
+#[cfg(target_os = "macos")]
 fn send_tagged<Req: serde::Serialize, Rep: serde::de::DeserializeOwned>(
     sock: &std::path::Path,
     tag: u8,

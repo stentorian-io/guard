@@ -117,7 +117,7 @@ const SHELL_PROFILES: &[&str] = &[
 ];
 
 fn is_shell_profile(name: &str) -> bool {
-    SHELL_PROFILES.iter().any(|&p| p == name)
+    SHELL_PROFILES.contains(&name)
 }
 
 struct WatchedDir {

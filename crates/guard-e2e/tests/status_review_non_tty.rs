@@ -5,8 +5,10 @@
 //! directly by status::review::run (eprintln + return Ok(64) BEFORE any
 //! daemon IPC), so the test does not require a live daemon.
 
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 
+#[cfg(target_os = "macos")]
 use guard_e2e::resolve_cli;
 
 #[cfg(target_os = "macos")]

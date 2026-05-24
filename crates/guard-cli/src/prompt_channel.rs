@@ -30,6 +30,7 @@ use crate::ipc_client::TAG_PROMPT_CHANNEL_INIT;
 /// Channel-internal frame (CLI → daemon direction).
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "frame_kind", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum ClientChannelFrame {
     Response(PromptResponse),
     Cancel(PromptCancel),

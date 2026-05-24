@@ -17,11 +17,11 @@
 
 use std::path::Path;
 
+use crate::CliError;
 use crate::denial_log;
 use crate::install::launchagent;
 use crate::ipc_client;
 use crate::tty;
-use crate::CliError;
 
 pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
     // TTY-required gate. Refuse to run from a non-interactive

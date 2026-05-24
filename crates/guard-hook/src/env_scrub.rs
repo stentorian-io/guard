@@ -82,7 +82,7 @@ pub fn is_hidden_key(name: *const libc::c_char) -> bool {
         return false;
     }
     let name_cstr = unsafe { CStr::from_ptr(name) };
-    HIDDEN_NAMES.iter().any(|h| name_cstr == *h)
+    HIDDEN_NAMES.contains(&name_cstr)
 }
 
 /// Interposed getenv: returns NULL for hidden keys once SCRUB_ACTIVE is

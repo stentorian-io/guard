@@ -42,8 +42,22 @@ fn new_run_uuid() -> Result<String, String> {
     buf[8] = (buf[8] & 0x3f) | 0x80; // variant 1
     Ok(format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9],
-        buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
+        buf[0],
+        buf[1],
+        buf[2],
+        buf[3],
+        buf[4],
+        buf[5],
+        buf[6],
+        buf[7],
+        buf[8],
+        buf[9],
+        buf[10],
+        buf[11],
+        buf[12],
+        buf[13],
+        buf[14],
+        buf[15],
     ))
 }
 
@@ -153,6 +167,7 @@ fn record_run(
     process_tree.set_run_baseline_mode(run_uuid, baseline_mode);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_prepare_snapshot(
     cwd: &Path,
     curated: &[AllowlistEntry],

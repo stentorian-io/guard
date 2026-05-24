@@ -17,11 +17,17 @@
 //!   - STT_GUARD_TEST_RESOLVE_OVERRIDE env-var on the daemon — abandoned because
 //!     handlers/resolve.rs is FROZEN per must-have #8.
 //!   - Wall-clock timing against an unrouteable IP — too flaky across CI runners.
-//! The unit-level test in resolve_client_tests.rs is the chosen hermetic vehicle.
-//! This file covers the empirical opt-in confirmation path.
+//!     The unit-level test in resolve_client_tests.rs is the chosen hermetic vehicle.
+//!     This file covers the empirical opt-in confirmation path.
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
-#[ignore = "live-network: requires real DNS + reachable registry.npmjs.org / pypi.org"]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "macOS-only; live-network requires real DNS + reachable registry.npmjs.org / pypi.org"
+)]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "live-network: requires real DNS + reachable registry.npmjs.org / pypi.org"
+)]
 #[test]
 fn pip_install_real_registry_succeeds_under_guard_run() {
     use guard_e2e::{DaemonHarness, resolve_cli, resolve_dylib};
@@ -82,8 +88,14 @@ fn pip_install_real_registry_succeeds_under_guard_run() {
     );
 }
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
-#[ignore = "live-network: requires real DNS + reachable curl + registry.npmjs.org"]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "macOS-only; live-network requires real DNS + reachable curl + registry.npmjs.org"
+)]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "live-network: requires real DNS + reachable curl + registry.npmjs.org"
+)]
 #[test]
 fn curl_get_real_registry_succeeds_under_guard_run() {
     use guard_e2e::{DaemonHarness, resolve_cli, resolve_dylib};

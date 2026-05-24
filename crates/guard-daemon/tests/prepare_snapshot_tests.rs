@@ -226,10 +226,11 @@ fn prepare_snapshot_includes_verified_signed_user_rule() {
             let snap_path = guard_daemon::state_dir::run_snapshot_path(&state_dir, &run_uuid);
             let bytes = std::fs::read(&snap_path).unwrap();
             let snap = guard_core::Snapshot::decode(&bytes).expect("decode");
-            assert!(snap
-                .entries
-                .iter()
-                .any(|e| e.pattern == "signed.example.com"));
+            assert!(
+                snap.entries
+                    .iter()
+                    .any(|e| e.pattern == "signed.example.com")
+            );
         }
         guard_ipc::SnapshotReply::Err { message, .. } => {
             panic!("expected Ok; got Err: {message}");
@@ -240,7 +241,7 @@ fn prepare_snapshot_includes_verified_signed_user_rule() {
 #[cfg(feature = "test-signer")]
 #[test]
 fn prepare_snapshot_fails_closed_on_tampered_user_rule() {
-    use rusqlite::{params, Connection};
+    use rusqlite::{Connection, params};
 
     let tmp = TempDir::new().unwrap();
     let state_dir = tmp.path().to_path_buf();

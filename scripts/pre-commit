@@ -94,6 +94,43 @@ if [ "$REPO_META_ONLY" -eq 1 ]; then
 else
   # ── 4. Cargo check (fast type/borrow check, no codegen) ───────────────────
   fp=$(rust_fingerprint)
+  if cache_hit "pre-commit:rustfmt-clippy" "$fp"; then
+    skip "cargo fmt and clippy"
+  else
+    before_autofix="$(mktemp)"
+    after_autofix="$(mktemp)"
+    git diff --binary HEAD > "$before_autofix"
+
+    cargo fmt \
+      || fail "cargo fmt failed"
+    cargo clippy --fix --workspace --all-targets --allow-dirty --allow-staged --quiet -- -D warnings \
+      || fail "cargo clippy --fix failed"
+
+    git diff --binary HEAD > "$after_autofix"
+    if ! cmp -s "$before_autofix" "$after_autofix"; then
+      rm -f "$before_autofix" "$after_autofix"
+      fail "rustfmt/clippy applied fixes; review them, stage the updates, and commit again"
+    fi
+    rm -f "$before_autofix" "$after_autofix"
+
+    cargo fmt --check \
+      || fail "cargo fmt --check failed"
+    cargo clippy --workspace --all-targets -- -D warnings \
+      || fail "cargo clippy failed"
+    cache_mark "pre-commit:rustfmt-clippy" "$fp"
+    pass "cargo fmt and clippy"
+  fi
+
+  linux_fp=$(linux_ci_lint_fingerprint)
+  if cache_hit "pre-commit:linux-ci-lint" "$linux_fp"; then
+    skip "Linux CI rustfmt/clippy"
+  else
+    scripts/ci-linux-lint.sh \
+      || fail "Linux CI rustfmt/clippy failed"
+    cache_mark "pre-commit:linux-ci-lint" "$linux_fp"
+    pass "Linux CI rustfmt/clippy"
+  fi
+
   if cache_hit "pre-commit:cargo-check" "$fp"; then
     skip "cargo check"
   else

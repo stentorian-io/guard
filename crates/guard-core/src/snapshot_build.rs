@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AllowlistEntry, Snapshot, SCHEMA_V2};
+use crate::{AllowlistEntry, SCHEMA_V2, Snapshot};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SnapshotBuildInput {
@@ -99,14 +99,18 @@ mod tests {
             .disabled_curated_patterns
             .insert("blocked.example".to_string());
         let snapshot = build_snapshot(input);
-        assert!(!snapshot
-            .entries
-            .iter()
-            .any(|entry| entry.pattern == "blocked.example"));
-        assert!(snapshot
-            .entries
-            .iter()
-            .any(|entry| entry.pattern == "user.example"));
+        assert!(
+            !snapshot
+                .entries
+                .iter()
+                .any(|entry| entry.pattern == "blocked.example")
+        );
+        assert!(
+            snapshot
+                .entries
+                .iter()
+                .any(|entry| entry.pattern == "user.example")
+        );
     }
 
     #[test]

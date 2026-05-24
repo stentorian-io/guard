@@ -43,11 +43,11 @@ pub fn publish(
             .create_new(true) // O_EXCL | O_CREAT
             .mode(0o600)
             .open(&tmp)?;
-        f.write_all(&bytes)?;
+        f.write_all(bytes.as_slice())?;
         f.sync_all()?;
     }
     std::fs::rename(&tmp, &final_path)?;
-    let digest = Sha256::digest(&bytes);
+    let digest = Sha256::digest(bytes.as_slice());
     Ok(PublishedSnapshot {
         path: final_path,
         digest_hex: hex_lower(&digest),
@@ -120,12 +120,12 @@ fn publish_run_inner(
             .create_new(true)
             .mode(0o600)
             .open(&tmp)?;
-        f.write_all(&bytes)?;
+        f.write_all(bytes)?;
         f.sync_all()?;
     }
     std::fs::rename(&tmp, &final_path)?;
 
-    let digest = Sha256::digest(&bytes);
+    let digest = Sha256::digest(bytes);
     let digest_hex = hex_lower(&digest);
 
     // Manifest file: tmp + fsync + rename.

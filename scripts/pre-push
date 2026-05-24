@@ -3,13 +3,14 @@
 # Pre-push hook for Stentorian Guard.
 # Install: ./scripts/install-hooks.sh
 #
-# This hook intentionally runs only E2E tests. Pre-commit owns lint, build,
-# unit tests, and integration tests.
+# Pre-commit owns lint, build, unit tests, and integration tests. Pre-push
+# re-checks Linux lint parity through the shared cache, then runs E2E tests.
 
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/check-cache.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -37,6 +38,17 @@ run_e2e() {
     || fail "$label"
   pass "$label"
 }
+
+cache_prune
+linux_fp=$(linux_ci_lint_fingerprint)
+if cache_hit "pre-push:linux-ci-lint" "$linux_fp" || cache_hit "pre-commit:linux-ci-lint" "$linux_fp"; then
+  pass "Linux CI rustfmt/clippy (cached)"
+else
+  scripts/ci-linux-lint.sh \
+    || fail "Linux CI rustfmt/clippy"
+  cache_mark "pre-push:linux-ci-lint" "$linux_fp"
+  pass "Linux CI rustfmt/clippy"
+fi
 
 cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer \
   || fail "build release binaries with test signer"

@@ -44,7 +44,7 @@ fn all_user_rules_empty_initially() {
 
 #[test]
 fn all_user_rules_maps_kind_to_user_tier() {
-    use rusqlite::{params, Connection};
+    use rusqlite::{Connection, params};
     let tmp = TempDir::new().unwrap();
     let p = guard_core::paths::db_path(tmp.path());
     let _store = RuleStore::open(&p).expect("init schema");
@@ -161,7 +161,7 @@ fn unsigned_legacy_row_fails_verified_read() {
 #[cfg(feature = "test-signer")]
 #[test]
 fn orphan_signature_row_fails_verified_read() {
-    use rusqlite::{params, Connection};
+    use rusqlite::{Connection, params};
     let tmp = TempDir::new().unwrap();
     let p = guard_core::paths::db_path(tmp.path());
     let s = RuleStore::open(&p).expect("open");
@@ -211,7 +211,7 @@ fn orphan_signature_row_fails_verified_read() {
 #[cfg(feature = "test-signer")]
 #[test]
 fn tampered_signed_rule_fails_verified_read() {
-    use rusqlite::{params, Connection};
+    use rusqlite::{Connection, params};
     let tmp = TempDir::new().unwrap();
     let p = guard_core::paths::db_path(tmp.path());
     let s = RuleStore::open(&p).expect("open");

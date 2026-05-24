@@ -22,6 +22,7 @@ test-yaml = ["dep:serde_yml"]
 [dependencies]
 guard-core = { workspace = true }
 guard-ipc = { workspace = true }
+guard-os = { workspace = true }
 clap = { workspace = true }
 crossbeam-channel = { workspace = true }
 tracing = { workspace = true }

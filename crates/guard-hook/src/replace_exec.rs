@@ -26,6 +26,7 @@ use crate::raw_syscall;
 use crate::reentrancy::IN_HOOK;
 use core::ffi::{c_char, c_int};
 use guard_ipc::AuditTokenWire;
+use guard_os::errno::set_errno;
 
 const IPC_TIMEOUT_MS: u64 = 250;
 
@@ -82,9 +83,7 @@ fn block_exec_trace_required(
         String::from_utf8_lossy(&path_buf[..n])
     );
     crate::log_buffer::LOG_RING.append(line.as_bytes());
-    unsafe {
-        *libc::__error() = libc::EACCES;
-    }
+    set_errno(libc::EACCES);
     -1
 }
 
@@ -116,9 +115,7 @@ pub unsafe extern "C" fn guard_execve(
     match exec_policy::check_exec_target(path) {
         ExecDecision::Block(reason) => {
             report_exec_blocked(path, reason);
-            unsafe {
-                *libc::__error() = libc::EACCES;
-            }
+            set_errno(libc::EACCES);
             return -1;
         }
         ExecDecision::Trace(reason) => return block_exec_trace_required(path, reason),
@@ -138,9 +135,7 @@ pub unsafe extern "C" fn guard_execvp(path: *const c_char, argv: *const *const c
     match exec_policy::check_exec_target(path) {
         ExecDecision::Block(reason) => {
             report_exec_blocked(path, reason);
-            unsafe {
-                *libc::__error() = libc::EACCES;
-            }
+            set_errno(libc::EACCES);
             return -1;
         }
         ExecDecision::Trace(reason) => return block_exec_trace_required(path, reason),
@@ -160,9 +155,7 @@ pub unsafe extern "C" fn guard_execv(path: *const c_char, argv: *const *const c_
     match exec_policy::check_exec_target(path) {
         ExecDecision::Block(reason) => {
             report_exec_blocked(path, reason);
-            unsafe {
-                *libc::__error() = libc::EACCES;
-            }
+            set_errno(libc::EACCES);
             return -1;
         }
         ExecDecision::Trace(reason) => return block_exec_trace_required(path, reason),
@@ -191,24 +184,18 @@ pub unsafe extern "C" fn guard_execv(path: *const c_char, argv: *const *const c_
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn guard_execl(_path: *const c_char, _arg0: *const c_char) -> c_int {
-    unsafe {
-        *libc::__error() = libc::ENOSYS;
-    }
+    set_errno(libc::ENOSYS);
     -1
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn guard_execlp(_path: *const c_char, _arg0: *const c_char) -> c_int {
-    unsafe {
-        *libc::__error() = libc::ENOSYS;
-    }
+    set_errno(libc::ENOSYS);
     -1
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn guard_execle(_path: *const c_char, _arg0: *const c_char) -> c_int {
-    unsafe {
-        *libc::__error() = libc::ENOSYS;
-    }
+    set_errno(libc::ENOSYS);
     -1
 }

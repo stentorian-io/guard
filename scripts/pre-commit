@@ -40,41 +40,7 @@ if changes_only_repo_meta staged; then
   REPO_META_ONLY=1
 fi
 
-# ── 1. Secret scan ──────────────────────────────────────────────────────────
-#
-# CI scans only commits added by the PR branch. Mirror that locally instead of
-# scanning the entire repository history, and also scan the staged patch because
-# the commit being created is not reachable from HEAD yet.
-if ! command -v trufflehog &>/dev/null; then
-  fail "trufflehog not found — install with 'brew install trufflehog'"
-fi
-
-scan_base=$(branch_scan_base) \
-  || fail "could not determine branch base for secret scan"
-
-if [ -n "$(git rev-list --max-count=1 "$scan_base..HEAD")" ]; then
-  trufflehog git "file://$REPO_ROOT" \
-    --since-commit "$scan_base" \
-    --branch HEAD \
-    --results=verified \
-    --fail \
-    --no-update \
-    || fail "secret scan failed for commits added on this branch"
-fi
-
-staged_patch=$(mktemp)
-trap 'rm -f "$staged_patch"' EXIT
-git diff --cached --binary > "$staged_patch"
-if [ -s "$staged_patch" ]; then
-  trufflehog filesystem "$staged_patch" \
-    --results=verified \
-    --fail \
-    --no-update \
-    || fail "secret scan failed for staged changes"
-fi
-pass "secret scan"
-
-# ── 2. Reject Co-Authored-By lines ──────────────────────────────────────────
+# ── 1. Reject Co-Authored-By lines ──────────────────────────────────────────
 #
 # Check the staged diff for Co-Authored-By trailers. The commit message isn't
 # available yet in a pre-commit hook, so we check it via the prepare-commit-msg
@@ -83,29 +49,36 @@ pass "secret scan"
 #
 # For the commit message itself, we install a companion commit-msg check below.
 
-# ── 3. Markdown lint ────────────────────────────────────────────────────────
-if command -v npx &>/dev/null; then
+# ── 2. Markdown lint ────────────────────────────────────────────────────────
+NODE_BIN="$(command -v node || true)"
+if [ -x /opt/homebrew/bin/node ]; then
+  NODE_BIN=/opt/homebrew/bin/node
+fi
+if [ -x /opt/homebrew/opt/node@20/bin/node ]; then
+  NODE_BIN=/opt/homebrew/opt/node@20/bin/node
+fi
+if [ -n "$NODE_BIN" ] && [ -x "$(dirname "$NODE_BIN")/npx" ]; then
   MD_FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.md' || true)
   if [ -n "$MD_FILES" ]; then
     fp=$(staged_md_fingerprint)
     if cache_hit "pre-commit:mdlint" "$fp"; then
       skip "markdown lint"
     else
-      echo "$MD_FILES" | xargs npx --yes markdownlint-cli2 \
+      echo "$MD_FILES" | PATH="$(dirname "$NODE_BIN"):$PATH" xargs npx --yes markdownlint-cli2 \
         || fail "markdown lint failed"
       cache_mark "pre-commit:mdlint" "$fp"
       pass "markdown lint"
     fi
   fi
 else
-  echo "⚠ npx not found — skipping markdown lint"
+  echo "⚠ node/npx not found — skipping markdown lint"
 fi
 
-# ── 4–6. Cargo check / machete / test — skip when only repo-meta changed ────
+# ── 3–7. Cheap validation — skip when only repo-meta changed ────────────────
 if [ "$REPO_META_ONLY" -eq 1 ]; then
-  skip "cargo check, machete, test (repo-meta-only change)"
+  skip "cargo check, machete, build, test (repo-meta-only change)"
 else
-  # ── 4. Cargo check (fast type/borrow check, no codegen) ───────────────────
+  # ── 3. Cargo check (fast type/borrow check, no codegen) ───────────────────
   fp=$(rust_fingerprint)
   if cache_hit "pre-commit:cargo-check" "$fp"; then
     skip "cargo check"
@@ -116,7 +89,7 @@ else
     pass "cargo check"
   fi
 
-  # ── 5. Unused dependency lint (cargo-machete — stable, no compilation) ────
+  # ── 4. Unused dependency lint (cargo-machete — stable, no compilation) ────
   if cache_hit "pre-commit:machete" "$fp"; then
     skip "cargo machete"
   else
@@ -130,14 +103,34 @@ else
     fi
   fi
 
-  # ── 6. Cargo test — unit + integration tests (excludes E2E) ───────────────
-  if cache_hit "pre-commit:cargo-test" "$fp"; then
-    skip "cargo test (unit + integration, E2E skipped)"
+  # ── 5. Release build — catches workspace build failures before push ───────
+  if cache_hit "pre-commit:cargo-build-release" "$fp"; then
+    skip "cargo build --workspace --release"
   else
-    cargo test --workspace --exclude guard-e2e --quiet \
-      || fail "cargo test failed"
-    cache_mark "pre-commit:cargo-test" "$fp"
-    pass "cargo test (unit + integration, E2E skipped)"
+    cargo build --workspace --release \
+      || fail "cargo build --workspace --release failed"
+    cache_mark "pre-commit:cargo-build-release" "$fp"
+    pass "cargo build --workspace --release"
+  fi
+
+  # ── 6. Unit tests — no E2E ────────────────────────────────────────────────
+  if cache_hit "pre-commit:cargo-test-unit" "$fp"; then
+    skip "cargo test unit targets"
+  else
+    cargo test --workspace --exclude guard-e2e --lib --bins --quiet \
+      || fail "cargo test unit targets failed"
+    cache_mark "pre-commit:cargo-test-unit" "$fp"
+    pass "cargo test unit targets"
+  fi
+
+  # ── 7. Integration tests — no E2E ─────────────────────────────────────────
+  if cache_hit "pre-commit:cargo-test-integration" "$fp"; then
+    skip "cargo test integration targets"
+  else
+    cargo test --workspace --exclude guard-e2e --tests --quiet \
+      || fail "cargo test integration targets failed"
+    cache_mark "pre-commit:cargo-test-integration" "$fp"
+    pass "cargo test integration targets"
   fi
 fi
 

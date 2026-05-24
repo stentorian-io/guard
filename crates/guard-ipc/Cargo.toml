@@ -10,6 +10,7 @@ description = "Stentorian Guard IPC wire schemas + Unix socket transport with pe
 
 [dependencies]
 guard-core = { workspace = true }
+guard-os = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
 ciborium = { workspace = true }

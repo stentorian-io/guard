@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#
+# Pre-push hook for Stentorian Guard.
+# Install: ./scripts/install-hooks.sh
+#
+# This hook intentionally runs only E2E tests. Pre-commit owns lint, build,
+# unit tests, and integration tests.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+fail() {
+  echo -e "${RED}${BOLD}pre-push: $1${RESET}" >&2
+  exit 1
+}
+
+pass() {
+  echo -e "${GREEN}✓${RESET} $1"
+}
+
+warn() {
+  echo -e "${YELLOW}⚠${RESET} $1"
+}
+
+run_e2e() {
+  local test_name="$1"
+  local label="$2"
+  cargo test -p guard-e2e --test "$test_name" --release -- --nocapture \
+    || fail "$label"
+  pass "$label"
+}
+
+run_e2e ua_parser_js_demo "VAL-01 ua-parser-js@0.7.29 demo"
+run_e2e workers_dev_validation "VAL-02 workers.dev allowlist-bleed"
+run_e2e failure_modes_corrupt_snapshot "VAL-04 D-12 corrupt snapshot"
+run_e2e failure_modes_hardened_exec "VAL-04 D-10 hardened-binary exec gap"
+
+if [ "${STT_GUARD_PRE_PUSH_RUN_PRIVILEGED:-0}" = "1" ]; then
+  STT_GUARD_E2E_PRIVILEGED_INSTALL=1 \
+    cargo test -p guard-e2e --test hardened_install_health --release -- --nocapture \
+    || fail "VAL-05 privileged init and install health"
+  pass "VAL-05 privileged init and install health"
+else
+  warn "skipping VAL-05 privileged init and install health (set STT_GUARD_PRE_PUSH_RUN_PRIVILEGED=1 to run)"
+fi
+
+echo -e "\n${GREEN}${BOLD}All pre-push E2E checks passed.${RESET}"

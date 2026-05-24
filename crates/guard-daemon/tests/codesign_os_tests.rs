@@ -1,4 +1,4 @@
-use guard_daemon::os_ffi::{
+use guard_os::codesign::{
     CS_HARD, CS_OPS_STATUS, CS_REQUIRE_LV, CS_RESTRICT, CS_RUNTIME, SYS_CSOPS, csops_status,
     has_hardened_bits, is_hardened_runtime,
 };

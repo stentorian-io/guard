@@ -373,9 +373,45 @@ jobs:
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - name: Compute daily audit cache key
+        id: audit_cache_key
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "scope=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "scope=main" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check daily audit marker
+        id: audit_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .audit-cache-marker
+          key: >-
+            cargo-audit-${{ steps.audit_cache_key.outputs.scope }}-${{ steps.audit_cache_key.outputs.date }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
+          lookup-only: true
       - uses: rustsec/audit-check@v2.0.0
+        if: steps.audit_cache.outputs.cache-hit != 'true'
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Write daily audit marker
+        if: steps.audit_cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .audit-cache-marker
+          {
+            echo "event=${{ github.event_name }}"
+            echo "scope=${{ steps.audit_cache_key.outputs.scope }}"
+            echo "date=${{ steps.audit_cache_key.outputs.date }}"
+            echo "sha=${{ github.sha }}"
+          } > .audit-cache-marker/last-run.txt
+      - name: Save daily audit marker
+        if: steps.audit_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .audit-cache-marker
+          key: ${{ steps.audit_cache.outputs.cache-primary-key }}
 
   gate:
     name: Gate

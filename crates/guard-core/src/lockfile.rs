@@ -163,8 +163,7 @@ fn extract_pip_registries(content: &str) -> BTreeSet<String> {
         Ok(v) => v,
         Err(_) => return hosts,
     };
-    if let Some(serde_json::Value::Array(sources)) = v.get("_meta").and_then(|m| m.get("sources"))
-    {
+    if let Some(serde_json::Value::Array(sources)) = v.get("_meta").and_then(|m| m.get("sources")) {
         for src in sources {
             if let Some(url) = src.get("url").and_then(|u| u.as_str()) {
                 if let Some(h) = extract_host_from_url(url) {

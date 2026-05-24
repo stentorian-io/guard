@@ -52,10 +52,9 @@ pub fn require_installed() -> Result<(), CliError> {
     if std::env::var_os(guard_core::paths::ENV_STATE_DIR).is_some() {
         return Ok(());
     }
-    if !crate::install::system::is_installed() {
-        return Err(CliError::Other(
-            "Stentorian Guard is not initialised. Run: sudo stt-guard init".into(),
-        ));
+    let health = crate::install::system::install_health();
+    if !health.is_healthy() {
+        return Err(CliError::Other(health.error_message()));
     }
     Ok(())
 }

@@ -250,9 +250,18 @@ pub fn resolve_node() -> Result<PathBuf, String> {
 /// E2E tests require `cargo build --workspace` before `cargo test -p guard-e2e`.
 pub fn resolve_dylib() -> PathBuf {
     let target = cargo_target_dir();
-    let preferred = target.join("stt-guard-hook.dylib");
-    if preferred.exists() {
-        return preferred;
+
+    // Prefer Cargo's canonical dylib output. Release packaging stages this as
+    // stt-guard-hook.dylib, but local target dirs can retain a stale staged
+    // alias across rebuilds; e2e tests should exercise the freshly-built dylib.
+    let cargo_output = target.join("libguard_hook.dylib");
+    if cargo_output.exists() {
+        return cargo_output;
+    }
+
+    let staged_alias = target.join("stt-guard-hook.dylib");
+    if staged_alias.exists() {
+        return staged_alias;
     }
 
     if let Ok(entries) = std::fs::read_dir(&target) {
@@ -268,9 +277,9 @@ pub fn resolve_dylib() -> PathBuf {
     }
 
     panic!(
-        "stt-guard-hook.dylib not found at {} and no hook dylib exists in {} — \
+        "libguard_hook.dylib not found at {} and no hook dylib exists in {} — \
          run `cargo build --workspace` before running E2E tests",
-        preferred.display(),
+        cargo_output.display(),
         target.display()
     );
 }

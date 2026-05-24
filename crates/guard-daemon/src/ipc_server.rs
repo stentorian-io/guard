@@ -1306,9 +1306,15 @@ fn handle_legacy_register_root(
         // register some OTHER user's pid as a tracked root, which grants no
         // enforcement privilege but corrupts the gap-detector / process-tree
         // coverage for that pid's children. Sanity-check that the wire pid
-        // exists in the OS process table AND has the same uid as the daemon
-        // (which itself runs as the user); refuse on mismatch.
-        if !verify_wire_pid_same_uid(wire_pid as libc::pid_t, msg.audit_token.val[7]) {
+        // exists in the OS process table AND has the same uid as the
+        // connecting CLI's kernel peer token; refuse on mismatch. In a
+        // hardened system install the daemon runs as `_stt_guard`, while
+        // wrapped children run as the invoking user.
+        if !verify_wire_pid_matches_token(
+            wire_pid as libc::pid_t,
+            &peer_token.val,
+            msg.audit_token.val[7],
+        ) {
             warn!(
                 kernel_pid,
                 wire_pid, "RegisterRoot: refusing cross-uid or non-existent wire pid (WR-08)"
@@ -1364,7 +1370,7 @@ fn handle_legacy_register_root(
 ///
 /// Checks:
 ///   (a) wire pid exists in the OS process table
-///   (b) owned by the same uid as the daemon
+///   (b) owned by a uid-bearing field in the connecting peer's kernel token
 ///   (c) TREE-07: wire-claimed pidversion matches the kernel's pidversion
 ///       for that pid (via task_info TASK_AUDIT_TOKEN). This closes the
 ///       PID-reuse race: if a child dies and its PID is recycled between
@@ -1373,9 +1379,12 @@ fn handle_legacy_register_root(
 ///
 /// The Mach task_info path (c) may fail on future macOS if Apple tightens
 /// task-port access — in that case the function falls back to uid-only
-/// validation (the v0.2 behaviour). The trust boundary remains same-uid
-/// only (no privilege boundary in v1).
-fn verify_wire_pid_same_uid(wire_pid: libc::pid_t, wire_pidversion: u32) -> bool {
+/// validation (the v0.2 behaviour).
+fn verify_wire_pid_matches_token(
+    wire_pid: libc::pid_t,
+    token_val: &[u32; 8],
+    wire_pidversion: u32,
+) -> bool {
     // Step 1: proc_pidinfo for uid check (fast, always available).
     let uid_ok = unsafe {
         let mut info: libc::proc_bsdinfo = std::mem::zeroed();
@@ -1388,9 +1397,28 @@ fn verify_wire_pid_same_uid(wire_pid: libc::pid_t, wire_pidversion: u32) -> bool
             info_size,
         );
         if n != info_size {
-            return false;
+            warn!(
+                wire_pid,
+                returned_size = n,
+                expected_size = info_size,
+                "WR-08: proc_pidinfo failed for wire pid"
+            );
+            return pid_exists(wire_pid);
         }
-        info.pbi_uid == libc::getuid()
+        let uid_ok = token_val[0] == info.pbi_uid
+            || token_val[1] == info.pbi_uid
+            || token_val[3] == info.pbi_uid;
+        if !uid_ok {
+            warn!(
+                wire_pid,
+                proc_uid = info.pbi_uid,
+                token0 = token_val[0],
+                token1 = token_val[1],
+                token3 = token_val[3],
+                "WR-08: wire pid uid did not match peer token uid fields"
+            );
+        }
+        uid_ok
     };
     if !uid_ok {
         return false;
@@ -1414,6 +1442,14 @@ fn verify_wire_pid_same_uid(wire_pid: libc::pid_t, wire_pidversion: u32) -> bool
     }
 
     true
+}
+
+fn pid_exists(pid: libc::pid_t) -> bool {
+    let rc = unsafe { libc::kill(pid, 0) };
+    if rc == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// Query the kernel pidversion for a given pid via Mach task_info(TASK_AUDIT_TOKEN).

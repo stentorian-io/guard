@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 pub const SIZE_THRESHOLD: u64 = 16 * 1024 * 1024; // 16 MiB
 pub const MAX_ARCHIVES: usize = 7;
 pub const MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024; // 256 MiB
-use guard_core::paths::{ROTATED_LOG_PREFIX as ROTATED_GLOB_PREFIX, ROTATED_LOG_SUFFIX_GZ as ROTATED_GLOB_SUFFIX_GZ};
+use guard_core::paths::{
+    ROTATED_LOG_PREFIX as ROTATED_GLOB_PREFIX, ROTATED_LOG_SUFFIX_GZ as ROTATED_GLOB_SUFFIX_GZ,
+};
 
 pub fn should_rotate(active_path: &Path) -> bool {
     fs::metadata(active_path)

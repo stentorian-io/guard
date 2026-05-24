@@ -19,7 +19,6 @@ crossbeam-queue = { workspace = true }
 serde = { workspace = true }
 guard-core = { workspace = true }
 guard-ipc = { workspace = true }
-socket2 = { workspace = true }
 sha2 = { workspace = true }
 hmac = { workspace = true }
 # crossbeam-queue (lock-free MPMC) is the BL-03 / D-43 fix for the racy

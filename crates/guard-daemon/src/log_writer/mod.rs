@@ -60,9 +60,15 @@ impl LogWriter {
     pub fn spawn(log_path: PathBuf) -> io::Result<Self> {
         if let Some(parent) = log_path.parent() {
             std::fs::create_dir_all(parent)?;
-            // Best-effort 0700 on the dir.
+            // System logs are user-facing via `stt-guard status logs`; user
+            // mode logs remain private to the user.
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+            let mode = if parent == std::path::Path::new(guard_core::paths::SYSTEM_LOG_DIR) {
+                0o711
+            } else {
+                0o700
+            };
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(mode));
         }
         let initial_file = open_active(&log_path)?;
         let (tx, rx) = bounded::<LogRow>(QUEUE_CAPACITY);
@@ -142,11 +148,22 @@ impl LogWriter {
 }
 
 fn open_active(path: &std::path::Path) -> io::Result<File> {
-    OpenOptions::new()
+    let mode = if path.starts_with(guard_core::paths::SYSTEM_LOG_DIR) {
+        0o644
+    } else {
+        0o600
+    };
+    let file = OpenOptions::new()
         .create(true)
         .append(true)
-        .mode(0o600)
-        .open(path)
+        .mode(mode)
+        .open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+    }
+    Ok(file)
 }
 
 /// WR-05: maximum length for a `dest_host` field in a log row. RFC1035 caps DNS

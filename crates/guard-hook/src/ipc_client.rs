@@ -18,7 +18,6 @@ use guard_ipc::{
     ExecBlockedAck, ExecEvent, ForkAck, ForkEvent, IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4,
     PersistenceWrite, PersistenceWriteAck, Resolve, ResolveReply, SOCKADDR_WIRE_LEN,
 };
-use socket2::{Domain, SockAddr, Socket, Type};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -171,21 +170,15 @@ pub(crate) fn connect_with_timeout(
     sock: &Path,
     total_ms: u64,
 ) -> Result<UnixStream, IpcClientError> {
-    let addr = SockAddr::unix(sock).map_err(IpcClientError::Io)?;
-    let socket = Socket::new(Domain::UNIX, Type::STREAM, None).map_err(IpcClientError::Io)?;
-    // 1/5 of total budget for connect, 2/5 each for read/write.
+    let stream = UnixStream::connect(sock).map_err(IpcClientError::Io)?;
+    // Split the total budget across subsequent read/write phases. AF_UNIX
+    // connect failures are local and immediate on Darwin; socket2
+    // connect_timeout is not reliable for this Unix socket path.
     let total_ms = total_ms.max(5);
-    let connect_dur = Duration::from_millis(total_ms / 5);
-    socket
-        .connect_timeout(&addr, connect_dur)
-        .map_err(IpcClientError::Io)?;
     let rw_dur = Duration::from_millis((total_ms * 2) / 5);
-    socket.set_read_timeout(Some(rw_dur)).ok();
-    socket.set_write_timeout(Some(rw_dur)).ok();
-    // WR-02: use the safe From<Socket> for UnixStream conversion (socket2 0.5+
-    // on Unix). Eliminates the unsafe raw-fd dance and its future-edit
-    // hazard.
-    Ok(socket.into())
+    stream.set_read_timeout(Some(rw_dur)).ok();
+    stream.set_write_timeout(Some(rw_dur)).ok();
+    Ok(stream)
 }
 
 fn map_io_to_timeout(e: std::io::Error) -> IpcClientError {

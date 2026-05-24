@@ -22,7 +22,6 @@ use crate::gap_detector::GapDetector;
 use crate::install_artifacts::InstallArtifactStore;
 use crate::ipc_dispatch::{DispatchError, FrameKind, MessageTag, classify_frame};
 use crate::log_writer::LogWriter;
-use crate::os_ffi::is_hardened_runtime;
 use crate::peer_auth::authenticate;
 use crate::prompt::{PromptDedup, RecentGapsRing};
 use crate::tracked::{CoverageGap, ProcessTree};
@@ -40,6 +39,8 @@ use guard_ipc::{
     ReadInstallArtifactsReply, RegisterRoot, Reply, Resolve, ResolveReply, SnapshotReply, Status,
     StatusReply,
 };
+use guard_os::codesign::is_hardened_runtime;
+use guard_os::process::kernel_pidversion;
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -1428,12 +1429,12 @@ fn verify_wire_pid_matches_token(
     // If the Mach call fails (entitlement restrictions, etc.), fall through
     // and accept uid-only validation — same as v0.2 behaviour.
     if wire_pidversion != 0 {
-        if let Some(kernel_pidversion) = query_kernel_pidversion(wire_pid) {
-            if kernel_pidversion != wire_pidversion {
+        if let Some(actual_pidversion) = kernel_pidversion(wire_pid) {
+            if actual_pidversion != wire_pidversion {
                 warn!(
                     wire_pid,
                     wire_pidversion,
-                    kernel_pidversion,
+                    kernel_pidversion = actual_pidversion,
                     "TREE-07: wire pidversion mismatch — possible PID reuse"
                 );
                 return false;
@@ -1450,53 +1451,6 @@ fn pid_exists(pid: libc::pid_t) -> bool {
         return true;
     }
     std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-/// Query the kernel pidversion for a given pid via Mach task_info(TASK_AUDIT_TOKEN).
-/// Returns None if the Mach call fails (e.g. entitlement restrictions).
-fn query_kernel_pidversion(pid: libc::pid_t) -> Option<u32> {
-    type MachPortT = u32;
-    type KernReturnT = i32;
-    const MACH_PORT_NULL: MachPortT = 0;
-    const KERN_SUCCESS: KernReturnT = 0;
-    const TASK_AUDIT_TOKEN: u32 = 15;
-
-    unsafe extern "C" {
-        fn mach_task_self() -> MachPortT;
-        fn task_name_for_pid(
-            target_tport: MachPortT,
-            pid: libc::pid_t,
-            t: *mut MachPortT,
-        ) -> KernReturnT;
-        fn task_info(
-            target_task: MachPortT,
-            flavor: u32,
-            task_info_out: *mut u32,
-            task_info_count: *mut u32,
-        ) -> KernReturnT;
-        fn mach_port_deallocate(task: MachPortT, name: MachPortT) -> KernReturnT;
-    }
-
-    unsafe {
-        let mut task_port: MachPortT = MACH_PORT_NULL;
-        let kr = task_name_for_pid(mach_task_self(), pid, &mut task_port);
-        if kr != KERN_SUCCESS {
-            return None;
-        }
-        let mut token_val = [0u32; 8];
-        let mut count: u32 = 8;
-        let kr2 = task_info(
-            task_port,
-            TASK_AUDIT_TOKEN,
-            token_val.as_mut_ptr(),
-            &mut count,
-        );
-        mach_port_deallocate(mach_task_self(), task_port);
-        if kr2 != KERN_SUCCESS {
-            return None;
-        }
-        Some(token_val[7])
-    }
 }
 
 // Per-connection frame signer, set by `handle()` before dispatching to handlers.

@@ -566,6 +566,7 @@ dependencies = [
  "guard-core",
  "guard-daemon",
  "guard-ipc",
+ "guard-os",
  "hmac",
  "libc",
  "rusqlite",

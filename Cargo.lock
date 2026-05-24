@@ -623,11 +623,21 @@ version = "0.1.0"
 dependencies = [
  "ciborium",
  "guard-core",
+ "guard-os",
  "hmac",
  "libc",
  "serde",
  "serde_bytes",
  "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "guard-os"
+version = "0.1.0"
+dependencies = [
+ "guard-core",
+ "libc",
  "thiserror 2.0.18",
 ]
 

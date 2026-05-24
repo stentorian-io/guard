@@ -2,6 +2,7 @@
 //! the same primitive the Wave 0 spike verified for LOCAL_PEERTOKEN.
 
 use guard_ipc::frame::{read_frame, write_frame};
+#[cfg(target_os = "macos")]
 use guard_ipc::transport::{peer_audit_token, peer_identity};
 use guard_ipc::{IPC_SCHEMA_V1, RegisterRoot, Reply};
 use std::os::unix::io::FromRawFd;
@@ -42,9 +43,10 @@ fn reply_ack_traverses_back() {
     assert!(matches!(r, Reply::Ack { .. }));
 }
 
-/// LOCAL_PEERTOKEN over a socketpair returns a token whose val[5] (pid) equals
-/// the test process's pid (since both ends of the pair are this process).
+/// Darwin LOCAL_PEERTOKEN over a socketpair returns a token whose val[5] (pid)
+/// equals the test process's pid (since both ends of the pair are this process).
 /// Mirrors the spike's A1 check at the wire layer.
+#[cfg(target_os = "macos")]
 #[test]
 fn peer_audit_token_returns_self_pid_over_socketpair() {
     let (a, _b) = make_pair();
@@ -56,6 +58,7 @@ fn peer_audit_token_returns_self_pid_over_socketpair() {
     );
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 fn peer_identity_yields_verified() {
     let (a, _b) = make_pair();

@@ -224,16 +224,16 @@ jobs:
             exit 1
           fi
           echo "Fixture hash matches script pin."
+      - name: cargo check agnostic support crates
+        run: cargo check -p guard-os -p guard-watchdog --quiet
+      - name: cargo test OS boundary
+        run: cargo test -p guard-os --quiet
       - name: cargo test portable core
         run: cargo test -p guard-core --lib --tests --quiet
-      - name: cargo test portable IPC schemas
-        run: >-
-          cargo test -p guard-ipc --lib
-          --test frame_tests
-          --test v2_messages_roundtrip
-          --test prompt_messages_round_trip
-          --test schema_v3_backward_compat
-          --quiet
+      - name: cargo test portable IPC
+        run: cargo test -p guard-ipc --lib --tests --quiet
+      - name: cargo test portable watchdog
+        run: cargo test -p guard-watchdog --bins --quiet
 
   secret_scan:
     name: Secret scan

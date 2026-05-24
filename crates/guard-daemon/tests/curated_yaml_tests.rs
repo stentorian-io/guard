@@ -61,15 +61,23 @@ fn allow_entries_get_curated_allow_tier() {
 }
 
 #[test]
-fn deny_entries_get_builtin_deny_tier() {
+fn deny_entries_get_expected_tier() {
     let entries = load_curated().expect("load");
     for e in &entries {
         if matches!(e.kind, RuleKind::Deny) {
-            assert!(
-                matches!(e.tier, RuleTier::BuiltinDeny),
-                "deny entry must be BuiltinDeny tier: {:?}",
-                e
-            );
+            if e.reason.contains("(FEED)") {
+                assert!(
+                    matches!(e.tier, RuleTier::ConfirmedDeny | RuleTier::SuspectDeny),
+                    "feed deny entry must carry a feed confidence tier: {:?}",
+                    e
+                );
+            } else {
+                assert!(
+                    matches!(e.tier, RuleTier::BuiltinDeny),
+                    "builtin deny entry must be BuiltinDeny tier: {:?}",
+                    e
+                );
+            }
         }
     }
 }

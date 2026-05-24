@@ -179,8 +179,8 @@ jobs:
       - name: Lint unused dependencies
         run: cargo machete --with-metadata
 
-  portable_checks:
-    name: Portable checks
+  pre_macos_checks:
+    name: Pre-macOS checks
     needs:
       - prepare
       - lint
@@ -196,7 +196,7 @@ jobs:
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: linux-portable
+          shared-key: pre-macos
       - name: Verify sanitized fixture present
         run: |
           set -euo pipefail
@@ -317,13 +317,13 @@ jobs:
     needs:
       - prepare
       - lint
-      - portable_checks
+      - pre_macos_checks
       - secret_scan
       - cargo_audit
     if: >-
       needs.prepare.outputs.code == 'true'
       && needs.lint.result == 'success'
-      && needs.portable_checks.result == 'success'
+      && needs.pre_macos_checks.result == 'success'
       && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
       && (needs.cargo_audit.result == 'success' || needs.cargo_audit.result == 'skipped')
     runs-on: macos-14
@@ -453,7 +453,7 @@ jobs:
       - pr_validation_gate
       - prepare
       - lint
-      - portable_checks
+      - pre_macos_checks
       - build
       - unit_tests
       - integration_tests

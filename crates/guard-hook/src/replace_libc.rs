@@ -18,6 +18,7 @@ use guard_core::{
     policy::{SourceKind, evaluate_policy, is_cloud_metadata_ip, is_loopback_ip},
 };
 use guard_ipc::{AuditTokenWire, SOCKADDR_WIRE_LEN};
+use guard_os::errno::set_errno;
 use libc::{AF_INET, AF_INET6, msghdr, size_t, sockaddr, socklen_t, ssize_t};
 
 /// Maximum number of Resolve-IPC round-trips per connect() invocation.
@@ -194,9 +195,7 @@ pub unsafe extern "C" fn guard_connect(
         let msg = format!("[guard-hook] DENY connect ({})", source.as_label());
         LOG_RING.append(msg.as_bytes());
         unsafe { notify_deny_for_sockaddr(addr, addrlen, "connect", source) };
-        unsafe {
-            *libc::__error() = libc::EHOSTUNREACH;
-        }
+        set_errno(libc::EHOSTUNREACH);
         return -1;
     }
     unsafe { raw_connect(s, addr, addrlen) }
@@ -265,9 +264,7 @@ unsafe extern "C" fn guard_connectx(
                 notify_deny_for_sockaddr(ep.sae_dstaddr, ep.sae_dstaddrlen, "connectx", source)
             };
         }
-        unsafe {
-            *libc::__error() = libc::EHOSTUNREACH;
-        }
+        set_errno(libc::EHOSTUNREACH);
         return -1;
     }
     unsafe { raw_syscall::raw_connectx(s, endpoints, associd, flags, iov, iovcnt, len, connid) }
@@ -531,9 +528,7 @@ unsafe extern "C" fn guard_sendto(
         let msg = format!("[guard-hook] DENY sendto ({})", source.as_label());
         LOG_RING.append(msg.as_bytes());
         unsafe { notify_deny_for_sockaddr(to, tolen, "sendto", source) };
-        unsafe {
-            *libc::__error() = libc::EHOSTUNREACH;
-        }
+        set_errno(libc::EHOSTUNREACH);
         return -1;
     }
     unsafe { raw_sendto(s, buf, len, flags, to, tolen) }
@@ -567,9 +562,7 @@ unsafe extern "C" fn guard_sendmsg(s: c_int, msg: *const msghdr, flags: c_int) -
         }
     };
     if matches!(verdict, Verdict::Deny) {
-        unsafe {
-            *libc::__error() = libc::EHOSTUNREACH;
-        }
+        set_errno(libc::EHOSTUNREACH);
         let log_msg = format!("[guard-hook] DENY sendmsg ({})", source.as_label());
         LOG_RING.append(log_msg.as_bytes());
         if !msg.is_null() {

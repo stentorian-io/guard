@@ -610,6 +610,7 @@ dependencies = [
  "guard-core",
  "guard-daemon",
  "guard-ipc",
+ "guard-os",
  "hdrhistogram",
  "hmac",
  "libc",

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/stentorian-io/guard/docs/release-meta.schema.json",
+  "title": "Guard Release Metadata",
+  "description": "Machine-readable metadata attached to each GitHub Release, consumed by the update checker.",
+  "type": "object",
+  "required": ["version", "severity", "summary", "deny_rule_count", "published_at"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.]+)?$",
+      "description": "SemVer version without 'v' prefix."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "informational"],
+      "description": "critical: new deny rules or security fixes; informational: everything else."
+    },
+    "summary": {
+      "type": "string",
+      "description": "One-line human-readable summary of the release."
+    },
+    "deny_rule_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of new deny rules added since the previous release."
+    },
+    "security_fixes": {
+      "type": "boolean",
+      "description": "True if the release contains commits with fix(security) scope."
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of generation."
+    },
+    "changelog_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the full changelog for this release."
+    }
+  },
+  "additionalProperties": false
+}

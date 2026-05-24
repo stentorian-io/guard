@@ -5,6 +5,7 @@
     <strong>Installing dependencies shouldn't feel like Russian Roulette</strong>
   </p>
   <p align="center">
+    <a href="https://github.com/stentorian-io/guard/releases/latest"><img src="https://img.shields.io/github/v/release/stentorian-io/guard?label=release" alt="Latest release"></a>
     <a href="https://github.com/stentorian-io/guard/actions/workflows/code-validation.yml"><img src="https://github.com/stentorian-io/guard/actions/workflows/code-validation.yml/badge.svg?branch=main" alt="CI"></a>
     <a href="#license"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License"></a>
   </p>
@@ -23,6 +24,7 @@
   - [Existing alternatives](#existing-alternatives)
 - [Usage](#usage)
   - [Installation](#installation)
+  - [Updating](#updating)
   - [Manual](#manual)
   - [Aliased](#aliased)
   - [Shell (recommended)](#shell-recommended)
@@ -144,6 +146,8 @@ Socket/Snyk, lockfiles, and more), see [docs/alternatives.md](docs/alternatives.
 
 ### Installation
 
+#### Homebrew (supported install path)
+
 ```sh
 brew install stentorian-io/tap/stt-guard
 sudo stt-guard init
@@ -151,15 +155,29 @@ sudo stt-guard init
 
 The init step creates a `_stt_guard` service user, deploys root-owned
 binaries to `/usr/local/libexec/stt-guard/`, and starts the daemon as a
-LaunchDaemon. This is the only deployment mode — it prevents a compromised
-process from tampering with the guard itself. See the
+LaunchDaemon. This is the only supported consumer deployment mode — it prevents
+a compromised process from tampering with the guard itself. See the
 [deployment model](SECURITY.md#deployment-model) for details.
 
 All other commands (`wrap`, `status`) require initialisation to be complete
 and will refuse to run otherwise.
 
-Or build from source — see [CONTRIBUTING.md](CONTRIBUTING.md#build) for
-prerequisites and detailed instructions.
+GitHub Releases are used for changelogs, release metadata, auditability, and
+Homebrew automation inputs. Manual binary installation from a release artifact
+is not a supported install path: a misplaced binary, hook library, plist, or
+ownership bit can silently weaken the deployment model.
+
+### Updating
+
+```sh
+brew upgrade stt-guard
+```
+
+Check your installed version:
+
+```sh
+stt-guard --version
+```
 
 ### Manual
 

@@ -1,0 +1,257 @@
+# Release workflow — builds target-specific macOS artifacts, generates
+# changelog and release-meta.json, and creates a GitHub Release for Homebrew
+# automation and maintainer audit trails.
+#
+# Triggered by pushing a semver tag (v0.1.0, v0.2.0, etc.).
+# Can also be triggered manually via workflow_dispatch for dry-run testing.
+#
+# Supported install path: Homebrew. GitHub Release artifacts are not a
+# documented manual install surface because incorrect placement, ownership, or
+# plist setup can weaken the deployment model.
+#
+# Artifacts per target: stt-guard, stt-guard-daemon, stt-guard-watchdog,
+#                       stt-guard-hook.dylib, release-meta.json
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (skip GitHub Release creation)'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: macos-14
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain + target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+
+      - name: Build release binaries
+        run: cargo build --workspace --release --target ${{ matrix.target }}
+
+      - name: Stage target artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "artifacts/${{ matrix.target }}"
+          cp "target/${{ matrix.target }}/release/stt-guard" "artifacts/${{ matrix.target }}/"
+          cp "target/${{ matrix.target }}/release/stt-guard-daemon" "artifacts/${{ matrix.target }}/"
+          cp "target/${{ matrix.target }}/release/stt-guard-watchdog" "artifacts/${{ matrix.target }}/"
+          cp "target/${{ matrix.target }}/release/libguard_hook.dylib" "artifacts/${{ matrix.target }}/stt-guard-hook.dylib"
+
+      - name: Verify target artifacts
+        run: |
+          set -euo pipefail
+          for f in "artifacts/${{ matrix.target }}"/*; do
+            echo "=== $(basename "$f") ==="
+            file "$f"
+          done
+
+      - name: Upload target artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: guard-${{ matrix.target }}
+          path: artifacts/${{ matrix.target }}/
+          retention-days: 5
+
+  release:
+    name: Create release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: guard-*
+          path: artifacts/
+
+      - name: Install git-cliff
+        uses: kenji-miyake/setup-git-cliff@v2
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v0.0.0-dryrun"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 "${{ steps.version.outputs.tag }}^" 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            git cliff "${PREV_TAG}..${{ steps.version.outputs.tag }}" --output CHANGELOG.md
+          else
+            git cliff --output CHANGELOG.md
+          fi
+
+      - name: Generate release-meta.json
+        run: |
+          scripts/generate-release-meta.sh "${{ steps.version.outputs.tag }}" > artifacts/release-meta.json
+          cat artifacts/release-meta.json
+
+      - name: Package target tarballs
+        id: package
+        run: |
+          set -euo pipefail
+          for target_dir in artifacts/guard-*; do
+            target="${target_dir#artifacts/guard-}"
+            cp artifacts/release-meta.json "${target_dir}/release-meta.json"
+            tarball="artifacts/guard-${{ steps.version.outputs.version }}-${target}.tar.gz"
+            tar -C "${target_dir}" \
+              -czf "${tarball}" \
+              stt-guard stt-guard-daemon stt-guard-watchdog stt-guard-hook.dylib release-meta.json
+            sha=$(sha256sum "${tarball}" | awk '{print $1}')
+            case "${target}" in
+              aarch64-apple-darwin)
+                echo "arm64_tarball=${tarball}" >> "$GITHUB_OUTPUT"
+                echo "arm64_sha256=${sha}" >> "$GITHUB_OUTPUT"
+                ;;
+              x86_64-apple-darwin)
+                echo "x86_64_tarball=${tarball}" >> "$GITHUB_OUTPUT"
+                echo "x86_64_sha256=${sha}" >> "$GITHUB_OUTPUT"
+                ;;
+              *)
+                echo "unexpected target: ${target}" >&2
+                exit 1
+                ;;
+            esac
+          done
+
+      - name: Generate Homebrew formula
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/Formula
+          base_url="https://github.com/stentorian-io/guard/releases/download/${{ steps.version.outputs.tag }}"
+          scripts/generate-homebrew-formula.sh \
+            "${{ steps.version.outputs.version }}" \
+            "${base_url}/$(basename '${{ steps.package.outputs.arm64_tarball }}')" \
+            "${{ steps.package.outputs.arm64_sha256 }}" \
+            "${base_url}/$(basename '${{ steps.package.outputs.x86_64_tarball }}')" \
+            "${{ steps.package.outputs.x86_64_sha256 }}" \
+            > artifacts/Formula/stt-guard.rb
+          ruby -c artifacts/Formula/stt-guard.rb
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' || inputs.dry_run == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Guard ${{ steps.version.outputs.version }}
+          body_path: CHANGELOG.md
+          files: |
+            artifacts/guard-${{ steps.version.outputs.version }}-*.tar.gz
+            artifacts/release-meta.json
+
+      - name: Load GitHub app credentials from 1Password
+        if: github.event_name == 'push'
+        uses: 1password/load-secrets-action@v2
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          GH_APP_ID: op://Stentorian/GitHub Settings App/username
+          GH_APP_PRIVATE_KEY: op://Stentorian/GitHub Settings App/key
+
+      - name: Generate Homebrew tap app token
+        if: github.event_name == 'push'
+        id: tap-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ env.GH_APP_ID }}
+          private-key: ${{ env.GH_APP_PRIVATE_KEY }}
+          owner: stentorian-io
+          repositories: "homebrew-tap"
+
+      - name: Checkout Homebrew tap
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          repository: stentorian-io/homebrew-tap
+          token: ${{ steps.tap-token.outputs.token }}
+          path: homebrew-tap
+
+      - name: Update Homebrew tap formula
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p homebrew-tap/Formula
+          cp artifacts/Formula/stt-guard.rb homebrew-tap/Formula/stt-guard.rb
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap checkout -B "stt-guard-${{ steps.version.outputs.version }}"
+          git -C homebrew-tap add Formula/stt-guard.rb
+          if git -C homebrew-tap diff --cached --quiet; then
+            echo "Homebrew formula is already current."
+            exit 0
+          fi
+          git -C homebrew-tap commit -m "stt-guard ${{ steps.version.outputs.version }}"
+          git -C homebrew-tap push --force-with-lease origin "stt-guard-${{ steps.version.outputs.version }}"
+          if gh pr view "stt-guard-${{ steps.version.outputs.version }}" --repo stentorian-io/homebrew-tap >/dev/null 2>&1; then
+            gh pr edit "stt-guard-${{ steps.version.outputs.version }}" \
+              --repo stentorian-io/homebrew-tap \
+              --title "stt-guard ${{ steps.version.outputs.version }}" \
+              --body "Updates the stt-guard formula for ${{ steps.version.outputs.tag }}."
+          else
+            gh pr create \
+              --repo stentorian-io/homebrew-tap \
+              --base main \
+              --head "stt-guard-${{ steps.version.outputs.version }}" \
+              --title "stt-guard ${{ steps.version.outputs.version }}" \
+              --body "Updates the stt-guard formula for ${{ steps.version.outputs.tag }}."
+          fi
+
+      - name: Dry-run summary
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true'
+        run: |
+          echo "## Dry Run Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tag:** ${{ steps.version.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Artifacts:**" >> "$GITHUB_STEP_SUMMARY"
+          ls -lh artifacts/ >> "$GITHUB_STEP_SUMMARY"
+          echo "**Release metadata:**" >> "$GITHUB_STEP_SUMMARY"
+          cat artifacts/release-meta.json >> "$GITHUB_STEP_SUMMARY"

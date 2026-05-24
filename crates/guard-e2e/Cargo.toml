@@ -23,7 +23,7 @@ tempfile = { workspace = true }
 
 [features]
 default = []
-test-signer = ["guard-core/test-signer", "guard-daemon/test-signer"]
+test-signer = ["guard-core/test-signer", "guard-daemon/test-signer", "guard-hook/test-signer"]
 
 [dev-dependencies]
 serde = { workspace = true }

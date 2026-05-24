@@ -406,7 +406,29 @@ fn setup_test_signer(state_dir: &Path) -> std::io::Result<()> {
             &public_key_x963,
             "e2e test-signer simulator",
         )
-        .map_err(|e| std::io::Error::other(format!("register e2e test signer: {e}")))
+        .map_err(|e| std::io::Error::other(format!("register e2e test signer: {e}")))?;
+    let manifest = format!(
+        "# stt-guard trusted test signers v1\n{}\t{}\t{}\t{}\n",
+        fingerprint,
+        signer_kind,
+        hex_lower(&public_key_x963),
+        "e2e test-signer simulator",
+    );
+    std::fs::write(
+        state_dir.join(guard_core::paths::TRUSTED_RULE_SIGNERS_FILENAME),
+        manifest,
+    )
+}
+
+#[cfg(feature = "test-signer")]
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    s
 }
 
 #[cfg(not(feature = "test-signer"))]

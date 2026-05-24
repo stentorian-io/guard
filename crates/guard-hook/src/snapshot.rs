@@ -322,16 +322,20 @@ fn verify_snapshot_signature(
         signed_payload_sha256: manifest_signature.signed_payload_sha256.clone(),
         signature_created_at_unix_ms: manifest_signature.signature_created_at_unix_ms,
     };
-    guard_core::verify_snapshot_signature(
-        &payload,
-        &signature,
-        guard_core::RuleSignaturePolicy::Production,
-    )
-    .map_err(|e| LoadError::SnapshotSignatureMismatch(e.to_string()))?;
+    guard_core::verify_snapshot_signature(&payload, &signature, snapshot_signature_policy())
+        .map_err(|e| LoadError::SnapshotSignatureMismatch(e.to_string()))?;
     if !trusted_signer_manifest_contains(&signature, state_dir)? {
         return Err(LoadError::SnapshotSignerUntrusted);
     }
     Ok(())
+}
+
+fn snapshot_signature_policy() -> guard_core::RuleSignaturePolicy {
+    if cfg!(feature = "test-signer") {
+        guard_core::RuleSignaturePolicy::AllowTestSimulator
+    } else {
+        guard_core::RuleSignaturePolicy::Production
+    }
 }
 
 fn trusted_signer_manifest_contains(
@@ -339,7 +343,7 @@ fn trusted_signer_manifest_contains(
     state_dir: &Path,
 ) -> Result<bool, LoadError> {
     let mut path = guard_core::paths::trusted_rule_signers_path();
-    if cfg!(debug_assertions) && !path.exists() {
+    if (cfg!(debug_assertions) || cfg!(feature = "test-signer")) && !path.exists() {
         path = state_dir.join(guard_core::paths::TRUSTED_RULE_SIGNERS_FILENAME);
     }
     verify_trusted_signer_manifest_path(&path)?;
@@ -362,7 +366,7 @@ fn verify_trusted_signer_manifest_path(path: &Path) -> Result<(), LoadError> {
             "trusted signer manifest is not a regular file".to_string(),
         ));
     }
-    #[cfg(not(debug_assertions))]
+    #[cfg(all(not(debug_assertions), not(feature = "test-signer")))]
     {
         use std::os::unix::fs::MetadataExt;
         if meta.uid() != 0 || meta.gid() != 0 || meta.mode() & 0o022 != 0 {

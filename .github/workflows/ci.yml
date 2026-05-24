@@ -26,11 +26,11 @@ jobs:
     name: Prepare validation context
     runs-on: ubuntu-latest
     outputs:
-      code: ${{ steps.changes.outputs.code }}
-      lockfile: ${{ steps.changes.outputs.lockfile }}
-      markdown: ${{ steps.changes.outputs.markdown }}
-      scan_base: ${{ steps.range.outputs.base }}
-      scan_head: ${{ steps.range.outputs.head }}
+      code: ${{ steps.context.outputs.code }}
+      lockfile: ${{ steps.context.outputs.lockfile }}
+      markdown: ${{ steps.context.outputs.markdown }}
+      scan_base: ${{ steps.context.outputs.base }}
+      scan_head: ${{ steps.context.outputs.head }}
       is_pr: ${{ steps.context.outputs.is_pr }}
     steps:
       - name: Checkout PR head
@@ -53,77 +53,9 @@ jobs:
           git remote add upstream "https://github.com/${{ github.repository }}.git"
           git fetch --no-tags upstream main
 
-      - name: Detect validation-relevant changes
-        id: changes
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            {
-              echo "code=false"
-              echo "lockfile=true"
-              echo "markdown=false"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          base_ref="upstream/main"
-          changed=$(git diff --name-only "$base_ref...HEAD")
-          printf 'Changed files:\n%s\n' "$changed"
-
-          code=false
-          lockfile=false
-          markdown=false
-          while IFS= read -r path; do
-            [ -n "$path" ] || continue
-            case "$path" in
-              *.rs|*/Cargo.toml|Cargo.toml|*/Cargo.lock|Cargo.lock|rust-toolchain.toml|crates/guard-e2e/fixtures/*|crates/guard-e2e/harness/*|crates/guard-core/data/*|scripts/*.sh|tools/*)
-                code=true
-                ;;
-            esac
-            case "$path" in
-              */Cargo.toml|Cargo.toml|*/Cargo.lock|Cargo.lock|rust-toolchain.toml)
-                lockfile=true
-                ;;
-            esac
-            case "$path" in
-              *.md)
-                markdown=true
-                ;;
-            esac
-          done <<< "$changed"
-
-          {
-            echo "code=$code"
-            echo "lockfile=$lockfile"
-            echo "markdown=$markdown"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Compute secret scan range
-        id: range
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base=$(git merge-base upstream/main HEAD)
-            head=$(git rev-parse HEAD)
-            echo "base=$base" >> "$GITHUB_OUTPUT"
-            echo "head=$head" >> "$GITHUB_OUTPUT"
-            echo "Secret scan range: $base..$head"
-          else
-            echo "base=" >> "$GITHUB_OUTPUT"
-            echo "head=" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Record event context
+      - name: Detect validation context
         id: context
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "is_pr=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_pr=false" >> "$GITHUB_OUTPUT"
-          fi
+        run: scripts/ci-detect-validation-context.sh upstream/main
 
   pr_title:
     name: PR title
@@ -214,7 +146,7 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-rust
       - uses: taiki-e/install-action@cargo-machete
       - name: Lint test env var hygiene
         run: scripts/lint-test-env-vars.sh
@@ -234,38 +166,11 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-rust
         with:
           shared-key: linux-compile-gate
       - name: Verify sanitized fixture present
-        run: |
-          set -euo pipefail
-          fixture=crates/guard-e2e/fixtures/ua-parser-js-0.7.29-sanitized/ua-parser-js-0.7.29-sanitized.tgz
-          test -f "$fixture" || { echo "FATAL: sanitized fixture missing"; exit 1; }
-          actual=$(sha256sum "$fixture" | awk '{print $1}')
-          echo "Fixture SHA-256: $actual"
-          matches=$(grep -c '^EXPECTED_OUTPUT_SHA256="[a-f0-9]\{64\}"$' \
-                    tools/vendor-ua-parser-js.sh || true)
-          if [ "$matches" -ne 1 ]; then
-            echo "FATAL: expected exactly one EXPECTED_OUTPUT_SHA256=\"<64-hex>\" line in tools/vendor-ua-parser-js.sh, found $matches"
-            exit 1
-          fi
-          pinned=$(grep '^EXPECTED_OUTPUT_SHA256="[a-f0-9]\{64\}"$' \
-                   tools/vendor-ua-parser-js.sh \
-                   | sed -E 's/^EXPECTED_OUTPUT_SHA256="([a-f0-9]{64})"$/\1/')
-          if [ -z "$pinned" ] || [ "$pinned" = "<FILL_ON_FIRST_RUN>" ]; then
-            echo "FATAL: tools/vendor-ua-parser-js.sh has no committed pinned hash"
-            exit 1
-          fi
-          if [ "$actual" != "$pinned" ]; then
-            echo "FATAL: fixture hash mismatch — fixture drifted from script pin"
-            echo "  script pin: $pinned"
-            echo "  on-disk:    $actual"
-            exit 1
-          fi
-          echo "Fixture hash matches script pin."
+        run: scripts/ci-verify-sanitized-fixture.sh
       - name: cargo check shared crates
         run: cargo check -p guard-os -p guard-watchdog --quiet
       - name: cargo check boundary consumers
@@ -382,10 +287,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: validation
+      - uses: ./.github/actions/setup-rust
       - name: cargo build workspace (release)
         run: cargo build --workspace --release
       - name: Upload release binaries for E2E
@@ -415,10 +317,7 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
-      - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: validation
+      - uses: ./.github/actions/setup-rust
       - name: cargo test unit targets
         run: cargo test --workspace --exclude guard-e2e --lib --bins --quiet
 
@@ -436,10 +335,7 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
-      - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: validation
+      - uses: ./.github/actions/setup-rust
       - name: cargo test integration targets
         run: cargo test --workspace --exclude guard-e2e --tests --quiet
 
@@ -461,10 +357,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: validation
+      - uses: ./.github/actions/setup-rust
       - name: Download release binaries from build
         uses: actions/download-artifact@v4
         with:

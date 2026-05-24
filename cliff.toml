@@ -34,6 +34,7 @@ filter_unconventional = true
 split_commits = false
 commit_parsers = [
     { message = "^feat", group = "<!-- 0 -->Features" },
+    { message = "^fix\\(security\\)", group = "<!-- 1a -->Security Fixes" },
     { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
     { message = "^perf", group = "<!-- 2 -->Performance" },
     # Shipped docs — appear in changelog (man pages, CLI --help, bundled install docs)

@@ -82,6 +82,24 @@ does and how it works from names, structure, and flow before needing comments.
 - Let functions have a visible rhythm: gather inputs, validate, derive named
   values, perform the operation, return.
 - Let code breathe with blank lines between distinct phases.
+- Put an empty line above and below multi-line statement blocks, including
+  multi-line `let` initializers, `if`/`match` blocks, unsafe blocks, and
+  multi-line method chains. Do not let those blocks run directly into
+  single-line statements.
+- Separate adjacent control-flow blocks with a blank line when they are
+  independent checks. Keep `if`/`else if`/`else` chains together because they
+  represent one decision.
+- Do not add blank lines between isolated one-line statements merely because
+  they are unrelated; solo statements stay together.
+- Use blank lines to separate a logical group from a solo statement, a solo
+  statement from a following logical group, or one logical group from another
+  group. A group is usually two or more related statements or a block.
+- Separate a declaration from a following run of assignments with a blank line,
+  such as `let mut val = ...;` followed by multiple `val[i] = ...;`
+  statements. A single declaration plus one immediate assignment may stay
+  together when they read as one small setup step.
+- Put a blank line before a final return expression such as `Ok(info.pbi_gid)`
+  when it follows validation, branching, or any multi-line block.
 - Group related declarations together, especially when names share terms.
 - Keep validation visually separate from mutation, I/O, or return construction.
 - Prefer explicit branching when it makes the business rule clearer.

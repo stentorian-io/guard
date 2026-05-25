@@ -346,12 +346,17 @@ man stt-guard-daemon   # daemon internals
 
 ### Platform support
 
-| Platform | Version       | Status        | Enforcement mechanism    | Hardware-backed signing support | Notes                                                                                                                                                                                                                                                     |
-| -------- | ------------- | ------------- | ------------------------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| macOS    | 13+ (Ventura) | **Supported** | DYLD injection           | Required: Secure Enclave or security key for baseline/snapshot signing | Primary platform, tested in CI                                                                                                                                                                                                                            |
-| macOS    | 12 (Monterey) | Best-effort   | DYLD injection           | Required: Secure Enclave or security key for baseline/snapshot signing | Not tested in CI                                                                                                                                                                                                                                          |
-| Linux    | glibc         | Initial support | LD_PRELOAD               | Production signer not implemented yet | Dynamically linked wrapped-process enforcement, Linux peer/process identity, fail-closed connect, and setuid/setgid exec blocking. Hardened production install remains gated on service and hardware-signer design. |
-| Windows  | —             | Not planned   | —                        | Unsupported                     | Windows restricts userspace library injection behind kernel-mode driver signing and security features that require paid enterprise certificates. There is no equivalent to DYLD or LD_PRELOAD available to open-source tools without elevated privileges. |
+| Platform | Versions / kernels | Architectures | Status | Details |
+| --- | --- | --- | --- | --- |
+| macOS | 13+ supported; 12 best-effort | `arm64`/`aarch64`, `x86_64` | **Supported** | [macOS support](docs/macos.md) |
+| Linux | Ubuntu/glibc smoke validation; musl and kernel series tracked | `x86_64` validated; `aarch64` tracked | Development-only initial support | [Linux support](docs/linux.md) |
+| Windows | — | — | Not planned | [Windows support](docs/windows.md) |
+
+Reviewed platform and toolchain coverage is tracked in
+[`compatibility-matrix.yaml`](compatibility-matrix.yaml). The weekly
+compatibility tracker opens human-review issues for new OS, CPU architecture,
+Rust, LLVM, Xcode, Homebrew, and Linux lifecycle entries; it never updates the
+manifest automatically. See [docs/compatibility.md](docs/compatibility.md).
 
 ### Threat intelligence
 
@@ -384,12 +389,14 @@ supply-chain malware attempts.
 
 It is not designed to stop a sufficiently determined attacker who can exploit
 the kernel or target infrastructure outside the process tree. On macOS,
-unknown native binaries that contain raw syscall instruction bytes fail closed
-at exec time; a future design will investigate non-fail-closed alternatives for
-that T3 class. The [security policy](SECURITY.md) documents the full threat
-model, known platform constraints, and what is (and isn't) considered a
-vulnerability. Read it before assuming Stentorian Guard is a sandbox — it isn't one,
-and we are upfront about where the boundaries are.
+unsupported Mach-O shapes, unknown native CPU subtypes, malformed scanner
+inputs, and native binaries that contain raw syscall instruction bytes fail
+closed at exec time. Shebang scripts remain allowed because the interpreter is
+the executable runtime that receives the hook. A future design will investigate
+non-fail-closed alternatives for that T3 class. The [security policy](SECURITY.md)
+documents the full threat model, known platform constraints, and what is (and
+isn't) considered a vulnerability. Read it before assuming Stentorian Guard is
+a sandbox — it isn't one, and we are upfront about where the boundaries are.
 
 ## Found Stentorian Guard useful?
 

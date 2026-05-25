@@ -8,6 +8,7 @@ members = [
   "crates/guard-os",
   "crates/guard-ipc",
   "crates/guard-watchdog",
+  "crates/guard-compat",
   "crates/guard-e2e",
   "crates/guard-e2e/harness/env_clear_posix_spawn",
   "crates/guard-e2e/harness/pm_env_posix_spawn",

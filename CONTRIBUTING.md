@@ -247,6 +247,11 @@ validation starts:
   schedule.
 - Platform E2E jobs download the release build artifacts so install-health tests
   exercise the same payload produced by the release-build matrix.
+- `.github/workflows/compatibility-tracker.yml` runs Mondays at 08:00 UTC and
+  opens review issues when upstream OS, CPU architecture, or toolchain sources
+  contain entries missing from `compatibility-matrix.yaml`.
+- `.github/workflows/compatibility-nightly.yml` runs daily at 06:00 UTC and
+  exercises a scheduled macOS/Rust matrix plus a Linux compile placeholder.
 
 PRs must pass the full CI suite before merging.
 

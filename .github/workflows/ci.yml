@@ -280,6 +280,32 @@ jobs:
           path: .audit-cache-marker
           key: ${{ steps.audit_cache.outputs.cache-primary-key }}
 
+  requirement_gate:
+    name: Requirement gate
+    needs:
+      - prepare
+      - secret_scan
+      - lint
+      - linux_check
+      - macos_check
+      - release_build
+      - unit_tests
+      - integration_tests
+      - linux_e2e_tests
+      - macos_e2e_tests
+      - cargo_audit
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required job results
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results"
+          if echo "$results" | grep -qE '"result":"(failure|cancelled)"'; then
+            echo "::error::One or more required jobs failed or were cancelled"
+            exit 1
+          fi
+
   release_build:
     name: Release build (${{ matrix.platform }})
     needs:

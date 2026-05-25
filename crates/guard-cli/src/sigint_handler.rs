@@ -46,12 +46,11 @@ pub fn install(
     let _ = std::thread::Builder::new()
         .name("guard-sigint".into())
         .spawn(move || {
-            for _sig in signals.forever() {
+            if let Some(_sig) = signals.forever().next() {
                 if stop_thread.load(Ordering::SeqCst) {
-                    break;
+                    return;
                 }
                 handle_sigint(&inflight, &channel, pgid);
-                break; // one-shot
             }
         })
         .map_err(|e| CliError::Other(format!("spawn sigint thread: {e}")))?;

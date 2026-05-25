@@ -3,7 +3,7 @@
 use crossbeam_channel::bounded;
 use guard_daemon::handlers::prompt_channel::{ClientChannelFrame, MAX_CONCURRENT_CHANNELS};
 use guard_daemon::tracked::ProcessTree;
-use guard_ipc::{PromptCancel, PromptResponse, PromptVerdict, IPC_SCHEMA_V3};
+use guard_ipc::{IPC_SCHEMA_V3, PromptCancel, PromptResponse, PromptVerdict};
 
 #[test]
 fn channel_frame_round_trip() {

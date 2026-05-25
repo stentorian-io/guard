@@ -13,14 +13,20 @@
 //! file descriptors. Opt-in via:
 //!   cargo test -p guard-e2e -- --ignored sixty_fifth_prompt_channel
 
+#[cfg(target_os = "macos")]
 use std::io::{Read, Write};
+#[cfg(target_os = "macos")]
 use std::os::unix::net::UnixStream;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
 use guard_ipc::frame::{read_frame, write_frame};
+#[cfg(target_os = "macos")]
 use guard_ipc::{IPC_SCHEMA_V3, PromptChannelInit, PromptChannelInitAck};
 
 /// Tag byte for PromptChannelInit — mirrors TAG_PROMPT_CHANNEL_INIT in CLI.
+#[cfg(target_os = "macos")]
 const TAG_PROMPT_CHANNEL_INIT: u8 = 0x0A;
 
 /// Open a raw PromptChannelInit exchange against the daemon socket.
@@ -31,6 +37,7 @@ const TAG_PROMPT_CHANNEL_INIT: u8 = 0x0A;
 /// Returns the live stream (to hold the prompt-channel slot open) and the
 /// decoded Ack. The stream is kept alive so the daemon doesn't tear down the
 /// channel until the caller explicitly drops it.
+#[cfg(target_os = "macos")]
 fn open_prompt_channel_init(
     sock: &std::path::Path,
     run_uuid: &str,
@@ -68,6 +75,7 @@ fn open_prompt_channel_init(
 /// Start a background `stt-guard wrap -- /bin/sleep 600` so a run_uuid is
 /// registered with the daemon. Returns the child handle (caller must kill it)
 /// and the run_uuid (recovered from the manifest written by PrepareSnapshot).
+#[cfg(target_os = "macos")]
 fn start_background_tracked_run(
     harness: &guard_e2e::DaemonHarness,
 ) -> (std::process::Child, String) {

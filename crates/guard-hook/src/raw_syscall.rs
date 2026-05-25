@@ -5,9 +5,9 @@
 //! symbol back to Stentorian Guard's replacement function.
 //!
 //! macOS/XNU syscall ABI:
-//!   - aarch64: x16 = syscall number, x0-x5 = args, svc #0x80, result in x0
-//!   - x86_64:  rax = syscall number | 0x2000000, rdi/rsi/rdx/r10/r8/r9 = args,
-//!              syscall instruction, result in rax
+//! - aarch64: x16 = syscall number, x0-x5 = args, svc #0x80, result in x0
+//! - x86_64:  rax = syscall number | 0x2000000, rdi/rsi/rdx/r10/r8/r9 = args,
+//!   syscall instruction, result in rax
 //!
 //! The 0x2000000 prefix on x86_64 selects the BSD syscall class on XNU.
 
@@ -197,6 +197,7 @@ unsafe fn syscall0(num: i64) -> i64 {
 
 /// Raw kernel syscall with 8 arguments (connectx).
 #[inline(always)]
+#[allow(clippy::too_many_arguments)]
 unsafe fn syscall8(
     num: i64,
     a1: u64,
@@ -267,6 +268,7 @@ pub unsafe fn raw_connect(s: c_int, addr: *const sockaddr, addrlen: socklen_t) -
 }
 
 #[inline(always)]
+#[allow(clippy::too_many_arguments)]
 pub unsafe fn raw_connectx(
     s: c_int,
     endpoints: *const c_void,

@@ -11,12 +11,17 @@
 //! Marked #[ignore]: requires PTY + signal-aware test runner + macOS daemon.
 //! Opt-in via: cargo test -p guard-e2e -- --ignored sigint_during_prompt
 
+#[cfg(target_os = "macos")]
 use std::io::{BufRead, BufReader};
+#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
 use portable_pty::PtySize;
 
+#[cfg(target_os = "macos")]
 const DENY_HOST: &str = "discord.com";
+#[cfg(target_os = "macos")]
 const DENY_PORT: &str = "443";
 
 #[cfg(target_os = "macos")]

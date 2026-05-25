@@ -5,11 +5,15 @@
 //! two attempts into a single prompt. The test writes "1\n" once and asserts
 //! the PTY received exactly one "Choose: [1]" line.
 
+#[cfg(target_os = "macos")]
 use std::io::{BufRead, BufReader, Write as _};
+#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
 use portable_pty::PtySize;
 
+#[cfg(target_os = "macos")]
 const DENY_HOST: &str = "discord.com";
 
 #[cfg(target_os = "macos")]

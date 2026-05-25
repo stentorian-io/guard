@@ -726,8 +726,8 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, S
         let af = if sa_n >= 2 { sa_buf[1] as i32 } else { 0 };
         let is_inet = af == AF_INET || af == AF_INET6;
 
-        let not_loopback = ip_slice.map_or(true, |ip| !is_loopback_ip(ip));
-        let not_imds = ip_slice.map_or(true, |ip| !is_cloud_metadata_ip(ip));
+        let not_loopback = ip_slice.is_none_or(|ip| !is_loopback_ip(ip));
+        let not_imds = ip_slice.is_none_or(|ip| !is_cloud_metadata_ip(ip));
 
         if is_inet && not_loopback && not_imds {
             // Extract port from bytes [2..4] of the sockaddr wire buffer (BE u16).
@@ -742,17 +742,15 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, S
                 /* buf */ [u8; MAX_HOSTNAME],
                 /* len */ usize,
             )> = None;
-            let mut attempts = 0usize;
-            'resolve_walk: for entry in entries.iter().filter(|e| {
-                e.kind == RuleKind::Allow
-                    && e.tier == RuleTier::CuratedAllow
-                    && e.match_type == MatchType::Exact
-            }) {
-                if attempts >= MAX_RESOLVE_ATTEMPTS {
-                    break;
-                }
-                attempts += 1;
-
+            'resolve_walk: for entry in entries
+                .iter()
+                .filter(|e| {
+                    e.kind == RuleKind::Allow
+                        && e.tier == RuleTier::CuratedAllow
+                        && e.match_type == MatchType::Exact
+                })
+                .take(MAX_RESOLVE_ATTEMPTS)
+            {
                 match send_resolve_sync(&entry.pattern, port, RESOLVE_TIMEOUT_MS) {
                     Ok(addrs) => {
                         // Compare each returned sockaddr wire buffer against
@@ -819,44 +817,40 @@ unsafe fn ip_to_str<'a>(
     if addrlen as usize >= core::mem::size_of::<libc::sa_family_t>() {
         let family = unsafe { (*addr).sa_family };
         match family as i32 {
-            libc::AF_INET => {
-                if addrlen as usize >= core::mem::size_of::<libc::sockaddr_in>() {
-                    let sin = unsafe { &*(addr as *const libc::sockaddr_in) };
-                    let r = unsafe {
-                        inet_ntop(
-                            libc::AF_INET,
-                            &sin.sin_addr as *const _ as *const c_void,
-                            buf.as_mut_ptr() as *mut c_char,
-                            buf.len() as socklen_t,
-                        )
-                    };
-                    if !r.is_null() {
-                        let mut n = 0usize;
-                        while n < buf.len() && buf[n] != 0 {
-                            n += 1;
-                        }
-                        return Some(&buf[..n]);
+            libc::AF_INET if addrlen as usize >= core::mem::size_of::<libc::sockaddr_in>() => {
+                let sin = unsafe { &*(addr as *const libc::sockaddr_in) };
+                let r = unsafe {
+                    inet_ntop(
+                        libc::AF_INET,
+                        &sin.sin_addr as *const _ as *const c_void,
+                        buf.as_mut_ptr() as *mut c_char,
+                        buf.len() as socklen_t,
+                    )
+                };
+                if !r.is_null() {
+                    let mut n = 0usize;
+                    while n < buf.len() && buf[n] != 0 {
+                        n += 1;
                     }
+                    return Some(&buf[..n]);
                 }
             }
-            libc::AF_INET6 => {
-                if addrlen as usize >= core::mem::size_of::<libc::sockaddr_in6>() {
-                    let sin6 = unsafe { &*(addr as *const libc::sockaddr_in6) };
-                    let r = unsafe {
-                        inet_ntop(
-                            libc::AF_INET6,
-                            &sin6.sin6_addr as *const _ as *const c_void,
-                            buf.as_mut_ptr() as *mut c_char,
-                            buf.len() as socklen_t,
-                        )
-                    };
-                    if !r.is_null() {
-                        let mut n = 0usize;
-                        while n < buf.len() && buf[n] != 0 {
-                            n += 1;
-                        }
-                        return Some(&buf[..n]);
+            libc::AF_INET6 if addrlen as usize >= core::mem::size_of::<libc::sockaddr_in6>() => {
+                let sin6 = unsafe { &*(addr as *const libc::sockaddr_in6) };
+                let r = unsafe {
+                    inet_ntop(
+                        libc::AF_INET6,
+                        &sin6.sin6_addr as *const _ as *const c_void,
+                        buf.as_mut_ptr() as *mut c_char,
+                        buf.len() as socklen_t,
+                    )
+                };
+                if !r.is_null() {
+                    let mut n = 0usize;
+                    while n < buf.len() && buf[n] != 0 {
+                        n += 1;
                     }
+                    return Some(&buf[..n]);
                 }
             }
             _ => {}

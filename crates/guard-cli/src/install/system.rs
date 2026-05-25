@@ -9,8 +9,8 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::hardware_signing::HardwareSignerEnrollment;
 use crate::CliError;
+use crate::hardware_signing::HardwareSignerEnrollment;
 
 use guard_core::paths;
 

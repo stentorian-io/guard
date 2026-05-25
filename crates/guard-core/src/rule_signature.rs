@@ -254,8 +254,8 @@ fn hex_lower(bytes: &[u8]) -> String {
 #[cfg(any(test, feature = "test-signer"))]
 pub mod test_support {
     use super::*;
-    use p256::ecdsa::signature::Signer;
     use p256::ecdsa::SigningKey;
+    use p256::ecdsa::signature::Signer;
 
     pub fn test_simulator_public_signer() -> Result<(String, String, Vec<u8>), RuleSignatureError> {
         let signing_key =

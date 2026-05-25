@@ -5,12 +5,17 @@
 //! This complements prompt_unblock_deny.rs (which only asserts the JSONL
 //! source_kind=prompt_deny row).
 
+#[cfg(target_os = "macos")]
 use std::io::{BufRead, BufReader, Write as _};
+#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
 use portable_pty::PtySize;
 
+#[cfg(target_os = "macos")]
 const DENY_HOST: &str = "discord.com";
+#[cfg(target_os = "macos")]
 const DENY_PORT: &str = "443";
 
 #[cfg(target_os = "macos")]

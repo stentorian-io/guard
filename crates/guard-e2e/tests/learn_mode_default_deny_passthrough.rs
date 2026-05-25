@@ -21,14 +21,20 @@
 //! the libuv thread-pool path, which is fragile on some dev machines.
 //! Opt-in via: `cargo test -p guard-e2e -- --ignored learn_mode_allows`
 
+#[cfg(target_os = "macos")]
 use std::io::Write as _;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
 use portable_pty::PtySize;
 
+#[cfg(target_os = "macos")]
 const HOST: &str = "discord.com";
+#[cfg(target_os = "macos")]
 const PORT: &str = "443";
 
+#[cfg(target_os = "macos")]
 fn host_resolves_outside_guard() -> bool {
     use std::net::ToSocketAddrs;
     format!("{HOST}:{PORT}")

@@ -138,7 +138,10 @@ jobs:
     needs:
       - prepare
       - pr_checks
-    if: needs.prepare.outputs.code == 'true' && needs.pr_checks.result == 'success'
+    if: >-
+      !cancelled()
+      && needs.prepare.outputs.code == 'true'
+      && needs.pr_checks.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -149,9 +152,13 @@ jobs:
       - name: Lint GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - uses: ./.github/actions/setup-rust
-      - uses: taiki-e/install-action@cargo-machete
+      - name: Check rustfmt
+        run: cargo fmt --check
+      - name: Check clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Lint test env var hygiene
         run: scripts/lint-test-env-vars.sh
+      - uses: taiki-e/install-action@cargo-machete
       - name: Lint unused dependencies
         run: cargo machete --with-metadata
 
@@ -160,7 +167,10 @@ jobs:
     needs:
       - prepare
       - lint
-    if: needs.prepare.outputs.code == 'true' && needs.lint.result == 'success'
+    if: >-
+      !cancelled()
+      && needs.prepare.outputs.code == 'true'
+      && needs.lint.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -313,7 +323,10 @@ jobs:
     needs:
       - prepare
       - build
-    if: needs.prepare.outputs.code == 'true' && needs.build.result == 'success'
+    if: >-
+      !cancelled()
+      && needs.prepare.outputs.code == 'true'
+      && needs.build.result == 'success'
     runs-on: macos-14
     timeout-minutes: 15
     steps:
@@ -331,7 +344,10 @@ jobs:
     needs:
       - prepare
       - unit_tests
-    if: needs.prepare.outputs.code == 'true' && needs.unit_tests.result == 'success'
+    if: >-
+      !cancelled()
+      && needs.prepare.outputs.code == 'true'
+      && needs.unit_tests.result == 'success'
     runs-on: macos-14
     timeout-minutes: 15
     steps:
@@ -349,7 +365,10 @@ jobs:
     needs:
       - prepare
       - integration_tests
-    if: needs.prepare.outputs.code == 'true' && needs.integration_tests.result == 'success'
+    if: >-
+      !cancelled()
+      && needs.prepare.outputs.code == 'true'
+      && needs.integration_tests.result == 'success'
     runs-on: macos-14
     timeout-minutes: 25
     steps:

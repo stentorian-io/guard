@@ -1,8 +1,8 @@
 #![cfg(feature = "test-signer")]
 
 use guard_core::{
-    verify_rule_signature, verify_snapshot_signature, RuleSignaturePayloadV1, RuleSignaturePolicy,
-    SnapshotSignaturePayloadV1, SIGNER_KIND_TEST_SIMULATOR,
+    RuleSignaturePayloadV1, RuleSignaturePolicy, SIGNER_KIND_TEST_SIMULATOR,
+    SnapshotSignaturePayloadV1, verify_rule_signature, verify_snapshot_signature,
 };
 
 fn payload() -> RuleSignaturePayloadV1 {

@@ -210,21 +210,17 @@ fn decide_for_sockaddr_allows_curated_host_via_resolve_ipc() {
         reason: "test entry for resolve-ipc gap-closure".to_string(),
     }];
 
-    // Build a raw AF_INET sockaddr_in for 1.2.3.4:443.
-    // Darwin sockaddr_in layout:
-    //   u8  sin_len   = 16
-    //   u8  sin_family = AF_INET = 2
-    //   u16 sin_port  = 443 (big-endian)
-    //   u32 sin_addr  = 1.2.3.4
-    //   [u8; 8] sin_zero = zeroes
-    let mut sa = libc::sockaddr_in {
-        sin_len: 16,
-        sin_family: libc::AF_INET as u8,
-        sin_port: 443u16.to_be(),
-        sin_addr: libc::in_addr {
-            s_addr: u32::from_be_bytes([1, 2, 3, 4]).to_be(),
-        },
-        sin_zero: [0i8; 8],
+    // Build a raw AF_INET sockaddr_in for 1.2.3.4:443. This test only runs on
+    // macOS, but the ignored Linux target still has to type-check this body.
+    let mut sa: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+    #[cfg(target_os = "macos")]
+    {
+        sa.sin_len = 16;
+    }
+    sa.sin_family = libc::AF_INET as libc::sa_family_t;
+    sa.sin_port = 443u16.to_be();
+    sa.sin_addr = libc::in_addr {
+        s_addr: u32::from_be_bytes([1, 2, 3, 4]).to_be(),
     };
     let addrlen = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
 

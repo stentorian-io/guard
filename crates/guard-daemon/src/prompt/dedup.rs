@@ -11,9 +11,12 @@ use std::time::{Duration, Instant};
 
 pub const WINDOW: Duration = Duration::from_secs(5);
 
+type PromptDedupKey = (String, String, u16);
+type PromptDedupValue = (String, Instant);
+
 #[derive(Default)]
 pub struct PromptDedup {
-    pending: Mutex<HashMap<(String, String, u16), (String, Instant)>>,
+    pending: Mutex<HashMap<PromptDedupKey, PromptDedupValue>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

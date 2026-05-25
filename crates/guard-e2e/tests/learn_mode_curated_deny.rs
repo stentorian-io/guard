@@ -15,11 +15,15 @@
 //! Requires PTY because `--learn` gates on `stdin_is_tty()`.
 //! Opt-in via: `cargo test -p guard-e2e -- --ignored learn_mode_still_blocks`
 
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
 use portable_pty::PtySize;
 
+#[cfg(target_os = "macos")]
 const DENY_HOST: &str = "guard-test.workers.dev";
+#[cfg(target_os = "macos")]
 const DENY_PORT: &str = "443";
 
 #[cfg(target_os = "macos")]

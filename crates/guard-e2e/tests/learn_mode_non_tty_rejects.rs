@@ -8,6 +8,7 @@
 //! This test does NOT require a daemon, PTY, or network access — the TTY
 //! check fires before any IPC or process spawning.
 
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 
 #[cfg(target_os = "macos")]

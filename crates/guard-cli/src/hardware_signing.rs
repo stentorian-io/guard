@@ -9,9 +9,9 @@
 use std::process::Command;
 
 use guard_core::{
+    RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256, RuleSignaturePayloadV1, RuleSignatureV1,
+    SIGNER_KIND_SECURE_ENCLAVE, SnapshotSignaturePayloadV1, SnapshotSignatureV1,
     canonical_rule_payload_bytes, canonical_snapshot_payload_bytes, sha256_hex,
-    RuleSignaturePayloadV1, RuleSignatureV1, SnapshotSignaturePayloadV1, SnapshotSignatureV1,
-    RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256, SIGNER_KIND_SECURE_ENCLAVE,
 };
 
 use crate::CliError;

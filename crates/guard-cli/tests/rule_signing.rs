@@ -15,9 +15,10 @@ fn production_rule_signing_fails_without_hardware_provider() {
     }
     let err = guard_cli::rule_signing::sign_rule_payload(&payload)
         .expect_err("production must not fall back to software signing");
-    assert!(err
-        .to_string()
-        .contains("hardware-backed signing key unavailable"));
+    assert!(
+        err.to_string()
+            .contains("hardware-backed signing key unavailable")
+    );
 
     let snapshot_payload = guard_core::SnapshotSignaturePayloadV1::new(
         "run-1",
@@ -26,9 +27,10 @@ fn production_rule_signing_fails_without_hardware_provider() {
     );
     let err = guard_cli::rule_signing::sign_snapshot_payload(&snapshot_payload)
         .expect_err("production snapshot signing must not fall back to software signing");
-    assert!(err
-        .to_string()
-        .contains("hardware-backed signing key unavailable"));
+    assert!(
+        err.to_string()
+            .contains("hardware-backed signing key unavailable")
+    );
 }
 
 #[cfg(feature = "test-signer")]

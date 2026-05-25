@@ -12,7 +12,7 @@
 //! covers the hard data-structure-level TREE-05 invariant directly. This e2e
 //! test only confirms the dispatch path doesn't crash under the double-fork
 //! + setsid pattern — full daemon-introspection of the tree state is a
-//! v0.3 polish (`stt-guard status` will surface this).
+//!   v0.3 polish (`stt-guard status` will surface this).
 
 use guard_e2e::{DaemonHarness, cargo_workspace_root, resolve_cli, resolve_dylib};
 use std::process::Command;

@@ -7,7 +7,7 @@
 use crate::OsError;
 use guard_core::AuditToken;
 #[cfg(target_os = "macos")]
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void};
 
 /// macOS syscall number for csops. Verified from MacOSX15.4.sdk syscall.h.
 pub const SYS_CSOPS: libc::c_int = 169;
@@ -57,7 +57,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     fn CFStringCreateWithCString(
         alloc: CFAllocatorRef,
-        c_str: *const u8,
+        c_str: *const c_char,
         encoding: u32,
     ) -> CFStringRef;
 
@@ -175,7 +175,7 @@ pub fn verify_peer_signature(token: &AuditToken) -> CodesignVerdict {
     unsafe {
         let key = CFStringCreateWithCString(
             std::ptr::null(),
-            b"audit\0".as_ptr(),
+            c"audit".as_ptr(),
             KCF_STRING_ENCODING_UTF8,
         );
         if key.is_null() {
@@ -197,8 +197,8 @@ pub fn verify_peer_signature(token: &AuditToken) -> CodesignVerdict {
         let values = [token_data];
         let dict = CFDictionaryCreate(
             std::ptr::null(),
-            keys.as_ptr() as *const *const c_void,
-            values.as_ptr() as *const *const c_void,
+            keys.as_ptr(),
+            values.as_ptr(),
             1,
             &kCFTypeDictionaryKeyCallBacks as *const c_void,
             &kCFTypeDictionaryValueCallBacks as *const c_void,

@@ -109,7 +109,7 @@ fn lockfile_registries_appear_in_snapshot() {
     let found_snapshot = std::fs::read_dir(&runs_dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "cbor"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "cbor"))
         .any(|e| {
             let data = std::fs::read(e.path()).unwrap_or_default();
             data.windows(b"npm.internal.example.com".len())
@@ -168,7 +168,7 @@ source = "sparse+https://cargo.corp.example.com/index/"
         let has_cargo_host = std::fs::read_dir(&runs_dir)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "cbor"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "cbor"))
             .any(|e| {
                 let data = std::fs::read(e.path()).unwrap_or_default();
                 data.windows(b"cargo.corp.example.com".len())

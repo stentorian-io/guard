@@ -83,8 +83,8 @@ in Docker and the macOS E2E smoke suite. The Linux stages use the same
 `rust:1.95.0-bookworm` container image locally and in CI, with Cargo caches
 under `/private/tmp/stt-guard-docker`.
 
-GitHub Actions remains the final PR gate, including secret scan, dependency
-audit, and privileged macOS install-health validation.
+GitHub Actions remains the required PR validation surface, including secret
+scan, dependency audit, and privileged macOS install-health validation.
 
 Benchmark infrastructure lives in `crates/guard-hook/benches/` (criterion) and `crates/guard-e2e/tests/bench_hot_path_e2e.rs` (live-wrap). Run `./scripts/bench-hot-path.sh` to reproduce locally.
 
@@ -226,8 +226,7 @@ then heavier code validation only when relevant files changed:
   on Ubuntu.
 - Rust lint and the Linux compile gate run on Ubuntu before paid macOS work.
 - Build, unit tests, integration tests, and macOS E2E run on macOS.
-- Linux E2E runs on Ubuntu in parallel with the macOS build/test/E2E path after
-  the Linux compile gate passes.
+- Linux E2E runs on Ubuntu after integration tests, in parallel with macOS E2E.
 - The macOS release build uploads binaries as a short-lived artifact; the macOS
   E2E job downloads those exact binaries so install-health tests exercise the
   same payload produced by the build job.

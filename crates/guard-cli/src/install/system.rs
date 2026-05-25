@@ -4,6 +4,8 @@
 //! `/usr/local/libexec/stt-guard/`, creates state and log directories owned
 //! by `_stt_guard`, installs a LaunchDaemon, and starts it.
 
+#![cfg_attr(target_os = "linux", allow(dead_code))]
+
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -42,6 +44,17 @@ pub fn system_state_dir() -> PathBuf {
 }
 
 /// Print the action plan the user is about to confirm.
+#[cfg(target_os = "linux")]
+pub fn print_plan() {
+    eprintln!("stt-guard init is not available on Linux yet.");
+    eprintln!("  • Linux LD_PRELOAD enforcement is available for development builds.");
+    eprintln!(
+        "  • Hardened production install is blocked on systemd service and hardware-backed signer design."
+    );
+}
+
+/// Print the action plan the user is about to confirm.
+#[cfg(not(target_os = "linux"))]
 pub fn print_plan() {
     eprintln!("stt-guard init will:");
     eprintln!("  • Create {SERVICE_USER} service user (no login shell, /var/empty home)");
@@ -56,6 +69,17 @@ pub fn print_plan() {
 }
 
 /// Execute the full hardened installation. Must be run as root.
+#[cfg(target_os = "linux")]
+pub fn run_install() -> Result<(), CliError> {
+    Err(CliError::Other(
+        "Linux hardened install is not implemented yet. \
+         Use a development build with STT_GUARD_STATE_DIR, or wait for the systemd and hardware-backed signer design."
+            .into(),
+    ))
+}
+
+/// Execute the full hardened installation. Must be run as root.
+#[cfg(not(target_os = "linux"))]
 pub fn run_install() -> Result<(), CliError> {
     require_root()?;
     let service_gid = create_service_user()?;
@@ -464,4 +488,19 @@ fn run_cmd(program: &str, args: &[&str], description: &str) -> Result<(), CliErr
         return Err(CliError::Other(format!("{description} failed: {stderr}")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[cfg(target_os = "linux")]
+mod tests {
+    #[test]
+    fn linux_hardened_install_is_explicitly_unsupported() {
+        let err = super::run_install().expect_err("Linux install should be gated");
+
+        assert!(
+            err.to_string()
+                .contains("Linux hardened install is not implemented yet"),
+            "unexpected error: {err}"
+        );
+    }
 }

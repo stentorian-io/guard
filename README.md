@@ -302,8 +302,8 @@ and source-build workflows:
 
 | Variable | Purpose |
 | --- | --- |
-| `STT_GUARD_STATE_DIR` | Override the state directory used by the CLI, daemon, and hook. In a hardened install, `stt-guard wrap` passes the system state directory through to wrapped processes; source-build workflows default to `~/Library/Application Support/Stentorian Guard`. |
-| `STT_GUARD_HOOK_DYLIB` | Override the hook dylib path used by `stt-guard wrap` in development/test mode. Production installs ignore this variable and use the verified root-owned system hook. |
+| `STT_GUARD_STATE_DIR` | Override the state directory used by the CLI, daemon, and hook. In a hardened install, `stt-guard wrap` passes the system state directory through to wrapped processes; source-build workflows default to `~/Library/Application Support/Stentorian Guard` on macOS and `$XDG_STATE_HOME/stt-guard` or `~/.local/state/stt-guard` on Linux. |
+| `STT_GUARD_HOOK_DYLIB` | Override the hook library path used by `stt-guard wrap` in development/test mode. Production installs ignore this variable and use the verified root-owned system hook. |
 | `RUST_LOG` | Control CLI and daemon logging verbosity. |
 
 `STT_GUARD_SNAPSHOT_MANIFEST` is an internal per-run variable injected by
@@ -350,7 +350,7 @@ man stt-guard-daemon   # daemon internals
 | -------- | ------------- | ------------- | ------------------------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | macOS    | 13+ (Ventura) | **Supported** | DYLD injection           | Required: Secure Enclave or security key for baseline/snapshot signing | Primary platform, tested in CI                                                                                                                                                                                                                            |
 | macOS    | 12 (Monterey) | Best-effort   | DYLD injection           | Required: Secure Enclave or security key for baseline/snapshot signing | Not tested in CI                                                                                                                                                                                                                                          |
-| Linux    | —             | Planned (v2)  | LD_PRELOAD / seccomp-bpf | Required: hardware-backed signer such as FIDO2/security key or TPM-backed key | [Tracking issue](https://github.com/stentorian-io/guard/issues/2)                                                                                                                                                                                      |
+| Linux    | glibc         | Initial support | LD_PRELOAD               | Production signer not implemented yet | Dynamically linked wrapped-process enforcement, Linux peer/process identity, fail-closed connect, and setuid/setgid exec blocking. Hardened production install remains gated on service and hardware-signer design. |
 | Windows  | —             | Not planned   | —                        | Unsupported                     | Windows restricts userspace library injection behind kernel-mode driver signing and security features that require paid enterprise certificates. There is no equivalent to DYLD or LD_PRELOAD available to open-source tools without elevated privileges. |
 
 ### Threat intelligence

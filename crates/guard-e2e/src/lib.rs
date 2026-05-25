@@ -244,22 +244,22 @@ pub fn resolve_node() -> Result<PathBuf, String> {
     Err("node not found on PATH; install Homebrew node or add node to PATH".into())
 }
 
-/// Path to the test-built Stentorian Guard hook dylib.
+/// Path to the test-built Stentorian Guard hook library.
 ///
-/// Panics with an actionable message if the dylib hasn't been built yet.
+/// Panics with an actionable message if the hook library hasn't been built yet.
 /// E2E tests require `cargo build --workspace` before `cargo test -p guard-e2e`.
 pub fn resolve_dylib() -> PathBuf {
     let target = cargo_target_dir();
 
-    // Prefer Cargo's canonical dylib output. Release packaging stages this as
-    // stt-guard-hook.dylib, but local target dirs can retain a stale staged
-    // alias across rebuilds; e2e tests should exercise the freshly-built dylib.
-    let cargo_output = target.join("libguard_hook.dylib");
+    // Prefer Cargo's canonical cdylib output. Release packaging stages this as
+    // stt-guard-hook.{dylib,so}, but local target dirs can retain a stale staged
+    // alias across rebuilds; e2e tests should exercise the freshly-built hook.
+    let cargo_output = target.join(platform_cargo_hook_name());
     if cargo_output.exists() {
         return cargo_output;
     }
 
-    let staged_alias = target.join("stt-guard-hook.dylib");
+    let staged_alias = target.join(platform_staged_hook_name());
     if staged_alias.exists() {
         return staged_alias;
     }
@@ -270,18 +270,68 @@ pub fn resolve_dylib() -> PathBuf {
             let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            if name.ends_with(".dylib") && name.contains("hook") {
+            if platform_hook_filename_matches(name) {
                 return path;
             }
         }
     }
 
     panic!(
-        "libguard_hook.dylib not found at {} and no hook dylib exists in {} — \
+        "{} not found at {} and no hook library exists in {} — \
          run `cargo build --workspace` before running E2E tests",
+        platform_cargo_hook_name(),
         cargo_output.display(),
         target.display()
     );
+}
+
+#[cfg(target_os = "macos")]
+fn platform_cargo_hook_name() -> &'static str {
+    "libguard_hook.dylib"
+}
+
+#[cfg(target_os = "linux")]
+fn platform_cargo_hook_name() -> &'static str {
+    "libguard_hook.so"
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn platform_cargo_hook_name() -> &'static str {
+    "libguard_hook"
+}
+
+#[cfg(target_os = "macos")]
+fn platform_staged_hook_name() -> &'static str {
+    "stt-guard-hook.dylib"
+}
+
+#[cfg(target_os = "linux")]
+fn platform_staged_hook_name() -> &'static str {
+    "stt-guard-hook.so"
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn platform_staged_hook_name() -> &'static str {
+    "stt-guard-hook"
+}
+
+fn platform_hook_filename_matches(name: &str) -> bool {
+    name.contains("hook") && platform_hook_extension_matches(name)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_hook_extension_matches(name: &str) -> bool {
+    name.ends_with(".dylib")
+}
+
+#[cfg(target_os = "linux")]
+fn platform_hook_extension_matches(name: &str) -> bool {
+    name.ends_with(".so")
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn platform_hook_extension_matches(name: &str) -> bool {
+    name.contains("hook")
 }
 
 /// Path to the stt-guard CLI binary.

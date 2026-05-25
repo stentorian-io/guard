@@ -100,7 +100,8 @@ fn report_exec(path: *const c_char, pm_env: Vec<(String, String)>) {
     let _ = send_exec_event_sync(token, &path_buf[..n], n, pm_env, IPC_TIMEOUT_MS);
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(target_os = "macos", unsafe(no_mangle))]
+#[cfg_attr(target_os = "linux", unsafe(export_name = "execve"))]
 pub unsafe extern "C" fn guard_execve(
     path: *const c_char,
     argv: *const *const c_char,

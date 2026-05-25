@@ -1,6 +1,6 @@
-# Code validation — cheap Linux checks run before macOS build/test work to keep
-# paid macOS minutes focused on changes that already passed repository hygiene
-# and platform-boundary checks.
+# Code validation — cheap PR and lint checks run before platform build/test
+# work so paid macOS minutes stay focused on changes that already passed
+# repository hygiene and security scans.
 
 name: CI
 
@@ -22,16 +22,64 @@ permissions:
   pull-requests: read
 
 jobs:
+  secret_scan:
+    name: Secret scan
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Fetch base branch
+        run: |
+          git remote add upstream "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags upstream main
+      - name: Compute scan range
+        id: scan_range
+        run: |
+          echo "base=$(git merge-base upstream/main HEAD)" >> "$GITHUB_OUTPUT"
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: trufflesecurity/trufflehog@v3.88.26
+        with:
+          base: ${{ steps.scan_range.outputs.base }}
+          head: ${{ steps.scan_range.outputs.head }}
+          extra_args: --only-verified
+
+  pr_title:
+    name: PR title
+    needs: secret_scan
+    if: >-
+      always()
+      && !cancelled()
+      && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip non-PR events
+        if: github.event_name != 'pull_request'
+        run: echo "PR title validation only runs for pull requests."
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - name: Validate PR title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: bash scripts/validate-conventional-subject "$PR_TITLE"
+
   prepare:
-    name: Prepare validation context
+    name: Prepare
+    needs: pr_title
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.context.outputs.code }}
       lockfile: ${{ steps.context.outputs.lockfile }}
       markdown: ${{ steps.context.outputs.markdown }}
       tooling: ${{ steps.context.outputs.tooling }}
-      scan_base: ${{ steps.context.outputs.base }}
-      scan_head: ${{ steps.context.outputs.head }}
       is_pr: ${{ steps.context.outputs.is_pr }}
     steps:
       - name: Checkout PR head
@@ -58,105 +106,39 @@ jobs:
         id: context
         run: scripts/ci-detect-validation-context.sh upstream/main
 
-  pr_title:
-    name: PR title
+  lint:
+    name: Lint
     needs: prepare
-    if: needs.prepare.outputs.is_pr == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: amannn/action-semantic-pull-request@v5
-        id: lint_pr
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          types: |
-            feat
-            fix
-            perf
-            refactor
-            test
-            docs
-            chore
-            ci
-          scopes: |
-            cli
-            daemon
-            hook
-            core
-            ipc
-            watchdog
-            e2e
-            bench
-            readme
-            llm
-            man
-            help
-            install
-            release
-            security
-          requireScope: false
-          subjectPattern: ^(?![A-Z]).+(?<!\.)$
-          subjectPatternError: |
-            The subject "{subject}" found in the pull request title "{title}"
-            must start with a lowercase letter and not end with a period.
-      - if: steps.lint_pr.outputs.type == 'ci' && steps.lint_pr.outputs.scope != ''
-        run: |
-          echo "::error::Scopes are not allowed for the 'ci' type. Use 'ci: ...' not 'ci(scope): ...'"
-          exit 1
-
-  markdown_lint:
-    name: Markdown lint
-    needs: prepare
-    if: needs.prepare.outputs.markdown == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
-      - run: npx markdownlint-cli2 "**/*.md" "#target" "#.gsd"
-
-  pr_checks:
-    name: PR checks
-    if: always()
-    needs:
-      - prepare
-      - pr_title
-      - markdown_lint
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          results='${{ toJSON(needs.*.result) }}'
-          echo "PR check results: $results"
-          if echo "$results" | grep -qE '"(failure|cancelled)"'; then
-            echo "::error::One or more PR checks failed or were cancelled"
-            exit 1
-          fi
-
-  tooling_lint:
-    name: Repo tooling lint
-    needs:
-      - prepare
-      - pr_checks
-    if: >-
-      !cancelled()
-      && needs.prepare.outputs.tooling == 'true'
-      && needs.pr_checks.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
           fetch-depth: 0
+      - name: Lint GitHub Actions workflows
+        if: needs.prepare.outputs.tooling == 'true'
+        shell: bash
+        run: |
+          curl -sSfL \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz \
+            -o actionlint.tar.gz
+          tar -xzf actionlint.tar.gz actionlint
+          ./actionlint
+      - uses: DavidAnson/markdownlint-cli2-action@v23.2.0
+        if: needs.prepare.outputs.markdown == 'true'
+        with:
+          globs: |
+            **/*.md
+            #target
+            #.gsd
       - name: Fetch base branch
+        if: needs.prepare.outputs.tooling == 'true'
         run: |
           git remote add upstream "https://github.com/${{ github.repository }}.git"
           git fetch --no-tags upstream main
-      - name: Lint GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - name: Check changed shell scripts
+        if: needs.prepare.outputs.tooling == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -170,38 +152,25 @@ jobs:
             exit 0
           fi
           bash -n "${shell_files[@]}"
-
-  lint:
-    name: Rust lint
-    needs:
-      - prepare
-      - pr_checks
-    if: >-
-      !cancelled()
-      && needs.prepare.outputs.code == 'true'
-      && needs.pr_checks.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
-      - name: Lint GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - uses: ./.github/actions/setup-rust
+        if: needs.prepare.outputs.code == 'true'
       - name: Check rustfmt
+        if: needs.prepare.outputs.code == 'true'
         run: cargo fmt --check
       - name: Check clippy
+        if: needs.prepare.outputs.code == 'true'
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Lint test env var hygiene
+        if: needs.prepare.outputs.code == 'true'
         run: scripts/lint-test-env-vars.sh
       - uses: taiki-e/install-action@cargo-machete
+        if: needs.prepare.outputs.code == 'true'
       - name: Lint unused dependencies
+        if: needs.prepare.outputs.code == 'true'
         run: cargo machete --with-metadata
 
-  linux_compile_gate:
-    name: Linux compile gate
+  linux_check:
+    name: Linux check
     needs:
       - prepare
       - lint
@@ -218,53 +187,53 @@ jobs:
           fetch-depth: 1
       - uses: ./.github/actions/setup-rust
         with:
-          shared-key: linux-compile-gate
+          shared-key: linux-check
       - name: Verify sanitized fixture present
         run: scripts/ci-verify-sanitized-fixture.sh
       - name: cargo check shared crates
         run: cargo check -p guard-os -p guard-watchdog --quiet
       - name: cargo check boundary consumers
         run: cargo check -p guard-hook -p guard-daemon -p guard-cli --quiet
-      - name: cargo test OS boundary crate
-        run: cargo test -p guard-os --quiet
-      - name: cargo test shared core
-        run: cargo test -p guard-core --lib --tests --quiet
-      - name: cargo test shared IPC
-        run: cargo test -p guard-ipc --lib --tests --quiet
-      - name: cargo test watchdog
-        run: cargo test -p guard-watchdog --bins --quiet
 
-  secret_scan:
-    name: Secret scan
+  macos_check:
+    name: macOS check
     needs:
       - prepare
-    if: needs.prepare.outputs.is_pr == 'true'
-    runs-on: ubuntu-latest
+      - lint
+    if: >-
+      !cancelled()
+      && needs.prepare.outputs.code == 'true'
+      && needs.lint.result == 'success'
+    runs-on: macos-14
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-      - name: Fetch base branch
-        run: |
-          git remote add upstream "https://github.com/${{ github.repository }}.git"
-          git fetch --no-tags upstream main
-      - uses: trufflesecurity/trufflehog@v3.88.26
+          fetch-depth: 1
+      - uses: ./.github/actions/setup-rust
         with:
-          base: ${{ needs.prepare.outputs.scan_base }}
-          head: ${{ needs.prepare.outputs.scan_head }}
-          extra_args: --only-verified
+          shared-key: macos-check
+      - name: cargo check workspace
+        run: cargo check --workspace --quiet
+      - name: cargo check release boundary crates
+        run: cargo check -p guard-cli -p guard-daemon -p guard-hook --features test-signer --quiet
 
   cargo_audit:
     name: Dependency CVE audit
     needs:
       - prepare
       - secret_scan
+      - linux_e2e_tests
+      - macos_e2e_tests
     if: >-
-      always()
+      !cancelled()
       && (github.event_name == 'schedule'
-          || (needs.prepare.outputs.lockfile == 'true' && needs.secret_scan.result == 'success'))
+          || (needs.prepare.outputs.lockfile == 'true'
+              && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
+              && (needs.linux_e2e_tests.result == 'success' || needs.linux_e2e_tests.result == 'skipped')
+              && (needs.macos_e2e_tests.result == 'success' || needs.macos_e2e_tests.result == 'skipped')))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -311,23 +280,57 @@ jobs:
           path: .audit-cache-marker
           key: ${{ steps.audit_cache.outputs.cache-primary-key }}
 
-  build:
-    name: Build
+  requirement_gate:
+    name: Requirement gate
     needs:
       - prepare
-      - lint
-      - linux_compile_gate
       - secret_scan
+      - lint
+      - linux_check
+      - macos_check
+      - release_build
+      - unit_tests
+      - integration_tests
+      - linux_e2e_tests
+      - macos_e2e_tests
       - cargo_audit
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required job results
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results"
+          if echo "$results" | grep -qE '"result":"(failure|cancelled)"'; then
+            echo "::error::One or more required jobs failed or were cancelled"
+            exit 1
+          fi
+
+  release_build:
+    name: Release build (${{ matrix.platform }})
+    needs:
+      - prepare
+      - linux_check
+      - macos_check
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
-      && needs.lint.result == 'success'
-      && needs.linux_compile_gate.result == 'success'
-      && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
-      && (needs.cargo_audit.result == 'success' || needs.cargo_audit.result == 'skipped')
-    runs-on: macos-14
+      && (needs.linux_check.result == 'success' || needs.linux_check.result == 'skipped')
+      && (needs.macos_check.result == 'success' || needs.macos_check.result == 'skipped')
+    runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runs_on: ubuntu-latest
+            artifact: linux-release-binaries
+            hook_library: libguard_hook.so
+          - platform: macos
+            runs_on: macos-14
+            artifact: macos-release-binaries
+            hook_library: libguard_hook.dylib
     steps:
       - uses: actions/checkout@v4
         with:
@@ -335,23 +338,26 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
       - name: Setup Node 20
+        if: matrix.platform == 'macos'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: release-build-${{ matrix.platform }}
       - name: cargo build workspace (release)
         run: |
           cargo build --workspace --release
           cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer
-      - name: Upload release binaries for E2E
+      - name: Upload release binaries
         uses: actions/upload-artifact@v4
         with:
-          name: macos-release-binaries
+          name: ${{ matrix.artifact }}
           path: |
             target/release/stt-guard
             target/release/stt-guard-daemon
             target/release/stt-guard-watchdog
-            target/release/libguard_hook.dylib
+            target/release/${{ matrix.hook_library }}
             target/release/hardened_exec_probe
           if-no-files-found: error
           retention-days: 1
@@ -360,11 +366,11 @@ jobs:
     name: Unit tests
     needs:
       - prepare
-      - build
+      - lint
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
-      && needs.build.result == 'success'
+      && needs.lint.result == 'success'
     runs-on: macos-14
     timeout-minutes: 15
     steps:
@@ -381,11 +387,11 @@ jobs:
     name: Integration tests
     needs:
       - prepare
-      - unit_tests
+      - lint
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
-      && needs.unit_tests.result == 'success'
+      && needs.lint.result == 'success'
     runs-on: macos-14
     timeout-minutes: 15
     steps:
@@ -398,14 +404,56 @@ jobs:
       - name: cargo test integration targets
         run: cargo test --workspace --exclude guard-e2e --tests --quiet
 
-  e2e_tests:
-    name: E2E tests
+  linux_e2e_tests:
+    name: Linux E2E tests
     needs:
       - prepare
+      - release_build
+      - unit_tests
       - integration_tests
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
+      && needs.release_build.result == 'success'
+      && needs.unit_tests.result == 'success'
+      && needs.integration_tests.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-e2e
+      - name: Download Linux release binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release-binaries
+          path: target/release
+      - name: Restore release binary modes
+        run: |
+          chmod +x target/release/stt-guard
+          chmod +x target/release/stt-guard-daemon
+          chmod +x target/release/stt-guard-watchdog
+          chmod +x target/release/hardened_exec_probe
+      - name: LD_PRELOAD smoke and denial coverage
+        run: cargo test -p guard-hook --test linux_ld_preload_smoke -- --nocapture
+
+  macos_e2e_tests:
+    name: macOS E2E tests
+    needs:
+      - prepare
+      - release_build
+      - unit_tests
+      - integration_tests
+    if: >-
+      !cancelled()
+      && needs.prepare.outputs.code == 'true'
+      && needs.release_build.result == 'success'
+      && needs.unit_tests.result == 'success'
       && needs.integration_tests.result == 'success'
     runs-on: macos-14
     timeout-minutes: 25
@@ -444,120 +492,3 @@ jobs:
         run: cargo test -p guard-e2e --features test-signer --test hardened_install_health --release -- --nocapture
         env:
           STT_GUARD_E2E_PRIVILEGED_INSTALL: '1'
-
-  gate:
-    name: Gate
-    if: always()
-    needs:
-      - prepare
-      - pr_title
-      - markdown_lint
-      - pr_checks
-      - tooling_lint
-      - lint
-      - linux_compile_gate
-      - build
-      - unit_tests
-      - integration_tests
-      - e2e_tests
-      - secret_scan
-      - cargo_audit
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          set -euo pipefail
-
-          results='${{ toJSON(needs.*.result) }}'
-          echo "Job results: $results"
-          if echo "$results" | grep -qE '"(failure|cancelled)"'; then
-            echo "::error::One or more validation jobs failed or were cancelled"
-            exit 1
-          fi
-
-          failed=false
-
-          require_success() {
-            local job="$1"
-            local result="$2"
-            if [ "$result" != "success" ]; then
-              echo "::error::${job} must succeed for this validation context; got '${result}'"
-              failed=true
-            fi
-          }
-
-          allow_success_or_skipped() {
-            local job="$1"
-            local result="$2"
-            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
-              echo "::error::${job} must succeed or be intentionally skipped; got '${result}'"
-              failed=true
-            fi
-          }
-
-          require_success "Prepare validation context" "${PREPARE_RESULT}"
-          require_success "PR checks" "${PR_CHECKS_RESULT}"
-
-          if [ "${IS_PR}" = "true" ]; then
-            require_success "PR title" "${PR_TITLE_RESULT}"
-            require_success "Secret scan" "${SECRET_SCAN_RESULT}"
-          else
-            allow_success_or_skipped "PR title" "${PR_TITLE_RESULT}"
-            allow_success_or_skipped "Secret scan" "${SECRET_SCAN_RESULT}"
-          fi
-
-          if [ "${MARKDOWN_CHANGED}" = "true" ]; then
-            require_success "Markdown lint" "${MARKDOWN_LINT_RESULT}"
-          else
-            allow_success_or_skipped "Markdown lint" "${MARKDOWN_LINT_RESULT}"
-          fi
-
-          if [ "${LOCKFILE_CHANGED}" = "true" ] || [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
-            require_success "Dependency CVE audit" "${CARGO_AUDIT_RESULT}"
-          else
-            allow_success_or_skipped "Dependency CVE audit" "${CARGO_AUDIT_RESULT}"
-          fi
-
-          if [ "${TOOLING_CHANGED}" = "true" ]; then
-            require_success "Repo tooling lint" "${TOOLING_LINT_RESULT}"
-          else
-            allow_success_or_skipped "Repo tooling lint" "${TOOLING_LINT_RESULT}"
-          fi
-
-          if [ "${CODE_CHANGED}" = "true" ]; then
-            require_success "Rust lint" "${LINT_RESULT}"
-            require_success "Linux compile gate" "${LINUX_COMPILE_GATE_RESULT}"
-            require_success "Build" "${BUILD_RESULT}"
-            require_success "Unit tests" "${UNIT_TESTS_RESULT}"
-            require_success "Integration tests" "${INTEGRATION_TESTS_RESULT}"
-            require_success "E2E tests" "${E2E_TESTS_RESULT}"
-          else
-            allow_success_or_skipped "Rust lint" "${LINT_RESULT}"
-            allow_success_or_skipped "Linux compile gate" "${LINUX_COMPILE_GATE_RESULT}"
-            allow_success_or_skipped "Build" "${BUILD_RESULT}"
-            allow_success_or_skipped "Unit tests" "${UNIT_TESTS_RESULT}"
-            allow_success_or_skipped "Integration tests" "${INTEGRATION_TESTS_RESULT}"
-            allow_success_or_skipped "E2E tests" "${E2E_TESTS_RESULT}"
-          fi
-
-          if [ "$failed" = "true" ]; then
-            exit 1
-          fi
-        env:
-          CODE_CHANGED: ${{ needs.prepare.outputs.code }}
-          LOCKFILE_CHANGED: ${{ needs.prepare.outputs.lockfile }}
-          MARKDOWN_CHANGED: ${{ needs.prepare.outputs.markdown }}
-          TOOLING_CHANGED: ${{ needs.prepare.outputs.tooling }}
-          IS_PR: ${{ needs.prepare.outputs.is_pr }}
-          PREPARE_RESULT: ${{ needs.prepare.result }}
-          PR_CHECKS_RESULT: ${{ needs.pr_checks.result }}
-          TOOLING_LINT_RESULT: ${{ needs.tooling_lint.result }}
-          LINT_RESULT: ${{ needs.lint.result }}
-          LINUX_COMPILE_GATE_RESULT: ${{ needs.linux_compile_gate.result }}
-          BUILD_RESULT: ${{ needs.build.result }}
-          UNIT_TESTS_RESULT: ${{ needs.unit_tests.result }}
-          INTEGRATION_TESTS_RESULT: ${{ needs.integration_tests.result }}
-          E2E_TESTS_RESULT: ${{ needs.e2e_tests.result }}
-          SECRET_SCAN_RESULT: ${{ needs.secret_scan.result }}
-          CARGO_AUDIT_RESULT: ${{ needs.cargo_audit.result }}
-          PR_TITLE_RESULT: ${{ needs.pr_title.result }}
-          MARKDOWN_LINT_RESULT: ${{ needs.markdown_lint.result }}

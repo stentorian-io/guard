@@ -1,4 +1,4 @@
-//! Resolve the absolute path to stt-guard-hook.dylib.
+//! Resolve the absolute path to the platform hook library.
 //!
 //! Hardened production mode is deliberately strict: once no explicit test state
 //! directory is selected, the hook must come from the root-owned system install
@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use guard_core::paths::{
-    ENV_HOOK_DYLIB, ENV_STATE_DIR, HOOK_DYLIB as DYLIB_NAME,
+    ENV_HOOK_LIBRARY, ENV_STATE_DIR, HOOK_LIBRARY as HOOK_LIBRARY_NAME,
     SYSTEM_HOOK_PATH as SYSTEM_INSTALL_PATH,
 };
 
@@ -26,13 +26,13 @@ pub fn find_dylib() -> std::io::Result<PathBuf> {
     }
 
     // Development/test override for source builds and harnesses only.
-    if let Some(path) = std::env::var_os(ENV_HOOK_DYLIB) {
+    if let Some(path) = std::env::var_os(ENV_HOOK_LIBRARY) {
         let candidate = PathBuf::from(path);
         if candidate.exists() {
             return candidate.canonicalize();
         }
         return Err(std::io::Error::other(format!(
-            "{ENV_HOOK_DYLIB} points to missing dylib: {}",
+            "{ENV_HOOK_LIBRARY} points to missing hook library: {}",
             candidate.display()
         )));
     }
@@ -40,7 +40,7 @@ pub fn find_dylib() -> std::io::Result<PathBuf> {
     // Sibling of CLI binary (dev-mode: target/debug/ or target/release/).
     let exe = std::env::current_exe()?;
     if let Some(parent) = exe.parent() {
-        let candidate = parent.join(DYLIB_NAME);
+        let candidate = parent.join(HOOK_LIBRARY_NAME);
         if candidate.exists() {
             return candidate.canonicalize();
         }
@@ -50,7 +50,7 @@ pub fn find_dylib() -> std::io::Result<PathBuf> {
                 let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                     continue;
                 };
-                if name.ends_with(".dylib") && name.contains("hook") {
+                if hook_library_filename_matches(name) {
                     return path.canonicalize();
                 }
             }
@@ -58,6 +58,25 @@ pub fn find_dylib() -> std::io::Result<PathBuf> {
     }
 
     Err(std::io::Error::other(format!(
-        "could not find {DYLIB_NAME}: in dev/test mode tried {ENV_HOOK_DYLIB}, sibling-of-CLI, and sibling hook dylibs"
+        "could not find {HOOK_LIBRARY_NAME}: in dev/test mode tried {ENV_HOOK_LIBRARY}, sibling-of-CLI, and sibling hook libraries"
     )))
+}
+
+fn hook_library_filename_matches(name: &str) -> bool {
+    name.contains("hook") && platform_hook_extension_matches(name)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_hook_extension_matches(name: &str) -> bool {
+    name.ends_with(".dylib")
+}
+
+#[cfg(target_os = "linux")]
+fn platform_hook_extension_matches(name: &str) -> bool {
+    name.ends_with(".so")
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn platform_hook_extension_matches(name: &str) -> bool {
+    name.contains("hook")
 }

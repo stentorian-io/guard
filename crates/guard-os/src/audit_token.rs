@@ -132,6 +132,31 @@ mod imp {
 mod imp {
     use super::*;
 
+    #[cfg(target_os = "linux")]
+    pub fn audit_token_for_pid(pid: libc::pid_t) -> Result<AuditToken, OsError> {
+        if pid <= 0 {
+            return Err(OsError::unexpected_data(
+                "process audit token",
+                format!("invalid pid {pid}"),
+            ));
+        }
+
+        let uid = crate::process::process_uid(pid)?;
+        let gid = crate::process::process_gid(pid)?;
+        let starttime = crate::process::process_starttime_ticks(pid)?;
+        let pidversion = crate::process::starttime_ticks_to_pidversion(starttime);
+
+        let mut val = [0u32; 8];
+        val[1] = uid;
+        val[2] = gid;
+        val[3] = uid;
+        val[4] = gid;
+        val[5] = pid as u32;
+        val[7] = pidversion;
+        Ok(AuditToken::synthetic(val))
+    }
+
+    #[cfg(not(target_os = "linux"))]
     pub fn audit_token_for_pid(_pid: libc::pid_t) -> Result<AuditToken, OsError> {
         Err(OsError::unsupported("process audit token"))
     }
@@ -141,7 +166,9 @@ mod imp {
 ///
 /// On macOS this uses `task_name_for_pid` + `task_info(TASK_AUDIT_TOKEN)`,
 /// with a `proc_pidinfo(PROC_PIDTBSDINFO)` fallback for tracked pid and
-/// pidversion context. Other platforms report the capability as unsupported.
+/// pidversion context. Linux returns a synthetic token using procfs uid/gid,
+/// pid, and starttime-derived pidversion context. Other platforms report the
+/// capability as unsupported.
 pub fn audit_token_for_pid(pid: libc::pid_t) -> Result<AuditToken, OsError> {
     imp::audit_token_for_pid(pid)
 }
@@ -159,7 +186,16 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    fn audit_token_for_self_pid_succeeds_on_linux() {
+        let pid = unsafe { libc::getpid() };
+        let token = audit_token_for_pid(pid).expect("audit_token_for_pid");
+        assert_eq!(token.val[5] as libc::pid_t, pid);
+        assert_ne!(token.val[7], 0, "linux starttime pidversion should be set");
+    }
+
+    #[test]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     fn audit_token_for_pid_is_explicitly_unsupported() {
         let err = audit_token_for_pid(1).expect_err("non-macOS audit token");
         assert!(matches!(

@@ -291,10 +291,7 @@ impl RuleStore {
                     "system trusted signer manifest is unavailable for this state directory"
                         .to_string(),
                 ),
-                action: Some(
-                    "run sudo stt-guard init on a supported hardware-backed signing platform"
-                        .to_string(),
-                ),
+                action: Some("run sudo stt-guard init to enroll an ML-DSA signer".to_string()),
             };
         };
         let trust_root_path = Some(path.display().to_string());
@@ -360,9 +357,7 @@ impl RuleStore {
                 trust_root_path,
                 trust_root_ok: true,
                 reason: Some("trusted signer manifest contains no signer entries".to_string()),
-                action: Some(
-                    "run sudo stt-guard init to enroll a hardware-backed signer".to_string(),
-                ),
+                action: Some("run sudo stt-guard init to enroll an ML-DSA signer".to_string()),
             };
         };
         let db_matches = self

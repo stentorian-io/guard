@@ -144,13 +144,13 @@ pub fn render_verbose_to<W: std::io::Write>(
 fn render_signing_info_to<W: std::io::Write>(w: &mut W, signing_info: Option<&SigningInfo>) {
     let _ = writeln!(w, "\nSigning:");
     let Some(info) = signing_info else {
-        let _ = writeln!(w, "  hardware-backed: unknown");
+        let _ = writeln!(w, "  post-quantum signer: unknown");
         let _ = writeln!(w, "  status: unavailable from daemon");
         return;
     };
     let _ = writeln!(
         w,
-        "  hardware-backed: {}",
+        "  post-quantum signer: {}",
         if info.configured {
             "configured"
         } else {

@@ -1,6 +1,6 @@
 #[cfg(not(feature = "test-signer"))]
 #[test]
-fn production_rule_signing_fails_without_hardware_provider() {
+fn production_rule_signing_fails_when_pq_signer_is_disabled() {
     let payload = guard_core::RuleSignaturePayloadV1::new(
         "allow",
         "exact",
@@ -11,14 +11,11 @@ fn production_rule_signing_fails_without_hardware_provider() {
         None,
     );
     unsafe {
-        std::env::set_var("STT_GUARD_DISABLE_HARDWARE_SIGNER", "1");
+        std::env::set_var("STT_GUARD_DISABLE_PQ_SIGNER", "1");
     }
     let err = guard_cli::rule_signing::sign_rule_payload(&payload)
-        .expect_err("production must not fall back to software signing");
-    assert!(
-        err.to_string()
-            .contains("hardware-backed signing key unavailable")
-    );
+        .expect_err("production signing must fail when the PQ signer is disabled");
+    assert!(err.to_string().contains("ML-DSA signing key unavailable"));
 
     let snapshot_payload = guard_core::SnapshotSignaturePayloadV1::new(
         "run-1",
@@ -26,11 +23,8 @@ fn production_rule_signing_fails_without_hardware_provider() {
         1_700_000_000_000,
     );
     let err = guard_cli::rule_signing::sign_snapshot_payload(&snapshot_payload)
-        .expect_err("production snapshot signing must not fall back to software signing");
-    assert!(
-        err.to_string()
-            .contains("hardware-backed signing key unavailable")
-    );
+        .expect_err("production snapshot signing must fail when the PQ signer is disabled");
+    assert!(err.to_string().contains("ML-DSA signing key unavailable"));
 }
 
 #[cfg(feature = "test-signer")]

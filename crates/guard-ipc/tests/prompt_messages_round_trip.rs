@@ -185,7 +185,7 @@ fn status_reply_full_ok_round_trip() {
         Some(SigningInfo {
             configured: true,
             status: "configured".into(),
-            signer_kind: Some("secure-enclave".into()),
+            signer_kind: Some("software-ml-dsa".into()),
             fingerprint: Some("abc123".into()),
             trust_root_path: Some("/usr/local/libexec/stt-guard/trusted-rule-signers.tsv".into()),
             trust_root_ok: true,
@@ -199,8 +199,8 @@ fn status_reply_full_ok_round_trip() {
 #[test]
 fn large_signed_snapshot_publish_frame_exceeds_old_64k_cap() {
     let signature = guard_core::SnapshotSignatureV1 {
-        scheme: guard_core::RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.into(),
-        signer_kind: guard_core::SIGNER_KIND_SECURE_ENCLAVE.into(),
+        scheme: guard_core::RULE_SIGNATURE_SCHEME_ML_DSA_65_SHA256.into(),
+        signer_kind: guard_core::SIGNER_KIND_SOFTWARE_ML_DSA.into(),
         public_key_x963: vec![1, 2, 3],
         public_key_sha256: "abc".into(),
         signature_der: vec![4, 5, 6],
@@ -238,8 +238,8 @@ fn signed_snapshot_messages_round_trip() {
     round_trip(&SnapshotInputsReply::err("bad"));
 
     let signature = guard_core::SnapshotSignatureV1 {
-        scheme: guard_core::RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.into(),
-        signer_kind: guard_core::SIGNER_KIND_SECURE_ENCLAVE.into(),
+        scheme: guard_core::RULE_SIGNATURE_SCHEME_ML_DSA_65_SHA256.into(),
+        signer_kind: guard_core::SIGNER_KIND_SOFTWARE_ML_DSA.into(),
         public_key_x963: vec![1, 2, 3],
         public_key_sha256: "abc".into(),
         signature_der: vec![4, 5, 6],

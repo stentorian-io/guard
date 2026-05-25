@@ -392,7 +392,7 @@ pub fn resolve_probe() -> PathBuf {
 #[cfg(feature = "test-signer")]
 fn setup_test_signer(state_dir: &Path) -> std::io::Result<()> {
     let (fingerprint, signer_kind, public_key_x963) =
-        guard_core::rule_signature::test_support::test_simulator_public_signer()
+        guard_core::rule_signature::test_support::install_test_simulator_signer(state_dir)
             .map_err(|e| std::io::Error::other(format!("test signer setup: {e}")))?;
     let db_path = guard_daemon::state_dir::db_path(state_dir);
     let store = guard_daemon::rule_store::RuleStore::open(&db_path)

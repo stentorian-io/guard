@@ -217,7 +217,7 @@ pub struct DaemonState {
     // v0.5 M004-S01: monotonic startup instant for uptime reporting in Ping.
     pub startup_instant: std::time::Instant,
     pub pending_snapshot_inputs: Arc<Mutex<HashMap<String, PendingSnapshotInput>>>,
-    // Issue #31: production accepts only hardware-backed signer kinds.
+    // Issue #31/#42: production accepts only the post-quantum signer profile.
     pub rule_signature_policy: guard_core::RuleSignaturePolicy,
 }
 

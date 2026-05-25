@@ -17,7 +17,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 ciborium = { workspace = true }
 sha2 = { workspace = true }
-p256 = { workspace = true }
+pqcrypto-mldsa = { workspace = true }
+pqcrypto-traits = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

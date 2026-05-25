@@ -90,21 +90,21 @@ fn signed_snapshot(
         guard_core::sha256_hex(&bytes),
         snap.generated_at_unix_ms,
     );
-    let signing_key = p256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
     let payload_bytes = guard_core::canonical_snapshot_payload_bytes(&payload).unwrap();
+    let (public_key, secret_key) = pqcrypto_mldsa::mldsa65::keypair();
     let signature_der = {
-        use p256::ecdsa::signature::Signer;
-        let signature: p256::ecdsa::Signature = signing_key.sign(&payload_bytes);
-        signature.to_der().as_bytes().to_vec()
+        use pqcrypto_traits::sign::DetachedSignature;
+        pqcrypto_mldsa::mldsa65::detached_sign(&payload_bytes, &secret_key)
+            .as_bytes()
+            .to_vec()
     };
-    let public_key_x963 = signing_key
-        .verifying_key()
-        .to_encoded_point(false)
-        .as_bytes()
-        .to_vec();
+    let public_key_x963 = {
+        use pqcrypto_traits::sign::PublicKey;
+        public_key.as_bytes().to_vec()
+    };
     let signature = guard_core::SnapshotSignatureV1 {
-        scheme: guard_core::RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
-        signer_kind: guard_core::SIGNER_KIND_SECURE_ENCLAVE.to_string(),
+        scheme: guard_core::RULE_SIGNATURE_SCHEME_ML_DSA_65_SHA256.to_string(),
+        signer_kind: guard_core::SIGNER_KIND_SOFTWARE_ML_DSA.to_string(),
         public_key_sha256: guard_core::sha256_hex(&public_key_x963),
         public_key_x963,
         signature_der,

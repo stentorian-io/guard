@@ -1,9 +1,9 @@
 //! Rule authenticity signing for persistent user rules.
 //!
-//! Production signing must use hardware-backed private keys. This vertical slice
-//! enforces that contract by failing closed when no hardware provider is
-//! available; CI can opt into the explicit `test-signer` feature to exercise the
-//! signed-rule flow without claiming hardware coverage.
+//! Production signing uses ML-DSA-65 so first-release policy artifacts are
+//! post-quantum from the start. CI can opt into the explicit `test-signer`
+//! feature to exercise the signed-rule flow without claiming production signing
+//! coverage.
 
 use crate::CliError;
 use guard_core::{
@@ -51,19 +51,19 @@ fn sign_management_action_payload_impl(
 
 #[cfg(not(feature = "test-signer"))]
 fn sign_rule_payload_impl(payload: &RuleSignaturePayloadV1) -> Result<RuleSignatureV1, CliError> {
-    crate::hardware_signing::sign_rule_payload(payload)
+    crate::pq_signing::sign_rule_payload(payload)
 }
 
 #[cfg(not(feature = "test-signer"))]
 fn sign_snapshot_payload_impl(
     payload: &SnapshotSignaturePayloadV1,
 ) -> Result<SnapshotSignatureV1, CliError> {
-    crate::hardware_signing::sign_snapshot_payload(payload)
+    crate::pq_signing::sign_snapshot_payload(payload)
 }
 
 #[cfg(not(feature = "test-signer"))]
 fn sign_management_action_payload_impl(
     payload: &ManagementActionPayloadV1,
 ) -> Result<RuleSignatureV1, CliError> {
-    crate::hardware_signing::sign_management_action_payload(payload)
+    crate::pq_signing::sign_management_action_payload(payload)
 }

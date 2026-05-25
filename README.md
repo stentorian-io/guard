@@ -35,6 +35,7 @@
   - [Platform support](#platform-support)
   - [Threat intelligence](#threat-intelligence)
   - [Security expectations](#security-expectations)
+  - [Post-quantum cryptography readiness](#post-quantum-cryptography-readiness)
 - [Found Stentorian Guard useful?](#found-stentorian-guard-useful)
 - [Changelog](#changelog)
 - [Contributing](#contributing)
@@ -346,11 +347,11 @@ man stt-guard-daemon   # daemon internals
 
 ### Platform support
 
-| Platform | Version       | Status        | Enforcement mechanism    | Hardware-backed signing support | Notes                                                                                                                                                                                                                                                     |
+| Platform | Version       | Status        | Enforcement mechanism    | Policy signing support          | Notes                                                                                                                                                                                                                                                     |
 | -------- | ------------- | ------------- | ------------------------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| macOS    | 13+ (Ventura) | **Supported** | DYLD injection           | Required: Secure Enclave or security key for baseline/snapshot signing | Primary platform, tested in CI                                                                                                                                                                                                                            |
-| macOS    | 12 (Monterey) | Best-effort   | DYLD injection           | Required: Secure Enclave or security key for baseline/snapshot signing | Not tested in CI                                                                                                                                                                                                                                          |
-| Linux    | —             | Planned (v2)  | LD_PRELOAD / seccomp-bpf | Required: hardware-backed signer such as FIDO2/security key or TPM-backed key | [Tracking issue](https://github.com/stentorian-io/guard/issues/2)                                                                                                                                                                                      |
+| macOS    | 13+ (Ventura) | **Supported** | DYLD injection           | Required: ML-DSA-65 for baseline/snapshot signing | Primary platform, tested in CI                                                                                                                                                                                                                            |
+| macOS    | 12 (Monterey) | Best-effort   | DYLD injection           | Required: ML-DSA-65 for baseline/snapshot signing | Not tested in CI                                                                                                                                                                                                                                          |
+| Linux    | —             | Planned (v2)  | LD_PRELOAD / seccomp-bpf | Required: ML-DSA-65 or stronger PQ profile | [Tracking issue](https://github.com/stentorian-io/guard/issues/2)                                                                                                                                                                                      |
 | Windows  | —             | Not planned   | —                        | Unsupported                     | Windows restricts userspace library injection behind kernel-mode driver signing and security features that require paid enterprise certificates. There is no equivalent to DYLD or LD_PRELOAD available to open-source tools without elevated privileges. |
 
 ### Threat intelligence
@@ -390,6 +391,14 @@ that T3 class. The [security policy](SECURITY.md) documents the full threat
 model, known platform constraints, and what is (and isn't) considered a
 vulnerability. Read it before assuming Stentorian Guard is a sandbox — it isn't one,
 and we are upfront about where the boundaries are.
+
+### Post-quantum cryptography readiness
+
+Stentorian Guard uses ML-DSA-65 for local policy artifact authenticity today.
+See the
+[post-quantum cryptography readiness audit](docs/post-quantum-crypto-readiness.md)
+for the current inventory, risk classification, recommended defaults, migration
+guidance, and acceptance criteria for future cryptographic changes.
 
 ## Found Stentorian Guard useful?
 

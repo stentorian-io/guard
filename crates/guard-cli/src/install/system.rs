@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::CliError;
-use crate::hardware_signing::HardwareSignerEnrollment;
+use crate::pq_signing::PqSignerEnrollment;
 
 use guard_core::paths;
 
@@ -49,8 +49,8 @@ pub fn print_plan() {
     eprintln!("  • Copy hook dylib to {BIN_DIR}/ (root:wheel, 644)");
     eprintln!("  • Create state directory at {STATE_DIR}/");
     eprintln!("  • Create log directory at {LOG_DIR}/");
-    eprintln!("  • Enroll a non-exportable Secure Enclave rule-signing key");
-    eprintln!("  • Register the hardware-backed public signer with the daemon state");
+    eprintln!("  • Enroll a user-owned ML-DSA-65 rule-signing key");
+    eprintln!("  • Register the post-quantum public signer with the daemon state");
     eprintln!("  • Install LaunchDaemon ({PLIST_LABEL})");
     eprintln!("  • Start the daemon");
 }
@@ -61,7 +61,7 @@ pub fn run_install() -> Result<(), CliError> {
     let service_gid = create_service_user()?;
     deploy_binaries()?;
     create_directories(service_gid)?;
-    let enrollment = crate::hardware_signing::enroll_secure_enclave_for_init()?;
+    let enrollment = crate::pq_signing::enroll_pq_signer_for_init()?;
     register_rule_signer(&enrollment, service_gid)?;
     install_launchdaemon()?;
     start_daemon()?;
@@ -343,12 +343,9 @@ fn create_directories(service_gid: u32) -> Result<(), CliError> {
     Ok(())
 }
 
-fn register_rule_signer(
-    enrollment: &HardwareSignerEnrollment,
-    service_gid: u32,
-) -> Result<(), CliError> {
+fn register_rule_signer(enrollment: &PqSignerEnrollment, service_gid: u32) -> Result<(), CliError> {
     eprintln!(
-        "  Registering hardware-backed rule signer {}...",
+        "  Registering post-quantum rule signer {}...",
         enrollment.public_key_sha256
     );
     write_trusted_signer_manifest(enrollment)?;
@@ -372,10 +369,10 @@ fn register_rule_signer(
     Ok(())
 }
 
-fn write_trusted_signer_manifest(enrollment: &HardwareSignerEnrollment) -> Result<(), CliError> {
+fn write_trusted_signer_manifest(enrollment: &PqSignerEnrollment) -> Result<(), CliError> {
     let path = paths::trusted_rule_signers_path();
     let content = format!(
-        "# stt-guard trusted hardware-backed rule signers v1\n{}\t{}\t{}\t{}\n",
+        "# stt-guard trusted post-quantum rule signers v1\n{}\t{}\t{}\t{}\n",
         enrollment.public_key_sha256,
         enrollment.signer_kind,
         hex_lower(&enrollment.public_key_x963),

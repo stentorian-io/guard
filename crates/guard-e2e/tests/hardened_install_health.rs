@@ -60,9 +60,9 @@ mod macos {
         );
 
         let init = sudo([cli.as_os_str(), OsStr::new("init"), OsStr::new("--yes")]);
-        if !init.status.success() && hardware_signing_unavailable(&stderr(&init)) {
+        if !init.status.success() && pq_signing_unavailable(&stderr(&init)) {
             eprintln!(
-                "SKIP: hosted runner cannot enroll Secure Enclave signing key; stdout={} stderr={}",
+                "SKIP: hosted runner cannot enroll ML-DSA signing key; stdout={} stderr={}",
                 stdout(&init),
                 stderr(&init)
             );
@@ -269,9 +269,9 @@ mod macos {
         dir
     }
 
-    fn hardware_signing_unavailable(stderr: &str) -> bool {
-        stderr.contains("create Secure Enclave signing key failed")
-            || stderr.contains("hardware-backed signing key unavailable")
+    fn pq_signing_unavailable(stderr: &str) -> bool {
+        stderr.contains("ML-DSA signing key unavailable")
+            || stderr.contains("ML-DSA signer enrollment requires")
             || stderr.contains("failed to generate asymmetric keypair")
     }
 

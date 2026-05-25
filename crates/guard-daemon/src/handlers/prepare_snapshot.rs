@@ -316,7 +316,12 @@ pub fn handle_publish_signed_snapshot_full(
         .is_trusted_rule_signer(&req.signature.public_key_sha256, &req.signature.signer_kind)
     {
         Ok(true) => {}
-        Ok(false) => return SnapshotReply::err("snapshot signer is not trusted"),
+        Ok(false) => {
+            return SnapshotReply::err(format!(
+                "snapshot signer is not trusted: kind={} fingerprint={}",
+                req.signature.signer_kind, req.signature.public_key_sha256
+            ));
+        }
         Err(e) => return SnapshotReply::err(format!("snapshot signer trust check failed: {e}")),
     }
     match publish_run_signed_bytes(

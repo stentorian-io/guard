@@ -1,10 +1,13 @@
 #![cfg(feature = "test-signer")]
 
 use guard_core::{
-    ManagementActionPayloadV1, RuleSignaturePayloadV1, RuleSignaturePolicy,
-    SIGNER_KIND_TEST_SIMULATOR, SnapshotSignaturePayloadV1, verify_management_action_signature,
+    ManagementActionPayloadV1, RULE_SIGNATURE_SCHEME_ML_DSA_65_SHA256, RuleSignaturePayloadV1,
+    RuleSignaturePolicy, RuleSignatureV1, SIGNER_KIND_SOFTWARE_ML_DSA, SIGNER_KIND_TEST_SIMULATOR,
+    SnapshotSignaturePayloadV1, sha256_hex, verify_management_action_signature,
     verify_rule_signature, verify_snapshot_signature,
 };
+use pqcrypto_mldsa::mldsa65;
+use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _};
 
 fn payload() -> RuleSignaturePayloadV1 {
     RuleSignaturePayloadV1::new(
@@ -57,6 +60,26 @@ fn test_simulator_signature_is_rejected_under_production_policy() {
     let err = verify_rule_signature(&payload, &signature, RuleSignaturePolicy::Production)
         .expect_err("production must reject simulator");
     assert!(err.to_string().contains("unsupported rule signer kind"));
+}
+
+#[test]
+fn ml_dsa_signature_verifies_under_production_policy() {
+    let payload = payload();
+    let payload_bytes = guard_core::canonical_rule_payload_bytes(&payload).expect("encode");
+    let (public_key, secret_key) = mldsa65::keypair();
+    let signature = mldsa65::detached_sign(&payload_bytes, &secret_key);
+    let public_key_bytes = public_key.as_bytes().to_vec();
+    let signature = RuleSignatureV1 {
+        scheme: RULE_SIGNATURE_SCHEME_ML_DSA_65_SHA256.to_string(),
+        signer_kind: SIGNER_KIND_SOFTWARE_ML_DSA.to_string(),
+        public_key_sha256: sha256_hex(&public_key_bytes),
+        public_key_x963: public_key_bytes,
+        signature_der: signature.as_bytes().to_vec(),
+        signed_payload_sha256: sha256_hex(&payload_bytes),
+        signature_created_at_unix_ms: payload.created_at_unix_ms,
+    };
+
+    verify_rule_signature(&payload, &signature, RuleSignaturePolicy::Production).expect("verify");
 }
 
 #[test]

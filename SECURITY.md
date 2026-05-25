@@ -60,14 +60,23 @@ The following are **known limitations**, not vulnerabilities:
 If you are unsure whether something is in scope, report it anyway.
 We would rather triage a known limitation than miss a real vulnerability.
 
+## Cryptography Roadmap
+
+The current local policy-signing profile uses ML-DSA-65 with SHA-256
+fingerprints. See the
+[post-quantum cryptography readiness audit](docs/post-quantum-crypto-readiness.md)
+for the crypto inventory, post-quantum risk classification, recommended default
+profiles, migration guidance, and review criteria for future cryptographic
+changes.
+
 ## Deployment Model
 
 `stt-guard init` deploys root-owned binaries, enrolls the invoking sudo user's
-non-exportable Secure Enclave rule-signing key, registers that public signer
-with daemon state, and runs the daemon as a dedicated `_stt_guard` service user
-(no login shell, no home directory — the same convention as macOS's `_postgres`
-and `_mysql`). This is the only deployment mode and prevents a compromised
-process from tampering with the guard itself.
+ML-DSA-65 rule-signing key, registers that public signer with daemon state, and
+runs the daemon as a dedicated `_stt_guard` service user (no login shell, no
+home directory — the same convention as macOS's `_postgres` and `_mysql`). This
+is the only deployment mode and prevents a compromised process from tampering
+with the guard itself.
 
 | Component | Path | Owner |
 |---|---|---|
@@ -86,7 +95,7 @@ process from tampering with the guard itself.
 | Modify snapshot contents | Snapshot signature validates authenticity | `_stt_guard`-owned, written by daemon only |
 | Delete denial logs | User-owned, deletable | `_stt_guard`-owned |
 | Kill daemon and replace with rogue | Codesign peer auth detects | Can't kill a different UID without root; LaunchDaemon auto-restarts |
-| Forge trusted policy artifacts | Daemon-writable state can be modified | Baseline/snapshot authenticity signing must use hardware-backed private keys that the daemon cannot export or forge with |
+| Forge trusted policy artifacts | Daemon-writable state can be modified | Baseline/snapshot authenticity signing uses a user-owned ML-DSA key that is not copied into daemon-writable state |
 | `sudo` inside monitored tree | Blocked (setuid check) | Blocked with explicit `PrivilegeEscalation` reason |
 
 The IPC socket is world-writable — any process can connect — but the daemon
@@ -94,18 +103,17 @@ authenticates every connection via macOS audit tokens and codesign identity
 verification (shipped in v0.7). The socket is the door; codesign is the lock.
 Tagged IPC frames are plain CBOR frames over the authenticated Unix socket.
 IPC authorization lives in peer authentication and daemon-side message policy;
-policy artifact authenticity lives in hardware-backed signatures.
+policy artifact authenticity lives in ML-DSA signatures.
 
 Baseline/snapshot authenticity signing has a stricter key-storage requirement
-than file ownership integrity: private signing keys must be hardware-backed
-(Secure Enclave, security key, TPM-backed key, or an equivalent non-exportable
-platform facility). On macOS, `sudo stt-guard init` creates or locates a
-Secure Enclave P-256 key in the invoking user's keychain, requires user
-presence for signing, records the signer in a root-owned manifest under
+than file ownership integrity: private signing keys must be user-owned, mode
+0600, and never copied into daemon-writable state. On macOS, `sudo stt-guard
+init` creates or locates an ML-DSA-65 key under the invoking user's Application
+Support directory, records the public signer in a root-owned manifest under
 `/usr/local/libexec/stt-guard/`, and mirrors only public signing metadata into
-daemon state for operational lookups. Software-only private keys are not a
-because the daemon must be able to verify signatures without being able to
-forge new trusted baselines if the daemon or its writable state is compromised.
+daemon state for operational lookups. This chooses first-release post-quantum
+signatures over Secure Enclave P-256 because macOS does not currently provide
+non-exportable ML-DSA keys.
 
 **Performance and UX impact:** the deployment has zero runtime overhead. The
 protection is purely ownership and permissions on disk — the daemon, hook, and

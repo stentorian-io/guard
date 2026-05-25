@@ -74,7 +74,7 @@ fn hex_lower(bytes: &[u8]) -> String {
 /// Manifest format:
 ///   line 1 = absolute snapshot path
 ///   line 2 = "digest=<hex>"
-///   remaining lines = hardware-backed snapshot signature metadata
+///   remaining lines = ML-DSA snapshot signature metadata
 pub fn publish_run(
     state_dir: &Path,
     snap: &Snapshot,

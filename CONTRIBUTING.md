@@ -77,11 +77,19 @@ cargo test -p guard-daemon
 
 Local validation is stage-based. During iteration, run the focused Cargo command
 that exercises your change. Before review, let the installed hooks run:
-`pre-commit` covers formatting, clippy, Linux lint parity in Docker, macOS and
-Linux release builds, unit tests, and integration tests; `pre-push` covers Linux
-LD_PRELOAD E2E in Docker and the macOS E2E smoke suite. The Linux stages use the
-same `rust:1.95.0-bookworm` container image locally and in CI, with Cargo caches
-under `/private/tmp/stt-guard-docker`.
+`pre-commit` covers formatting, clippy, Bash syntax, Linux check/lint parity in
+Docker, macOS and Linux release builds, unit tests, and integration tests;
+`pre-push` covers Linux LD_PRELOAD E2E in Docker and the macOS E2E smoke suite.
+The Linux stages use the same `rust:1.95.0-bookworm` container image locally and
+in CI, with Cargo caches under `/private/tmp/stt-guard-docker`.
+
+Secret scan and dependency CVE audit are available locally but opt-in because
+they can be network-heavy:
+
+```sh
+STT_GUARD_PRE_COMMIT_SECRET_SCAN=1 STT_GUARD_PRE_COMMIT_CVE_AUDIT=1 git commit
+STT_GUARD_PRE_PUSH_SECRET_SCAN=1 STT_GUARD_PRE_PUSH_CVE_AUDIT=1 git push
+```
 
 GitHub Actions remains the required PR validation surface, including secret
 scan, dependency audit, and privileged macOS install-health validation.

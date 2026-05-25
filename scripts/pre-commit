@@ -22,6 +22,10 @@ pass() {
   echo -e "${GREEN}✓${RESET} $1"
 }
 
+warn() {
+  echo "⚠ $1"
+}
+
 skip() {
   echo -e "${GREEN}✓${RESET} $1 ${BOLD}(cached)${RESET}"
 }
@@ -88,6 +92,52 @@ if [ -n "$WORKFLOW_FILES" ]; then
   fi
 fi
 
+# ── 3a. Bash syntax lint ───────────────────────────────────────────────────
+SHELL_FILES=$(git diff --cached --name-only --diff-filter=ACM -- \
+  'scripts/*.sh' \
+  'tools/*.sh' \
+  'scripts/pre-commit' \
+  'scripts/pre-push' \
+  'scripts/commit-msg' \
+  'scripts/prepare-commit-msg' \
+  'scripts/validate-conventional-subject' || true)
+if [ -n "$SHELL_FILES" ]; then
+  echo "$SHELL_FILES" | xargs bash -n \
+    || fail "bash syntax lint failed"
+  pass "bash syntax lint"
+fi
+
+# ── 3b. Optional secret scan ───────────────────────────────────────────────
+if [ "${STT_GUARD_PRE_COMMIT_SECRET_SCAN:-0}" = "1" ]; then
+  scan_base="$(branch_scan_base)"
+  if command -v trufflehog &>/dev/null; then
+    trufflehog git "file://$REPO_ROOT" \
+      --since-commit "$scan_base" \
+      --branch HEAD \
+      --only-verified \
+      --fail \
+      || fail "secret scan failed"
+    pass "secret scan"
+  else
+    fail "trufflehog not found; install it or unset STT_GUARD_PRE_COMMIT_SECRET_SCAN"
+  fi
+else
+  warn "skipping secret scan (set STT_GUARD_PRE_COMMIT_SECRET_SCAN=1 to run)"
+fi
+
+# ── 3c. Optional dependency CVE audit ──────────────────────────────────────
+if [ "${STT_GUARD_PRE_COMMIT_CVE_AUDIT:-0}" = "1" ]; then
+  if command -v cargo-audit &>/dev/null; then
+    cargo audit \
+      || fail "dependency CVE audit failed"
+    pass "dependency CVE audit"
+  else
+    fail "cargo-audit not found; install it or unset STT_GUARD_PRE_COMMIT_CVE_AUDIT"
+  fi
+else
+  warn "skipping dependency CVE audit (set STT_GUARD_PRE_COMMIT_CVE_AUDIT=1 to run)"
+fi
+
 # ── 4–8. Cheap validation — skip when only repo-meta changed ────────────────
 if [ "$REPO_META_ONLY" -eq 1 ]; then
   skip "cargo check, machete, build, test (repo-meta-only change)"
@@ -124,6 +174,16 @@ else
   scripts/lint-test-env-vars.sh \
     || fail "test env var hygiene failed"
   pass "test env var hygiene"
+
+  linux_check_fp=$(linux_ci_check_fingerprint)
+  if cache_hit "pre-commit:linux-check" "$linux_check_fp"; then
+    skip "Linux check"
+  else
+    bash scripts/ci-linux-check.sh \
+      || fail "Linux check failed"
+    cache_mark "pre-commit:linux-check" "$linux_check_fp"
+    pass "Linux check"
+  fi
 
   linux_fp=$(linux_ci_lint_fingerprint)
   if cache_hit "pre-commit:linux-ci-lint" "$linux_fp"; then

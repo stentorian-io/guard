@@ -4,6 +4,10 @@
 # Lint GitHub Actions workflow syntax locally.
 brew "actionlint"
 
+# Optional local parity for CI dependency and secret gates.
+brew "cargo-audit"
+brew "trufflehog"
+
 # Linux parity checks run in containers from pre-commit and pre-push.
 brew "colima"
 brew "docker"

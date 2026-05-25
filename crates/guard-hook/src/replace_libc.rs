@@ -178,7 +178,8 @@ fn cache_key(sa: &[u8], sa_len: usize) -> ([u8; MAX_SOCKADDR_BYTES], usize) {
 
 // ---- connect ----
 
-#[unsafe(no_mangle)]
+#[cfg_attr(target_os = "macos", unsafe(no_mangle))]
+#[cfg_attr(target_os = "linux", unsafe(export_name = "connect"))]
 pub unsafe extern "C" fn guard_connect(
     s: c_int,
     addr: *const sockaddr,

@@ -197,6 +197,7 @@ static STT_GUARD_INTERPOSE_GETENV: [SyncPtr2; 2] = [
 /// equals `&guard_connect` (our replacement), our interpose is active.
 ///
 /// On probe failure: set FAIL_CLOSED = true, log a clear line, return.
+#[cfg(target_os = "macos")]
 pub fn probe_self_test() {
     use core::ffi::c_void;
     use core::sync::atomic::Ordering;
@@ -249,4 +250,10 @@ pub fn probe_self_test() {
             b"[guard-hook] interpose self-test passed (guard_connect + guard_write + guard_getaddrinfo active)",
         );
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn probe_self_test() {
+    crate::log_buffer::LOG_RING
+        .append(b"[guard-hook] interpose self-test skipped: dyld __interpose is macOS-only");
 }

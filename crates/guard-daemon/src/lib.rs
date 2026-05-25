@@ -10,6 +10,7 @@ pub mod install_artifacts;
 pub mod ipc_dispatch;
 pub mod ipc_server;
 pub mod log_writer;
+pub mod management_auth;
 pub mod manifest;
 pub mod peer_auth;
 pub mod persistence_watcher;

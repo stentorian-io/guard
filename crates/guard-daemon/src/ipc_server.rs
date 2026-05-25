@@ -465,9 +465,12 @@ impl IpcServer {
                 // NB: return here — the stream is now owned by the prompt-channel thread.
             }
             // v0.7 — management-IPC family.
+            // ListRules is read-only and safe after peer/codesign auth.
             FrameKind::Tagged(MessageTag::ListRules) => {
                 handle_list_rules_frame(&mut stream, state);
             }
+            // DeleteInstallArtifacts mutates install-state bookkeeping only;
+            // the handler constrains it to known artifact kinds.
             FrameKind::Tagged(MessageTag::DeleteInstallArtifacts) => {
                 handle_delete_install_artifacts_frame(&mut stream, state);
             }
@@ -484,6 +487,9 @@ impl IpcServer {
                 handle_ping_frame(&mut stream, state);
             }
             // v1.0 — curated rule override IPC:
+            // Mutable rule-management actions require daemon-verified signed
+            // management authorization; CLI-side biometric gates are not a
+            // daemon trust boundary because direct IPC can bypass them.
             FrameKind::Tagged(MessageTag::DisableCuratedRule) => {
                 handle_disable_curated_rule_frame(&mut stream, state);
             }
@@ -1095,12 +1101,12 @@ fn handle_disable_curated_rule_frame(stream: &mut UnixStream, state: &Arc<Daemon
             return;
         }
     };
-    if req.schema_version != IPC_SCHEMA_V3 {
+    if !matches!(req.schema_version, IPC_SCHEMA_V3 | IPC_SCHEMA_V5) {
         let _ = write_tagged(
             stream,
             MessageTag::DisableCuratedRule,
             &DisableCuratedRuleReply::err(format!(
-                "schema_version {} != IPC_SCHEMA_V3",
+                "schema_version {} not supported for DisableCuratedRule",
                 req.schema_version
             )),
         );
@@ -1110,6 +1116,7 @@ fn handle_disable_curated_rule_frame(stream: &mut UnixStream, state: &Arc<Daemon
         &req,
         &state.rule_store,
         state.curated.as_ref(),
+        state.rule_signature_policy,
     );
     if let Err(e) = write_tagged(stream, MessageTag::DisableCuratedRule, &reply) {
         error!(error = %e, "failed to send DisableCuratedRuleReply");
@@ -1129,19 +1136,22 @@ fn handle_enable_curated_rule_frame(stream: &mut UnixStream, state: &Arc<DaemonS
             return;
         }
     };
-    if req.schema_version != IPC_SCHEMA_V3 {
+    if !matches!(req.schema_version, IPC_SCHEMA_V3 | IPC_SCHEMA_V5) {
         let _ = write_tagged(
             stream,
             MessageTag::EnableCuratedRule,
             &EnableCuratedRuleReply::err(format!(
-                "schema_version {} != IPC_SCHEMA_V3",
+                "schema_version {} not supported for EnableCuratedRule",
                 req.schema_version
             )),
         );
         return;
     }
-    let reply =
-        crate::handlers::enable_curated_rule::handle_enable_curated_rule(&req, &state.rule_store);
+    let reply = crate::handlers::enable_curated_rule::handle_enable_curated_rule(
+        &req,
+        &state.rule_store,
+        state.rule_signature_policy,
+    );
     if let Err(e) = write_tagged(stream, MessageTag::EnableCuratedRule, &reply) {
         error!(error = %e, "failed to send EnableCuratedRuleReply");
     }

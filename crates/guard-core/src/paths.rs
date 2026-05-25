@@ -13,9 +13,19 @@ use std::path::{Path, PathBuf};
 pub const APP_NAME: &str = "Stentorian Guard";
 
 /// System-wide state directory (hardened install, root-owned).
+#[cfg(target_os = "macos")]
 pub const SYSTEM_STATE_DIR: &str = "/Library/Application Support/Stentorian Guard";
+#[cfg(target_os = "linux")]
+pub const SYSTEM_STATE_DIR: &str = "/var/lib/stt-guard";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub const SYSTEM_STATE_DIR: &str = "/var/lib/stt-guard";
 
 /// System-wide log directory.
+#[cfg(target_os = "macos")]
+pub const SYSTEM_LOG_DIR: &str = "/var/log/stt-guard";
+#[cfg(target_os = "linux")]
+pub const SYSTEM_LOG_DIR: &str = "/var/log/stt-guard";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub const SYSTEM_LOG_DIR: &str = "/var/log/stt-guard";
 
 /// Binary install directory (root:wheel 755).
@@ -40,19 +50,38 @@ pub const ROTATED_LOG_PREFIX: &str = "stt-guard-";
 pub const ROTATED_LOG_SUFFIX_GZ: &str = ".log.gz";
 
 // ---------------------------------------------------------------------------
-// Binary / dylib names
+// Binary / hook library names
 // ---------------------------------------------------------------------------
 
 pub const CLI_BIN: &str = "stt-guard";
 pub const DAEMON_BIN: &str = "stt-guard-daemon";
-pub const HOOK_DYLIB: &str = "stt-guard-hook.dylib";
+
+#[cfg(target_os = "macos")]
+pub const HOOK_LIBRARY: &str = "stt-guard-hook.dylib";
+#[cfg(target_os = "linux")]
+pub const HOOK_LIBRARY: &str = "stt-guard-hook.so";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub const HOOK_LIBRARY: &str = "stt-guard-hook";
+
+/// Backward-compatible alias for macOS-era call sites. New code should use
+/// `HOOK_LIBRARY` when the value is not specifically about a Mach-O dylib.
+pub const HOOK_DYLIB: &str = HOOK_LIBRARY;
 
 pub const WATCHDOG_BIN: &str = "stt-guard-watchdog";
 
 pub const INSTALLED_BINARIES: &[&str] = &[CLI_BIN, DAEMON_BIN, WATCHDOG_BIN];
 
+#[cfg(target_os = "macos")]
 pub const SYSTEM_HOOK_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook.dylib";
+#[cfg(target_os = "linux")]
+pub const SYSTEM_HOOK_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook.so";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub const SYSTEM_HOOK_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook";
+
+#[cfg(target_os = "macos")]
 pub const HOMEBREW_HOOK_PATH: &str = "/opt/homebrew/lib/stt-guard/stt-guard-hook.dylib";
+#[cfg(not(target_os = "macos"))]
+pub const HOMEBREW_HOOK_PATH: &str = "";
 
 // ---------------------------------------------------------------------------
 // LaunchDaemon
@@ -73,9 +102,21 @@ pub const SERVICE_USER_REALNAME: &str = "Stentorian Guard Daemon";
 // ---------------------------------------------------------------------------
 
 pub const ENV_STATE_DIR: &str = "STT_GUARD_STATE_DIR";
-pub const ENV_HOOK_DYLIB: &str = "STT_GUARD_HOOK_DYLIB";
+pub const ENV_HOOK_LIBRARY: &str = "STT_GUARD_HOOK_DYLIB";
+/// Backward-compatible name for the development hook-library override.
+pub const ENV_HOOK_DYLIB: &str = ENV_HOOK_LIBRARY;
 pub const ENV_SNAPSHOT_MANIFEST: &str = "STT_GUARD_SNAPSHOT_MANIFEST";
-pub const ENV_DYLD: &str = "DYLD_INSERT_LIBRARIES";
+
+#[cfg(target_os = "macos")]
+pub const ENV_HOOK_INJECTION: &str = "DYLD_INSERT_LIBRARIES";
+#[cfg(target_os = "linux")]
+pub const ENV_HOOK_INJECTION: &str = "LD_PRELOAD";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub const ENV_HOOK_INJECTION: &str = "LD_PRELOAD";
+
+/// Backward-compatible alias for macOS-era call sites. New code should use
+/// `ENV_HOOK_INJECTION` when the value is platform-specific.
+pub const ENV_DYLD: &str = ENV_HOOK_INJECTION;
 
 // ---------------------------------------------------------------------------
 // Path builders (all derive from a state_dir root)
@@ -152,7 +193,7 @@ pub fn is_system_install(state_dir: &Path) -> bool {
 /// Resolve the default state directory.
 ///
 /// Priority: `STT_GUARD_STATE_DIR` env override → system dir (if exists) →
-/// user-level `~/Library/Application Support/Stentorian Guard`.
+/// platform user-level state directory.
 pub fn default_state_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os(ENV_STATE_DIR) {
         return PathBuf::from(dir);
@@ -161,16 +202,68 @@ pub fn default_state_dir() -> PathBuf {
     if sys.exists() {
         return sys;
     }
-    let home = std::env::var_os("HOME").expect("HOME environment variable must be set");
-    PathBuf::from(home).join("Library/Application Support/Stentorian Guard")
+    user_state_dir()
 }
 
 /// User-level log directory (used when not running as system install).
 pub fn user_log_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
+    #[cfg(target_os = "macos")]
+    {
+        let home = home_dir_from_env();
+        home.join("Library/Logs/Stentorian Guard")
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        user_state_dir().join("logs")
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        user_state_dir().join("logs")
+    }
+}
+
+fn user_state_dir() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        home_dir_from_env().join("Library/Application Support/Stentorian Guard")
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        linux_user_state_dir(
+            std::env::var_os("HOME").as_deref(),
+            std::env::var_os("XDG_STATE_HOME").as_deref(),
+        )
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        home_dir_from_env().join(".local/state/stt-guard")
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn home_dir_from_env() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .expect("HOME environment variable must be set")
+}
+
+#[cfg(target_os = "linux")]
+fn linux_user_state_dir(
+    home: Option<&std::ffi::OsStr>,
+    xdg_state_home: Option<&std::ffi::OsStr>,
+) -> PathBuf {
+    if let Some(xdg_state_home) = xdg_state_home.filter(|value| !value.is_empty()) {
+        return PathBuf::from(xdg_state_home).join("stt-guard");
+    }
+
+    let home = home
         .map(PathBuf::from)
         .expect("HOME environment variable must be set");
-    home.join("Library/Logs/Stentorian Guard")
+    home.join(".local/state/stt-guard")
 }
 
 /// Runtime JSONL log directory for a daemon using `state_dir`.
@@ -266,5 +359,35 @@ mod tests {
     fn run_paths_nest_under_runs() {
         let p = run_manifest_path(Path::new("/s"), "abc-123");
         assert_eq!(p, PathBuf::from("/s/runs/abc-123.manifest"));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn hook_constants_are_macos_specific() {
+        assert_eq!(HOOK_LIBRARY, "stt-guard-hook.dylib");
+        assert_eq!(ENV_HOOK_INJECTION, "DYLD_INSERT_LIBRARIES");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn hook_constants_are_linux_specific() {
+        assert_eq!(HOOK_LIBRARY, "stt-guard-hook.so");
+        assert_eq!(ENV_HOOK_INJECTION, "LD_PRELOAD");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn linux_user_state_dir_uses_xdg_state_home() {
+        let path = linux_user_state_dir(Some("/home/dev".as_ref()), Some("/tmp/state".as_ref()));
+
+        assert_eq!(path, PathBuf::from("/tmp/state/stt-guard"));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn linux_user_state_dir_falls_back_to_home_local_state() {
+        let path = linux_user_state_dir(Some("/home/dev".as_ref()), None);
+
+        assert_eq!(path, PathBuf::from("/home/dev/.local/state/stt-guard"));
     }
 }

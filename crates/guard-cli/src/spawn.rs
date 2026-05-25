@@ -1,4 +1,4 @@
-//! posix_spawnp wrapper that injects DYLD_INSERT_LIBRARIES and
+//! posix_spawnp wrapper that injects the platform hook variable and
 //! STT_GUARD_SNAPSHOT_MANIFEST into the child's envp. The hook derives the
 //! daemon socket path from STT_GUARD_STATE_DIR at ctor time.
 
@@ -8,7 +8,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use guard_core::paths::{
-    ENV_DYLD, ENV_SNAPSHOT_MANIFEST as ENV_MANIFEST, ENV_STATE_DIR as ENV_STATE,
+    ENV_HOOK_INJECTION, ENV_SNAPSHOT_MANIFEST as ENV_MANIFEST, ENV_STATE_DIR as ENV_STATE,
 };
 
 const ENV_DAEMON_SOCKET: &str = "STT_GUARD_DAEMON_SOCKET";
@@ -25,7 +25,7 @@ pub fn spawn_wrapped(
     let mut env: Vec<CString> = std::env::vars_os()
         .filter_map(|(k, v)| {
             let k_bytes = k.as_bytes();
-            if k_bytes == ENV_DYLD.as_bytes()
+            if k_bytes == ENV_HOOK_INJECTION.as_bytes()
                 || k_bytes == ENV_MANIFEST.as_bytes()
                 || k_bytes == ENV_STATE.as_bytes()
                 || k_bytes == ENV_DAEMON_SOCKET.as_bytes()
@@ -41,19 +41,19 @@ pub fn spawn_wrapped(
         })
         .collect();
 
-    // DYLD_INSERT_LIBRARIES: prepend our dylib so dyld processes it first.
-    let prior = std::env::var_os(ENV_DYLD).unwrap_or_default();
-    let mut dyld_value = dylib_path.as_os_str().as_bytes().to_vec();
+    // Prepend our hook library so the platform dynamic loader processes it first.
+    let prior = std::env::var_os(ENV_HOOK_INJECTION).unwrap_or_default();
+    let mut injection_value = dylib_path.as_os_str().as_bytes().to_vec();
     if !prior.is_empty() {
-        dyld_value.push(b':');
-        dyld_value.extend_from_slice(prior.as_bytes());
+        injection_value.push(b':');
+        injection_value.extend_from_slice(prior.as_bytes());
     }
-    let mut entry = ENV_DYLD.as_bytes().to_vec();
+    let mut entry = ENV_HOOK_INJECTION.as_bytes().to_vec();
     entry.push(b'=');
-    entry.extend_from_slice(&dyld_value);
+    entry.extend_from_slice(&injection_value);
     env.push(
         CString::new(entry)
-            .map_err(|e| std::io::Error::other(format!("DYLD env contains NUL: {e}")))?,
+            .map_err(|e| std::io::Error::other(format!("hook env contains NUL: {e}")))?,
     );
 
     // STT_GUARD_SNAPSHOT_MANIFEST: absolute path for the dylib to read at ctor time.
@@ -119,7 +119,7 @@ pub fn spawn_wrapped(
 /// POSIX_SPAWN_SETPGROUP. The returned pgid is `child.id() as i32`.
 ///
 /// Environment setup mirrors `spawn_wrapped`: inherits current env, strips
-/// managed vars, then adds DYLD_INSERT_LIBRARIES and STT_GUARD_SNAPSHOT_MANIFEST.
+/// managed vars, then adds the platform hook env var and STT_GUARD_SNAPSHOT_MANIFEST.
 pub fn spawn_wrapped_with_pgid(
     command: &[OsString],
     manifest_path: &Path,
@@ -135,12 +135,12 @@ pub fn spawn_wrapped_with_pgid(
     let dylib =
         crate::locate::find_dylib().map_err(|e| crate::CliError::DylibNotFound(e.to_string()))?;
 
-    let prior_dyld = std::env::var_os(ENV_DYLD).unwrap_or_default();
-    let mut dyld_value = dylib.as_os_str().to_os_string();
-    if !prior_dyld.is_empty() {
+    let prior_injection = std::env::var_os(ENV_HOOK_INJECTION).unwrap_or_default();
+    let mut injection_value = dylib.as_os_str().to_os_string();
+    if !prior_injection.is_empty() {
         let mut v = std::ffi::OsString::from(":");
-        v.push(&prior_dyld);
-        dyld_value.push(v);
+        v.push(&prior_injection);
+        injection_value.push(v);
     }
 
     let mut cmd = std::process::Command::new(&command[0]);
@@ -148,7 +148,7 @@ pub fn spawn_wrapped_with_pgid(
 
     for (k, v) in std::env::vars_os() {
         let kb = k.as_bytes();
-        if kb == ENV_DYLD.as_bytes()
+        if kb == ENV_HOOK_INJECTION.as_bytes()
             || kb == ENV_MANIFEST.as_bytes()
             || kb == ENV_STATE.as_bytes()
             || kb == ENV_DAEMON_SOCKET.as_bytes()
@@ -160,7 +160,7 @@ pub fn spawn_wrapped_with_pgid(
         cmd.env(k, v);
     }
 
-    cmd.env(ENV_DYLD, &dyld_value);
+    cmd.env(ENV_HOOK_INJECTION, &injection_value);
     cmd.env(ENV_MANIFEST, manifest_path);
     cmd.env(ENV_STATE, state_dir);
 

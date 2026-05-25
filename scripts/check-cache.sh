@@ -73,9 +73,35 @@ linux_ci_lint_fingerprint() {
     git diff-index HEAD -- \
       'scripts/pre-commit' \
       'scripts/pre-push' \
+      'scripts/ci-linux-check.sh' \
       'scripts/ci-linux-lint.sh' \
+      'scripts/ci-linux-release-build.sh' \
       'scripts/check-cache.sh' \
       'scripts/lint-test-env-vars.sh' \
+      '.github/workflows/ci.yml' \
+      '.github/actions/' 2>/dev/null
+  } | shasum -a 256 | awk '{print $1}'
+}
+
+linux_ci_check_fingerprint() {
+  { rust_fingerprint
+    fixture_fingerprint
+    git diff-index HEAD -- \
+      'scripts/pre-commit' \
+      'scripts/ci-linux-check.sh' \
+      'scripts/ci-verify-sanitized-fixture.sh' \
+      'scripts/check-cache.sh' \
+      '.github/workflows/ci.yml' \
+      '.github/actions/' 2>/dev/null
+  } | shasum -a 256 | awk '{print $1}'
+}
+
+linux_ci_release_build_fingerprint() {
+  { rust_fingerprint
+    git diff-index HEAD -- \
+      'scripts/pre-commit' \
+      'scripts/ci-linux-release-build.sh' \
+      'scripts/check-cache.sh' \
       '.github/workflows/ci.yml' \
       '.github/actions/' 2>/dev/null
   } | shasum -a 256 | awk '{print $1}'
@@ -145,7 +171,7 @@ changes_affect_e2e_files() {
 # build/test/runtime code changed.  Used to skip cargo check/test/build
 # phases that cannot be affected by these files.
 #
-# $1 = "staged" (pre-commit: --cached) or "all" (ci-local / pre-push: HEAD)
+# $1 = "staged" (pre-commit: --cached) or "all" (pre-push: HEAD)
 #
 # Files considered repo-meta (non-code):
 #   *.md, LICENSE*, SECURITY*, .gitignore, .gitattributes,

@@ -48,6 +48,55 @@ mod imp {
 mod imp {
     use super::*;
 
+    #[cfg(target_os = "linux")]
+    pub fn peer_audit_token(stream: &UnixStream) -> Result<AuditToken, OsError> {
+        use core::ffi::c_void;
+        use std::os::unix::io::AsRawFd;
+
+        let mut cred: libc::ucred = unsafe { core::mem::zeroed() };
+        let mut len: libc::socklen_t = core::mem::size_of::<libc::ucred>() as _;
+        let rc = unsafe {
+            libc::getsockopt(
+                stream.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                &mut cred as *mut libc::ucred as *mut c_void,
+                &mut len,
+            )
+        };
+        if rc < 0 {
+            return Err(OsError::io(
+                "peer credentials",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        if len as usize != core::mem::size_of::<libc::ucred>() {
+            return Err(OsError::unexpected_data(
+                "peer credentials",
+                format!("SO_PEERCRED returned unexpected length {len}"),
+            ));
+        }
+        if cred.pid <= 0 {
+            return Err(OsError::unexpected_data(
+                "peer credentials",
+                format!("SO_PEERCRED returned invalid pid {}", cred.pid),
+            ));
+        }
+
+        let starttime = crate::process::process_starttime_ticks(cred.pid)?;
+        let pidversion = crate::process::starttime_ticks_to_pidversion(starttime);
+
+        let mut val = [0u32; 8];
+        val[1] = cred.uid;
+        val[2] = cred.gid;
+        val[3] = cred.uid;
+        val[4] = cred.gid;
+        val[5] = cred.pid as u32;
+        val[7] = pidversion;
+        Ok(AuditToken::synthetic(val))
+    }
+
+    #[cfg(not(target_os = "linux"))]
     pub fn peer_audit_token(_stream: &UnixStream) -> Result<AuditToken, OsError> {
         Err(OsError::unsupported("peer audit token"))
     }
@@ -68,7 +117,24 @@ pub fn peer_identity(stream: &UnixStream) -> Result<ProcessIdentity, OsError> {
     Ok(unsafe { ProcessIdentity::from_kernel_token(token) })
 }
 
-#[cfg(all(test, not(target_os = "macos")))]
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    use super::*;
+
+    #[test]
+    fn peer_audit_token_uses_so_peercred() {
+        let (a, _b) = UnixStream::pair().expect("socket pair");
+
+        let token = peer_audit_token(&a).expect("peer audit token");
+
+        assert_eq!(token.val[5] as libc::pid_t, unsafe { libc::getpid() });
+        assert_eq!(token.val[1], unsafe { libc::geteuid() });
+        assert_eq!(token.val[2], unsafe { libc::getegid() });
+        assert_ne!(token.val[7], 0, "linux starttime pidversion should be set");
+    }
+}
+
+#[cfg(all(test, not(any(target_os = "macos", target_os = "linux"))))]
 mod tests {
     use super::*;
 

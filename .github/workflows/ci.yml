@@ -1,6 +1,6 @@
-# Code validation — cheap Linux checks run before macOS build/test work to keep
-# paid macOS minutes focused on changes that already passed repository hygiene
-# and platform-boundary checks.
+# Code validation — cheap PR and lint checks run before platform build/test
+# work so paid macOS minutes stay focused on changes that already passed
+# repository hygiene and security scans.
 
 name: CI
 
@@ -22,16 +22,64 @@ permissions:
   pull-requests: read
 
 jobs:
+  secret_scan:
+    name: Secret scan
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Fetch base branch
+        run: |
+          git remote add upstream "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags upstream main
+      - name: Compute scan range
+        id: scan_range
+        run: |
+          echo "base=$(git merge-base upstream/main HEAD)" >> "$GITHUB_OUTPUT"
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: trufflesecurity/trufflehog@v3.88.26
+        with:
+          base: ${{ steps.scan_range.outputs.base }}
+          head: ${{ steps.scan_range.outputs.head }}
+          extra_args: --only-verified
+
+  pr_title:
+    name: PR title
+    needs: secret_scan
+    if: >-
+      always()
+      && !cancelled()
+      && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip non-PR events
+        if: github.event_name != 'pull_request'
+        run: echo "PR title validation only runs for pull requests."
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - name: Validate PR title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: bash scripts/validate-conventional-subject "$PR_TITLE"
+
   prepare:
-    name: Prepare validation context
+    name: Prepare
+    needs: pr_title
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.context.outputs.code }}
       lockfile: ${{ steps.context.outputs.lockfile }}
       markdown: ${{ steps.context.outputs.markdown }}
       tooling: ${{ steps.context.outputs.tooling }}
-      scan_base: ${{ steps.context.outputs.base }}
-      scan_head: ${{ steps.context.outputs.head }}
       is_pr: ${{ steps.context.outputs.is_pr }}
     steps:
       - name: Checkout PR head
@@ -58,99 +106,39 @@ jobs:
         id: context
         run: scripts/ci-detect-validation-context.sh upstream/main
 
-  pr_title:
-    name: PR title
+  lint:
+    name: Lint
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - name: Skip non-PR events
-        if: needs.prepare.outputs.is_pr != 'true'
-        run: echo "PR title validation only runs for pull requests."
-      - uses: amannn/action-semantic-pull-request@v5
-        id: lint_pr
-        if: needs.prepare.outputs.is_pr == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          types: |
-            feat
-            fix
-            perf
-            refactor
-            test
-            docs
-            chore
-            ci
-          scopes: |
-            cli
-            daemon
-            hook
-            core
-            ipc
-            watchdog
-            e2e
-            bench
-            readme
-            llm
-            man
-            help
-            install
-            release
-            security
-          requireScope: false
-          subjectPattern: ^(?![A-Z]).+(?<!\.)$
-          subjectPatternError: |
-            The subject "{subject}" found in the pull request title "{title}"
-            must start with a lowercase letter and not end with a period.
-      - if: >-
-          needs.prepare.outputs.is_pr == 'true'
-          && steps.lint_pr.outputs.type == 'ci'
-          && steps.lint_pr.outputs.scope != ''
-        run: |
-          echo "::error::Scopes are not allowed for the 'ci' type. Use 'ci: ...' not 'ci(scope): ...'"
-          exit 1
-
-  markdown_lint:
-    name: Markdown lint
-    needs:
-      - prepare
-      - pr_title
-    if: >-
-      !cancelled()
-      && needs.prepare.outputs.markdown == 'true'
-      && needs.pr_title.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
-      - run: npx markdownlint-cli2 "**/*.md" "#target" "#.gsd"
-
-  tooling_lint:
-    name: Repo tooling lint
-    needs:
-      - prepare
-      - pr_title
-    if: >-
-      !cancelled()
-      && needs.prepare.outputs.tooling == 'true'
-      && needs.pr_title.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
           fetch-depth: 0
+      - name: Lint GitHub Actions workflows
+        if: needs.prepare.outputs.tooling == 'true'
+        shell: bash
+        run: |
+          curl -sSfL \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz \
+            -o actionlint.tar.gz
+          tar -xzf actionlint.tar.gz actionlint
+          ./actionlint
+      - uses: DavidAnson/markdownlint-cli2-action@v23.2.0
+        if: needs.prepare.outputs.markdown == 'true'
+        with:
+          globs: |
+            **/*.md
+            #target
+            #.gsd
       - name: Fetch base branch
+        if: needs.prepare.outputs.tooling == 'true'
         run: |
           git remote add upstream "https://github.com/${{ github.repository }}.git"
           git fetch --no-tags upstream main
-      - name: Lint GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - name: Check changed shell scripts
+        if: needs.prepare.outputs.tooling == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -164,38 +152,25 @@ jobs:
             exit 0
           fi
           bash -n "${shell_files[@]}"
-
-  lint:
-    name: Rust lint
-    needs:
-      - prepare
-      - pr_title
-    if: >-
-      !cancelled()
-      && needs.prepare.outputs.code == 'true'
-      && needs.pr_title.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
-      - name: Lint GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - uses: ./.github/actions/setup-rust
+        if: needs.prepare.outputs.code == 'true'
       - name: Check rustfmt
+        if: needs.prepare.outputs.code == 'true'
         run: cargo fmt --check
       - name: Check clippy
+        if: needs.prepare.outputs.code == 'true'
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Lint test env var hygiene
+        if: needs.prepare.outputs.code == 'true'
         run: scripts/lint-test-env-vars.sh
       - uses: taiki-e/install-action@cargo-machete
+        if: needs.prepare.outputs.code == 'true'
       - name: Lint unused dependencies
+        if: needs.prepare.outputs.code == 'true'
         run: cargo machete --with-metadata
 
-  linux_build_tests:
-    name: Linux build/test
+  linux_check:
+    name: Linux check
     needs:
       - prepare
       - lint
@@ -212,58 +187,48 @@ jobs:
           fetch-depth: 1
       - uses: ./.github/actions/setup-rust
         with:
-          shared-key: linux-build-tests
+          shared-key: linux-check
       - name: Verify sanitized fixture present
         run: scripts/ci-verify-sanitized-fixture.sh
       - name: cargo check shared crates
         run: cargo check -p guard-os -p guard-watchdog --quiet
       - name: cargo check boundary consumers
         run: cargo check -p guard-hook -p guard-daemon -p guard-cli --quiet
-      - name: cargo test OS boundary crate
-        run: cargo test -p guard-os --quiet
-      - name: cargo test shared core
-        run: cargo test -p guard-core --lib --tests --quiet
-      - name: cargo test shared IPC
-        run: cargo test -p guard-ipc --lib --tests --quiet
-      - name: cargo test watchdog
-        run: cargo test -p guard-watchdog --bins --quiet
 
-  secret_scan:
-    name: Secret scan
+  macos_check:
+    name: macOS check
     needs:
       - prepare
-      - pr_title
+      - lint
     if: >-
       !cancelled()
-      && needs.prepare.outputs.is_pr == 'true'
-      && needs.pr_title.result == 'success'
-    runs-on: ubuntu-latest
+      && needs.prepare.outputs.code == 'true'
+      && needs.lint.result == 'success'
+    runs-on: macos-14
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-      - name: Fetch base branch
-        run: |
-          git remote add upstream "https://github.com/${{ github.repository }}.git"
-          git fetch --no-tags upstream main
-      - uses: trufflesecurity/trufflehog@v3.88.26
+          fetch-depth: 1
+      - uses: ./.github/actions/setup-rust
         with:
-          base: ${{ needs.prepare.outputs.scan_base }}
-          head: ${{ needs.prepare.outputs.scan_head }}
-          extra_args: --only-verified
+          shared-key: macos-check
+      - name: cargo check workspace
+        run: cargo check --workspace --quiet
+      - name: cargo check release boundary crates
+        run: cargo check -p guard-cli -p guard-daemon -p guard-hook --features test-signer --quiet
 
   cargo_audit:
     name: Dependency CVE audit
     needs:
       - prepare
-      - markdown_lint
-      - tooling_lint
       - lint
-      - linux_build_tests
+      - linux_check
       - secret_scan
-      - build
+      - macos_check
+      - macos_build
       - unit_tests
       - integration_tests
       - linux_e2e_tests
@@ -272,12 +237,11 @@ jobs:
       !cancelled()
       && (github.event_name == 'schedule'
           || (needs.prepare.outputs.lockfile == 'true'
-              && (needs.markdown_lint.result == 'success' || needs.markdown_lint.result == 'skipped')
-              && (needs.tooling_lint.result == 'success' || needs.tooling_lint.result == 'skipped')
-              && (needs.lint.result == 'success' || needs.lint.result == 'skipped')
-              && (needs.linux_build_tests.result == 'success' || needs.linux_build_tests.result == 'skipped')
+              && needs.lint.result == 'success'
+              && (needs.linux_check.result == 'success' || needs.linux_check.result == 'skipped')
               && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
-              && (needs.build.result == 'success' || needs.build.result == 'skipped')
+              && (needs.macos_check.result == 'success' || needs.macos_check.result == 'skipped')
+              && (needs.macos_build.result == 'success' || needs.macos_build.result == 'skipped')
               && (needs.unit_tests.result == 'success' || needs.unit_tests.result == 'skipped')
               && (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped')
               && (needs.linux_e2e_tests.result == 'success' || needs.linux_e2e_tests.result == 'skipped')
@@ -328,23 +292,15 @@ jobs:
           path: .audit-cache-marker
           key: ${{ steps.audit_cache.outputs.cache-primary-key }}
 
-  build:
-    name: Build
+  macos_build:
+    name: macOS release build
     needs:
       - prepare
-      - markdown_lint
-      - tooling_lint
-      - lint
-      - linux_build_tests
-      - secret_scan
+      - macos_check
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
-      && (needs.markdown_lint.result == 'success' || needs.markdown_lint.result == 'skipped')
-      && (needs.tooling_lint.result == 'success' || needs.tooling_lint.result == 'skipped')
-      && needs.lint.result == 'success'
-      && needs.linux_build_tests.result == 'success'
-      && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
+      && needs.macos_check.result == 'success'
     runs-on: macos-14
     timeout-minutes: 15
     steps:
@@ -379,11 +335,11 @@ jobs:
     name: Unit tests
     needs:
       - prepare
-      - build
+      - lint
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
-      && needs.build.result == 'success'
+      && needs.lint.result == 'success'
     runs-on: macos-14
     timeout-minutes: 15
     steps:
@@ -400,11 +356,11 @@ jobs:
     name: Integration tests
     needs:
       - prepare
-      - build
+      - lint
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
-      && needs.build.result == 'success'
+      && needs.lint.result == 'success'
     runs-on: macos-14
     timeout-minutes: 15
     steps:
@@ -421,11 +377,13 @@ jobs:
     name: Linux E2E tests
     needs:
       - prepare
+      - linux_check
       - unit_tests
       - integration_tests
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
+      && needs.linux_check.result == 'success'
       && needs.unit_tests.result == 'success'
       && needs.integration_tests.result == 'success'
     runs-on: ubuntu-latest
@@ -446,11 +404,13 @@ jobs:
     name: macOS E2E tests
     needs:
       - prepare
+      - macos_build
       - unit_tests
       - integration_tests
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
+      && needs.macos_build.result == 'success'
       && needs.unit_tests.result == 'success'
       && needs.integration_tests.result == 'success'
     runs-on: macos-14

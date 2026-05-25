@@ -30,39 +30,13 @@ if grep -qi '^Co-Authored-By:' "$MSG_FILE"; then
 Remove the Co-Authored-By line from your commit message."
 fi
 
-# ── Validate conventional commit format ────────────────────────────────────
-
-PATTERN='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?!?: .+'
-if ! echo "$MSG" | grep -Eq "$PATTERN"; then
-  fail "commit message does not follow Conventional Commits.
-Expected: <type>(<scope>): <description>
-Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
-Got: $MSG"
-fi
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+bash "$SCRIPT_DIR/validate-conventional-subject" "$MSG" || exit 1
 
 # ── Extract type and scope ─────────────────────────────────────────────────
 
 TYPE=$(echo "$MSG" | sed -E 's/^([a-z]+).*/\1/')
 SCOPE=$(echo "$MSG" | sed -nE 's/^[a-z]+\(([^)]+)\).*/\1/p')
-
-# ── Enforce explicit scope on docs type ────────────────────────────────────
-
-if [ "$TYPE" = "docs" ]; then
-  if [ -z "$SCOPE" ]; then
-    fail "'docs' commits require an explicit scope.
-Allowed: docs(readme), docs(llm), docs(bench), docs(man), docs(help), docs(install)
-Got: $MSG"
-  fi
-  case "$SCOPE" in
-    readme|llm|bench|man|help|install)
-      ;; # known scope
-    *)
-      fail "docs(${SCOPE}) is not a recognized scope.
-Allowed: readme, llm, bench, man, help, install
-Changelog scopes: man, help, install"
-      ;;
-  esac
-fi
 
 # ── Classify staged files ──────────────────────────────────────────────────
 

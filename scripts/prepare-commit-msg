@@ -142,8 +142,9 @@ if [ "$MSG_SOURCE" != "message" ] || [ -z "$CURRENT_TYPE" ]; then
     echo "# Rules enforced by commit-msg hook:"
     echo "#   feat/fix → must change source code (.rs), not just docs/tests/CI"
     echo "#   test     → must change test files"
-    echo "#   ci       → must change .github/ files"
+    echo "#   ci       → should change .github/ files and must not use a scope"
     echo "#   docs     → requires scope: readme, llm, bench, man, help, install"
+    echo "#   subject  → starts lowercase and does not end with a period"
     echo "# ──────────────────────────────────────────────────────────────"
   } >> "$MSG_FILE"
 fi

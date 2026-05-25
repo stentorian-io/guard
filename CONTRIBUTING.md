@@ -198,6 +198,9 @@ docs(bench): capture p99 on M1 reference run
 chore: update ciborium to 0.2.2
 ```
 
+Subjects start with lowercase text after the colon and do not end with a period.
+Use `ci: ...` without a scope.
+
 ### Error handling
 
 - **Hook:** fail-closed — any error in snapshot load, signature verification, or IPC timeout denies all network
@@ -219,20 +222,23 @@ chore: update ciborium to 0.2.2
 
 ## CI
 
-GitHub Actions run one validation workflow. PR title validation runs first, then
-independent lint jobs fan out in parallel before heavier code validation starts:
+GitHub Actions run one validation workflow. Secret scan runs first for PRs, then
+PR title validation, preparation, and repository linting run before heavier
+validation starts:
 
-- Markdown lint, repo-tooling lint, Rust lint, and secret scan run on Ubuntu.
-- Linux build/test runs on Ubuntu before paid macOS work.
-- Build, unit tests, integration tests, and macOS E2E run on macOS; unit and
-  integration tests run in parallel after the release build.
-- Linux E2E runs on Ubuntu after unit and integration tests, in parallel with
-  macOS E2E.
+- `Lint` runs GitHub Actions workflow lint, Markdown lint, Bash lint, and Rust
+  lint in one Ubuntu job. Bash lint checks changed `scripts/*.sh` and
+  `tools/*.sh` files.
+- Linux check, macOS check, workspace unit tests, and workspace integration
+  tests run in parallel after linting passes.
+- The macOS release build runs after macOS check and uploads binaries as a
+  short-lived artifact for macOS E2E.
+- Linux E2E runs after Linux check plus unit and integration tests; macOS E2E
+  runs after the macOS release build plus unit and integration tests.
 - Dependency CVE audit runs last for lockfile-changing PRs and on the nightly
   schedule.
-- The macOS release build uploads binaries as a short-lived artifact; the macOS
-  E2E job downloads those exact binaries so install-health tests exercise the
-  same payload produced by the build job.
+- The macOS E2E job downloads the release build artifact so install-health tests
+  exercise the same payload produced by the macOS build job.
 
 PRs must pass the full CI suite before merging.
 

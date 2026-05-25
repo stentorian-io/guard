@@ -13,9 +13,19 @@ use std::path::{Path, PathBuf};
 pub const APP_NAME: &str = "Stentorian Guard";
 
 /// System-wide state directory (hardened install, root-owned).
+#[cfg(target_os = "macos")]
 pub const SYSTEM_STATE_DIR: &str = "/Library/Application Support/Stentorian Guard";
+#[cfg(target_os = "linux")]
+pub const SYSTEM_STATE_DIR: &str = "/var/lib/stt-guard";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub const SYSTEM_STATE_DIR: &str = "/var/lib/stt-guard";
 
 /// System-wide log directory.
+#[cfg(target_os = "macos")]
+pub const SYSTEM_LOG_DIR: &str = "/var/log/stt-guard";
+#[cfg(target_os = "linux")]
+pub const SYSTEM_LOG_DIR: &str = "/var/log/stt-guard";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub const SYSTEM_LOG_DIR: &str = "/var/log/stt-guard";
 
 /// Binary install directory (root:wheel 755).
@@ -183,7 +193,7 @@ pub fn is_system_install(state_dir: &Path) -> bool {
 /// Resolve the default state directory.
 ///
 /// Priority: `STT_GUARD_STATE_DIR` env override → system dir (if exists) →
-/// user-level `~/Library/Application Support/Stentorian Guard`.
+/// platform user-level state directory.
 pub fn default_state_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os(ENV_STATE_DIR) {
         return PathBuf::from(dir);
@@ -192,16 +202,68 @@ pub fn default_state_dir() -> PathBuf {
     if sys.exists() {
         return sys;
     }
-    let home = std::env::var_os("HOME").expect("HOME environment variable must be set");
-    PathBuf::from(home).join("Library/Application Support/Stentorian Guard")
+    user_state_dir()
 }
 
 /// User-level log directory (used when not running as system install).
 pub fn user_log_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
+    #[cfg(target_os = "macos")]
+    {
+        let home = home_dir_from_env();
+        home.join("Library/Logs/Stentorian Guard")
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        user_state_dir().join("logs")
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        user_state_dir().join("logs")
+    }
+}
+
+fn user_state_dir() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        home_dir_from_env().join("Library/Application Support/Stentorian Guard")
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        linux_user_state_dir(
+            std::env::var_os("HOME").as_deref(),
+            std::env::var_os("XDG_STATE_HOME").as_deref(),
+        )
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        home_dir_from_env().join(".local/state/stt-guard")
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn home_dir_from_env() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .expect("HOME environment variable must be set")
+}
+
+#[cfg(target_os = "linux")]
+fn linux_user_state_dir(
+    home: Option<&std::ffi::OsStr>,
+    xdg_state_home: Option<&std::ffi::OsStr>,
+) -> PathBuf {
+    if let Some(xdg_state_home) = xdg_state_home.filter(|value| !value.is_empty()) {
+        return PathBuf::from(xdg_state_home).join("stt-guard");
+    }
+
+    let home = home
         .map(PathBuf::from)
         .expect("HOME environment variable must be set");
-    home.join("Library/Logs/Stentorian Guard")
+    home.join(".local/state/stt-guard")
 }
 
 /// Runtime JSONL log directory for a daemon using `state_dir`.
@@ -311,5 +373,21 @@ mod tests {
     fn hook_constants_are_linux_specific() {
         assert_eq!(HOOK_LIBRARY, "stt-guard-hook.so");
         assert_eq!(ENV_HOOK_INJECTION, "LD_PRELOAD");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn linux_user_state_dir_uses_xdg_state_home() {
+        let path = linux_user_state_dir(Some("/home/dev".as_ref()), Some("/tmp/state".as_ref()));
+
+        assert_eq!(path, PathBuf::from("/tmp/state/stt-guard"));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn linux_user_state_dir_falls_back_to_home_local_state() {
+        let path = linux_user_state_dir(Some("/home/dev".as_ref()), None);
+
+        assert_eq!(path, PathBuf::from("/home/dev/.local/state/stt-guard"));
     }
 }

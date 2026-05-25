@@ -37,8 +37,8 @@ vertical slices:
    interposition end to end.
 5. Replace macOS hardened-runtime classification with Linux setuid, setgid, file
    capability, ELF, and syscall-instruction classification.
-6. Decide the Linux production signing and install model before claiming
-   supported consumer installs.
+6. Keep Linux development mode explicit, and decide the production signing and
+   install model before claiming supported consumer installs.
 
 Do not declare Linux support until a Linux e2e suite proves wrapped commands
 fail closed for denied outbound connections and known hook-bypass classes.
@@ -364,7 +364,11 @@ Not possible:
 
 First slice:
 
-- Add a Linux development daemon path.
+- Add XDG-based Linux development state/log paths.
+- Start a sibling `stt-guard-daemon serve --state-dir ...` from the CLI when a
+  Linux development daemon is not already reachable.
+- Make `stt-guard init` on Linux fail closed with an explicit unsupported
+  production-install message.
 - Defer production install until signing and ownership decisions are settled.
 
 ## Containers And CI
@@ -432,12 +436,20 @@ Verification:
 - setuid and setgid harnesses are blocked before exec.
 - file capability harness is classified according to the chosen policy.
 
-### Slice F: Linux Production Install
+### Slice F: Linux Development Daemon And Production Gate
 
-Goal: install root-owned artifacts, register a hardware-backed signer, and run
-the daemon under the chosen Linux service model.
+Goal: make Linux usable for development without implying production support.
+Production install remains blocked until root-owned artifact layout, systemd
+service management, and hardware-backed signing decisions are made.
 
 Verification:
+
+- Linux uses XDG development state paths.
+- Linux CLI can start a local sibling daemon for wrapped commands.
+- `stt-guard init` on Linux reports that hardened production install is not
+  implemented yet.
+
+Future production verification:
 
 - Privileged Linux install-health e2e passes in a controlled runner.
 

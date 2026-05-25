@@ -4,10 +4,9 @@
 //! `well_known_state_dir()` path validator accepts paths under the tempdir.
 
 use guard_core::Snapshot;
-use guard_daemon::hmac_key;
 use guard_daemon::snapshot::publish_run_signed_bytes;
 use guard_daemon::state_dir::ensure_state_dir;
-use guard_hook::snapshot::{load_from_env, LoadError};
+use guard_hook::snapshot::{LoadError, load_from_env};
 use std::sync::Mutex;
 
 /// Tests that mutate process env must be serialized.
@@ -288,111 +287,5 @@ fn fail_closed_when_snapshot_signer_untrusted() {
             matches!(r, Err(LoadError::SnapshotSignerUntrusted)),
             "expected SnapshotSignerUntrusted, got {r:?}"
         );
-    });
-}
-
-// --- M004-S02 HMAC integrity tests ---
-
-#[test]
-fn hmac_happy_path_with_signed_manifest() {
-    use guard_daemon::state_dir::ensure_runs_dir;
-
-    let _t = with_fake_home(|state_dir| {
-        ensure_runs_dir(state_dir).unwrap();
-        hmac_key::generate_and_store(state_dir).unwrap();
-
-        let snap = Snapshot::v2_default();
-        let uuid = "hmac-test-0001";
-        let pub_ = publish_signed_run(state_dir, snap, uuid);
-        assert!(
-            pub_.hmac_hex.is_some(),
-            "publish_run must produce hmac when key present"
-        );
-
-        let manifest_path = guard_daemon::state_dir::run_manifest_path(state_dir, uuid);
-        unsafe {
-            std::env::set_var("STT_GUARD_SNAPSHOT_MANIFEST", &manifest_path);
-            std::env::set_var("STT_GUARD_STATE_DIR", state_dir);
-        }
-        let loaded = load_from_env().expect("HMAC happy path");
-        assert_eq!(loaded.schema_version, 2);
-        assert!(!loaded.entries.is_empty());
-    });
-}
-
-#[test]
-fn hmac_fail_closed_on_tampered_hmac() {
-    use guard_daemon::state_dir::ensure_runs_dir;
-
-    let _t = with_fake_home(|state_dir| {
-        ensure_runs_dir(state_dir).unwrap();
-        hmac_key::generate_and_store(state_dir).unwrap();
-
-        let snap = Snapshot::v2_default();
-        let uuid = "hmac-test-0002";
-        let _pub = publish_signed_run(state_dir, snap, uuid);
-
-        // Tamper with HMAC in the manifest
-        let manifest_path = guard_daemon::state_dir::run_manifest_path(state_dir, uuid);
-        let text = std::fs::read_to_string(&manifest_path).unwrap();
-        let tampered = text.replace(
-            "hmac=",
-            "hmac=0000000000000000000000000000000000000000000000000000000000000000\nold_hmac=",
-        );
-        std::fs::write(&manifest_path, &tampered).unwrap();
-
-        unsafe {
-            std::env::set_var("STT_GUARD_SNAPSHOT_MANIFEST", &manifest_path);
-            std::env::set_var("STT_GUARD_STATE_DIR", state_dir);
-        }
-        let r = load_from_env();
-        assert!(
-            matches!(r, Err(LoadError::HmacMismatch)),
-            "expected HmacMismatch, got: {r:?}"
-        );
-    });
-}
-
-#[test]
-fn hmac_fail_closed_when_key_exists_but_manifest_has_no_hmac() {
-    let _t = with_fake_home(|state_dir| {
-        // Publish signed manifest before key exists, then create key so loader requires HMAC.
-        let snap = Snapshot::v2_default();
-        let uuid = "hmac-test-0003";
-        let _pub = publish_signed_run(state_dir, snap, uuid);
-        hmac_key::generate_and_store(state_dir).unwrap();
-
-        unsafe {
-            std::env::set_var(
-                "STT_GUARD_SNAPSHOT_MANIFEST",
-                guard_daemon::state_dir::run_manifest_path(state_dir, uuid),
-            );
-            std::env::set_var("STT_GUARD_STATE_DIR", state_dir);
-        }
-        let r = load_from_env();
-        assert!(
-            matches!(r, Err(LoadError::HmacMissing)),
-            "expected HmacMissing, got: {r:?}"
-        );
-    });
-}
-
-#[test]
-fn no_hmac_key_skips_verification() {
-    let _t = with_fake_home(|state_dir| {
-        // No key generated — legacy mode, HMAC check should be skipped
-        let snap = Snapshot::v2_default();
-        let uuid = "hmac-test-0004";
-        let _pub = publish_signed_run(state_dir, snap, uuid);
-
-        unsafe {
-            std::env::set_var(
-                "STT_GUARD_SNAPSHOT_MANIFEST",
-                guard_daemon::state_dir::run_manifest_path(state_dir, uuid),
-            );
-            std::env::set_var("STT_GUARD_STATE_DIR", state_dir);
-        }
-        let loaded = load_from_env().expect("no-key should skip HMAC check");
-        assert_eq!(loaded.schema_version, 2);
     });
 }

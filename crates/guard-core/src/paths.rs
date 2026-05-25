@@ -29,7 +29,6 @@ pub const DB_FILENAME: &str = "stt-guard.db";
 pub const SOCKET_FILENAME: &str = "stt-guard-daemon.sock";
 pub const LOG_FILENAME: &str = "stt-guard.log";
 pub const READY_FILENAME: &str = "daemon.ready";
-pub const HMAC_KEY_FILENAME: &str = "hmac.key";
 pub const HOOK_HASH_FILENAME: &str = "hook.sha256";
 pub const TRUSTED_RULE_SIGNERS_FILENAME: &str = "trusted-rule-signers.tsv";
 pub const MANIFEST_FILENAME: &str = "snapshot.manifest";
@@ -100,10 +99,6 @@ pub fn manifest_path(state_dir: &Path) -> PathBuf {
 
 pub fn manifest_tmp_path(state_dir: &Path) -> PathBuf {
     state_dir.join(format!(".{MANIFEST_FILENAME}.tmp"))
-}
-
-pub fn hmac_key_path(state_dir: &Path) -> PathBuf {
-    state_dir.join(HMAC_KEY_FILENAME)
 }
 
 pub fn hook_hash_path(state_dir: &Path) -> PathBuf {

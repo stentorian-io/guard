@@ -6,7 +6,6 @@ pub mod daemon_state;
 pub mod env_capture;
 pub mod gap_detector;
 pub mod handlers;
-pub mod hmac_key;
 pub mod install_artifacts;
 pub mod ipc_dispatch;
 pub mod ipc_server;

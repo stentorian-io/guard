@@ -47,11 +47,6 @@ fn max_frame_bytes_for_tag(tag: u8) -> u32 {
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
-fn load_ipc_hmac_key(sock: &Path) -> Option<[u8; 32]> {
-    let state_dir = sock.parent()?;
-    guard_daemon::hmac_key::load(state_dir)
-}
-
 /// PrepareSnapshot's read timeout is generous to accommodate snapshot
 /// generation on large rule sets.
 const PREPARE_SNAPSHOT_READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -166,42 +161,21 @@ where
         .write_all(&[tag])
         .map_err(|e| CliError::DaemonUnreachable(format!("tag write: {e}")))?;
 
-    if let Some(key) = load_ipc_hmac_key(sock) {
-        let mut signer = guard_ipc::signed_frame::FrameSigner::new(key);
-        signer
-            .write_signed_with_limit(&mut stream, tag, req, max_frame_bytes_for_tag(tag))
-            .map_err(|e| CliError::DaemonUnreachable(format!("write signed: {e}")))?;
-        let mut tag_back = [0u8; 1];
-        stream
-            .read_exact(&mut tag_back)
-            .map_err(|e| CliError::DaemonUnreachable(format!("read tag echo: {e}")))?;
-        if tag_back[0] != tag {
-            return Err(CliError::DaemonUnreachable(format!(
-                "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
-                tag_back[0]
-            )));
-        }
-        let reply: ReplyT = signer
-            .read_signed_with_limit(&mut stream, tag, max_frame_bytes_for_tag(tag))
-            .map_err(|e| CliError::DaemonUnreachable(format!("read signed reply: {e}")))?;
-        Ok(reply)
-    } else {
-        write_frame_with_limit(&mut stream, req, max_frame_bytes_for_tag(tag))
-            .map_err(|e| CliError::DaemonUnreachable(format!("write frame: {e}")))?;
-        let mut tag_back = [0u8; 1];
-        stream
-            .read_exact(&mut tag_back)
-            .map_err(|e| CliError::DaemonUnreachable(format!("read tag echo: {e}")))?;
-        if tag_back[0] != tag {
-            return Err(CliError::DaemonUnreachable(format!(
-                "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
-                tag_back[0]
-            )));
-        }
-        let reply: ReplyT = read_frame_with_limit(&mut stream, max_frame_bytes_for_tag(tag))
-            .map_err(|e| CliError::DaemonUnreachable(format!("read reply: {e}")))?;
-        Ok(reply)
+    write_frame_with_limit(&mut stream, req, max_frame_bytes_for_tag(tag))
+        .map_err(|e| CliError::DaemonUnreachable(format!("write frame: {e}")))?;
+    let mut tag_back = [0u8; 1];
+    stream
+        .read_exact(&mut tag_back)
+        .map_err(|e| CliError::DaemonUnreachable(format!("read tag echo: {e}")))?;
+    if tag_back[0] != tag {
+        return Err(CliError::DaemonUnreachable(format!(
+            "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
+            tag_back[0]
+        )));
     }
+    let reply: ReplyT = read_frame_with_limit(&mut stream, max_frame_bytes_for_tag(tag))
+        .map_err(|e| CliError::DaemonUnreachable(format!("read reply: {e}")))?;
+    Ok(reply)
 }
 
 /// Send `PrepareSnapshot { cwd }` BEFORE posix_spawn so the daemon merges

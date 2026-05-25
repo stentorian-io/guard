@@ -33,9 +33,7 @@ pub(crate) const TAG_ENV_NOT_PROPAGATED: u8 = 0x08;
 pub(crate) const TAG_DENY_NOTIFY: u8 = 0x12;
 pub(crate) const TAG_EXEC_BLOCKED: u8 = 0x13;
 pub(crate) const TAG_PERSISTENCE_WRITE: u8 = 0x14;
-
 static DAEMON_SOCKET_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
-static IPC_HMAC_KEY: OnceLock<Option<[u8; 32]>> = OnceLock::new();
 
 /// Per-test override for the daemon socket path.
 ///
@@ -118,35 +116,6 @@ pub fn cache_daemon_socket_path() {
     });
 }
 
-/// Cache the HMAC key from the well-known state directory. Called once from the
-/// dylib ctor after snapshot load. The key is reused for per-message IPC signing.
-pub fn cache_ipc_hmac_key() {
-    use std::os::unix::fs::OpenOptionsExt;
-    IPC_HMAC_KEY.get_or_init(|| {
-        let state_dir = crate::snapshot::well_known_state_dir();
-        let path = guard_core::paths::hmac_key_path(&state_dir);
-        let mut f = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(&path)
-            .ok()?;
-        let mut buf = [0u8; 32];
-        let n = std::io::Read::read(&mut f, &mut buf).ok()?;
-        if n != 32 {
-            return None;
-        }
-        let mut extra = [0u8; 1];
-        if std::io::Read::read(&mut f, &mut extra).ok() != Some(0) {
-            return None;
-        }
-        Some(buf)
-    });
-}
-
-fn ipc_hmac_key() -> Option<[u8; 32]> {
-    IPC_HMAC_KEY.get().and_then(|o| *o)
-}
-
 /// Returns the daemon socket path. The test override (set via `_set_daemon_socket_for_test`)
 /// is consulted first; in production, the OnceLock value (derived from state dir at ctor
 /// time) is used.
@@ -203,42 +172,19 @@ where
     // Tag byte first.
     stream.write_all(&[tag]).map_err(map_io_to_timeout)?;
 
-    if let Some(key) = ipc_hmac_key() {
-        let mut signer = guard_ipc::signed_frame::FrameSigner::new(key);
-        signer
-            .write_signed(&mut stream, tag, msg)
-            .map_err(|e| IpcClientError::Codec(e.to_string()))?;
-        // Read the response: tag byte (echoed by daemon) + signed body.
-        let mut tag_back = [0u8; 1];
-        stream
-            .read_exact(&mut tag_back)
-            .map_err(map_io_to_timeout)?;
-        if tag_back[0] != tag {
-            return Err(IpcClientError::Codec(format!(
-                "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
-                tag_back[0]
-            )));
-        }
-        let ack: Ack = signer
-            .read_signed(&mut stream, tag)
-            .map_err(|e| IpcClientError::Codec(e.to_string()))?;
-        Ok(ack)
-    } else {
-        // Unsigned fallback (no HMAC key available).
-        write_frame(&mut stream, msg).map_err(|e| IpcClientError::Codec(e.to_string()))?;
-        let mut tag_back = [0u8; 1];
-        stream
-            .read_exact(&mut tag_back)
-            .map_err(map_io_to_timeout)?;
-        if tag_back[0] != tag {
-            return Err(IpcClientError::Codec(format!(
-                "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
-                tag_back[0]
-            )));
-        }
-        let ack: Ack = read_frame(&mut stream).map_err(|e| IpcClientError::Codec(e.to_string()))?;
-        Ok(ack)
+    write_frame(&mut stream, msg).map_err(|e| IpcClientError::Codec(e.to_string()))?;
+    let mut tag_back = [0u8; 1];
+    stream
+        .read_exact(&mut tag_back)
+        .map_err(map_io_to_timeout)?;
+    if tag_back[0] != tag {
+        return Err(IpcClientError::Codec(format!(
+            "tag mismatch: sent 0x{tag:02x}, got 0x{:02x}",
+            tag_back[0]
+        )));
     }
+    let ack: Ack = read_frame(&mut stream).map_err(|e| IpcClientError::Codec(e.to_string()))?;
+    Ok(ack)
 }
 
 /// Synchronous round trip: sends a tagged ForkEvent frame, waits for ForkAck.

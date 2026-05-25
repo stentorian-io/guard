@@ -210,8 +210,6 @@ pub struct DaemonState {
     pub deferred_resolve: Arc<DeferredResolveTable>,
     // v0.5 M004-S01: monotonic startup instant for uptime reporting in Ping.
     pub startup_instant: std::time::Instant,
-    // Per-message HMAC key for IPC frame signing. Reuses the snapshot HMAC key.
-    pub ipc_hmac_key: Option<[u8; 32]>,
     pub pending_snapshot_inputs: Arc<Mutex<HashMap<String, PendingSnapshotInput>>>,
     // Issue #31: production accepts only hardware-backed signer kinds.
     pub rule_signature_policy: guard_core::RuleSignaturePolicy,
@@ -250,7 +248,6 @@ impl DaemonState {
             last_snapshot_publish_failed: AtomicBool::new(false),
             deferred_resolve: Arc::new(DeferredResolveTable::new()),
             startup_instant: std::time::Instant::now(),
-            ipc_hmac_key: None,
             pending_snapshot_inputs: Arc::new(Mutex::new(HashMap::new())),
             rule_signature_policy: guard_core::RuleSignaturePolicy::Production,
         }
@@ -402,9 +399,6 @@ impl IpcServer {
             return;
         }
 
-        // Install per-connection frame signer (if HMAC key is available).
-        set_conn_signer(state.ipc_hmac_key);
-
         // Classify the frame: tagged or legacy length-prefixed.
         let kind = match classify_frame(&mut stream) {
             Ok(k) => k,
@@ -498,7 +492,6 @@ impl IpcServer {
                 handle_publish_signed_snapshot_frame(&mut stream, state);
             }
         }
-        clear_conn_signer();
     }
 }
 
@@ -1468,25 +1461,6 @@ fn pid_exists(pid: libc::pid_t) -> bool {
     std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-// Per-connection frame signer, set by `handle()` before dispatching to handlers.
-// Thread-local avoids threading the signer through every handler signature.
-thread_local! {
-    static CONN_SIGNER: std::cell::RefCell<Option<guard_ipc::signed_frame::FrameSigner>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-fn set_conn_signer(key: Option<[u8; 32]>) {
-    CONN_SIGNER.with(|cell| {
-        *cell.borrow_mut() = key.map(guard_ipc::signed_frame::FrameSigner::new);
-    });
-}
-
-fn clear_conn_signer() {
-    CONN_SIGNER.with(|cell| {
-        *cell.borrow_mut() = None;
-    });
-}
-
 fn max_frame_bytes_for_tag(tag: MessageTag) -> u32 {
     match tag {
         MessageTag::PrepareSnapshotInputs | MessageTag::PublishSignedSnapshot => {
@@ -1500,15 +1474,7 @@ fn read_tagged_body<T>(stream: &mut UnixStream, tag: MessageTag) -> Result<T, Ip
 where
     T: serde::de::DeserializeOwned,
 {
-    CONN_SIGNER.with(|cell| {
-        let mut borrow = cell.borrow_mut();
-        match borrow.as_mut() {
-            Some(signer) => {
-                signer.read_signed_with_limit(stream, tag.as_byte(), max_frame_bytes_for_tag(tag))
-            }
-            None => guard_ipc::frame::read_frame_with_limit(stream, max_frame_bytes_for_tag(tag)),
-        }
-    })
+    guard_ipc::frame::read_frame_with_limit(stream, max_frame_bytes_for_tag(tag))
 }
 
 fn write_tagged<T>(stream: &mut UnixStream, tag: MessageTag, msg: &T) -> Result<(), IpcError>
@@ -1518,20 +1484,7 @@ where
     if let Err(e) = stream.write_all(&[tag.as_byte()]) {
         return Err(IpcError::Io(e));
     }
-    CONN_SIGNER.with(|cell| {
-        let mut borrow = cell.borrow_mut();
-        match borrow.as_mut() {
-            Some(signer) => signer.write_signed_with_limit(
-                stream,
-                tag.as_byte(),
-                msg,
-                max_frame_bytes_for_tag(tag),
-            ),
-            None => {
-                guard_ipc::frame::write_frame_with_limit(stream, msg, max_frame_bytes_for_tag(tag))
-            }
-        }
-    })
+    guard_ipc::frame::write_frame_with_limit(stream, msg, max_frame_bytes_for_tag(tag))
 }
 
 fn handle_fork_event(stream: &mut UnixStream, peer_token: AuditToken, state: &Arc<DaemonState>) {

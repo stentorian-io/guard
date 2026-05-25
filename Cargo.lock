@@ -668,7 +668,6 @@ dependencies = [
  "guard-daemon",
  "guard-ipc",
  "guard-os",
- "hmac",
  "libc",
  "rusqlite",
  "rusqlite_migration",
@@ -712,7 +711,6 @@ dependencies = [
  "guard-ipc",
  "guard-os",
  "hdrhistogram",
- "hmac",
  "libc",
  "memmap2",
  "p256",
@@ -728,11 +726,9 @@ dependencies = [
  "ciborium",
  "guard-core",
  "guard-os",
- "hmac",
  "libc",
  "serde",
  "serde_bytes",
- "sha2",
  "thiserror 2.0.18",
 ]
 

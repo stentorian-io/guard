@@ -10,7 +10,6 @@
 pub mod error;
 pub mod frame;
 pub mod messages;
-pub mod signed_frame;
 pub mod transport;
 
 pub use error::IpcError;

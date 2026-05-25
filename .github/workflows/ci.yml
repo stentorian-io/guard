@@ -61,11 +61,14 @@ jobs:
   pr_title:
     name: PR title
     needs: prepare
-    if: needs.prepare.outputs.is_pr == 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Skip non-PR events
+        if: needs.prepare.outputs.is_pr != 'true'
+        run: echo "PR title validation only runs for pull requests."
       - uses: amannn/action-semantic-pull-request@v5
         id: lint_pr
+        if: needs.prepare.outputs.is_pr == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -99,15 +102,23 @@ jobs:
           subjectPatternError: |
             The subject "{subject}" found in the pull request title "{title}"
             must start with a lowercase letter and not end with a period.
-      - if: steps.lint_pr.outputs.type == 'ci' && steps.lint_pr.outputs.scope != ''
+      - if: >-
+          needs.prepare.outputs.is_pr == 'true'
+          && steps.lint_pr.outputs.type == 'ci'
+          && steps.lint_pr.outputs.scope != ''
         run: |
           echo "::error::Scopes are not allowed for the 'ci' type. Use 'ci: ...' not 'ci(scope): ...'"
           exit 1
 
   markdown_lint:
     name: Markdown lint
-    needs: prepare
-    if: needs.prepare.outputs.markdown == 'true'
+    needs:
+      - prepare
+      - pr_title
+    if: >-
+      !cancelled()
+      && needs.prepare.outputs.markdown == 'true'
+      && needs.pr_title.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -117,32 +128,15 @@ jobs:
           fetch-depth: 1
       - run: npx markdownlint-cli2 "**/*.md" "#target" "#.gsd"
 
-  pr_checks:
-    name: PR checks
-    if: always()
-    needs:
-      - prepare
-      - pr_title
-      - markdown_lint
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          results='${{ toJSON(needs.*.result) }}'
-          echo "PR check results: $results"
-          if echo "$results" | grep -qE '"(failure|cancelled)"'; then
-            echo "::error::One or more PR checks failed or were cancelled"
-            exit 1
-          fi
-
   tooling_lint:
     name: Repo tooling lint
     needs:
       - prepare
-      - pr_checks
+      - pr_title
     if: >-
       !cancelled()
       && needs.prepare.outputs.tooling == 'true'
-      && needs.pr_checks.result == 'success'
+      && needs.pr_title.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -175,11 +169,11 @@ jobs:
     name: Rust lint
     needs:
       - prepare
-      - pr_checks
+      - pr_title
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
-      && needs.pr_checks.result == 'success'
+      && needs.pr_title.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -200,8 +194,8 @@ jobs:
       - name: Lint unused dependencies
         run: cargo machete --with-metadata
 
-  linux_compile_gate:
-    name: Linux compile gate
+  linux_build_tests:
+    name: Linux build/test
     needs:
       - prepare
       - lint
@@ -218,7 +212,7 @@ jobs:
           fetch-depth: 1
       - uses: ./.github/actions/setup-rust
         with:
-          shared-key: linux-compile-gate
+          shared-key: linux-build-tests
       - name: Verify sanitized fixture present
         run: scripts/ci-verify-sanitized-fixture.sh
       - name: cargo check shared crates
@@ -238,8 +232,11 @@ jobs:
     name: Secret scan
     needs:
       - prepare
-      - pr_checks
-    if: needs.prepare.outputs.is_pr == 'true'
+      - pr_title
+    if: >-
+      !cancelled()
+      && needs.prepare.outputs.is_pr == 'true'
+      && needs.pr_title.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -261,12 +258,30 @@ jobs:
     name: Dependency CVE audit
     needs:
       - prepare
-      - pr_checks
+      - markdown_lint
+      - tooling_lint
+      - lint
+      - linux_build_tests
       - secret_scan
+      - build
+      - unit_tests
+      - integration_tests
+      - linux_e2e_tests
+      - macos_e2e_tests
     if: >-
-      always()
+      !cancelled()
       && (github.event_name == 'schedule'
-          || (needs.prepare.outputs.lockfile == 'true' && needs.secret_scan.result == 'success'))
+          || (needs.prepare.outputs.lockfile == 'true'
+              && (needs.markdown_lint.result == 'success' || needs.markdown_lint.result == 'skipped')
+              && (needs.tooling_lint.result == 'success' || needs.tooling_lint.result == 'skipped')
+              && (needs.lint.result == 'success' || needs.lint.result == 'skipped')
+              && (needs.linux_build_tests.result == 'success' || needs.linux_build_tests.result == 'skipped')
+              && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
+              && (needs.build.result == 'success' || needs.build.result == 'skipped')
+              && (needs.unit_tests.result == 'success' || needs.unit_tests.result == 'skipped')
+              && (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped')
+              && (needs.linux_e2e_tests.result == 'success' || needs.linux_e2e_tests.result == 'skipped')
+              && (needs.macos_e2e_tests.result == 'success' || needs.macos_e2e_tests.result == 'skipped')))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -317,17 +332,19 @@ jobs:
     name: Build
     needs:
       - prepare
+      - markdown_lint
+      - tooling_lint
       - lint
-      - linux_compile_gate
+      - linux_build_tests
       - secret_scan
-      - cargo_audit
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
+      && (needs.markdown_lint.result == 'success' || needs.markdown_lint.result == 'skipped')
+      && (needs.tooling_lint.result == 'success' || needs.tooling_lint.result == 'skipped')
       && needs.lint.result == 'success'
-      && needs.linux_compile_gate.result == 'success'
+      && needs.linux_build_tests.result == 'success'
       && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
-      && (needs.cargo_audit.result == 'success' || needs.cargo_audit.result == 'skipped')
     runs-on: macos-14
     timeout-minutes: 15
     steps:
@@ -383,11 +400,11 @@ jobs:
     name: Integration tests
     needs:
       - prepare
-      - unit_tests
+      - build
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
-      && needs.unit_tests.result == 'success'
+      && needs.build.result == 'success'
     runs-on: macos-14
     timeout-minutes: 15
     steps:
@@ -404,10 +421,12 @@ jobs:
     name: Linux E2E tests
     needs:
       - prepare
+      - unit_tests
       - integration_tests
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
+      && needs.unit_tests.result == 'success'
       && needs.integration_tests.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -427,10 +446,12 @@ jobs:
     name: macOS E2E tests
     needs:
       - prepare
+      - unit_tests
       - integration_tests
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
+      && needs.unit_tests.result == 'success'
       && needs.integration_tests.result == 'success'
     runs-on: macos-14
     timeout-minutes: 25

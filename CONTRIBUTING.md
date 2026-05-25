@@ -219,14 +219,17 @@ chore: update ciborium to 0.2.2
 
 ## CI
 
-GitHub Actions run one validation workflow with cheap PR-shape checks first,
-then heavier code validation only when relevant files changed:
+GitHub Actions run one validation workflow. PR title validation runs first, then
+independent lint jobs fan out in parallel before heavier code validation starts:
 
-- PR title, markdown, repo-tooling lint, secret scan, and dependency audit run
-  on Ubuntu.
-- Rust lint and the Linux compile gate run on Ubuntu before paid macOS work.
-- Build, unit tests, integration tests, and macOS E2E run on macOS.
-- Linux E2E runs on Ubuntu after integration tests, in parallel with macOS E2E.
+- Markdown lint, repo-tooling lint, Rust lint, and secret scan run on Ubuntu.
+- Linux build/test runs on Ubuntu before paid macOS work.
+- Build, unit tests, integration tests, and macOS E2E run on macOS; unit and
+  integration tests run in parallel after the release build.
+- Linux E2E runs on Ubuntu after unit and integration tests, in parallel with
+  macOS E2E.
+- Dependency CVE audit runs last for lockfile-changing PRs and on the nightly
+  schedule.
 - The macOS release build uploads binaries as a short-lived artifact; the macOS
   E2E job downloads those exact binaries so install-health tests exercise the
   same payload produced by the build job.

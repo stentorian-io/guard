@@ -5,12 +5,19 @@
 //! `EnvNotPropagatedGap` before the real libc::posix_spawn fires.
 //!
 //! The check is prefix-anchored: each envp entry must START with the key
-//! (e.g. `DYLD_INSERT_LIBRARIES=`) to match, preventing false positives
+//! (e.g. the platform hook injection key) to match, preventing false positives
 //! from values that contain the key name as a substring.
 
 use core::ffi::c_char;
 
-const REQUIRED_KEYS: &[&[u8]] = &[b"DYLD_INSERT_LIBRARIES=", b"STT_GUARD_SNAPSHOT_MANIFEST="];
+#[cfg(target_os = "macos")]
+const HOOK_INJECTION_KEY: &[u8] = b"DYLD_INSERT_LIBRARIES=";
+#[cfg(target_os = "linux")]
+const HOOK_INJECTION_KEY: &[u8] = b"LD_PRELOAD=";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+const HOOK_INJECTION_KEY: &[u8] = b"LD_PRELOAD=";
+
+const REQUIRED_KEYS: &[&[u8]] = &[HOOK_INJECTION_KEY, b"STT_GUARD_SNAPSHOT_MANIFEST="];
 
 /// Walks the null-terminated envp array and returns true if ANY of the three
 /// required Stentorian Guard env vars is missing. Returns true if envp is null (treat

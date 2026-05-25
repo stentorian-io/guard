@@ -5,14 +5,14 @@
 //! vars once the ctor has finished initialization. During ctor (pre-main),
 //! the filter is disabled so the hook can read its own config vars.
 //!
-//! We do NOT modify `environ` because child processes need
-//! `DYLD_INSERT_LIBRARIES` to inherit hook injection.
+//! We do NOT modify `environ` because child processes need the platform hook
+//! injection variable to inherit hook injection.
 //!
 //! Hidden from application code (after ctor):
 //!   - STT_GUARD_SNAPSHOT_MANIFEST
 //!   - STT_GUARD_STATE_DIR
 //!   - STT_GUARD_TEST_MARKER
-//!   - DYLD_INSERT_LIBRARIES (hides our dylib path)
+//!   - platform hook injection variable (hides our hook library path)
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::ffi::CStr;
@@ -69,11 +69,18 @@ unsafe fn raw_getenv(name: *const libc::c_char) -> *mut libc::c_char {
     std::ptr::null_mut()
 }
 
+#[cfg(target_os = "macos")]
+const HOOK_INJECTION_ENV: &CStr = c"DYLD_INSERT_LIBRARIES";
+#[cfg(target_os = "linux")]
+const HOOK_INJECTION_ENV: &CStr = c"LD_PRELOAD";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+const HOOK_INJECTION_ENV: &CStr = c"LD_PRELOAD";
+
 const HIDDEN_NAMES: &[&CStr] = &[
     c"STT_GUARD_SNAPSHOT_MANIFEST",
     c"STT_GUARD_STATE_DIR",
     c"STT_GUARD_TEST_MARKER",
-    c"DYLD_INSERT_LIBRARIES",
+    HOOK_INJECTION_ENV,
 ];
 
 /// Check whether a getenv key should be hidden from application code.
@@ -107,7 +114,10 @@ mod tests {
         assert!(is_hidden_key(c"STT_GUARD_SNAPSHOT_MANIFEST".as_ptr()));
         assert!(is_hidden_key(c"STT_GUARD_STATE_DIR".as_ptr()));
         assert!(is_hidden_key(c"STT_GUARD_TEST_MARKER".as_ptr()));
+        #[cfg(target_os = "macos")]
         assert!(is_hidden_key(c"DYLD_INSERT_LIBRARIES".as_ptr()));
+        #[cfg(target_os = "linux")]
+        assert!(is_hidden_key(c"LD_PRELOAD".as_ptr()));
     }
 
     #[test]

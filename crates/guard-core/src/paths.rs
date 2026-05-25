@@ -40,19 +40,38 @@ pub const ROTATED_LOG_PREFIX: &str = "stt-guard-";
 pub const ROTATED_LOG_SUFFIX_GZ: &str = ".log.gz";
 
 // ---------------------------------------------------------------------------
-// Binary / dylib names
+// Binary / hook library names
 // ---------------------------------------------------------------------------
 
 pub const CLI_BIN: &str = "stt-guard";
 pub const DAEMON_BIN: &str = "stt-guard-daemon";
-pub const HOOK_DYLIB: &str = "stt-guard-hook.dylib";
+
+#[cfg(target_os = "macos")]
+pub const HOOK_LIBRARY: &str = "stt-guard-hook.dylib";
+#[cfg(target_os = "linux")]
+pub const HOOK_LIBRARY: &str = "stt-guard-hook.so";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub const HOOK_LIBRARY: &str = "stt-guard-hook";
+
+/// Backward-compatible alias for macOS-era call sites. New code should use
+/// `HOOK_LIBRARY` when the value is not specifically about a Mach-O dylib.
+pub const HOOK_DYLIB: &str = HOOK_LIBRARY;
 
 pub const WATCHDOG_BIN: &str = "stt-guard-watchdog";
 
 pub const INSTALLED_BINARIES: &[&str] = &[CLI_BIN, DAEMON_BIN, WATCHDOG_BIN];
 
+#[cfg(target_os = "macos")]
 pub const SYSTEM_HOOK_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook.dylib";
+#[cfg(target_os = "linux")]
+pub const SYSTEM_HOOK_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook.so";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub const SYSTEM_HOOK_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook";
+
+#[cfg(target_os = "macos")]
 pub const HOMEBREW_HOOK_PATH: &str = "/opt/homebrew/lib/stt-guard/stt-guard-hook.dylib";
+#[cfg(not(target_os = "macos"))]
+pub const HOMEBREW_HOOK_PATH: &str = "";
 
 // ---------------------------------------------------------------------------
 // LaunchDaemon
@@ -73,9 +92,21 @@ pub const SERVICE_USER_REALNAME: &str = "Stentorian Guard Daemon";
 // ---------------------------------------------------------------------------
 
 pub const ENV_STATE_DIR: &str = "STT_GUARD_STATE_DIR";
-pub const ENV_HOOK_DYLIB: &str = "STT_GUARD_HOOK_DYLIB";
+pub const ENV_HOOK_LIBRARY: &str = "STT_GUARD_HOOK_DYLIB";
+/// Backward-compatible name for the development hook-library override.
+pub const ENV_HOOK_DYLIB: &str = ENV_HOOK_LIBRARY;
 pub const ENV_SNAPSHOT_MANIFEST: &str = "STT_GUARD_SNAPSHOT_MANIFEST";
-pub const ENV_DYLD: &str = "DYLD_INSERT_LIBRARIES";
+
+#[cfg(target_os = "macos")]
+pub const ENV_HOOK_INJECTION: &str = "DYLD_INSERT_LIBRARIES";
+#[cfg(target_os = "linux")]
+pub const ENV_HOOK_INJECTION: &str = "LD_PRELOAD";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub const ENV_HOOK_INJECTION: &str = "LD_PRELOAD";
+
+/// Backward-compatible alias for macOS-era call sites. New code should use
+/// `ENV_HOOK_INJECTION` when the value is platform-specific.
+pub const ENV_DYLD: &str = ENV_HOOK_INJECTION;
 
 // ---------------------------------------------------------------------------
 // Path builders (all derive from a state_dir root)
@@ -266,5 +297,19 @@ mod tests {
     fn run_paths_nest_under_runs() {
         let p = run_manifest_path(Path::new("/s"), "abc-123");
         assert_eq!(p, PathBuf::from("/s/runs/abc-123.manifest"));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn hook_constants_are_macos_specific() {
+        assert_eq!(HOOK_LIBRARY, "stt-guard-hook.dylib");
+        assert_eq!(ENV_HOOK_INJECTION, "DYLD_INSERT_LIBRARIES");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn hook_constants_are_linux_specific() {
+        assert_eq!(HOOK_LIBRARY, "stt-guard-hook.so");
+        assert_eq!(ENV_HOOK_INJECTION, "LD_PRELOAD");
     }
 }

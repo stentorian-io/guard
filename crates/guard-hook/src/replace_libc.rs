@@ -925,9 +925,12 @@ pub unsafe extern "C" fn guard_send(
 // written after the linker places it, so Sync is sound here.
 
 #[allow(dead_code)]
+#[cfg(target_os = "macos")]
 struct SyncPtr(*const c_void);
+#[cfg(target_os = "macos")]
 unsafe impl Sync for SyncPtr {}
 
+#[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn connectx(
         s: c_int,
@@ -949,6 +952,7 @@ unsafe extern "C" {
 // correctly (real freeaddrinfo would crash on our custom layout).
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_CONNECT: [SyncPtr; 2] = [
@@ -957,6 +961,7 @@ static STT_GUARD_INTERPOSE_CONNECT: [SyncPtr; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_CONNECTX: [SyncPtr; 2] = [
@@ -965,6 +970,7 @@ static STT_GUARD_INTERPOSE_CONNECTX: [SyncPtr; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_SENDTO: [SyncPtr; 2] = [
@@ -973,6 +979,7 @@ static STT_GUARD_INTERPOSE_SENDTO: [SyncPtr; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_SENDMSG: [SyncPtr; 2] = [
@@ -981,6 +988,7 @@ static STT_GUARD_INTERPOSE_SENDMSG: [SyncPtr; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_SEND: [SyncPtr; 2] = [
@@ -989,6 +997,7 @@ static STT_GUARD_INTERPOSE_SEND: [SyncPtr; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_WRITE: [SyncPtr; 2] = [
@@ -997,6 +1006,7 @@ static STT_GUARD_INTERPOSE_WRITE: [SyncPtr; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_WRITEV: [SyncPtr; 2] = [
@@ -1005,6 +1015,7 @@ static STT_GUARD_INTERPOSE_WRITEV: [SyncPtr; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_GETADDRINFO: [SyncPtr; 2] = [
@@ -1013,6 +1024,7 @@ static STT_GUARD_INTERPOSE_GETADDRINFO: [SyncPtr; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_FREEADDRINFO: [SyncPtr; 2] = [

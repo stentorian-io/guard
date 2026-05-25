@@ -77,10 +77,10 @@ cargo test -p guard-daemon
 
 Local validation is stage-based. During iteration, run the focused Cargo command
 that exercises your change. Before review, let the installed hooks run:
-`pre-commit` covers formatting, clippy, Linux lint parity in Docker, release
-build, unit tests, and integration tests; `pre-push` covers Linux LD_PRELOAD E2E
-in Docker and the macOS E2E smoke suite. The Linux stages use the same
-`rust:1.95.0-bookworm` container image locally and in CI, with Cargo caches
+`pre-commit` covers formatting, clippy, Linux lint parity in Docker, macOS and
+Linux release builds, unit tests, and integration tests; `pre-push` covers Linux
+LD_PRELOAD E2E in Docker and the macOS E2E smoke suite. The Linux stages use the
+same `rust:1.95.0-bookworm` container image locally and in CI, with Cargo caches
 under `/private/tmp/stt-guard-docker`.
 
 GitHub Actions remains the required PR validation surface, including secret
@@ -231,14 +231,14 @@ validation starts:
   `tools/*.sh` files.
 - Linux check, macOS check, workspace unit tests, and workspace integration
   tests run in parallel after linting passes.
-- The macOS release build runs after macOS check and uploads binaries as a
-  short-lived artifact for macOS E2E.
-- Linux E2E runs after Linux check plus unit and integration tests; macOS E2E
-  runs after the macOS release build plus unit and integration tests.
+- Linux and macOS release builds run as a release-build matrix after platform
+  checks and upload short-lived artifacts.
+- Linux E2E runs after the Linux release build plus unit and integration tests;
+  macOS E2E runs after the macOS release build plus unit and integration tests.
 - Dependency CVE audit runs last for lockfile-changing PRs and on the nightly
   schedule.
-- The macOS E2E job downloads the release build artifact so install-health tests
-  exercise the same payload produced by the macOS build job.
+- Platform E2E jobs download the release build artifacts so install-health tests
+  exercise the same payload produced by the release-build matrix.
 
 PRs must pass the full CI suite before merging.
 

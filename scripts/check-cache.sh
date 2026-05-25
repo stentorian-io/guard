@@ -74,8 +74,20 @@ linux_ci_lint_fingerprint() {
       'scripts/pre-commit' \
       'scripts/pre-push' \
       'scripts/ci-linux-lint.sh' \
+      'scripts/ci-linux-release-build.sh' \
       'scripts/check-cache.sh' \
       'scripts/lint-test-env-vars.sh' \
+      '.github/workflows/ci.yml' \
+      '.github/actions/' 2>/dev/null
+  } | shasum -a 256 | awk '{print $1}'
+}
+
+linux_ci_release_build_fingerprint() {
+  { rust_fingerprint
+    git diff-index HEAD -- \
+      'scripts/pre-commit' \
+      'scripts/ci-linux-release-build.sh' \
+      'scripts/check-cache.sh' \
       '.github/workflows/ci.yml' \
       '.github/actions/' 2>/dev/null
   } | shasum -a 256 | awk '{print $1}'

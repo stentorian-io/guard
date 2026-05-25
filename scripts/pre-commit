@@ -158,7 +158,7 @@ else
     fi
   fi
 
-  # ── 6. Release build — catches workspace build failures before push ───────
+  # ── 6. Release builds — catch platform artifact failures before push ──────
   if cache_hit "pre-commit:cargo-build-release" "$fp"; then
     skip "cargo build --workspace --release"
   else
@@ -166,6 +166,16 @@ else
       || fail "cargo build --workspace --release failed"
     cache_mark "pre-commit:cargo-build-release" "$fp"
     pass "cargo build --workspace --release"
+  fi
+
+  linux_release_fp=$(linux_ci_release_build_fingerprint)
+  if cache_hit "pre-commit:linux-release-build" "$linux_release_fp"; then
+    skip "Linux release build"
+  else
+    bash scripts/ci-linux-release-build.sh \
+      || fail "Linux release build failed"
+    cache_mark "pre-commit:linux-release-build" "$linux_release_fp"
+    pass "Linux release build"
   fi
 
   # ── 7. Unit tests — no E2E ────────────────────────────────────────────────

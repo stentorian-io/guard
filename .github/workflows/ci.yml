@@ -228,7 +228,7 @@ jobs:
       - linux_check
       - secret_scan
       - macos_check
-      - macos_build
+      - release_build
       - unit_tests
       - integration_tests
       - linux_e2e_tests
@@ -241,7 +241,7 @@ jobs:
               && (needs.linux_check.result == 'success' || needs.linux_check.result == 'skipped')
               && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
               && (needs.macos_check.result == 'success' || needs.macos_check.result == 'skipped')
-              && (needs.macos_build.result == 'success' || needs.macos_build.result == 'skipped')
+              && (needs.release_build.result == 'success' || needs.release_build.result == 'skipped')
               && (needs.unit_tests.result == 'success' || needs.unit_tests.result == 'skipped')
               && (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped')
               && (needs.linux_e2e_tests.result == 'success' || needs.linux_e2e_tests.result == 'skipped')
@@ -292,17 +292,31 @@ jobs:
           path: .audit-cache-marker
           key: ${{ steps.audit_cache.outputs.cache-primary-key }}
 
-  macos_build:
-    name: macOS release build
+  release_build:
+    name: Release build (${{ matrix.platform }})
     needs:
       - prepare
+      - linux_check
       - macos_check
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
-      && needs.macos_check.result == 'success'
-    runs-on: macos-14
+      && (needs.linux_check.result == 'success' || needs.linux_check.result == 'skipped')
+      && (needs.macos_check.result == 'success' || needs.macos_check.result == 'skipped')
+    runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runs_on: ubuntu-latest
+            artifact: linux-release-binaries
+            hook_library: libguard_hook.so
+          - platform: macos
+            runs_on: macos-14
+            artifact: macos-release-binaries
+            hook_library: libguard_hook.dylib
     steps:
       - uses: actions/checkout@v4
         with:
@@ -310,23 +324,26 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
       - name: Setup Node 20
+        if: matrix.platform == 'macos'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: release-build-${{ matrix.platform }}
       - name: cargo build workspace (release)
         run: |
           cargo build --workspace --release
           cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer
-      - name: Upload release binaries for E2E
+      - name: Upload release binaries
         uses: actions/upload-artifact@v4
         with:
-          name: macos-release-binaries
+          name: ${{ matrix.artifact }}
           path: |
             target/release/stt-guard
             target/release/stt-guard-daemon
             target/release/stt-guard-watchdog
-            target/release/libguard_hook.dylib
+            target/release/${{ matrix.hook_library }}
             target/release/hardened_exec_probe
           if-no-files-found: error
           retention-days: 1
@@ -377,13 +394,13 @@ jobs:
     name: Linux E2E tests
     needs:
       - prepare
-      - linux_check
+      - release_build
       - unit_tests
       - integration_tests
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
-      && needs.linux_check.result == 'success'
+      && needs.release_build.result == 'success'
       && needs.unit_tests.result == 'success'
       && needs.integration_tests.result == 'success'
     runs-on: ubuntu-latest
@@ -397,6 +414,17 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           shared-key: linux-e2e
+      - name: Download Linux release binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release-binaries
+          path: target/release
+      - name: Restore release binary modes
+        run: |
+          chmod +x target/release/stt-guard
+          chmod +x target/release/stt-guard-daemon
+          chmod +x target/release/stt-guard-watchdog
+          chmod +x target/release/hardened_exec_probe
       - name: LD_PRELOAD smoke and denial coverage
         run: cargo test -p guard-hook --test linux_ld_preload_smoke -- --nocapture
 
@@ -404,13 +432,13 @@ jobs:
     name: macOS E2E tests
     needs:
       - prepare
-      - macos_build
+      - release_build
       - unit_tests
       - integration_tests
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
-      && needs.macos_build.result == 'success'
+      && needs.release_build.result == 'success'
       && needs.unit_tests.result == 'success'
       && needs.integration_tests.result == 'success'
     runs-on: macos-14

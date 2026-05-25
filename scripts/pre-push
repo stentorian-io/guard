@@ -31,6 +31,35 @@ warn() {
   echo -e "${YELLOW}⚠${RESET} $1"
 }
 
+changed_files_for_push() {
+  local remote_name="$1"
+  local push_refs="$2"
+  local zero_sha="0000000000000000000000000000000000000000"
+  local changed_files=""
+
+  while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -n "${local_ref:-}" ] || continue
+    [ "$local_sha" != "$zero_sha" ] || continue
+
+    local base_ref
+    if [ "$remote_sha" = "$zero_sha" ]; then
+      base_ref=$(
+        git merge-base "$local_sha" "$remote_name/main" 2>/dev/null \
+          || git merge-base "$local_sha" origin/main 2>/dev/null \
+          || git merge-base "$local_sha" main 2>/dev/null \
+          || git rev-parse "$local_sha^" 2>/dev/null
+      )
+    else
+      base_ref="$remote_sha"
+    fi
+
+    changed_files+=$'\n'
+    changed_files+="$(git diff --name-only "$base_ref" "$local_sha")"
+  done <<< "$push_refs"
+
+  printf '%s\n' "$changed_files" | sed '/^$/d' | sort -u
+}
+
 run_e2e() {
   local test_name="$1"
   local label="$2"
@@ -38,6 +67,13 @@ run_e2e() {
     || fail "$label"
   pass "$label"
 }
+
+PUSH_REFS="$(cat)"
+PUSH_CHANGED_FILES="$(changed_files_for_push "${1:-origin}" "$PUSH_REFS")"
+if [ -n "$PUSH_CHANGED_FILES" ] && ! changes_affect_e2e_files "$PUSH_CHANGED_FILES"; then
+  pass "skipping pre-push runtime checks (no E2E-relevant files changed)"
+  exit 0
+fi
 
 cache_prune
 linux_fp=$(linux_ci_lint_fingerprint)

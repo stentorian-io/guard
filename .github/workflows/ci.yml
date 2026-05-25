@@ -29,6 +29,7 @@ jobs:
       code: ${{ steps.context.outputs.code }}
       lockfile: ${{ steps.context.outputs.lockfile }}
       markdown: ${{ steps.context.outputs.markdown }}
+      tooling: ${{ steps.context.outputs.tooling }}
       scan_base: ${{ steps.context.outputs.base }}
       scan_head: ${{ steps.context.outputs.head }}
       is_pr: ${{ steps.context.outputs.is_pr }}
@@ -133,8 +134,45 @@ jobs:
             exit 1
           fi
 
+  tooling_lint:
+    name: Repo tooling lint
+    needs:
+      - prepare
+      - pr_checks
+    if: >-
+      !cancelled()
+      && needs.prepare.outputs.tooling == 'true'
+      && needs.pr_checks.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Fetch base branch
+        run: |
+          git remote add upstream "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags upstream main
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Check changed shell scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t shell_files < <(
+            git diff --name-only upstream/main...HEAD -- \
+              'scripts/*.sh' \
+              'tools/*.sh'
+          )
+          if [ "${#shell_files[@]}" -eq 0 ]; then
+            echo "No changed shell scripts."
+            exit 0
+          fi
+          bash -n "${shell_files[@]}"
+
   lint:
-    name: Lint
+    name: Rust lint
     needs:
       - prepare
       - pr_checks
@@ -415,6 +453,7 @@ jobs:
       - pr_title
       - markdown_lint
       - pr_checks
+      - tooling_lint
       - lint
       - linux_compile_gate
       - build
@@ -478,15 +517,21 @@ jobs:
             allow_success_or_skipped "Dependency CVE audit" "${CARGO_AUDIT_RESULT}"
           fi
 
+          if [ "${TOOLING_CHANGED}" = "true" ]; then
+            require_success "Repo tooling lint" "${TOOLING_LINT_RESULT}"
+          else
+            allow_success_or_skipped "Repo tooling lint" "${TOOLING_LINT_RESULT}"
+          fi
+
           if [ "${CODE_CHANGED}" = "true" ]; then
-            require_success "Lint" "${LINT_RESULT}"
+            require_success "Rust lint" "${LINT_RESULT}"
             require_success "Linux compile gate" "${LINUX_COMPILE_GATE_RESULT}"
             require_success "Build" "${BUILD_RESULT}"
             require_success "Unit tests" "${UNIT_TESTS_RESULT}"
             require_success "Integration tests" "${INTEGRATION_TESTS_RESULT}"
             require_success "E2E tests" "${E2E_TESTS_RESULT}"
           else
-            allow_success_or_skipped "Lint" "${LINT_RESULT}"
+            allow_success_or_skipped "Rust lint" "${LINT_RESULT}"
             allow_success_or_skipped "Linux compile gate" "${LINUX_COMPILE_GATE_RESULT}"
             allow_success_or_skipped "Build" "${BUILD_RESULT}"
             allow_success_or_skipped "Unit tests" "${UNIT_TESTS_RESULT}"
@@ -501,9 +546,11 @@ jobs:
           CODE_CHANGED: ${{ needs.prepare.outputs.code }}
           LOCKFILE_CHANGED: ${{ needs.prepare.outputs.lockfile }}
           MARKDOWN_CHANGED: ${{ needs.prepare.outputs.markdown }}
+          TOOLING_CHANGED: ${{ needs.prepare.outputs.tooling }}
           IS_PR: ${{ needs.prepare.outputs.is_pr }}
           PREPARE_RESULT: ${{ needs.prepare.result }}
           PR_CHECKS_RESULT: ${{ needs.pr_checks.result }}
+          TOOLING_LINT_RESULT: ${{ needs.tooling_lint.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           LINUX_COMPILE_GATE_RESULT: ${{ needs.linux_compile_gate.result }}
           BUILD_RESULT: ${{ needs.build.result }}

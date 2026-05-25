@@ -145,7 +145,7 @@ changes_affect_e2e_files() {
 # build/test/runtime code changed.  Used to skip cargo check/test/build
 # phases that cannot be affected by these files.
 #
-# $1 = "staged" (pre-commit: --cached) or "all" (ci-local / pre-push: HEAD)
+# $1 = "staged" (pre-commit: --cached) or "all" (pre-push: HEAD)
 #
 # Files considered repo-meta (non-code):
 #   *.md, LICENSE*, SECURITY*, .gitignore, .gitattributes,

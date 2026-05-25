@@ -5,14 +5,20 @@ everything you need to clone, build, test, and submit changes.
 
 ## Prerequisites
 
-- **macOS 14 (Sonoma) or later** — Intel or Apple Silicon
-- **Rust toolchain** — stable channel, 1.85+ (install via [rustup](https://rustup.rs/))
+- **macOS 14 (Sonoma) or later** — Intel or Apple Silicon for macOS install and
+  E2E validation
+- **Rust toolchain** — stable channel, 1.95+ (install via [rustup](https://rustup.rs/))
 - **Node.js 20+** — used by E2E test harnesses (a non-hardened-runtime build; the one from [nodejs.org](https://nodejs.org/) or nvm works)
+- **Docker + Colima** — used by local hooks for Linux lint and E2E parity from
+  macOS
 - **Git**
 
 ```sh
-rustc --version   # 1.85 or later
+brew bundle       # installs actionlint, Docker/Colima, Node, and helpers
+colima start      # required before Docker-backed local checks
+rustc --version   # 1.95 or later
 node --version    # 20 or later
+docker info
 ```
 
 ## Build
@@ -64,21 +70,21 @@ cargo test --workspace --release
 # E2E validation suite only
 cargo test -p guard-e2e --release
 
-# Full local CI parity run (includes privileged VAL-05 by default)
-scripts/ci-local.sh
-
 # Single crate unit tests (faster iteration)
 cargo test -p guard-core
 cargo test -p guard-daemon
 ```
 
-The local CI script mirrors the split PR/code-validation workflows. It compares
-the branch against `origin/${GITHUB_BASE_REF:-main}` to decide whether
-code-validation is required. VAL-05 mutates `/usr/local/libexec/stt-guard`,
-`/Library/Application Support/Stentorian Guard`, `/var/log/stt-guard`, and the
-LaunchDaemon plist, so the script installs a narrow temporary sudoers drop-in
-for the test and removes it on exit. Use `scripts/ci-local.sh --no-privileged`
-only when you intentionally want to skip that system-install check.
+Local validation is stage-based. During iteration, run the focused Cargo command
+that exercises your change. Before review, let the installed hooks run:
+`pre-commit` covers formatting, clippy, Linux lint parity in Docker, release
+build, unit tests, and integration tests; `pre-push` covers Linux LD_PRELOAD E2E
+in Docker and the macOS E2E smoke suite. The Linux stages use the same
+`rust:1.95.0-bookworm` container image locally and in CI, with Cargo caches
+under `/private/tmp/stt-guard-docker`.
+
+GitHub Actions remains the final PR gate, including secret scan, dependency
+audit, and privileged macOS install-health validation.
 
 Benchmark infrastructure lives in `crates/guard-hook/benches/` (criterion) and `crates/guard-e2e/tests/bench_hot_path_e2e.rs` (live-wrap). Run `./scripts/bench-hot-path.sh` to reproduce locally.
 
@@ -213,14 +219,16 @@ chore: update ciborium to 0.2.2
 
 ## CI
 
-GitHub Actions are split into cheap PR-shape validation and heavier code
-validation:
+GitHub Actions run one validation workflow with cheap PR-shape checks first,
+then heavier code validation only when relevant files changed:
 
-- `.github/workflows/pr-validation.yml` runs metadata and markdown checks first.
-- `.github/workflows/code-validation.yml` waits for PR validation, detects
-  validation-relevant changes, then runs lint, release build, unit tests,
-  integration tests, E2E tests, secret scan, dependency audit, and a final gate.
-- The release build uploads the macOS binaries as a short-lived artifact; the
+- PR title, markdown, repo-tooling lint, secret scan, and dependency audit run
+  on Ubuntu.
+- Rust lint and the Linux compile gate run on Ubuntu before paid macOS work.
+- Build, unit tests, integration tests, and macOS E2E run on macOS.
+- Linux E2E runs on Ubuntu in parallel with the macOS build/test/E2E path after
+  the Linux compile gate passes.
+- The macOS release build uploads binaries as a short-lived artifact; the macOS
   E2E job downloads those exact binaries so install-health tests exercise the
   same payload produced by the build job.
 

@@ -398,8 +398,31 @@ jobs:
       - name: cargo test integration targets
         run: cargo test --workspace --exclude guard-e2e --tests --quiet
 
-  e2e_tests:
-    name: E2E tests
+  linux_e2e_tests:
+    name: Linux E2E tests
+    needs:
+      - prepare
+      - linux_compile_gate
+    if: >-
+      !cancelled()
+      && needs.prepare.outputs.code == 'true'
+      && needs.linux_compile_gate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-e2e
+      - name: LD_PRELOAD smoke and denial coverage
+        run: cargo test -p guard-hook --test linux_ld_preload_smoke -- --nocapture
+
+  macos_e2e_tests:
+    name: macOS E2E tests
     needs:
       - prepare
       - integration_tests
@@ -459,7 +482,8 @@ jobs:
       - build
       - unit_tests
       - integration_tests
-      - e2e_tests
+      - linux_e2e_tests
+      - macos_e2e_tests
       - secret_scan
       - cargo_audit
     runs-on: ubuntu-latest
@@ -529,14 +553,16 @@ jobs:
             require_success "Build" "${BUILD_RESULT}"
             require_success "Unit tests" "${UNIT_TESTS_RESULT}"
             require_success "Integration tests" "${INTEGRATION_TESTS_RESULT}"
-            require_success "E2E tests" "${E2E_TESTS_RESULT}"
+            require_success "Linux E2E tests" "${LINUX_E2E_TESTS_RESULT}"
+            require_success "macOS E2E tests" "${MACOS_E2E_TESTS_RESULT}"
           else
             allow_success_or_skipped "Rust lint" "${LINT_RESULT}"
             allow_success_or_skipped "Linux compile gate" "${LINUX_COMPILE_GATE_RESULT}"
             allow_success_or_skipped "Build" "${BUILD_RESULT}"
             allow_success_or_skipped "Unit tests" "${UNIT_TESTS_RESULT}"
             allow_success_or_skipped "Integration tests" "${INTEGRATION_TESTS_RESULT}"
-            allow_success_or_skipped "E2E tests" "${E2E_TESTS_RESULT}"
+            allow_success_or_skipped "Linux E2E tests" "${LINUX_E2E_TESTS_RESULT}"
+            allow_success_or_skipped "macOS E2E tests" "${MACOS_E2E_TESTS_RESULT}"
           fi
 
           if [ "$failed" = "true" ]; then
@@ -556,7 +582,8 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           UNIT_TESTS_RESULT: ${{ needs.unit_tests.result }}
           INTEGRATION_TESTS_RESULT: ${{ needs.integration_tests.result }}
-          E2E_TESTS_RESULT: ${{ needs.e2e_tests.result }}
+          LINUX_E2E_TESTS_RESULT: ${{ needs.linux_e2e_tests.result }}
+          MACOS_E2E_TESTS_RESULT: ${{ needs.macos_e2e_tests.result }}
           SECRET_SCAN_RESULT: ${{ needs.secret_scan.result }}
           CARGO_AUDIT_RESULT: ${{ needs.cargo_audit.result }}
           PR_TITLE_RESULT: ${{ needs.pr_title.result }}

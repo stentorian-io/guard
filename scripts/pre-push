@@ -4,7 +4,7 @@
 # Install: ./scripts/install-hooks.sh
 #
 # Pre-commit owns lint, build, unit tests, and integration tests. Pre-push
-# re-checks Linux lint parity through the shared cache, then runs E2E tests.
+# re-checks Linux parity through the shared cache, then runs platform E2E tests.
 
 set -euo pipefail
 
@@ -37,7 +37,7 @@ changed_files_for_push() {
   local zero_sha="0000000000000000000000000000000000000000"
   local changed_files=""
 
-  while read -r local_ref local_sha remote_ref remote_sha; do
+  while read -r local_ref local_sha _remote_ref remote_sha; do
     [ -n "${local_ref:-}" ] || continue
     [ "$local_sha" != "$zero_sha" ] || continue
 
@@ -90,6 +90,10 @@ else
   cache_mark "pre-push:linux-ci-lint" "$linux_fp"
   pass "Linux CI rustfmt/clippy"
 fi
+
+scripts/ci-linux-e2e.sh \
+  || fail "Linux E2E LD_PRELOAD smoke"
+pass "Linux E2E LD_PRELOAD smoke"
 
 cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer \
   || fail "build release binaries with test signer"

@@ -9,6 +9,7 @@ if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
     echo "code=false"
     echo "lockfile=true"
     echo "markdown=false"
+    echo "tooling=false"
     echo "base="
     echo "head="
     echo "is_pr=false"
@@ -23,11 +24,17 @@ printf 'Changed files:\n%s\n' "$changed"
 code=false
 lockfile=false
 markdown=false
+tooling=false
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   case "$path" in
-    *.rs|*/Cargo.toml|Cargo.toml|*/Cargo.lock|Cargo.lock|rust-toolchain.toml|crates/guard-e2e/fixtures/*|crates/guard-e2e/harness/*|crates/guard-core/data/*|scripts/*.sh|tools/*|.github/workflows/*|.github/actions/*)
+    *.rs|*/Cargo.toml|Cargo.toml|*/Cargo.lock|Cargo.lock|rust-toolchain.toml|crates/guard-e2e/fixtures/*|crates/guard-e2e/harness/*|crates/guard-core/data/*)
       code=true
+      ;;
+  esac
+  case "$path" in
+    scripts/*.sh|tools/*.sh|.github/workflows/*|.github/actions/*)
+      tooling=true
       ;;
   esac
   case "$path" in
@@ -49,6 +56,7 @@ head=$(git rev-parse HEAD)
   echo "code=$code"
   echo "lockfile=$lockfile"
   echo "markdown=$markdown"
+  echo "tooling=$tooling"
   echo "base=$base"
   echo "head=$head"
   echo "is_pr=true"

@@ -146,6 +146,8 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - uses: ./.github/actions/setup-rust
       - uses: taiki-e/install-action@cargo-machete
       - name: Lint test env var hygiene
@@ -270,7 +272,8 @@ jobs:
       - secret_scan
       - cargo_audit
     if: >-
-      needs.prepare.outputs.code == 'true'
+      !cancelled()
+      && needs.prepare.outputs.code == 'true'
       && needs.lint.result == 'success'
       && needs.linux_compile_gate.result == 'success'
       && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
@@ -390,6 +393,8 @@ jobs:
     if: always()
     needs:
       - prepare
+      - pr_title
+      - markdown_lint
       - pr_checks
       - lint
       - linux_compile_gate
@@ -402,9 +407,91 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
+          set -euo pipefail
+
           results='${{ toJSON(needs.*.result) }}'
           echo "Job results: $results"
           if echo "$results" | grep -qE '"(failure|cancelled)"'; then
             echo "::error::One or more validation jobs failed or were cancelled"
             exit 1
           fi
+
+          failed=false
+
+          require_success() {
+            local job="$1"
+            local result="$2"
+            if [ "$result" != "success" ]; then
+              echo "::error::${job} must succeed for this validation context; got '${result}'"
+              failed=true
+            fi
+          }
+
+          allow_success_or_skipped() {
+            local job="$1"
+            local result="$2"
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "::error::${job} must succeed or be intentionally skipped; got '${result}'"
+              failed=true
+            fi
+          }
+
+          require_success "Prepare validation context" "${PREPARE_RESULT}"
+          require_success "PR checks" "${PR_CHECKS_RESULT}"
+
+          if [ "${IS_PR}" = "true" ]; then
+            require_success "PR title" "${PR_TITLE_RESULT}"
+            require_success "Secret scan" "${SECRET_SCAN_RESULT}"
+          else
+            allow_success_or_skipped "PR title" "${PR_TITLE_RESULT}"
+            allow_success_or_skipped "Secret scan" "${SECRET_SCAN_RESULT}"
+          fi
+
+          if [ "${MARKDOWN_CHANGED}" = "true" ]; then
+            require_success "Markdown lint" "${MARKDOWN_LINT_RESULT}"
+          else
+            allow_success_or_skipped "Markdown lint" "${MARKDOWN_LINT_RESULT}"
+          fi
+
+          if [ "${LOCKFILE_CHANGED}" = "true" ] || [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            require_success "Dependency CVE audit" "${CARGO_AUDIT_RESULT}"
+          else
+            allow_success_or_skipped "Dependency CVE audit" "${CARGO_AUDIT_RESULT}"
+          fi
+
+          if [ "${CODE_CHANGED}" = "true" ]; then
+            require_success "Lint" "${LINT_RESULT}"
+            require_success "Linux compile gate" "${LINUX_COMPILE_GATE_RESULT}"
+            require_success "Build" "${BUILD_RESULT}"
+            require_success "Unit tests" "${UNIT_TESTS_RESULT}"
+            require_success "Integration tests" "${INTEGRATION_TESTS_RESULT}"
+            require_success "E2E tests" "${E2E_TESTS_RESULT}"
+          else
+            allow_success_or_skipped "Lint" "${LINT_RESULT}"
+            allow_success_or_skipped "Linux compile gate" "${LINUX_COMPILE_GATE_RESULT}"
+            allow_success_or_skipped "Build" "${BUILD_RESULT}"
+            allow_success_or_skipped "Unit tests" "${UNIT_TESTS_RESULT}"
+            allow_success_or_skipped "Integration tests" "${INTEGRATION_TESTS_RESULT}"
+            allow_success_or_skipped "E2E tests" "${E2E_TESTS_RESULT}"
+          fi
+
+          if [ "$failed" = "true" ]; then
+            exit 1
+          fi
+        env:
+          CODE_CHANGED: ${{ needs.prepare.outputs.code }}
+          LOCKFILE_CHANGED: ${{ needs.prepare.outputs.lockfile }}
+          MARKDOWN_CHANGED: ${{ needs.prepare.outputs.markdown }}
+          IS_PR: ${{ needs.prepare.outputs.is_pr }}
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          PR_CHECKS_RESULT: ${{ needs.pr_checks.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          LINUX_COMPILE_GATE_RESULT: ${{ needs.linux_compile_gate.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          UNIT_TESTS_RESULT: ${{ needs.unit_tests.result }}
+          INTEGRATION_TESTS_RESULT: ${{ needs.integration_tests.result }}
+          E2E_TESTS_RESULT: ${{ needs.e2e_tests.result }}
+          SECRET_SCAN_RESULT: ${{ needs.secret_scan.result }}
+          CARGO_AUDIT_RESULT: ${{ needs.cargo_audit.result }}
+          PR_TITLE_RESULT: ${{ needs.pr_title.result }}
+          MARKDOWN_LINT_RESULT: ${{ needs.markdown_lint.result }}

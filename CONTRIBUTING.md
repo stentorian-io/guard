@@ -107,7 +107,7 @@ graph LR
         Ctor["#ctor: load snapshot<br/><small>capture libc via RTLD_NEXT</small>"]
         Interpose["Interpose<br/><small>socket · connect · bind · listen<br/>send · getaddrinfo<br/>exec* · fork · vfork</small>"]
         Hot["Hot path: decide_for_sockaddr<br/><small>cache hit &lt;100µs · miss → IPC Resolve</small>"]
-        Fail["Fail-closed on<br/><small>corrupt snapshot · IPC timeout<br/>HMAC mismatch</small>"]
+        Fail["Fail-closed on<br/><small>corrupt snapshot · invalid signature<br/>IPC timeout</small>"]
         Ctor --- Interpose
         Interpose --- Hot
         Hot --- Fail
@@ -120,7 +120,7 @@ graph LR
 
 ### How it works
 
-1. CLI sends `PrepareSnapshot` IPC — daemon merges curated + user rules into a CBOR snapshot (HMAC-signed)
+1. CLI sends `PrepareSnapshot` IPC — daemon merges curated + user rules into a CBOR snapshot with a trusted signature manifest
 2. CLI spawns the user's command with `DYLD_INSERT_LIBRARIES=stt-guard-hook.dylib`
 3. Hook's `#[ctor]` loads the snapshot, captures original libc symbols via `RTLD_NEXT`
 4. On `connect()` / `sendto()` / etc.: in-process cache lookup -> `evaluate_policy()` (tier walk)
@@ -169,15 +169,14 @@ Stentorian Guard is a defense-in-depth layer, not a sandbox. Known boundaries:
 | Persistence | rusqlite (bundled SQLite) | Migrations in `crates/guard-daemon/migrations/` |
 | Serialization | ciborium (CBOR), serde | Snapshot format and IPC wire protocol |
 | Logging | tracing + tracing-subscriber | JSONL forensic log to `/var/log/stt-guard/` |
-| Integrity | HMAC-SHA256 | Snapshot + IPC signing; hook binary self-check |
+| Integrity | Hardware-backed policy signatures | Snapshot/rule authenticity; hook binary self-check |
 | Process tracking | audit_token + pidversion | Fork/exec events; PID-reuse guard |
 
 ## IPC protocol
 
 - **Schema versions:** V1 (RegisterRoot), V2 (PrepareSnapshot/Prompt), V3 (Resolve/Status), V4 (ForkEvent/ExecEvent/DylibLoaded)
-- **Frame format:** `[1-byte tag][8-byte nonce LE][32-byte HMAC-SHA256][4-byte length BE][CBOR payload]` (signed); unsigned fallback when no HMAC key
-- **Signing:** HMAC-SHA256 covers tag + nonce + length prefix + payload; key from `state_dir/hmac.key`
-- **Auth:** kernel-sourced audit token via `LOCAL_PEERTOKEN` socket option
+- **Frame format:** `[1-byte tag][4-byte length BE][CBOR payload]`
+- **Auth:** kernel-sourced audit token via `LOCAL_PEERTOKEN` socket option, code-sign verification, and daemon-side message policy
 
 ## Conventions
 
@@ -195,7 +194,7 @@ chore: update ciborium to 0.2.2
 
 ### Error handling
 
-- **Hook:** fail-closed — any error in snapshot load, HMAC verify, or IPC timeout denies all network
+- **Hook:** fail-closed — any error in snapshot load, signature verification, or IPC timeout denies all network
 - **Daemon:** auto-restarts on crash via watchdog
 - **CLI:** structured error types via `thiserror`
 

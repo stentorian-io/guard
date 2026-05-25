@@ -194,7 +194,7 @@ detect_validation_changes() {
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     case "$path" in
-      *.rs|*/Cargo.toml|Cargo.toml|*/Cargo.lock|Cargo.lock|rust-toolchain.toml|crates/guard-e2e/fixtures/*|crates/guard-e2e/harness/*|crates/guard-core/data/*|scripts/*.sh|tools/*)
+      *.rs|*/Cargo.toml|Cargo.toml|*/Cargo.lock|Cargo.lock|rust-toolchain.toml|crates/guard-e2e/fixtures/*|crates/guard-e2e/harness/*|crates/guard-core/data/*|scripts/*.sh|tools/*|.github/workflows/*|.github/actions/*)
         CODE_CHANGED=1
         ;;
     esac
@@ -244,6 +244,15 @@ if [ -n "$node_bin" ]; then
   fi
 else
   warn "node not found — skipping markdown lint"
+fi
+
+# ── lint-github-actions job (ubuntu) ───────────────────────────────────────
+step "GitHub Actions workflow lint"
+if command -v actionlint >/dev/null; then
+  actionlint || fail "GitHub Actions workflow lint"
+  pass "GitHub Actions workflow lint"
+else
+  fail "actionlint not found; install it locally (for example: brew install actionlint)"
 fi
 
 # ── validation job: fixture SHA check ──────────────────────────────────────

@@ -32,7 +32,6 @@ ciborium = { workspace = true }
 libc = { workspace = true }
 thiserror = { workspace = true }
 sha2 = { workspace = true }
-hmac = { workspace = true }
 getrandom = { workspace = true }
 serde = { workspace = true }
 rusqlite = { workspace = true }

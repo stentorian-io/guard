@@ -13,7 +13,7 @@ service user via a system-level LaunchDaemon and provides:
 .IP \(bu 2
 IPC server on a Unix domain socket for the hook library and CLI
 .IP \(bu 2
-CBOR snapshot preparation with HMAC-SHA256 signing
+CBOR snapshot preparation with hardware-backed signature publication
 .IP \(bu 2
 DNS resolution proxying for hooked processes
 .IP \(bu 2
@@ -98,7 +98,7 @@ SQLite database: rules, install artifacts, process roots.
 Unix domain socket for IPC.
 .TP
 .I /Library/Application\~Support/Stentorian\~Guard/snapshots/
-CBOR snapshot files (per-run, HMAC-signed).
+CBOR snapshot files (per-run, signature-manifest verified).
 .TP
 .I /var/log/stt-guard/
 JSONL forensic log directory. Logs are rotated automatically.
@@ -110,7 +110,7 @@ LaunchDaemon plist (installed by
 .IP \(bu 2
 All IPC connections are authenticated via kernel audit tokens.
 .IP \(bu 2
-Snapshots are HMAC-SHA256 signed; the hook verifies signatures at load time.
+Snapshots are signed with trusted hardware-backed keys; the hook verifies signatures at load time.
 .IP \(bu 2
 The daemon runs as the
 .B _stt_guard

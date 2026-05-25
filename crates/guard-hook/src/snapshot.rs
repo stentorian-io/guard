@@ -1,10 +1,9 @@
 //! Snapshot loader: read manifest from env, verify path under state_dir,
-//! verify SHA-256 digest, mmap, parse schema_version.
+//! verify SHA-256 digest and snapshot signature, mmap, parse schema_version.
 //!
 //! On ANY error: fail-closed (returns Err; lib.rs sets FAIL_CLOSED = true).
 
 use core::sync::atomic::AtomicBool;
-use hmac::{Hmac, Mac};
 use memmap2::Mmap;
 use sha2::{Digest, Sha256};
 use std::ffi::CStr;
@@ -12,8 +11,6 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-
-type HmacSha256 = Hmac<Sha256>;
 
 pub static FAIL_CLOSED: AtomicBool = AtomicBool::new(false);
 
@@ -31,8 +28,6 @@ pub enum LoadError {
         expected: String,
         got: String,
     },
-    HmacMissing,
-    HmacMismatch,
     SchemaMismatch {
         expected: u16,
         got: u16,
@@ -149,7 +144,6 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
     if manifest_digest.len() != 64 || !manifest_digest.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(LoadError::ManifestParseFailed);
     }
-    let mut manifest_hmac: Option<String> = None;
     let mut signature_scheme: Option<String> = None;
     let mut signer_kind: Option<String> = None;
     let mut public_key_sha256: Option<String> = None;
@@ -158,13 +152,7 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
     let mut signed_payload_sha256: Option<String> = None;
     let mut signature_created_at_unix_ms: Option<i64> = None;
     for line in lines {
-        if let Some(h) = line.strip_prefix("hmac=") {
-            if h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()) {
-                manifest_hmac = Some(h.to_string());
-            } else {
-                return Err(LoadError::ManifestParseFailed);
-            }
-        } else if let Some(value) = line.strip_prefix("snapshot_signature_scheme=") {
+        if let Some(value) = line.strip_prefix("snapshot_signature_scheme=") {
             signature_scheme = Some(value.to_string());
         } else if let Some(value) = line.strip_prefix("snapshot_signer_kind=") {
             signer_kind = Some(value.to_string());
@@ -238,19 +226,6 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
         });
     }
 
-    // HMAC verification (M004-S02): if the key exists, the manifest MUST
-    // contain a valid HMAC. This prevents an attacker from replacing both
-    // the snapshot and manifest without knowing the key.
-    if let Some(hmac_key) = load_hmac_key(&state_dir) {
-        let expected_hmac = manifest_hmac.ok_or(LoadError::HmacMissing)?;
-        let mut mac = HmacSha256::new_from_slice(&hmac_key).expect("key length valid");
-        mac.update(&bytes);
-        let computed_hmac = hex_lower(&mac.finalize().into_bytes());
-        if computed_hmac != expected_hmac {
-            return Err(LoadError::HmacMismatch);
-        }
-    }
-
     // Decode CBOR; verify schema.
     let snap = guard_core::Snapshot::decode(&bytes).map_err(|e| match e {
         guard_core::Error::SchemaVersionMismatch { expected, got } => {
@@ -275,27 +250,6 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
         schema_version: snap.schema_version,
         snapshot_path,
     })
-}
-
-const HMAC_KEY_LEN: usize = 32;
-
-fn load_hmac_key(state_dir: &Path) -> Option<[u8; HMAC_KEY_LEN]> {
-    let path = guard_core::paths::hmac_key_path(state_dir);
-    let mut f = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)
-        .ok()?;
-    let mut buf = [0u8; HMAC_KEY_LEN];
-    let n = f.read(&mut buf).ok()?;
-    if n != HMAC_KEY_LEN {
-        return None;
-    }
-    let mut extra = [0u8; 1];
-    if f.read(&mut extra).ok() != Some(0) {
-        return None;
-    }
-    Some(buf)
 }
 
 fn verify_snapshot_signature(

@@ -11,19 +11,15 @@ use crate::state_dir::{
     run_snapshot_tmp_path, snapshot_path, snapshot_tmp_path,
 };
 use guard_core::Snapshot;
-use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-type HmacSha256 = Hmac<Sha256>;
-
 pub struct PublishedSnapshot {
     pub path: PathBuf,
     pub digest_hex: String,
-    pub hmac_hex: Option<String>,
 }
 
 /// Write `snap` to `state_dir` with mode 0600 atomically. Returns the absolute
@@ -55,7 +51,6 @@ pub fn publish(
     Ok(PublishedSnapshot {
         path: final_path,
         digest_hex: hex_lower(&digest),
-        hmac_hex: None,
     })
 }
 
@@ -76,9 +71,7 @@ fn hex_lower(bytes: &[u8]) -> String {
 /// Manifest format:
 ///   line 1 = absolute snapshot path
 ///   line 2 = "digest=<hex>"
-///   line 3 = "hmac=<hex>" (present when hmac_key is Some)
-///
-/// The dylib's snapshot loader verifies both digest and HMAC (M004-S02).
+///   remaining lines = hardware-backed snapshot signature metadata
 pub fn publish_run(
     state_dir: &Path,
     snap: &Snapshot,
@@ -105,15 +98,13 @@ fn publish_run_bytes(
     run_uuid: &str,
     signature: Option<&guard_core::SnapshotSignatureV1>,
 ) -> std::io::Result<PublishedSnapshot> {
-    let hmac_key = crate::hmac_key::load(state_dir);
-    publish_run_inner(state_dir, bytes, run_uuid, hmac_key.as_ref(), signature)
+    publish_run_inner(state_dir, bytes, run_uuid, signature)
 }
 
 fn publish_run_inner(
     state_dir: &Path,
     bytes: &[u8],
     run_uuid: &str,
-    hmac_key: Option<&[u8; 32]>,
     signature: Option<&guard_core::SnapshotSignatureV1>,
 ) -> std::io::Result<PublishedSnapshot> {
     ensure_runs_dir(state_dir)?;
@@ -137,12 +128,6 @@ fn publish_run_inner(
     let digest = Sha256::digest(&bytes);
     let digest_hex = hex_lower(&digest);
 
-    let hmac_hex = hmac_key.map(|key| {
-        let mut mac = HmacSha256::new_from_slice(key).expect("HMAC key length valid");
-        mac.update(&bytes);
-        hex_lower(&mac.finalize().into_bytes())
-    });
-
     // Manifest file: tmp + fsync + rename.
     let manifest_tmp = run_manifest_tmp_path(state_dir, run_uuid);
     let manifest_final = run_manifest_path(state_dir, run_uuid);
@@ -154,9 +139,6 @@ fn publish_run_inner(
             .mode(0o600)
             .open(&manifest_tmp)?;
         let mut body = format!("{}\ndigest={}\n", final_path.display(), digest_hex);
-        if let Some(ref h) = hmac_hex {
-            body.push_str(&format!("hmac={h}\n"));
-        }
         if let Some(signature) = signature {
             body.push_str(&format!("snapshot_signature_scheme={}\n", signature.scheme));
             body.push_str(&format!("snapshot_signer_kind={}\n", signature.signer_kind));
@@ -189,7 +171,6 @@ fn publish_run_inner(
     Ok(PublishedSnapshot {
         path: final_path,
         digest_hex,
-        hmac_hex,
     })
 }
 

@@ -109,6 +109,35 @@ e2e_fingerprint() {
   } | shasum -a 256 | awk '{print $1}'
 }
 
+_is_e2e_relevant() {
+  local f="$1"
+  case "$f" in
+    *.rs)                         return 0 ;;
+    Cargo.toml|Cargo.lock)        return 0 ;;
+    */Cargo.toml|*/Cargo.lock)    return 0 ;;
+    rust-toolchain.toml)          return 0 ;;
+    crates/guard-e2e/fixtures/*)  return 0 ;;
+    crates/guard-e2e/harness/*)   return 0 ;;
+    crates/guard-core/data/*)     return 0 ;;
+    *)                            return 1 ;;
+  esac
+}
+
+changes_affect_e2e_files() {
+  local files="$1"
+
+  [ -n "$files" ] || return 1
+
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if _is_e2e_relevant "$f"; then
+      return 0
+    fi
+  done <<< "$files"
+
+  return 1
+}
+
 # ── Repo-meta detection ───────────────────────────────────────────────────
 #
 # Returns 0 (true) when every changed file is "repo meta" — docs, licenses,

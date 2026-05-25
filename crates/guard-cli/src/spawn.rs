@@ -7,7 +7,9 @@ use std::ffi::{CString, OsStr};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use guard_core::paths::{ENV_DYLD, ENV_SNAPSHOT_MANIFEST as ENV_MANIFEST};
+use guard_core::paths::{
+    ENV_DYLD, ENV_SNAPSHOT_MANIFEST as ENV_MANIFEST, ENV_STATE_DIR as ENV_STATE,
+};
 
 const ENV_DAEMON_SOCKET: &str = "STT_GUARD_DAEMON_SOCKET";
 const ENV_TRUSTED_SIGNERS_MANIFEST: &str = "STT_GUARD_TRUSTED_SIGNERS_MANIFEST";
@@ -25,6 +27,7 @@ pub fn spawn_wrapped(
             let k_bytes = k.as_bytes();
             if k_bytes == ENV_DYLD.as_bytes()
                 || k_bytes == ENV_MANIFEST.as_bytes()
+                || k_bytes == ENV_STATE.as_bytes()
                 || k_bytes == ENV_DAEMON_SOCKET.as_bytes()
                 || k_bytes == ENV_TRUSTED_SIGNERS_MANIFEST.as_bytes()
                 || k_bytes == ENV_ALLOW_TEST_SIGNER.as_bytes()
@@ -120,6 +123,7 @@ pub fn spawn_wrapped(
 pub fn spawn_wrapped_with_pgid(
     command: &[OsString],
     manifest_path: &Path,
+    state_dir: &Path,
     _run_uuid: &str,
 ) -> Result<(std::process::Child, i32), crate::CliError> {
     use std::os::unix::process::CommandExt;
@@ -146,6 +150,7 @@ pub fn spawn_wrapped_with_pgid(
         let kb = k.as_bytes();
         if kb == ENV_DYLD.as_bytes()
             || kb == ENV_MANIFEST.as_bytes()
+            || kb == ENV_STATE.as_bytes()
             || kb == ENV_DAEMON_SOCKET.as_bytes()
             || kb == ENV_TRUSTED_SIGNERS_MANIFEST.as_bytes()
             || kb == ENV_ALLOW_TEST_SIGNER.as_bytes()
@@ -157,6 +162,7 @@ pub fn spawn_wrapped_with_pgid(
 
     cmd.env(ENV_DYLD, &dyld_value);
     cmd.env(ENV_MANIFEST, manifest_path);
+    cmd.env(ENV_STATE, state_dir);
 
     // Make the child its own pgid leader (POSIX_SPAWN_SETPGROUP equivalent).
     // process_group(0) calls setpgid(0,0) in the child, making it its own leader.

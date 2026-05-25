@@ -18,7 +18,6 @@ pub fn run(
     command: Vec<OsString>,
     learn_mode: bool,
 ) -> Result<i32, CliError> {
-    let _ = state_dir; // reserved for future use
     let cwd = std::env::current_dir().map_err(|e| CliError::Other(format!("cwd: {e}")))?;
     let is_tty = std::io::stdin().is_terminal();
 
@@ -55,7 +54,7 @@ pub fn run(
 
     // Spawn the wrapped child; capture pgid for SIGINT propagation.
     let (mut child, pgid) =
-        crate::spawn::spawn_wrapped_with_pgid(&command, &manifest_path, &run_uuid)?;
+        crate::spawn::spawn_wrapped_with_pgid(&command, &manifest_path, state_dir, &run_uuid)?;
 
     // Restore the RegisterRoot delegation that was lost in the v0.3
     // refactor (commit d020752 — extracted run_orchestrator from main.rs and

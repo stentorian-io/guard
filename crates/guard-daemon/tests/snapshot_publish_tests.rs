@@ -83,19 +83,25 @@ fn second_publish_writes_distinct_snapshot_file() {
 
 /// Per-run publish_run path (D-29): runs/{uuid}.cbor + runs/{uuid}.manifest
 /// written atomically; manifest references the snapshot path; both files
-/// are mode 0600; bytes round-trip Snapshot::decode under SCHEMA_V2.
+/// are mode 0644 so wrapped user processes can load the signed policy artifact;
+/// bytes round-trip Snapshot::decode under SCHEMA_V2.
 #[test]
 fn publish_run_writes_per_run_files_with_manifest() {
     let tmp = tempfile::tempdir().unwrap();
     let state_dir = tmp.path();
     ensure_state_dir(state_dir).unwrap();
     ensure_runs_dir(state_dir).unwrap();
+    let runs_mode = std::fs::metadata(guard_daemon::state_dir::runs_dir(state_dir))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(runs_mode & 0o777, 0o711, "runs dir mode 0711");
 
     let snap = Snapshot::v2_default();
     let uuid = "00000000-0000-0000-0000-000000000001";
     let pub_ = publish_run(state_dir, &snap, uuid).expect("publish_run");
 
-    // Snapshot file lives at runs/{uuid}.cbor with mode 0600.
+    // Snapshot file lives at runs/{uuid}.cbor with mode 0644.
     let expected_snap = run_snapshot_path(state_dir, uuid);
     assert_eq!(pub_.path, expected_snap);
     assert!(expected_snap.exists());
@@ -103,16 +109,16 @@ fn publish_run_writes_per_run_files_with_manifest() {
         .unwrap()
         .permissions()
         .mode();
-    assert_eq!(snap_mode & 0o777, 0o600, "snapshot mode 0600");
+    assert_eq!(snap_mode & 0o777, 0o644, "snapshot mode 0644");
 
-    // Manifest file lives at runs/{uuid}.manifest with mode 0600.
+    // Manifest file lives at runs/{uuid}.manifest with mode 0644.
     let expected_manifest = run_manifest_path(state_dir, uuid);
     assert!(expected_manifest.exists());
     let m_mode = std::fs::metadata(&expected_manifest)
         .unwrap()
         .permissions()
         .mode();
-    assert_eq!(m_mode & 0o777, 0o600, "manifest mode 0600");
+    assert_eq!(m_mode & 0o777, 0o644, "manifest mode 0644");
 
     // Manifest contents reference the snapshot path + digest.
     let manifest_text = std::fs::read_to_string(&expected_manifest).unwrap();

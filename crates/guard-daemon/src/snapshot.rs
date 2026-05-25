@@ -1,10 +1,11 @@
 //! Snapshot publication: const allowlist → CBOR file with O_EXCL + fsync + rename.
 //! Snapshot publication: const allowlist -> CBOR file with O_EXCL + fsync + rename.
 //!
-//! v0.2 adds `publish_run` for per-run snapshot lifecycle: writes to
-//! `${state_dir}/runs/{run-uuid}.cbor` plus a matching `{run-uuid}.manifest`
-//! atomically (tmp + fsync + rename). The v0.1 `publish` function remains for
-//! the daemon-startup snapshot at the legacy path scheme.
+//! v0.2 adds `publish_run` for per-run snapshot lifecycle: writes read-only
+//! signed policy artifacts to `${state_dir}/runs/{run-uuid}.cbor` plus a
+//! matching `{run-uuid}.manifest` atomically (tmp + fsync + rename). The v0.1
+//! `publish` function remains for the daemon-startup snapshot at the legacy
+//! path scheme.
 
 use crate::state_dir::{
     ensure_runs_dir, run_manifest_path, run_manifest_tmp_path, run_snapshot_path,
@@ -16,6 +17,8 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+
+const PER_RUN_ARTIFACT_MODE: u32 = 0o644;
 
 pub struct PublishedSnapshot {
     pub path: PathBuf,
@@ -118,7 +121,7 @@ fn publish_run_inner(
         let mut f = OpenOptions::new()
             .write(true)
             .create_new(true)
-            .mode(0o600)
+            .mode(PER_RUN_ARTIFACT_MODE)
             .open(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
@@ -136,7 +139,7 @@ fn publish_run_inner(
         let mut f = OpenOptions::new()
             .write(true)
             .create_new(true)
-            .mode(0o600)
+            .mode(PER_RUN_ARTIFACT_MODE)
             .open(&manifest_tmp)?;
         let mut body = format!("{}\ndigest={}\n", final_path.display(), digest_hex);
         if let Some(signature) = signature {

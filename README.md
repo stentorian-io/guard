@@ -302,7 +302,7 @@ and source-build workflows:
 
 | Variable | Purpose |
 | --- | --- |
-| `STT_GUARD_STATE_DIR` | Override the state directory used by the CLI, daemon, and hook. Defaults to `~/Library/Application Support/Stentorian Guard`. |
+| `STT_GUARD_STATE_DIR` | Override the state directory used by the CLI, daemon, and hook. In a hardened install, `stt-guard wrap` passes the system state directory through to wrapped processes; source-build workflows default to `~/Library/Application Support/Stentorian Guard`. |
 | `STT_GUARD_HOOK_DYLIB` | Override the hook dylib path used by `stt-guard wrap` in development/test mode. Production installs ignore this variable and use the verified root-owned system hook. |
 | `RUST_LOG` | Control CLI and daemon logging verbosity. |
 

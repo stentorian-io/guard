@@ -8,8 +8,11 @@
 #[cfg(target_os = "macos")]
 mod macos {
     use std::ffi::OsStr;
+    use std::net::TcpListener;
     use std::path::Path;
+    use std::path::PathBuf;
     use std::process::{Command, Output};
+    use std::thread;
     use std::time::{Duration, Instant};
 
     use guard_e2e::{cargo_target_dir, resolve_cli};
@@ -73,6 +76,7 @@ mod macos {
         );
 
         wait_for_status_ok(&cli);
+        assert_wrapped_user_process_loads_system_snapshot_and_enforces_policy(&cli, &target_dir);
 
         sudo_ok([
             OsStr::new("chmod"),
@@ -194,6 +198,75 @@ mod macos {
                 install_name.display()
             )
         });
+    }
+
+    fn assert_wrapped_user_process_loads_system_snapshot_and_enforces_policy(
+        cli: &Path,
+        target_dir: &Path,
+    ) {
+        let probe = target_dir.join("zero_config_probe");
+        assert!(
+            probe.is_file(),
+            "zero_config_probe missing {}; run cargo build --workspace --release first",
+            probe.display()
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback listener");
+        let port = listener.local_addr().expect("listener addr").port();
+        let addr_a = format!("127.0.0.1:{port}");
+        spawn_accept_thread(listener);
+
+        let baseline = Command::new(&probe)
+            .args([&addr_a, &addr_a])
+            .output()
+            .expect("run zero_config_probe baseline");
+        assert_eq!(
+            baseline.status.code(),
+            Some(3),
+            "baseline probe must connect to loopback twice; stdout={} stderr={}",
+            stdout(&baseline),
+            stderr(&baseline)
+        );
+
+        let out = Command::new(cli)
+            .arg("wrap")
+            .arg(&probe)
+            .arg(&addr_a)
+            .arg("192.0.2.1:80")
+            .current_dir(test_work_dir())
+            .env_clear()
+            .env("HOME", test_home())
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .output()
+            .expect("run system stt-guard wrap with zero_config_probe");
+        let exit_code = out.status.code().unwrap_or(-1);
+
+        assert!(
+            exit_code & 1 == 1,
+            "system wrapped command did not allow loopback; exit={exit_code} stdout={} stderr={}",
+            stdout(&out),
+            stderr(&out)
+        );
+        assert!(
+            exit_code & 2 == 0,
+            "system wrapped command did not deny TEST-NET destination; exit={exit_code} stdout={} stderr={}",
+            stdout(&out),
+            stderr(&out)
+        );
+    }
+
+    fn spawn_accept_thread(listener: TcpListener) {
+        thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                drop(stream);
+            }
+        });
+    }
+
+    fn test_work_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join("stt-guard-hardened-install-e2e-work");
+        std::fs::create_dir_all(&dir).expect("create test work dir");
+        dir
     }
 
     fn hardware_signing_unavailable(stderr: &str) -> bool {

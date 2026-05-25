@@ -194,17 +194,23 @@ pub fn ensure_state_dir(state_dir: &Path) -> std::io::Result<()> {
         .create(state_dir)
 }
 
-/// Ensure `runs/` subdirectory exists with mode 0700. Idempotent.
+/// Ensure `runs/` subdirectory exists with mode 0711. Idempotent.
+///
+/// Per-run snapshot artifacts under this directory are read-only, signed policy
+/// inputs for wrapped user processes. The directory is searchable but not
+/// listable so a wrapped process can open the exact manifest path handed to it
+/// without exposing mutable daemon state.
 pub fn ensure_runs_dir(state_dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::fs::PermissionsExt;
     let dir = runs_dir(state_dir);
-    if dir.exists() {
-        return Ok(());
+    if !dir.exists() {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o711)
+            .create(&dir)?;
     }
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o711))
 }
 
 // ---------------------------------------------------------------------------

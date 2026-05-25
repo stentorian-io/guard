@@ -1738,6 +1738,11 @@
   confidence: suspect
 - kind: deny
   match: exact
+  pattern: x.com
+  reason: "MAL-2026-4275 supply-chain IOC (FEED)"
+  confidence: suspect
+- kind: deny
+  match: exact
   pattern: xenx.lol
   reason: "MAL-2025-191716 supply-chain IOC (FEED)"
   confidence: confirmed

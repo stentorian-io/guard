@@ -113,9 +113,12 @@ pub fn lock_originals_page() {
 // ============================================================================
 
 #[allow(dead_code)]
+#[cfg(target_os = "macos")]
 struct SyncPtr2(*const c_void);
+#[cfg(target_os = "macos")]
 unsafe impl Sync for SyncPtr2 {}
 
+#[cfg(target_os = "macos")]
 unsafe extern "C" {
     // libc 0.2.x does NOT export vfork on BSD; declare it locally so we can
     // take its address as the "real" pointer in the interpose pair.
@@ -123,6 +126,7 @@ unsafe extern "C" {
 }
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_FORK: [SyncPtr2; 2] = [
@@ -131,6 +135,7 @@ static STT_GUARD_INTERPOSE_FORK: [SyncPtr2; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_VFORK: [SyncPtr2; 2] = [
@@ -139,6 +144,7 @@ static STT_GUARD_INTERPOSE_VFORK: [SyncPtr2; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_POSIX_SPAWN: [SyncPtr2; 2] = [
@@ -147,6 +153,7 @@ static STT_GUARD_INTERPOSE_POSIX_SPAWN: [SyncPtr2; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_POSIX_SPAWNP: [SyncPtr2; 2] = [
@@ -155,6 +162,7 @@ static STT_GUARD_INTERPOSE_POSIX_SPAWNP: [SyncPtr2; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_EXECVE: [SyncPtr2; 2] = [
@@ -163,6 +171,7 @@ static STT_GUARD_INTERPOSE_EXECVE: [SyncPtr2; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_EXECVP: [SyncPtr2; 2] = [
@@ -171,6 +180,7 @@ static STT_GUARD_INTERPOSE_EXECVP: [SyncPtr2; 2] = [
 ];
 
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_EXECV: [SyncPtr2; 2] = [
@@ -180,6 +190,7 @@ static STT_GUARD_INTERPOSE_EXECV: [SyncPtr2; 2] = [
 
 // M004-S04: getenv interposition for anti-detection hardening.
 #[unsafe(no_mangle)]
+#[cfg(target_os = "macos")]
 #[unsafe(link_section = "__DATA,__interpose")]
 #[used]
 static STT_GUARD_INTERPOSE_GETENV: [SyncPtr2; 2] = [

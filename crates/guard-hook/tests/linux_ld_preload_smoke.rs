@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
+use std::{ffi::CString, os::unix::fs::PermissionsExt};
 
 fn built_hook_so() -> PathBuf {
     let mut dir = std::env::current_exe().expect("current test binary path");
@@ -72,6 +73,37 @@ fn ld_preload_fail_closes_connect_without_snapshot() {
 }
 
 #[test]
+fn ld_preload_blocks_setuid_execve_before_exec() {
+    let hook = built_hook_so();
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let marker = tempdir.path().join("hook-loaded-exec");
+    let target = tempdir.path().join("setuid-script");
+    std::fs::write(&target, b"#!/bin/sh\nexit 99\n").expect("write target");
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o4755))
+        .expect("set setuid permissions");
+
+    let status = Command::new(std::env::current_exe().expect("current test binary"))
+        .args([
+            "--ignored",
+            "--exact",
+            "linux_execve_child_helper",
+            "--nocapture",
+        ])
+        .env("LD_PRELOAD", &hook)
+        .env("STT_GUARD_TEST_MARKER", &marker)
+        .env("STT_GUARD_EXEC_TARGET", &target)
+        .status()
+        .expect("spawn exec helper with LD_PRELOAD");
+
+    assert!(status.success(), "exec helper should observe setuid block");
+    assert!(
+        marker.exists(),
+        "hook constructor marker was not written; LD_PRELOAD did not load {}",
+        hook.display()
+    );
+}
+
+#[test]
 #[ignore = "spawned by ld_preload_fail_closes_connect_without_snapshot"]
 fn linux_connect_child_helper() {
     let target = std::env::var("STT_GUARD_CONNECT_TARGET").expect("target env");
@@ -80,4 +112,23 @@ fn linux_connect_child_helper() {
     if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok() {
         panic!("connect unexpectedly succeeded under fail-closed hook");
     }
+}
+
+#[test]
+#[ignore = "spawned by ld_preload_blocks_setuid_execve_before_exec"]
+fn linux_execve_child_helper() {
+    let target = std::env::var("STT_GUARD_EXEC_TARGET").expect("target env");
+    let target = CString::new(target).expect("target CString");
+    let arg0 = CString::new("setuid-script").expect("arg0 CString");
+    let argv = [arg0.as_ptr(), std::ptr::null()];
+    let envp = [std::ptr::null()];
+
+    let rc = unsafe { libc::execve(target.as_ptr(), argv.as_ptr(), envp.as_ptr()) };
+
+    assert_eq!(rc, -1, "execve should return after hook blocks target");
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::EACCES),
+        "hook should block setuid execve with EACCES"
+    );
 }

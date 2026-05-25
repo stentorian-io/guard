@@ -38,8 +38,8 @@ impl DaemonHarness {
     ///   - `STT_GUARD_STATE_DIR=<state_dir>` (defense in depth — explicit override
     ///     ensures the CLI uses the harness state dir even if `default_state_dir()`
     ///     changes its derivation rule).
-    /// This dual env-var pattern is the ISS-07 fix: the daemon and CLI use the
-    /// same state_dir without relying on HOME-derivation alone.
+    ///     This dual env-var pattern is the ISS-07 fix: the daemon and CLI use the
+    ///     same state_dir without relying on HOME-derivation alone.
     ///
     /// ISS-12: macOS Unix domain socket paths must be < 104 bytes. The default
     /// `tempfile::tempdir()` creates paths under /var/folders/…/T/ which can
@@ -204,8 +204,6 @@ pub fn cargo_target_dir() -> PathBuf {
     let exe_str = exe.to_string_lossy();
     let profile = if exe_str.contains("/release/") {
         "release"
-    } else if exe_str.contains("/debug/") {
-        "debug"
     } else {
         "debug"
     };

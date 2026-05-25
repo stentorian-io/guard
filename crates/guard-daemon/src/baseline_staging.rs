@@ -26,7 +26,7 @@ impl BaselineStaging {
     /// repeated calls with the same triple do not duplicate the entry.
     pub fn record_allow(&self, run_uuid: &str, match_type: &str, pattern: &str, reason: &str) {
         let mut g = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        let entries = g.entry(run_uuid.to_string()).or_insert_with(Vec::new);
+        let entries = g.entry(run_uuid.to_string()).or_default();
         if entries
             .iter()
             .any(|r| r.match_type == match_type && r.pattern == pattern)

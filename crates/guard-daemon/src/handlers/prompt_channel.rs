@@ -18,11 +18,12 @@ use guard_ipc::{PackageContext, PromptCancel, PromptRequest, PromptResponse, Pro
 
 use crate::ipc_server::DaemonState;
 use crate::log_writer::{
-    self, now_rfc3339, Decision, GapRecord, LogRow, ProcessCtxLog, RootCtxLog, JSONL_SCHEMA_VERSION,
+    self, Decision, GapRecord, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
 };
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "frame_kind", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum ClientChannelFrame {
     Response(PromptResponse),
     Cancel(PromptCancel),

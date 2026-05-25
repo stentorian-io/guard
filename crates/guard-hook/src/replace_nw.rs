@@ -50,14 +50,20 @@ static REAL_OBJECT_GET_CLASS_NAME: AtomicPtr<c_void> = AtomicPtr::new(core::ptr:
 fn resolve_object_get_class_name() -> Option<unsafe extern "C" fn(*mut c_void) -> *const c_char> {
     let p = REAL_OBJECT_GET_CLASS_NAME.load(Ordering::Relaxed);
     if !p.is_null() {
-        return Some(unsafe { core::mem::transmute(p) });
+        return Some(unsafe {
+            core::mem::transmute::<*mut c_void, unsafe extern "C" fn(*mut c_void) -> *const c_char>(
+                p,
+            )
+        });
     }
     let sym = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"object_getClassName".as_ptr()) };
     if sym.is_null() {
         return None;
     }
     REAL_OBJECT_GET_CLASS_NAME.store(sym, Ordering::Relaxed);
-    Some(unsafe { core::mem::transmute(sym) })
+    Some(unsafe {
+        core::mem::transmute::<*mut c_void, unsafe extern "C" fn(*mut c_void) -> *const c_char>(sym)
+    })
 }
 
 // ---- Per-symbol AtomicPtrs for captured originals ----

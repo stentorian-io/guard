@@ -120,7 +120,7 @@ fn getaddrinfo_proxy_returns_v4_address() {
 
     // Verify the sockaddr contents.
     let sin = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in) };
-    assert_eq!(sin.sin_family, libc::AF_INET as u8);
+    assert_eq!(sin.sin_family, libc::AF_INET as libc::sa_family_t);
     assert_eq!(u16::from_be(sin.sin_port), 443);
     let ip_bytes = sin.sin_addr.s_addr.to_ne_bytes();
     assert_eq!(ip_bytes, [1, 2, 3, 4]);

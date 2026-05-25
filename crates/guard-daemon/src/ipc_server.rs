@@ -20,12 +20,12 @@
 use crate::baseline_staging::BaselineStaging;
 use crate::gap_detector::GapDetector;
 use crate::install_artifacts::InstallArtifactStore;
-use crate::ipc_dispatch::{classify_frame, DispatchError, FrameKind, MessageTag};
+use crate::ipc_dispatch::{DispatchError, FrameKind, MessageTag, classify_frame};
 use crate::log_writer::LogWriter;
 use crate::peer_auth::authenticate;
 use crate::prompt::{PromptDedup, RecentGapsRing};
 use crate::tracked::{CoverageGap, ProcessTree};
-use crossbeam_channel::{bounded, TrySendError};
+use crossbeam_channel::{TrySendError, bounded};
 use guard_core::AuditToken;
 use guard_ipc::frame::write_frame;
 use guard_ipc::{
@@ -33,11 +33,11 @@ use guard_ipc::{
     DenyNotify, DenyNotifyAck, DisableCuratedRule, DisableCuratedRuleReply, DylibLoaded,
     DylibLoadedAck, EnableCuratedRule, EnableCuratedRuleReply, EnvNotPropagatedGap,
     EnvNotPropagatedGapAck, ExecAck, ExecBlocked, ExecBlockedAck, ExecEvent, ForkAck, ForkEvent,
-    InsertUserRule, InsertUserRuleReply, IpcError, ListRules, ListRulesReply, PersistenceWrite,
+    IPC_SCHEMA_V2, IPC_SCHEMA_V3, IPC_SCHEMA_V4, IPC_SCHEMA_V5, InsertUserRule,
+    InsertUserRuleReply, IpcError, ListRules, ListRulesReply, PersistenceWrite,
     PersistenceWriteAck, Ping, PingReply, PrepareSnapshot, PromptChannelInit, PromptChannelInitAck,
     PublishSignedSnapshot, ReadInstallArtifacts, ReadInstallArtifactsReply, RegisterRoot, Reply,
-    Resolve, ResolveReply, SnapshotInputsReply, SnapshotReply, Status, StatusReply, IPC_SCHEMA_V2,
-    IPC_SCHEMA_V3, IPC_SCHEMA_V4, IPC_SCHEMA_V5,
+    Resolve, ResolveReply, SnapshotInputsReply, SnapshotReply, Status, StatusReply,
 };
 use guard_os::codesign::is_hardened_runtime;
 use guard_os::process::{kernel_pidversion, process_uid};
@@ -171,6 +171,12 @@ impl DeferredResolveTable {
             }
         }
         drained
+    }
+}
+
+impl Default for DeferredResolveTable {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -457,7 +463,6 @@ impl IpcServer {
             FrameKind::Tagged(MessageTag::PromptChannelInit) => {
                 handle_prompt_channel_init_frame(stream, state);
                 // NB: return here — the stream is now owned by the prompt-channel thread.
-                return;
             }
             // v0.7 — management-IPC family.
             FrameKind::Tagged(MessageTag::ListRules) => {
@@ -707,7 +712,7 @@ fn handle_delete_install_artifacts_frame(stream: &mut UnixStream, state: &Arc<Da
 
 fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
     use crate::log_writer::jsonl_row::{
-        now_rfc3339, Decision, LogRow, ProcessCtxLog, RootCtxLog, JSONL_SCHEMA_VERSION,
+        Decision, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
     };
 
     let req: DenyNotify = match read_tagged_body(stream, MessageTag::DenyNotify) {
@@ -886,7 +891,7 @@ fn handle_deny_notify_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
 // ============================================================================
 
 fn handle_exec_blocked_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    use crate::log_writer::jsonl_row::{now_rfc3339, LogRow, ProcessCtxLog, JSONL_SCHEMA_VERSION};
+    use crate::log_writer::jsonl_row::{JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, now_rfc3339};
 
     let req: ExecBlocked = match read_tagged_body(stream, MessageTag::ExecBlocked) {
         Ok(m) => m,
@@ -968,7 +973,7 @@ fn handle_exec_blocked_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) 
 // ============================================================================
 
 fn handle_persistence_write_frame(stream: &mut UnixStream, state: &Arc<DaemonState>) {
-    use crate::log_writer::jsonl_row::{now_rfc3339, LogRow, ProcessCtxLog, JSONL_SCHEMA_VERSION};
+    use crate::log_writer::jsonl_row::{JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, now_rfc3339};
 
     let req: PersistenceWrite = match read_tagged_body(stream, MessageTag::PersistenceWrite) {
         Ok(m) => m,
@@ -1981,7 +1986,7 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
             guard_core::SourceKind::ConfirmedDeny | guard_core::SourceKind::BuiltinDeny
         ) {
             use crate::log_writer::jsonl_row::{
-                now_rfc3339, Decision, LogRow, ProcessCtxLog, RootCtxLog, JSONL_SCHEMA_VERSION,
+                Decision, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
             };
 
             if matches!(policy_source, guard_core::SourceKind::ConfirmedDeny) {
@@ -2243,7 +2248,7 @@ fn handle_resolve_frame(stream: &mut UnixStream, peer_token: AuditToken, state: 
 
     if let Some((run_uuid, source, entries)) = policy_deny {
         use crate::log_writer::jsonl_row::{
-            now_rfc3339, Decision, LogRow, ProcessCtxLog, RootCtxLog, JSONL_SCHEMA_VERSION,
+            Decision, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
         };
 
         let source_kind_str = source.as_label();

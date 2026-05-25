@@ -123,13 +123,10 @@ pub fn daemon_socket_path() -> Option<PathBuf> {
     let g = TEST_SOCKET_OVERRIDE
         .lock()
         .expect("test socket override mutex");
-    match &*g {
-        Some(override_val) => {
-            let result = override_val.clone();
-            drop(g);
-            return result;
-        }
-        None => {}
+    if let Some(override_val) = &*g {
+        let result = override_val.clone();
+        drop(g);
+        return result;
     }
     drop(g);
     DAEMON_SOCKET_PATH.get().and_then(|o| o.clone())

@@ -21,11 +21,11 @@
 //! read contention.
 
 use guard_core::{
-    paths, verify_rule_signature, AllowlistEntry, MatchType, RuleKind, RuleSignaturePayloadV1,
-    RuleSignaturePolicy, RuleSignatureV1, RuleTier,
+    AllowlistEntry, MatchType, RuleKind, RuleSignaturePayloadV1, RuleSignaturePolicy,
+    RuleSignatureV1, RuleTier, paths, verify_rule_signature,
 };
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Result as SqlResult};
-use rusqlite_migration::{Migrations, M};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Result as SqlResult, params};
+use rusqlite_migration::{M, Migrations};
 use std::collections::HashSet;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};

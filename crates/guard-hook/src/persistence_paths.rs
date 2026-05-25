@@ -34,25 +34,25 @@ pub fn classify_persistence_path_with_version(
     }
 
     // ---- Login items: macOS 13+ (Ventura) uses backgroundtaskmanagementagent ----
-    if macos_major >= 13 {
-        if starts_with_home_then(
+    if macos_major >= 13
+        && starts_with_home_then(
             path,
             home,
             b"/Library/Application Support/com.apple.backgroundtaskmanagementagent/",
-        ) {
-            return Some("login-item");
-        }
+        )
+    {
+        return Some("login-item");
     }
 
     // ---- Login items: pre-Ventura uses LSSharedFileList plist ----
-    if macos_major < 13 {
-        if starts_with_home_then(
+    if macos_major < 13
+        && starts_with_home_then(
             path,
             home,
             b"/Library/Preferences/com.apple.loginitems.plist",
-        ) {
-            return Some("login-item");
-        }
+        )
+    {
+        return Some("login-item");
     }
 
     // ---- Crontab (all macOS versions) ----
@@ -211,6 +211,6 @@ mod tests {
     #[test]
     fn version_detection_returns_plausible_value() {
         let v = macos_major_version();
-        assert!(v >= 12 && v <= 30, "unexpected macOS major: {v}");
+        assert!((12..=30).contains(&v), "unexpected macOS major: {v}");
     }
 }

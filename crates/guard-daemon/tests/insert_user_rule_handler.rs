@@ -3,7 +3,7 @@
 use guard_core::{RuleSignaturePayloadV1, RuleSignaturePolicy};
 use guard_daemon::handlers::insert_user_rule::handle_insert_user_rule;
 use guard_daemon::rule_store::RuleStore;
-use guard_ipc::{InsertUserRule, InsertUserRuleReply, IPC_SCHEMA_V5};
+use guard_ipc::{IPC_SCHEMA_V5, InsertUserRule, InsertUserRuleReply};
 
 fn signed_req(kind: &str, match_type: &str, pattern: &str, reason: &str) -> InsertUserRule {
     let created_at_unix_ms = 1_700_000_000_000;

@@ -77,11 +77,7 @@ impl std::fmt::Debug for LoadedSnapshot {
 pub fn well_known_state_dir() -> PathBuf {
     // Check STT_GUARD_STATE_DIR override first (using libc getenv to stay
     // allocation-free on the ctor path).
-    let override_val = unsafe {
-        getenv_libc(CStr::from_bytes_with_nul_unchecked(
-            b"STT_GUARD_STATE_DIR\0",
-        ))
-    };
+    let override_val = unsafe { getenv_libc(c"STT_GUARD_STATE_DIR") };
     if let Some(s) = override_val {
         if !s.is_empty() {
             return PathBuf::from(s);
@@ -106,12 +102,8 @@ unsafe fn getenv_libc(name: &CStr) -> Option<String> {
 }
 
 pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
-    let manifest_env = unsafe {
-        getenv_libc(CStr::from_bytes_with_nul_unchecked(
-            b"STT_GUARD_SNAPSHOT_MANIFEST\0",
-        ))
-    }
-    .ok_or(LoadError::EnvUnset)?;
+    let manifest_env =
+        unsafe { getenv_libc(c"STT_GUARD_SNAPSHOT_MANIFEST") }.ok_or(LoadError::EnvUnset)?;
     let manifest_path = PathBuf::from(&manifest_env);
     let canonical = manifest_path.canonicalize().map_err(LoadError::Io)?;
     let state_dir = well_known_state_dir()

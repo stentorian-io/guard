@@ -1,7 +1,9 @@
 //! E2E: `stt-guard status` emits human-readable state when daemon is running.
 
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
+#[cfg(target_os = "macos")]
 use guard_e2e::{DaemonHarness, resolve_cli};
 
 #[cfg(target_os = "macos")]

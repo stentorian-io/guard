@@ -5,7 +5,7 @@
 use std::io::{BufRead, Write};
 
 use guard_ipc::{
-    PromptRequest, PromptResponse, PromptVerdict, RulePattern, IPC_SCHEMA_V3, IPC_SCHEMA_V5,
+    IPC_SCHEMA_V3, IPC_SCHEMA_V5, PromptRequest, PromptResponse, PromptVerdict, RulePattern,
 };
 
 use crate::CliError;

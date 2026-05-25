@@ -29,10 +29,10 @@
 //!    `decide_for_sockaddr`. The Resolve-IPC fallback is therefore skipped; the
 //!    bench measures `sockaddr_bytes` decode + `with_cache(...)` mutex acquisition
 //!    + `evaluate_policy` tier-walk against the IP — i.e. the cache-miss-against-IP
-//!    branch of the libc hot path. That IS the < 100µs load-bearing surface for
-//!    VAL-03 (the cache-miss Resolve-IPC path is the *context* number per D-32
-//!    and lives in the live-wrap E2E bench planned downstream). Documented here
-//!    so future readers don't conclude the bench is misnamed.
+//!      branch of the libc hot path. That IS the < 100µs load-bearing surface for
+//!      VAL-03 (the cache-miss Resolve-IPC path is the *context* number per D-32
+//!      and lives in the live-wrap E2E bench planned downstream). Documented here
+//!      so future readers don't conclude the bench is misnamed.
 //!
 //! See:
 //!   * `crates/guard-hook/src/replace_libc.rs::decide_for_sockaddr` — function under measurement

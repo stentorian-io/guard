@@ -10,7 +10,7 @@
 //! RuleStore::insert_user_rule uses parameterized queries; debug_asserts
 //! provide defense-in-depth at the store boundary.
 
-use guard_core::{verify_rule_signature, RuleSignaturePayloadV1, RuleSignaturePolicy};
+use guard_core::{RuleSignaturePayloadV1, RuleSignaturePolicy, verify_rule_signature};
 use guard_ipc::{InsertUserRule, InsertUserRuleReply};
 
 use crate::rule_store::RuleStore;

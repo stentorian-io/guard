@@ -4,8 +4,10 @@
 //! shows re-enabled. CLI argument validation (--disable without --reason,
 //! --disable + --enable conflict) is verified separately without a daemon.
 //!
-//! Biometric auth is CLI-side only, so IPC tests exercise the daemon
-//! handlers directly via tagged IPC frames on the Unix socket.
+//! Mutable override authorization is enforced daemon-side. Direct unsigned
+//! IPC must fail; the CLI path supplies the signed management authorization
+//! after its biometric gate. Under the `test-signer` feature, the harness uses
+//! explicit test-only signing and authentication instead of hardware.
 
 #[cfg(target_os = "macos")]
 use std::io::{Read, Write};
@@ -54,27 +56,27 @@ fn send_tagged<Req: serde::Serialize, Rep: serde::de::DeserializeOwned>(
 }
 
 // ---------------------------------------------------------------------------
-// IPC-level tests (daemon required, biometric bypassed)
+// IPC-level tests (daemon required)
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "macos")]
 #[test]
-fn disable_list_enable_lifecycle() {
+fn direct_unsigned_disable_and_enable_are_rejected() {
     let harness = DaemonHarness::start().expect("start daemon");
 
-    // "registry.npmjs.org" is in the curated allow list.
     let pattern = "registry.npmjs.org";
 
-    // 1. Disable the curated rule.
     let req = DisableCuratedRule::new(pattern, "suspected compromise");
     let reply: DisableCuratedRuleReply =
         send_tagged(&harness.socket, TAG_DISABLE_CURATED_RULE, &req);
-    assert!(
-        matches!(reply, DisableCuratedRuleReply::Ok { .. }),
-        "disable should succeed; got {reply:?}"
-    );
+    match reply {
+        DisableCuratedRuleReply::Err { message, .. } => assert!(
+            message.contains("signed management authorization required"),
+            "expected authorization failure; got: {message}"
+        ),
+        _ => panic!("unsigned direct disable should fail; got {reply:?}"),
+    }
 
-    // 2. ListRules with builtins should show the rule as disabled.
     let req = ListRules::new(true);
     let reply: ListRulesReply = send_tagged(&harness.socket, TAG_LIST_RULES, &req);
     let rules = match reply {
@@ -86,59 +88,19 @@ fn disable_list_enable_lifecycle() {
         .find(|r| r.pattern == pattern)
         .expect("npm rule should be present in list");
     assert_eq!(
-        npm_rule.source, "builtin (disabled)",
-        "disabled rule source should be 'builtin (disabled)'; got {:?}",
+        npm_rule.source, "builtin",
+        "unsigned disable must not mutate state; got {:?}",
         npm_rule.source
     );
 
-    // 3. Disable is idempotent.
-    let req = DisableCuratedRule::new(pattern, "still compromised");
-    let reply: DisableCuratedRuleReply =
-        send_tagged(&harness.socket, TAG_DISABLE_CURATED_RULE, &req);
-    assert!(
-        matches!(reply, DisableCuratedRuleReply::Ok { .. }),
-        "idempotent disable should succeed; got {reply:?}"
-    );
-
-    // 4. Re-enable the curated rule.
     let req = EnableCuratedRule::new(pattern);
     let reply: EnableCuratedRuleReply = send_tagged(&harness.socket, TAG_ENABLE_CURATED_RULE, &req);
     match reply {
-        EnableCuratedRuleReply::Ok { was_disabled, .. } => {
-            assert!(was_disabled, "should report was_disabled=true");
-        }
-        EnableCuratedRuleReply::Err { message, .. } => {
-            panic!("enable should succeed; got err: {message}");
-        }
-    }
-
-    // 5. ListRules should now show the rule as "builtin" again.
-    let req = ListRules::new(true);
-    let reply: ListRulesReply = send_tagged(&harness.socket, TAG_LIST_RULES, &req);
-    let rules = match reply {
-        ListRulesReply::Ok { rules, .. } => rules,
-        ListRulesReply::Err { message, .. } => panic!("list_rules failed: {message}"),
-    };
-    let npm_rule = rules
-        .iter()
-        .find(|r| r.pattern == pattern)
-        .expect("npm rule should be present after re-enable");
-    assert_eq!(
-        npm_rule.source, "builtin",
-        "re-enabled rule source should be 'builtin'; got {:?}",
-        npm_rule.source
-    );
-
-    // 6. Enable a rule that was never disabled → was_disabled=false.
-    let req = EnableCuratedRule::new("pypi.org");
-    let reply: EnableCuratedRuleReply = send_tagged(&harness.socket, TAG_ENABLE_CURATED_RULE, &req);
-    match reply {
-        EnableCuratedRuleReply::Ok { was_disabled, .. } => {
-            assert!(!was_disabled, "pypi.org was never disabled");
-        }
-        EnableCuratedRuleReply::Err { message, .. } => {
-            panic!("enable should succeed even for non-disabled; got err: {message}");
-        }
+        EnableCuratedRuleReply::Err { message, .. } => assert!(
+            message.contains("signed management authorization required"),
+            "expected authorization failure; got: {message}"
+        ),
+        _ => panic!("unsigned direct enable should fail; got {reply:?}"),
     }
 }
 
@@ -159,6 +121,75 @@ fn disable_nonexistent_pattern_returns_error() {
         }
         _ => panic!("expected error for nonexistent pattern; got {reply:?}"),
     }
+}
+
+#[cfg(all(target_os = "macos", feature = "test-signer"))]
+#[test]
+fn cli_signed_disable_list_enable_lifecycle_still_works() {
+    let harness = DaemonHarness::start().expect("start daemon");
+    let cli = resolve_cli();
+    let pattern = "registry.npmjs.org";
+
+    let disable = Command::new(&cli)
+        .args([
+            "status",
+            "rules",
+            "--disable",
+            pattern,
+            "--reason",
+            "suspected compromise",
+        ])
+        .env_clear()
+        .env("HOME", harness.home.path())
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("STT_GUARD_STATE_DIR", &harness.state_dir)
+        .output()
+        .expect("stt-guard status rules --disable");
+    assert_eq!(
+        disable.status.code(),
+        Some(0),
+        "disable should exit 0; stderr: {}",
+        String::from_utf8_lossy(&disable.stderr)
+    );
+
+    let req = ListRules::new(true);
+    let reply: ListRulesReply = send_tagged(&harness.socket, TAG_LIST_RULES, &req);
+    let rules = match reply {
+        ListRulesReply::Ok { rules, .. } => rules,
+        ListRulesReply::Err { message, .. } => panic!("list_rules failed: {message}"),
+    };
+    let npm_rule = rules
+        .iter()
+        .find(|r| r.pattern == pattern)
+        .expect("npm rule should be present in list");
+    assert_eq!(npm_rule.source, "builtin (disabled)");
+
+    let enable = Command::new(&cli)
+        .args(["status", "rules", "--enable", pattern])
+        .env_clear()
+        .env("HOME", harness.home.path())
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("STT_GUARD_STATE_DIR", &harness.state_dir)
+        .output()
+        .expect("stt-guard status rules --enable");
+    assert_eq!(
+        enable.status.code(),
+        Some(0),
+        "enable should exit 0; stderr: {}",
+        String::from_utf8_lossy(&enable.stderr)
+    );
+
+    let req = ListRules::new(true);
+    let reply: ListRulesReply = send_tagged(&harness.socket, TAG_LIST_RULES, &req);
+    let rules = match reply {
+        ListRulesReply::Ok { rules, .. } => rules,
+        ListRulesReply::Err { message, .. } => panic!("list_rules failed: {message}"),
+    };
+    let npm_rule = rules
+        .iter()
+        .find(|r| r.pattern == pattern)
+        .expect("npm rule should be present after re-enable");
+    assert_eq!(npm_rule.source, "builtin");
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +263,7 @@ fn cli_disable_enable_conflict_rejected() {
 // CLI + daemon integration (IPC disable, then verify CLI output)
 // ---------------------------------------------------------------------------
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "test-signer"))]
 #[test]
 fn cli_status_rules_include_built_in_shows_disabled() {
     let harness = DaemonHarness::start().expect("start daemon");
@@ -240,11 +271,27 @@ fn cli_status_rules_include_built_in_shows_disabled() {
 
     let pattern = "registry.npmjs.org";
 
-    // Disable via IPC directly (bypass biometric).
-    let req = DisableCuratedRule::new(pattern, "e2e test");
-    let reply: DisableCuratedRuleReply =
-        send_tagged(&harness.socket, TAG_DISABLE_CURATED_RULE, &req);
-    assert!(matches!(reply, DisableCuratedRuleReply::Ok { .. }));
+    let disable = Command::new(&cli)
+        .args([
+            "status",
+            "rules",
+            "--disable",
+            pattern,
+            "--reason",
+            "e2e test",
+        ])
+        .env_clear()
+        .env("HOME", harness.home.path())
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("STT_GUARD_STATE_DIR", &harness.state_dir)
+        .output()
+        .expect("stt-guard status rules --disable");
+    assert_eq!(
+        disable.status.code(),
+        Some(0),
+        "disable should exit 0; stderr: {}",
+        String::from_utf8_lossy(&disable.stderr)
+    );
 
     // Run `stt-guard status rules --include-built-in` and verify output.
     let output = Command::new(&cli)

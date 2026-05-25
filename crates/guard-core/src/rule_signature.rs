@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 
 pub const RULE_SIGNATURE_PAYLOAD_SCHEMA_V1: u16 = 1;
 pub const SNAPSHOT_SIGNATURE_PAYLOAD_SCHEMA_V1: u16 = 1;
+pub const MANAGEMENT_ACTION_PAYLOAD_SCHEMA_V1: u16 = 1;
 pub const RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256: &str = "ecdsa-p256-sha256";
 pub const SIGNER_KIND_SECURE_ENCLAVE: &str = "secure-enclave";
 pub const SIGNER_KIND_SECURITY_KEY: &str = "security-key";
@@ -99,6 +100,32 @@ pub struct SnapshotSignatureV1 {
     pub signature_created_at_unix_ms: i64,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagementActionPayloadV1 {
+    pub schema_version: u16,
+    pub action: String,
+    pub pattern: String,
+    pub reason: String,
+    pub created_at_unix_ms: i64,
+}
+
+impl ManagementActionPayloadV1 {
+    pub fn new(
+        action: impl Into<String>,
+        pattern: impl Into<String>,
+        reason: impl Into<String>,
+        created_at_unix_ms: i64,
+    ) -> Self {
+        Self {
+            schema_version: MANAGEMENT_ACTION_PAYLOAD_SCHEMA_V1,
+            action: action.into(),
+            pattern: pattern.into(),
+            reason: reason.into(),
+            created_at_unix_ms,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuleSignaturePolicy {
     Production,
@@ -138,6 +165,15 @@ pub fn canonical_rule_payload_bytes(
 
 pub fn canonical_snapshot_payload_bytes(
     payload: &SnapshotSignaturePayloadV1,
+) -> Result<Vec<u8>, RuleSignatureError> {
+    let mut bytes = Vec::new();
+    ciborium::into_writer(payload, &mut bytes)
+        .map_err(|e| RuleSignatureError::Encode(e.to_string()))?;
+    Ok(bytes)
+}
+
+pub fn canonical_management_action_payload_bytes(
+    payload: &ManagementActionPayloadV1,
 ) -> Result<Vec<u8>, RuleSignatureError> {
     let mut bytes = Vec::new();
     ciborium::into_writer(payload, &mut bytes)
@@ -212,6 +248,44 @@ pub fn verify_snapshot_signature(
     }
 
     let payload_bytes = canonical_snapshot_payload_bytes(payload)?;
+    if sha256_hex(&payload_bytes) != signature.signed_payload_sha256 {
+        return Err(RuleSignatureError::PayloadHashMismatch);
+    }
+
+    let verifying_key = VerifyingKey::from_sec1_bytes(&signature.public_key_x963)
+        .map_err(|_| RuleSignatureError::InvalidPublicKey)?;
+    let sig = Signature::from_der(&signature.signature_der)
+        .map_err(|_| RuleSignatureError::InvalidSignatureEncoding)?;
+    verifying_key
+        .verify(&payload_bytes, &sig)
+        .map_err(|_| RuleSignatureError::SignatureMismatch)
+}
+
+pub fn verify_management_action_signature(
+    payload: &ManagementActionPayloadV1,
+    signature: &RuleSignatureV1,
+    policy: RuleSignaturePolicy,
+) -> Result<(), RuleSignatureError> {
+    if payload.schema_version != MANAGEMENT_ACTION_PAYLOAD_SCHEMA_V1 {
+        return Err(RuleSignatureError::UnsupportedPayloadSchema(
+            payload.schema_version,
+        ));
+    }
+    if signature.scheme != RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256 {
+        return Err(RuleSignatureError::UnsupportedScheme(
+            signature.scheme.clone(),
+        ));
+    }
+    if !signer_kind_allowed(&signature.signer_kind, policy) {
+        return Err(RuleSignatureError::UnsupportedSignerKind(
+            signature.signer_kind.clone(),
+        ));
+    }
+    if sha256_hex(&signature.public_key_x963) != signature.public_key_sha256 {
+        return Err(RuleSignatureError::PublicKeyHashMismatch);
+    }
+
+    let payload_bytes = canonical_management_action_payload_bytes(payload)?;
     if sha256_hex(&payload_bytes) != signature.signed_payload_sha256 {
         return Err(RuleSignatureError::PayloadHashMismatch);
     }
@@ -311,6 +385,27 @@ pub mod test_support {
             signature_der: signature.to_der().as_bytes().to_vec(),
             signed_payload_sha256: sha256_hex(&payload_bytes),
             signature_created_at_unix_ms: payload.generated_at_unix_ms,
+        })
+    }
+
+    pub fn sign_management_action_with_test_simulator(
+        payload: &ManagementActionPayloadV1,
+    ) -> Result<RuleSignatureV1, RuleSignatureError> {
+        // Fixed non-zero scalar. This is intentionally deterministic and test-only.
+        let signing_key =
+            SigningKey::from_slice(&[7u8; 32]).map_err(|_| RuleSignatureError::InvalidPublicKey)?;
+        let payload_bytes = canonical_management_action_payload_bytes(payload)?;
+        let signature: Signature = signing_key.sign(&payload_bytes);
+        let verifying_key = signing_key.verifying_key();
+        let public_key_x963 = verifying_key.to_encoded_point(false).as_bytes().to_vec();
+        Ok(RuleSignatureV1 {
+            scheme: RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
+            signer_kind: SIGNER_KIND_TEST_SIMULATOR.to_string(),
+            public_key_sha256: sha256_hex(&public_key_x963),
+            public_key_x963,
+            signature_der: signature.to_der().as_bytes().to_vec(),
+            signed_payload_sha256: sha256_hex(&payload_bytes),
+            signature_created_at_unix_ms: payload.created_at_unix_ms,
         })
     }
 }

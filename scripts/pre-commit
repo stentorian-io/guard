@@ -121,6 +121,10 @@ else
     pass "cargo fmt and clippy"
   fi
 
+  scripts/lint-test-env-vars.sh \
+    || fail "test env var hygiene failed"
+  pass "test env var hygiene"
+
   linux_fp=$(linux_ci_lint_fingerprint)
   if cache_hit "pre-commit:linux-ci-lint" "$linux_fp"; then
     skip "Linux CI rustfmt/clippy"

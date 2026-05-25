@@ -1,8 +1,9 @@
 #![cfg(feature = "test-signer")]
 
 use guard_core::{
-    RuleSignaturePayloadV1, RuleSignaturePolicy, SIGNER_KIND_TEST_SIMULATOR,
-    SnapshotSignaturePayloadV1, verify_rule_signature, verify_snapshot_signature,
+    ManagementActionPayloadV1, RuleSignaturePayloadV1, RuleSignaturePolicy,
+    SIGNER_KIND_TEST_SIMULATOR, SnapshotSignaturePayloadV1, verify_management_action_signature,
+    verify_rule_signature, verify_snapshot_signature,
 };
 
 fn payload() -> RuleSignaturePayloadV1 {
@@ -21,6 +22,15 @@ fn snapshot_payload() -> SnapshotSignaturePayloadV1 {
     SnapshotSignaturePayloadV1::new(
         "run-1",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        1_700_000_000_000,
+    )
+}
+
+fn management_payload() -> ManagementActionPayloadV1 {
+    ManagementActionPayloadV1::new(
+        "disable-curated-rule",
+        "registry.npmjs.org",
+        "suspected compromise",
         1_700_000_000_000,
     )
 }
@@ -96,6 +106,41 @@ fn snapshot_test_simulator_signature_verifies_under_test_policy() {
         RuleSignaturePolicy::AllowTestSimulator,
     )
     .expect("verify snapshot");
+}
+
+#[test]
+fn management_action_signature_verifies_under_test_policy() {
+    let payload = management_payload();
+    let signature =
+        guard_core::rule_signature::test_support::sign_management_action_with_test_simulator(
+            &payload,
+        )
+        .expect("sign management action");
+    verify_management_action_signature(
+        &payload,
+        &signature,
+        RuleSignaturePolicy::AllowTestSimulator,
+    )
+    .expect("verify management action");
+}
+
+#[test]
+fn tampered_management_action_fails_verification() {
+    let payload = management_payload();
+    let signature =
+        guard_core::rule_signature::test_support::sign_management_action_with_test_simulator(
+            &payload,
+        )
+        .expect("sign management action");
+    let mut tampered = payload.clone();
+    tampered.action = "enable-curated-rule".into();
+    let err = verify_management_action_signature(
+        &tampered,
+        &signature,
+        RuleSignaturePolicy::AllowTestSimulator,
+    )
+    .expect_err("tampered management action must fail");
+    assert!(err.to_string().contains("payload hash mismatch"));
 }
 
 #[test]

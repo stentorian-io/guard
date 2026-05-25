@@ -381,7 +381,15 @@ pub fn disable_curated_rule_request(
             "biometric authentication required to modify rules".into(),
         ));
     }
-    let req = DisableCuratedRule::new(pattern, reason);
+    let created_at_unix_ms = unix_ms_now();
+    let payload = guard_core::ManagementActionPayloadV1::new(
+        guard_daemon::management_auth::ACTION_DISABLE_CURATED_RULE,
+        pattern,
+        reason,
+        created_at_unix_ms,
+    );
+    let signature = crate::rule_signing::sign_management_action_payload(&payload)?;
+    let req = DisableCuratedRule::new_signed(pattern, reason, created_at_unix_ms, signature);
     let reply: DisableCuratedRuleReply = send_tagged_request(sock, TAG_DISABLE_CURATED_RULE, &req)?;
     match reply {
         DisableCuratedRuleReply::Ok { .. } => Ok(()),
@@ -400,7 +408,15 @@ pub fn enable_curated_rule_request(sock: &Path, pattern: &str) -> Result<bool, C
             "biometric authentication required to modify rules".into(),
         ));
     }
-    let req = EnableCuratedRule::new(pattern);
+    let created_at_unix_ms = unix_ms_now();
+    let payload = guard_core::ManagementActionPayloadV1::new(
+        guard_daemon::management_auth::ACTION_ENABLE_CURATED_RULE,
+        pattern,
+        "",
+        created_at_unix_ms,
+    );
+    let signature = crate::rule_signing::sign_management_action_payload(&payload)?;
+    let req = EnableCuratedRule::new_signed(pattern, created_at_unix_ms, signature);
     let reply: EnableCuratedRuleReply = send_tagged_request(sock, TAG_ENABLE_CURATED_RULE, &req)?;
     match reply {
         EnableCuratedRuleReply::Ok { was_disabled, .. } => Ok(was_disabled),

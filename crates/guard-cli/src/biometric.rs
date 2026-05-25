@@ -7,8 +7,10 @@
 //! Fail-closed: if Swift is unavailable or the process fails to launch,
 //! authentication is denied.
 
+#[cfg(not(feature = "test-signer"))]
 use std::process::Command;
 
+#[cfg(not(feature = "test-signer"))]
 const SWIFT_AUTH_SCRIPT: &str = r#"
 import LocalAuthentication
 import Foundation
@@ -27,6 +29,17 @@ exit(ok ? 0 : 1)
 /// Returns `true` if authentication succeeded, `false` otherwise.
 ///
 /// Fail-closed: returns `false` if `/usr/bin/swift` is missing or fails to launch.
+#[cfg(feature = "test-signer")]
+pub fn authenticate(reason: &str) -> bool {
+    let _ = reason;
+    true
+}
+
+/// Prompt the user for Touch ID or password authentication.
+/// Returns `true` if authentication succeeded, `false` otherwise.
+///
+/// Fail-closed: returns `false` if `/usr/bin/swift` is missing or fails to launch.
+#[cfg(not(feature = "test-signer"))]
 pub fn authenticate(reason: &str) -> bool {
     let swift = "/usr/bin/swift";
     if !std::path::Path::new(swift).exists() {

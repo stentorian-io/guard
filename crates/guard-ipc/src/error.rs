@@ -17,9 +17,6 @@ pub enum IpcError {
     #[error("peer auth failed: {0}")]
     PeerAuth(String),
 
-    #[error("HMAC mismatch on IPC frame")]
-    HmacMismatch,
-
     #[error("IPC nonce not monotonic: expected > {expected}, got {got}")]
     NonceReplay { expected: u64, got: u64 },
 }

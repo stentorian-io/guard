@@ -74,11 +74,25 @@ else
   echo "⚠ node/npx not found — skipping markdown lint"
 fi
 
-# ── 3–7. Cheap validation — skip when only repo-meta changed ────────────────
+# ── 3. GitHub Actions lint ─────────────────────────────────────────────────
+WORKFLOW_FILES=$(git diff --cached --name-only --diff-filter=ACM -- \
+  '.github/workflows/*.yml' \
+  '.github/workflows/*.yaml' || true)
+if [ -n "$WORKFLOW_FILES" ]; then
+  if command -v actionlint &>/dev/null; then
+    actionlint \
+      || fail "GitHub Actions workflow lint failed"
+    pass "GitHub Actions workflow lint"
+  else
+    fail "actionlint not found; install it locally (for example: brew install actionlint)"
+  fi
+fi
+
+# ── 4–8. Cheap validation — skip when only repo-meta changed ────────────────
 if [ "$REPO_META_ONLY" -eq 1 ]; then
   skip "cargo check, machete, build, test (repo-meta-only change)"
 else
-  # ── 3. Cargo check (fast type/borrow check, no codegen) ───────────────────
+  # ── 4. Cargo check (fast type/borrow check, no codegen) ───────────────────
   fp=$(rust_fingerprint)
   if cache_hit "pre-commit:cargo-check" "$fp"; then
     skip "cargo check"
@@ -89,7 +103,7 @@ else
     pass "cargo check"
   fi
 
-  # ── 4. Unused dependency lint (cargo-machete — stable, no compilation) ────
+  # ── 5. Unused dependency lint (cargo-machete — stable, no compilation) ────
   if cache_hit "pre-commit:machete" "$fp"; then
     skip "cargo machete"
   else
@@ -103,7 +117,7 @@ else
     fi
   fi
 
-  # ── 5. Release build — catches workspace build failures before push ───────
+  # ── 6. Release build — catches workspace build failures before push ───────
   if cache_hit "pre-commit:cargo-build-release" "$fp"; then
     skip "cargo build --workspace --release"
   else
@@ -113,7 +127,7 @@ else
     pass "cargo build --workspace --release"
   fi
 
-  # ── 6. Unit tests — no E2E ────────────────────────────────────────────────
+  # ── 7. Unit tests — no E2E ────────────────────────────────────────────────
   if cache_hit "pre-commit:cargo-test-unit" "$fp"; then
     skip "cargo test unit targets"
   else
@@ -123,7 +137,7 @@ else
     pass "cargo test unit targets"
   fi
 
-  # ── 7. Integration tests — no E2E ─────────────────────────────────────────
+  # ── 8. Integration tests — no E2E ─────────────────────────────────────────
   if cache_hit "pre-commit:cargo-test-integration" "$fp"; then
     skip "cargo test integration targets"
   else

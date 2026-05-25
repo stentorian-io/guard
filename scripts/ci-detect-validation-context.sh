@@ -26,7 +26,7 @@ markdown=false
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   case "$path" in
-    *.rs|*/Cargo.toml|Cargo.toml|*/Cargo.lock|Cargo.lock|rust-toolchain.toml|crates/guard-e2e/fixtures/*|crates/guard-e2e/harness/*|crates/guard-core/data/*|scripts/*.sh|tools/*)
+    *.rs|*/Cargo.toml|Cargo.toml|*/Cargo.lock|Cargo.lock|rust-toolchain.toml|crates/guard-e2e/fixtures/*|crates/guard-e2e/harness/*|crates/guard-core/data/*|scripts/*.sh|tools/*|.github/workflows/*|.github/actions/*)
       code=true
       ;;
   esac

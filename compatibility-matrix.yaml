@@ -147,7 +147,12 @@ syscall_patterns:
   - id: raw-syscall-instructions
     status: tracked
     scanner_coverage: https://github.com/stentorian-io/guard/issues/1
-    notes: Native raw syscall instruction scanning fails closed when known patterns are present.
+    notes: Native raw syscall instruction scanning fails closed when known target-architecture patterns are present.
+  - id: linux-elf-exec-scanner
+    status: unsupported-fail-closed
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/59
+    linux_coverage: https://github.com/stentorian-io/guard/issues/2
+    notes: Linux builds compile an explicit ELF scanner boundary, but unsupported non-script exec targets fail closed until ELF classification is implemented.
   - id: scanner-unknown-classification
     status: covered-macos
     scanner_coverage: https://github.com/stentorian-io/guard/issues/60

@@ -19,8 +19,8 @@ use crate::ipc_client::{
     IpcClientError, copy_cstr_to_buf, send_env_not_propagated_gap_sync, send_exec_blocked,
     send_exec_event_sync, send_fork_event_sync,
 };
-use crate::macho_scan::{BlockReason, SuspiciousReason};
 use crate::reentrancy::IN_HOOK;
+use crate::scanner::{BlockReason, SuspiciousReason};
 use guard_ipc::AuditTokenWire;
 use guard_os::audit_token::audit_token_for_pid;
 use guard_os::errno::set_errno;

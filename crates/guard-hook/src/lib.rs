@@ -33,7 +33,7 @@ pub mod interpose; // Filled in by task 2; symbol re-export only at this point
 pub mod ipc_client; // v0.2: blocking IPC for ForkEvent / ExecEvent / DylibLoaded
 pub mod log_buffer;
 pub mod macho_flags; // M003-S02: Mach-O code-signing flag parser for hardened-runtime exec blocking
-pub mod macho_scan; // Issue #1 phase 1: Mach-O tier classification + syscall-byte scan
+pub mod macho_scan; // Compatibility re-export for scanner types and entry points
 pub mod persistence_paths; // M003-S04: persistence-path classifier for open/openat monitoring
 pub mod pm_env_filter; // quick-260508-et9 (BLOCKER #1): dylib-side pm_env capture
 pub mod raw_syscall; // M003-S01: direct kernel syscall wrappers for hook call-through
@@ -43,6 +43,7 @@ pub mod replace_fork; // v0.2: fork/vfork/posix_spawn shadows
 pub mod replace_libc; // Filled in by task 2
 pub mod replace_nw; // v0.1: Network.framework dlsym + shadow exports
 pub mod replace_open; // M003-S04: open/openat interpose for persistence monitoring
+pub mod scanner; // Issue #59: OS/format-specific exec-target scanner boundary
 pub mod self_check; // M004-S03: hook binary self-integrity verification
 pub mod snapshot;
 pub mod trusted_runtime; // Issue #1 phase 2: content-hash trusted runtime registry

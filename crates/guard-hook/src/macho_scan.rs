@@ -18,6 +18,10 @@ const FAT_CIGAM: u32 = 0xbebafeca;
 const FAT_MAGIC_64: u32 = 0xcafebabf;
 const FAT_CIGAM_64: u32 = 0xbfbafeca;
 const LC_SEGMENT_64: u32 = 0x19;
+const CPU_SUBTYPE_MASK: u32 = 0xff00_0000;
+const CPU_SUBTYPE_ARM64_ALL: u32 = 0;
+const CPU_SUBTYPE_X86_64_ALL: u32 = 3;
+const CPU_SUBTYPE_X86_64_H: u32 = 8;
 
 #[cfg(target_arch = "aarch64")]
 const NATIVE_CPU_TYPE: u32 = 0x0100_000c;
@@ -43,6 +47,10 @@ pub enum BlockReason {
     PrivilegeEscalation,
     FatBinary,
     UnsupportedArch,
+    UnsupportedSubtype,
+    UnknownFormat,
+    MalformedMachO,
+    ScanFailure,
 }
 
 impl BlockReason {
@@ -52,6 +60,10 @@ impl BlockReason {
             Self::PrivilegeEscalation => "privilege-escalation",
             Self::FatBinary => "fat-binary",
             Self::UnsupportedArch => "unsupported-arch",
+            Self::UnsupportedSubtype => "unsupported-subtype",
+            Self::UnknownFormat => "unknown-format",
+            Self::MalformedMachO => "malformed-macho",
+            Self::ScanFailure => "scan-failure",
         }
     }
 }
@@ -78,9 +90,15 @@ enum ScanVerdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HeaderKind {
     Fat,
-    NotMachO,
+    Script,
+    UnknownFormat,
     UnsupportedMachO,
-    Thin64 { cputype: u32, ncmds: usize },
+    MalformedMachO,
+    Thin64 {
+        cputype: u32,
+        cpusubtype: u32,
+        ncmds: usize,
+    },
 }
 
 pub fn classify_path(path: *const libc::c_char) -> BinaryTier {
@@ -114,28 +132,35 @@ pub fn classify_path_with_registry(
     unsafe {
         libc::close(fd);
     }
-    if n < 4 {
-        return BinaryTier::T2CleanUnknown;
-    }
-
     match parse_header_kind(&header[..n as usize]) {
         HeaderKind::Fat => BinaryTier::T0Blocked(BlockReason::FatBinary),
-        HeaderKind::NotMachO => BinaryTier::T2CleanUnknown,
+        HeaderKind::Script => BinaryTier::T2CleanUnknown,
+        HeaderKind::UnknownFormat => BinaryTier::T0Blocked(BlockReason::UnknownFormat),
         HeaderKind::UnsupportedMachO => BinaryTier::T0Blocked(BlockReason::UnsupportedArch),
-        HeaderKind::Thin64 { cputype, .. } => {
+        HeaderKind::MalformedMachO => BinaryTier::T0Blocked(BlockReason::MalformedMachO),
+        HeaderKind::Thin64 {
+            cputype,
+            cpusubtype,
+            ..
+        } => {
             if cputype != NATIVE_CPU_TYPE || !is_supported_cpu(cputype) {
                 return BinaryTier::T0Blocked(BlockReason::UnsupportedArch);
+            }
+
+            if !is_supported_cpu_subtype(cputype, cpusubtype) {
+                return BinaryTier::T0Blocked(BlockReason::UnsupportedSubtype);
             }
 
             match hash_file(path) {
                 Some(hash) if trusted_registry.get(&hash).is_some() => BinaryTier::T1TrustedRuntime,
                 Some(hash) => match cached_or_scan(path, hash) {
-                    Some(ScanVerdict::Clean) | None => BinaryTier::T2CleanUnknown,
+                    Some(ScanVerdict::Clean) => BinaryTier::T2CleanUnknown,
                     Some(ScanVerdict::Suspicious(reason)) => {
                         BinaryTier::T3SuspiciousUnknown(reason)
                     }
+                    None => BinaryTier::T0Blocked(BlockReason::ScanFailure),
                 },
-                None => BinaryTier::T2CleanUnknown,
+                None => BinaryTier::T0Blocked(BlockReason::ScanFailure),
             }
         }
     }
@@ -201,15 +226,24 @@ fn scan_path(path: *const libc::c_char) -> Option<ScanVerdict> {
         }
         return None;
     }
-    let ranges = text_ranges(&header[..n as usize]);
+    let ranges = text_ranges(&header[..n as usize])?;
     for (fileoff, filesize) in ranges {
-        if scan_file_range(fd, fileoff, filesize) {
-            unsafe {
-                libc::close(fd);
+        match scan_file_range(fd, fileoff, filesize) {
+            Some(true) => {
+                unsafe {
+                    libc::close(fd);
+                }
+                return Some(ScanVerdict::Suspicious(
+                    SuspiciousReason::SyscallInstruction,
+                ));
             }
-            return Some(ScanVerdict::Suspicious(
-                SuspiciousReason::SyscallInstruction,
-            ));
+            Some(false) => {}
+            None => {
+                unsafe {
+                    libc::close(fd);
+                }
+                return None;
+            }
         }
     }
     unsafe {
@@ -218,13 +252,13 @@ fn scan_path(path: *const libc::c_char) -> Option<ScanVerdict> {
     Some(ScanVerdict::Clean)
 }
 
-fn scan_file_range(fd: libc::c_int, fileoff: u64, filesize: u64) -> bool {
+fn scan_file_range(fd: libc::c_int, fileoff: u64, filesize: u64) -> Option<bool> {
     if filesize == 0 {
-        return false;
+        return Some(false);
     }
     let seeked = unsafe { libc::lseek(fd, fileoff as libc::off_t, libc::SEEK_SET) };
     if seeked < 0 {
-        return false;
+        return None;
     }
 
     let mut remaining = filesize;
@@ -236,22 +270,26 @@ fn scan_file_range(fd: libc::c_int, fileoff: u64, filesize: u64) -> bool {
             raw_syscall::raw_read(fd, buf[tail_len..].as_mut_ptr() as *mut libc::c_void, want)
         };
         if n <= 0 {
-            return false;
+            return None;
         }
         let total = tail_len + n as usize;
         if contains_syscall_pattern(&buf[..total]) {
-            return true;
+            return Some(true);
         }
         tail_len = total.min(3);
         buf.copy_within(total - tail_len..total, 0);
         remaining -= n as u64;
     }
-    false
+    Some(false)
 }
 
 fn parse_header_kind(data: &[u8]) -> HeaderKind {
     if data.len() < 4 {
-        return HeaderKind::NotMachO;
+        if data.starts_with(b"#!") {
+            return HeaderKind::Script;
+        }
+
+        return HeaderKind::UnknownFormat;
     }
     let be_magic = u32::from_be_bytes(data[0..4].try_into().unwrap());
     if matches!(
@@ -265,30 +303,39 @@ fn parse_header_kind(data: &[u8]) -> HeaderKind {
         return HeaderKind::UnsupportedMachO;
     }
     if le_magic != MH_MAGIC_64 {
-        return HeaderKind::NotMachO;
+        if data.starts_with(b"#!") {
+            return HeaderKind::Script;
+        }
+
+        return HeaderKind::UnknownFormat;
     }
     if data.len() < 32 {
-        return HeaderKind::UnsupportedMachO;
+        return HeaderKind::MalformedMachO;
     }
     let cputype = u32::from_le_bytes(data[4..8].try_into().unwrap());
+    let cpusubtype = u32::from_le_bytes(data[8..12].try_into().unwrap());
     let ncmds = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
-    HeaderKind::Thin64 { cputype, ncmds }
+    HeaderKind::Thin64 {
+        cputype,
+        cpusubtype,
+        ncmds,
+    }
 }
 
-fn text_ranges(data: &[u8]) -> Vec<(u64, u64)> {
+fn text_ranges(data: &[u8]) -> Option<Vec<(u64, u64)>> {
     let HeaderKind::Thin64 { ncmds, .. } = parse_header_kind(data) else {
-        return Vec::new();
+        return None;
     };
     let mut ranges = Vec::new();
     let mut pos = 32usize;
     for _ in 0..ncmds.min(512) {
         if pos + 72 > data.len() {
-            break;
+            return None;
         }
         let cmd = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
         let cmdsize = u32::from_le_bytes(data[pos + 4..pos + 8].try_into().unwrap()) as usize;
         if cmdsize < 8 || pos + cmdsize > data.len() {
-            break;
+            return None;
         }
         if cmd == LC_SEGMENT_64 && cmdsize >= 72 {
             let segname = &data[pos + 8..pos + 24];
@@ -300,7 +347,7 @@ fn text_ranges(data: &[u8]) -> Vec<(u64, u64)> {
         }
         pos += cmdsize;
     }
-    ranges
+    Some(ranges)
 }
 
 fn nul_trim(bytes: &[u8]) -> &[u8] {
@@ -312,6 +359,16 @@ fn nul_trim(bytes: &[u8]) -> &[u8] {
 
 fn is_supported_cpu(cputype: u32) -> bool {
     matches!(cputype, CPU_TYPE_ARM64 | CPU_TYPE_X86_64)
+}
+
+fn is_supported_cpu_subtype(cputype: u32, cpusubtype: u32) -> bool {
+    let subtype = cpusubtype & !CPU_SUBTYPE_MASK;
+
+    match cputype {
+        CPU_TYPE_ARM64 => subtype == CPU_SUBTYPE_ARM64_ALL,
+        CPU_TYPE_X86_64 => matches!(subtype, CPU_SUBTYPE_X86_64_ALL | CPU_SUBTYPE_X86_64_H),
+        _ => false,
+    }
 }
 
 fn contains_syscall_pattern(bytes: &[u8]) -> bool {
@@ -330,12 +387,13 @@ mod tests {
     use std::io::Write;
     use std::os::unix::ffi::OsStrExt;
 
-    fn thin_header(cputype: u32, text_payload: &[u8]) -> Vec<u8> {
+    fn thin_header(cputype: u32, cpusubtype: u32, text_payload: &[u8]) -> Vec<u8> {
         let fileoff = 0x100u64;
         let filesize = text_payload.len() as u64;
         let mut data = vec![0u8; fileoff as usize + text_payload.len()];
         data[0..4].copy_from_slice(&MH_MAGIC_64.to_le_bytes());
         data[4..8].copy_from_slice(&cputype.to_le_bytes());
+        data[8..12].copy_from_slice(&cpusubtype.to_le_bytes());
         data[16..20].copy_from_slice(&1u32.to_le_bytes());
         data[20..24].copy_from_slice(&72u32.to_le_bytes());
         let pos = 32usize;
@@ -356,6 +414,18 @@ mod tests {
 
     fn path_cstring(file: &tempfile::NamedTempFile) -> CString {
         CString::new(file.path().as_os_str().as_bytes()).expect("path cstring")
+    }
+
+    fn native_cpu_subtype() -> u32 {
+        #[cfg(target_arch = "aarch64")]
+        {
+            CPU_SUBTYPE_ARM64_ALL
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            CPU_SUBTYPE_X86_64_ALL
+        }
     }
 
     #[test]
@@ -379,7 +449,11 @@ mod tests {
 
     #[test]
     fn classify_path_detects_suspicious_thin_binary() {
-        let data = thin_header(NATIVE_CPU_TYPE, &[0xaa, 0x01, 0x10, 0x00, 0xd4]);
+        let data = thin_header(
+            NATIVE_CPU_TYPE,
+            native_cpu_subtype(),
+            &[0xaa, 0x01, 0x10, 0x00, 0xd4],
+        );
         let file = write_temp(&data);
         let path = path_cstring(&file);
         assert_eq!(
@@ -390,7 +464,11 @@ mod tests {
 
     #[test]
     fn classify_path_promotes_trusted_runtime_before_syscall_scan() {
-        let data = thin_header(NATIVE_CPU_TYPE, &[0xaa, 0x01, 0x10, 0x00, 0xd4]);
+        let data = thin_header(
+            NATIVE_CPU_TYPE,
+            native_cpu_subtype(),
+            &[0xaa, 0x01, 0x10, 0x00, 0xd4],
+        );
         let hash = Sha256::digest(&data);
         let registry_yaml = format!(
             "runtimes:\n  - sha256: \"{}\"\n    name: guard-test-runtime\n    version: \"0.0.0\"\n    source: unit-test\n",
@@ -406,16 +484,64 @@ mod tests {
     }
 
     #[test]
-    fn classify_path_allows_non_macho_files() {
+    fn classify_path_allows_shebang_scripts() {
         let file = write_temp(b"#!/bin/sh\nexit 0\n");
         let path = path_cstring(&file);
         assert_eq!(classify_path(path.as_ptr()), BinaryTier::T2CleanUnknown);
     }
 
     #[test]
+    fn classify_path_blocks_unknown_non_macho_files() {
+        let file = write_temp(b"not a script or Mach-O");
+        let path = path_cstring(&file);
+        assert_eq!(
+            classify_path(path.as_ptr()),
+            BinaryTier::T0Blocked(BlockReason::UnknownFormat)
+        );
+    }
+
+    #[test]
+    fn classify_path_blocks_unknown_native_cpu_subtype() {
+        let data = thin_header(NATIVE_CPU_TYPE, 0x0000_00fe, &[1, 2, 3, 4]);
+        let file = write_temp(&data);
+        let path = path_cstring(&file);
+        assert_eq!(
+            classify_path(path.as_ptr()),
+            BinaryTier::T0Blocked(BlockReason::UnsupportedSubtype)
+        );
+    }
+
+    #[test]
+    fn classify_path_blocks_unsupported_cpu_type() {
+        let data = thin_header(
+            0x0100_000c ^ 0x0000_000b,
+            native_cpu_subtype(),
+            &[1, 2, 3, 4],
+        );
+        let file = write_temp(&data);
+        let path = path_cstring(&file);
+        assert_eq!(
+            classify_path(path.as_ptr()),
+            BinaryTier::T0Blocked(BlockReason::UnsupportedArch)
+        );
+    }
+
+    #[test]
+    fn classify_path_blocks_malformed_macho_load_command() {
+        let mut data = thin_header(NATIVE_CPU_TYPE, native_cpu_subtype(), &[1, 2, 3, 4]);
+        data[32 + 4..32 + 8].copy_from_slice(&4u32.to_le_bytes());
+        let file = write_temp(&data);
+        let path = path_cstring(&file);
+        assert_eq!(
+            classify_path(path.as_ptr()),
+            BinaryTier::T0Blocked(BlockReason::ScanFailure)
+        );
+    }
+
+    #[test]
     fn extracts_text_range_from_thin_macho() {
-        let data = thin_header(NATIVE_CPU_TYPE, &[1, 2, 3, 4]);
-        assert_eq!(text_ranges(&data), vec![(0x100, 4)]);
+        let data = thin_header(NATIVE_CPU_TYPE, native_cpu_subtype(), &[1, 2, 3, 4]);
+        assert_eq!(text_ranges(&data), Some(vec![(0x100, 4)]));
     }
 
     #[test]
@@ -435,6 +561,13 @@ mod tests {
         assert_eq!(BlockReason::HardenedRuntime.as_str(), "hardened-runtime");
         assert_eq!(BlockReason::FatBinary.as_str(), "fat-binary");
         assert_eq!(BlockReason::UnsupportedArch.as_str(), "unsupported-arch");
+        assert_eq!(
+            BlockReason::UnsupportedSubtype.as_str(),
+            "unsupported-subtype"
+        );
+        assert_eq!(BlockReason::UnknownFormat.as_str(), "unknown-format");
+        assert_eq!(BlockReason::MalformedMachO.as_str(), "malformed-macho");
+        assert_eq!(BlockReason::ScanFailure.as_str(), "scan-failure");
     }
 
     #[test]

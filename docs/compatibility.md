@@ -2,13 +2,15 @@
 
 Stentorian Guard depends on platform behavior that can drift outside this
 repository: macOS DYLD and hardened-runtime behavior, CPU architecture names,
-Rust and LLVM target support, Xcode releases, Homebrew packaging, and future
-Linux support expansion. The checked-in source of truth is
+Rust and LLVM target support, Xcode releases, Homebrew packaging, reviewed
+runtime identities, and future Linux support expansion. The checked-in source of
+truth is
 [`compatibility-matrix.yaml`](../compatibility-matrix.yaml).
 
 The manifest records the OS, CPU, syscall-pattern, and toolchain entries that
-maintainers have already reviewed. It does not grant runtime support by itself;
-it is a review ledger that keeps scanner coverage issue
+maintainers have already reviewed. Runtime integrity hashes are validated
+against this same review ledger before they can be embedded in the hook. The
+manifest does not grant runtime support by itself; it keeps scanner coverage issue
 [#1](https://github.com/stentorian-io/guard/issues/1) and Linux coverage issue
 [#2](https://github.com/stentorian-io/guard/issues/2) connected to upstream
 platform changes.
@@ -36,7 +38,7 @@ CI validation, docs, or Linux planning needs follow-up, and then update the
 manifest in a normal PR.
 
 Expected labels include `compatibility`, `cpu-arch`, `scanner-review`, `macos`,
-`toolchain`, `lifecycle`, and `linux`.
+`toolchain`, `runtime`, `integrity`, `lifecycle`, and `linux`.
 
 ## CI Validation
 
@@ -44,6 +46,12 @@ Expected labels include `compatibility`, `cpu-arch`, `scanner-review`, `macos`,
 the platform matrix the project currently claims to support. The compatibility
 tracker opens review issues when upstream sources drift; CI is the single place
 that proves reviewed support still builds and tests.
+
+CI also validates the trusted runtime registry against the compatibility
+manifest. A hash entry for a runtime executable is only valid when its
+`name`/`version` matches a reviewed runtime release in the manifest. New runtime
+releases may be detected automatically, but new trusted hashes must still land
+through a reviewed change.
 
 Linux entries represent Ubuntu `glibc` `x86_64` smoke coverage plus tracked
 review work for `aarch64`, `musl`, and kernel series, not full Linux runtime

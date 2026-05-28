@@ -33,6 +33,7 @@
   - [Manuals](#manuals)
 - [Coverage](#coverage)
   - [Platform support](#platform-support)
+  - [Automated review pipeline](#automated-review-pipeline)
   - [Threat intelligence](#threat-intelligence)
   - [Security expectations](#security-expectations)
 - [Found Stentorian Guard useful?](#found-stentorian-guard-useful)
@@ -359,6 +360,24 @@ Reviewed platform and toolchain coverage is tracked in
 compatibility tracker opens human-review issues for new OS, CPU architecture,
 Rust, LLVM, Xcode, Homebrew, and Linux lifecycle entries; it never updates the
 manifest automatically. See [docs/compatibility.md](docs/compatibility.md).
+
+### Automated review pipeline
+
+Stentorian Guard keeps up with upstream drift through scheduled automation, but
+automation is review-only for compatibility and trust decisions. A new release,
+runtime, architecture, or threat-intel entry may be detected automatically, but
+it is not considered supported or trusted until a maintainer reviews the change.
+
+| Surface | Automation | Review boundary |
+| --- | --- | --- |
+| Platform and toolchain compatibility | Weekly scans compare upstream release sources with the reviewed compatibility matrix. | New entries open review issues. The matrix changes only through normal PR review. |
+| Runtime integrity allowlists | Runtime identities are managed as reviewed compatibility inputs when enforcement depends on them. | New runtime releases should be detected as drift, not added to the trusted set automatically. |
+| Threat-intel deny rules | Nightly OSV.dev feed updates open PRs when new malicious-package IOCs are found. | Deny-rule changes land through PR review before being baked into a release. |
+| Curated allow rules | Registry and CDN allowlists are versioned with the codebase and visible through status commands. | Adding or changing an allow rule requires review because it expands what protected processes may reach. |
+
+The rule is simple: scheduled jobs find changes, humans approve compatibility
+and trust changes, and CI verifies that the checked-in policy and compatibility
+metadata still match the support claims.
 
 ### Threat intelligence
 

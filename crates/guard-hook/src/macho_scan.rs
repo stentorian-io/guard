@@ -37,7 +37,8 @@ const SCAN_CHUNK: usize = 64 * 1024;
 pub enum BinaryTier {
     T0Blocked(BlockReason),
     T1TrustedRuntime,
-    T2CleanUnknown,
+    T2AllowedScript,
+    T2CleanNativeMachO,
     T3SuspiciousUnknown(SuspiciousReason),
 }
 
@@ -48,7 +49,10 @@ pub enum BlockReason {
     FatBinary,
     UnsupportedArch,
     UnsupportedSubtype,
+    UnsupportedElf,
     UnknownFormat,
+    UnreadablePath,
+    HeaderReadFailure,
     MalformedMachO,
     ScanFailure,
 }
@@ -61,7 +65,10 @@ impl BlockReason {
             Self::FatBinary => "fat-binary",
             Self::UnsupportedArch => "unsupported-arch",
             Self::UnsupportedSubtype => "unsupported-subtype",
+            Self::UnsupportedElf => "unsupported-elf",
             Self::UnknownFormat => "unknown-format",
+            Self::UnreadablePath => "unreadable-path",
+            Self::HeaderReadFailure => "header-read-failure",
             Self::MalformedMachO => "malformed-macho",
             Self::ScanFailure => "scan-failure",
         }
@@ -89,6 +96,7 @@ enum ScanVerdict {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HeaderKind {
+    Elf,
     Fat,
     Script,
     UnknownFormat,
@@ -110,7 +118,7 @@ pub fn classify_path_with_registry(
     trusted_registry: &TrustedRuntimeRegistry,
 ) -> BinaryTier {
     if path.is_null() {
-        return BinaryTier::T2CleanUnknown;
+        return BinaryTier::T0Blocked(BlockReason::UnreadablePath);
     }
 
     if let Some(shed_reason) = macho_flags::will_shed_dylib(path) {
@@ -123,8 +131,9 @@ pub fn classify_path_with_registry(
 
     let fd = unsafe { libc::open(path, libc::O_RDONLY) };
     if fd < 0 {
-        return BinaryTier::T2CleanUnknown;
+        return BinaryTier::T0Blocked(BlockReason::UnreadablePath);
     }
+
     let mut header = [0u8; MAX_HEADER_READ];
     let n = unsafe {
         raw_syscall::raw_read(fd, header.as_mut_ptr() as *mut libc::c_void, header.len())
@@ -132,9 +141,14 @@ pub fn classify_path_with_registry(
     unsafe {
         libc::close(fd);
     }
+    if n < 0 {
+        return BinaryTier::T0Blocked(BlockReason::HeaderReadFailure);
+    }
+
     match parse_header_kind(&header[..n as usize]) {
+        HeaderKind::Elf => platform_elf_policy(),
         HeaderKind::Fat => BinaryTier::T0Blocked(BlockReason::FatBinary),
-        HeaderKind::Script => BinaryTier::T2CleanUnknown,
+        HeaderKind::Script => BinaryTier::T2AllowedScript,
         HeaderKind::UnknownFormat => BinaryTier::T0Blocked(BlockReason::UnknownFormat),
         HeaderKind::UnsupportedMachO => BinaryTier::T0Blocked(BlockReason::UnsupportedArch),
         HeaderKind::MalformedMachO => BinaryTier::T0Blocked(BlockReason::MalformedMachO),
@@ -154,7 +168,7 @@ pub fn classify_path_with_registry(
             match hash_file(path) {
                 Some(hash) if trusted_registry.get(&hash).is_some() => BinaryTier::T1TrustedRuntime,
                 Some(hash) => match cached_or_scan(path, hash) {
-                    Some(ScanVerdict::Clean) => BinaryTier::T2CleanUnknown,
+                    Some(ScanVerdict::Clean) => BinaryTier::T2CleanNativeMachO,
                     Some(ScanVerdict::Suspicious(reason)) => {
                         BinaryTier::T3SuspiciousUnknown(reason)
                     }
@@ -164,6 +178,16 @@ pub fn classify_path_with_registry(
             }
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn platform_elf_policy() -> BinaryTier {
+    BinaryTier::T0Blocked(BlockReason::UnsupportedElf)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn platform_elf_policy() -> BinaryTier {
+    BinaryTier::T0Blocked(BlockReason::UnknownFormat)
 }
 
 fn cached_or_scan(path: *const libc::c_char, hash: [u8; 32]) -> Option<ScanVerdict> {
@@ -291,6 +315,10 @@ fn parse_header_kind(data: &[u8]) -> HeaderKind {
 
         return HeaderKind::UnknownFormat;
     }
+    if data.starts_with(b"\x7fELF") {
+        return HeaderKind::Elf;
+    }
+
     let be_magic = u32::from_be_bytes(data[0..4].try_into().unwrap());
     if matches!(
         be_magic,
@@ -487,12 +515,43 @@ mod tests {
     fn classify_path_allows_shebang_scripts() {
         let file = write_temp(b"#!/bin/sh\nexit 0\n");
         let path = path_cstring(&file);
-        assert_eq!(classify_path(path.as_ptr()), BinaryTier::T2CleanUnknown);
+        assert_eq!(classify_path(path.as_ptr()), BinaryTier::T2AllowedScript);
+    }
+
+    #[test]
+    fn classify_path_blocks_unreadable_paths() {
+        let path = CString::new("/definitely/not/a/guard/executable").unwrap();
+        assert_eq!(
+            classify_path(path.as_ptr()),
+            BinaryTier::T0Blocked(BlockReason::UnreadablePath)
+        );
     }
 
     #[test]
     fn classify_path_blocks_unknown_non_macho_files() {
         let file = write_temp(b"not a script or Mach-O");
+        let path = path_cstring(&file);
+        assert_eq!(
+            classify_path(path.as_ptr()),
+            BinaryTier::T0Blocked(BlockReason::UnknownFormat)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn classify_path_blocks_linux_elf_without_supported_scanner() {
+        let file = write_temp(b"\x7fELF\x02\x01\x01\0");
+        let path = path_cstring(&file);
+        assert_eq!(
+            classify_path(path.as_ptr()),
+            BinaryTier::T0Blocked(BlockReason::UnsupportedElf)
+        );
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn classify_path_treats_elf_as_unknown_format_off_linux() {
+        let file = write_temp(b"\x7fELF\x02\x01\x01\0");
         let path = path_cstring(&file);
         assert_eq!(
             classify_path(path.as_ptr()),
@@ -565,11 +624,18 @@ mod tests {
             BlockReason::UnsupportedSubtype.as_str(),
             "unsupported-subtype"
         );
+        assert_eq!(BlockReason::UnsupportedElf.as_str(), "unsupported-elf");
         assert_eq!(BlockReason::UnknownFormat.as_str(), "unknown-format");
+        assert_eq!(BlockReason::UnreadablePath.as_str(), "unreadable-path");
+        assert_eq!(
+            BlockReason::HeaderReadFailure.as_str(),
+            "header-read-failure"
+        );
         assert_eq!(BlockReason::MalformedMachO.as_str(), "malformed-macho");
         assert_eq!(BlockReason::ScanFailure.as_str(), "scan-failure");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn classify_system_sudo_blocks_as_privilege_escalation() {
         // /usr/bin/sudo is setuid on macOS — it should be blocked with
@@ -584,6 +650,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn classify_system_ls_blocks_as_hardened_runtime() {
         // /bin/ls is a platform binary with CS_RUNTIME but NOT setuid.

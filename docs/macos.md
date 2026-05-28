@@ -52,9 +52,13 @@ project is designed to run from user space and fail closed when injection or
 identity checks cannot provide the guarantees enforcement needs.
 
 Exec-time classification blocks unsupported Mach-O shapes, unknown native CPU
-subtypes, malformed scanner inputs, and native binaries with known raw syscall
-instruction bytes. Shebang scripts remain allowed because the interpreter is the
-runtime that receives the hook.
+subtypes, unknown non-Mach-O formats, unreadable paths, malformed scanner
+inputs, and native binaries with known raw syscall instruction bytes. Clean
+native Mach-O files are classified separately from shebang scripts.
+
+Shebang scripts are the reviewed exception: they remain allowed because the
+interpreter is the runtime that receives the hook and is classified at exec
+time.
 
 Hardened-runtime children that strip `DYLD_*` injection are treated as coverage
 gaps. The intended behavior is to detect that gap before relying on a missing

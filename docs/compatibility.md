@@ -47,8 +47,10 @@ that proves reviewed support still builds and tests.
 
 Linux entries represent Ubuntu `glibc` `x86_64` smoke coverage plus tracked
 review work for `aarch64`, `musl`, and kernel series, not full Linux runtime
-enforcement or production install support. Privileged system mutation stays in
-the existing CI/E2E path where it is explicit.
+enforcement or production install support. Linux ELF exec-target scanning is
+compiled as an explicit unsupported fail-closed boundary until ELF
+classification is implemented. Privileged system mutation stays in the existing
+CI/E2E path where it is explicit.
 
 ## Local Use
 

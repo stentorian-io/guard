@@ -21,9 +21,9 @@
 
 use crate::exec_policy::{self, ExecDecision};
 use crate::ipc_client::{copy_cstr_to_buf, send_exec_blocked, send_exec_event_sync};
-use crate::macho_scan::BlockReason;
 use crate::raw_syscall;
 use crate::reentrancy::IN_HOOK;
+use crate::scanner::{BlockReason, SuspiciousReason};
 use core::ffi::{c_char, c_int};
 use guard_ipc::AuditTokenWire;
 use guard_os::errno::set_errno;
@@ -71,10 +71,7 @@ fn report_exec_blocked(path: *const c_char, reason: BlockReason) {
     send_exec_blocked(token, &path_buf[..n], reason.as_str());
 }
 
-fn block_exec_trace_required(
-    path: *const c_char,
-    reason: crate::macho_scan::SuspiciousReason,
-) -> c_int {
+fn block_exec_trace_required(path: *const c_char, reason: SuspiciousReason) -> c_int {
     let mut path_buf = [0u8; 1024];
     let n = copy_cstr_to_buf(path, &mut path_buf);
     let line = format!(

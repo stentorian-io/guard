@@ -40,7 +40,9 @@ and setuid/setgid `execve` blocking.
 The exec-time scanner does not yet provide supported ELF classification. Linux
 ELF child execs fail closed with an explicit unsupported-ELF reason instead of
 being treated as clean or validated runtime coverage. Unknown non-script child
-execs also fail closed.
+execs also fail closed. Linux builds compile an explicit ELF/LD_PRELOAD scanner
+boundary for that unsupported state; they do not reuse macOS Mach-O
+classification.
 
 Peer identity is implemented for same-namespace Linux peers using
 `SO_PEERCRED` and procfs. Namespace and container semantics remain tracked

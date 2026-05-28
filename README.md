@@ -121,7 +121,9 @@ Policy is evaluated in tier order:
 5. **Suspect Deny** — suspected IOCs (prompts if TTY)
 6. **Default Deny**
 
-Cache hits resolve in under 100 microseconds with no IPC.
+Cache hits resolve in under 100 microseconds with no IPC; see the
+[hot-path benchmark report](docs/hot-path-benchmark.md) for the measured budget,
+CI gate, and regression review process.
 
 - No kernel extensions or system extensions
 - One-time `sudo stt-guard init` — tamper-resistant by default

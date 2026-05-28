@@ -5,6 +5,7 @@
 #
 # Usage:
 #   ./scripts/bench-hot-path.sh
+#   ./scripts/bench-hot-path.sh --cache-hit-only --enforce-cache-hit-budget --github-action-benchmark-json target/bench-hot-path/results.json
 #
 # Output:
 #   * Progress markers on stderr.
@@ -17,6 +18,27 @@
 #   * RESEARCH Pitfall 7 (--release required for live-wrap E2E bench)
 
 set -euo pipefail
+
+CACHE_HIT_ONLY=0
+ENFORCE_CACHE_HIT_BUDGET=0
+CACHE_HIT_BUDGET_NS=100000
+CACHE_HIT_BUDGET_SOURCE="scripts/bench-hot-path.sh CACHE_HIT_BUDGET_NS"
+GITHUB_ACTION_BENCHMARK_JSON=""
+
+usage() {
+    cat <<'EOF'
+Usage:
+  ./scripts/bench-hot-path.sh [options]
+
+Options:
+  --dry-run                              Validate output parsing with synthetic samples.
+  --cache-hit-only                       Run only the deterministic cache-hit microbench.
+  --enforce-cache-hit-budget             Fail if cache-hit p99 exceeds the budget.
+  --cache-hit-budget-ns <ns>             Override the script's cache-hit p99 budget.
+  --github-action-benchmark-json <path>  Write customSmallerIsBetter JSON for github-action-benchmark.
+  -h, --help                             Show this help.
+EOF
+}
 
 # ---------------------------------------------------------------------------
 # --dry-run mode: validate percentile-extraction greps against synthetic
@@ -56,6 +78,52 @@ if [[ "${1:-}" == "--dry-run" ]]; then
     echo "    ./scripts/bench-hot-path.sh    (no flags) on the reference Apple Silicon machine"
     exit 0
 fi
+
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --cache-hit-only)
+            CACHE_HIT_ONLY=1
+            shift
+            ;;
+        --enforce-cache-hit-budget)
+            ENFORCE_CACHE_HIT_BUDGET=1
+            shift
+            ;;
+        --cache-hit-budget-ns)
+            if [[ -z "${2:-}" ]]; then
+                echo "--cache-hit-budget-ns requires a value" >&2
+                exit 2
+            fi
+            CACHE_HIT_BUDGET_NS="$2"
+            CACHE_HIT_BUDGET_SOURCE="command line"
+            shift 2
+            ;;
+        --github-action-benchmark-json)
+            if [[ -z "${2:-}" ]]; then
+                echo "--github-action-benchmark-json requires a path" >&2
+                exit 2
+            fi
+            GITHUB_ACTION_BENCHMARK_JSON="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+case "$CACHE_HIT_BUDGET_NS" in
+    ''|*[!0-9]*)
+        echo "--cache-hit-budget-ns must be an integer number of nanoseconds" >&2
+        exit 2
+        ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Reference-machine identity block (printed in the markdown header).
@@ -97,10 +165,15 @@ cargo bench -p guard-hook --bench cache_hit_hot_path 2>&1 \
 # Live-wrap E2E bench — the CONTEXT number for VAL-03 (no fixed budget).
 # Requires --release explicitly because cargo test default is dev profile.
 # ---------------------------------------------------------------------------
-echo "## bench-hot-path: live-wrap (context number) ..." >&2
-cargo test -p guard-e2e --release --test bench_hot_path_e2e -- \
-    --ignored --nocapture 2>&1 \
-    | tee "$SCRATCH/bench-live-wrap.out"
+if [[ "$CACHE_HIT_ONLY" -eq 0 ]]; then
+    echo "## bench-hot-path: live-wrap (context number) ..." >&2
+    cargo test -p guard-e2e --release --test bench_hot_path_e2e -- \
+        --ignored --nocapture 2>&1 \
+        | tee "$SCRATCH/bench-live-wrap.out"
+else
+    echo "## bench-hot-path: live-wrap skipped (--cache-hit-only)" >&2
+    : > "$SCRATCH/bench-live-wrap.out"
+fi
 
 # ---------------------------------------------------------------------------
 # Extract percentile values from each bench's output. Both extractions
@@ -128,6 +201,39 @@ LIVE_WRAP_P99="$(grep -oE 'p99=[0-9]+' "$SCRATCH/bench-live-wrap.out" | head -1 
 fmt_ns() { [ "$1" = "unknown" ] && echo "$1" || echo "${1}ns"; }
 CACHE_HIT_P99_FMT="$(fmt_ns "$CACHE_HIT_P99")"
 LIVE_WRAP_P99_FMT="$(fmt_ns "$LIVE_WRAP_P99")"
+
+if [[ "$CACHE_HIT_P99" = "unknown" ]]; then
+    echo "bench-hot-path: could not extract cache-hit p99 from benchmark output" >&2
+    exit 1
+fi
+
+if [[ "$ENFORCE_CACHE_HIT_BUDGET" -eq 1 && "$CACHE_HIT_P99" -gt "$CACHE_HIT_BUDGET_NS" ]]; then
+    echo "bench-hot-path: cache-hit p99 ${CACHE_HIT_P99}ns exceeds ${CACHE_HIT_BUDGET_NS}ns budget from ${CACHE_HIT_BUDGET_SOURCE}" >&2
+    echo "bench-hot-path: if this regression is intentional, update CACHE_HIT_BUDGET_NS near the top of scripts/bench-hot-path.sh and explain the new budget in the PR." >&2
+    exit 1
+fi
+
+if [[ -n "$GITHUB_ACTION_BENCHMARK_JSON" ]]; then
+    mkdir -p "$(dirname "$GITHUB_ACTION_BENCHMARK_JSON")"
+    {
+        echo "["
+        echo "  {"
+        echo '    "name": "cache-hit decide_for_sockaddr p99",'
+        echo '    "unit": "ns",'
+        echo "    \"value\": ${CACHE_HIT_P99},"
+        echo "    \"extra\": \"budget: ${CACHE_HIT_BUDGET_NS}ns\\nbudget source: ${CACHE_HIT_BUDGET_SOURCE}\\ngit SHA: ${GIT_SHA}\\nmacOS: ${MACOS_VER}\\nrustc: ${RUSTC_VER}\""
+        echo "  }"
+        if [[ "$LIVE_WRAP_P99" != "unknown" ]]; then
+            echo "  ,{"
+            echo '    "name": "live-wrap npmjs connect p99",'
+            echo '    "unit": "ns",'
+            echo "    \"value\": ${LIVE_WRAP_P99},"
+            echo "    \"extra\": \"context benchmark; no fixed budget\\ngit SHA: ${GIT_SHA}\\nmacOS: ${MACOS_VER}\\nrustc: ${RUSTC_VER}\""
+            echo "  }"
+        fi
+        echo "]"
+    } > "$GITHUB_ACTION_BENCHMARK_JSON"
+fi
 
 # ---------------------------------------------------------------------------
 # Markdown summary table.

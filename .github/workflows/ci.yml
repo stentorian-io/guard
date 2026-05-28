@@ -295,6 +295,7 @@ jobs:
       - integration_tests
       - linux_e2e_tests
       - macos_e2e_tests
+      - hot_path_benchmark
       - cargo_audit
     if: always() && !cancelled()
     runs-on: ubuntu-latest
@@ -494,3 +495,72 @@ jobs:
         run: cargo test -p guard-e2e --features test-signer --test hardened_install_health --release -- --nocapture
         env:
           STT_GUARD_E2E_PRIVILEGED_INSTALL: '1'
+
+  hot_path_benchmark:
+    name: Hot path benchmark
+    needs:
+      - prepare
+      - lint
+    if: >-
+      !cancelled()
+      && (needs.prepare.outputs.code == 'true' || needs.prepare.outputs.tooling == 'true')
+      && needs.lint.result == 'success'
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          fetch-depth: 1
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: hot-path-benchmark
+      - name: Restore benchmark history
+        id: benchmark_history
+        uses: actions/cache/restore@v4
+        with:
+          path: .benchmark-history
+          key: hot-path-benchmark-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            hot-path-benchmark-${{ runner.os }}-
+      - name: Run cache-hit hot path benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/bench-hot-path
+          ./scripts/bench-hot-path.sh \
+            --cache-hit-only \
+            --enforce-cache-hit-budget \
+            --github-action-benchmark-json target/bench-hot-path/github-action-benchmark.json \
+            | tee target/bench-hot-path/summary.md
+      - name: Publish benchmark summary
+        if: always() && hashFiles('target/bench-hot-path/summary.md') != ''
+        run: cat target/bench-hot-path/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Store benchmark trend
+        uses: benchmark-action/github-action-benchmark@v1.22.1
+        with:
+          name: Stentorian Guard hot path
+          tool: customSmallerIsBetter
+          output-file-path: target/bench-hot-path/github-action-benchmark.json
+          external-data-json-path: .benchmark-history/benchmark-data.json
+          alert-threshold: '150%'
+          fail-on-alert: ${{ !contains(github.event.pull_request.labels.*.name, 'accepted-hot-path-regression') }}
+          summary-always: true
+      - name: Save benchmark history
+        if: success() && hashFiles('.benchmark-history/benchmark-data.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .benchmark-history
+          key: hot-path-benchmark-${{ runner.os }}-${{ github.run_id }}
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hot-path-benchmark
+          path: |
+            target/bench-hot-path/summary.md
+            target/bench-hot-path/github-action-benchmark.json
+            target/criterion/cache_hit/decide_for_sockaddr
+          if-no-files-found: warn
+          retention-days: 14

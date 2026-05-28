@@ -74,6 +74,21 @@ run_e2e() {
   pass "$label"
 }
 
+run_hot_path_benchmark() {
+  if [ "$(uname -s)" != "Darwin" ]; then
+    warn "skipping hot-path benchmark (macOS-only)"
+    return
+  fi
+
+  mkdir -p target/bench-hot-path
+  ./scripts/bench-hot-path.sh \
+    --cache-hit-only \
+    --enforce-cache-hit-budget \
+    --github-action-benchmark-json target/bench-hot-path/pre-push-github-action-benchmark.json \
+    || fail "hot-path benchmark"
+  pass "hot-path benchmark"
+}
+
 PUSH_REFS="$(cat)"
 PUSH_CHANGED_FILES="$(changed_files_for_push "${1:-origin}" "$PUSH_REFS")"
 
@@ -147,5 +162,7 @@ if [ "${STT_GUARD_PRE_PUSH_RUN_PRIVILEGED:-0}" = "1" ]; then
 else
   warn "skipping VAL-05 privileged init and install health (set STT_GUARD_PRE_PUSH_RUN_PRIVILEGED=1 to run)"
 fi
+
+run_hot_path_benchmark
 
 echo -e "\n${GREEN}${BOLD}All pre-push E2E checks passed.${RESET}"

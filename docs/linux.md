@@ -37,9 +37,10 @@ The current Linux enforcement path uses `LD_PRELOAD` to load the guard hook into
 wrapped processes. Current smoke coverage includes fail-closed connect behavior
 and setuid/setgid `execve` blocking.
 
-The exec-time scanner does not yet provide supported ELF classification.
-Unknown non-script child execs fail closed instead of being treated as validated
-Linux runtime coverage.
+The exec-time scanner does not yet provide supported ELF classification. Linux
+ELF child execs fail closed with an explicit unsupported-ELF reason instead of
+being treated as clean or validated runtime coverage. Unknown non-script child
+execs also fail closed.
 
 Peer identity is implemented for same-namespace Linux peers using
 `SO_PEERCRED` and procfs. Namespace and container semantics remain tracked

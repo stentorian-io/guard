@@ -16,6 +16,9 @@ struct Args {
     #[arg(long, default_value = "compatibility-matrix.yaml")]
     manifest: PathBuf,
 
+    #[arg(long, default_value = "crates/guard-core/data/trusted-runtimes.yaml")]
+    trusted_runtimes: PathBuf,
+
     #[arg(long)]
     offline: bool,
 
@@ -34,6 +37,7 @@ struct Manifest {
     cpu_architectures: Vec<CpuArchitecture>,
     operating_systems: OperatingSystems,
     toolchains: Toolchains,
+    runtime_integrity: Option<RuntimeIntegrity>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,6 +104,34 @@ struct Toolchains {
 }
 
 #[derive(Debug, Deserialize)]
+struct RuntimeIntegrity {
+    #[serde(default)]
+    runtimes: Vec<RuntimeReview>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimeReview {
+    id: String,
+    name: String,
+    #[serde(default)]
+    reviewed_releases: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TrustedRuntimeRegistry {
+    #[serde(default)]
+    runtimes: Vec<TrustedRuntime>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TrustedRuntime {
+    sha256: String,
+    name: String,
+    version: String,
+    source: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct ToolchainCycles {
     #[serde(default)]
     tracked_cycles: Vec<String>,
@@ -141,8 +173,13 @@ fn run(args: Args) -> Result<(), String> {
         .map_err(|error| format!("read {}: {error}", args.manifest.display()))?;
     let manifest: Manifest = serde_yml::from_str(&manifest_text)
         .map_err(|error| format!("parse {}: {error}", args.manifest.display()))?;
+    let trusted_runtime_text = fs::read_to_string(&args.trusted_runtimes)
+        .map_err(|error| format!("read {}: {error}", args.trusted_runtimes.display()))?;
+    let trusted_runtimes: TrustedRuntimeRegistry = serde_yml::from_str(&trusted_runtime_text)
+        .map_err(|error| format!("parse {}: {error}", args.trusted_runtimes.display()))?;
 
     validate_manifest(&manifest)?;
+    validate_trusted_runtimes(&manifest, &trusted_runtimes)?;
 
     if args.offline {
         println!(
@@ -212,6 +249,84 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         ));
     }
 
+    validate_runtime_reviews(manifest)?;
+
+    Ok(())
+}
+
+fn validate_runtime_reviews(manifest: &Manifest) -> Result<(), String> {
+    let Some(runtime_integrity) = &manifest.runtime_integrity else {
+        return Ok(());
+    };
+    let mut runtime_ids = BTreeSet::new();
+
+    for runtime in &runtime_integrity.runtimes {
+        if runtime.id.trim().is_empty() {
+            return Err("runtime id must not be empty".to_string());
+        }
+
+        if runtime.name.trim().is_empty() {
+            return Err(format!("runtime {} name must not be empty", runtime.id));
+        }
+
+        if !runtime_ids.insert(runtime.id.as_str()) {
+            return Err(format!("duplicate runtime id: {}", runtime.id));
+        }
+
+        if runtime.reviewed_releases.is_empty() {
+            return Err(format!(
+                "runtime {} needs at least one reviewed release",
+                runtime.id
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_trusted_runtimes(
+    manifest: &Manifest,
+    registry: &TrustedRuntimeRegistry,
+) -> Result<(), String> {
+    let reviewed_runtime_releases = reviewed_runtime_releases(manifest);
+    let mut trusted_hashes = BTreeSet::new();
+
+    for runtime in &registry.runtimes {
+        if parse_sha256_hex(&runtime.sha256).is_none() {
+            return Err(format!(
+                "trusted runtime {} {} has malformed sha256",
+                runtime.name, runtime.version
+            ));
+        }
+
+        let trusted_key = format!(
+            "{}:{}",
+            runtime.name.to_ascii_lowercase(),
+            runtime.version.to_ascii_lowercase()
+        );
+
+        if !reviewed_runtime_releases.contains(&trusted_key) {
+            return Err(format!(
+                "trusted runtime {} {} is not reviewed in compatibility-matrix.yaml",
+                runtime.name, runtime.version
+            ));
+        }
+
+        if runtime.source.trim().is_empty() {
+            return Err(format!(
+                "trusted runtime {} {} source must not be empty",
+                runtime.name, runtime.version
+            ));
+        }
+
+        if !trusted_hashes.insert(runtime.sha256.to_ascii_lowercase()) {
+            return Err(format!(
+                "duplicate trusted runtime sha256 for {} {}",
+                runtime.name, runtime.version
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -244,6 +359,8 @@ fn fetch_source_entries(source: &Source) -> Result<Vec<ReviewEntry>, String> {
         "endoflife-lifecycle" => lifecycle_entries(source),
         "apple-developer-releases" => apple_xcode_entries(source),
         "github-llvm-releases" => llvm_release_entries(source),
+        "github-node-releases" => github_runtime_release_entries(source, "node", 1),
+        "github-python-releases" => github_runtime_release_entries(source, "python", 2),
         _ => {
             eprintln!("warning: no fetcher for {}", source.id);
             Ok(Vec::new())
@@ -410,6 +527,77 @@ fn llvm_release_entries(source: &Source) -> Result<Vec<ReviewEntry>, String> {
     }
 
     Ok(entries)
+}
+
+fn github_runtime_release_entries(
+    source: &Source,
+    runtime_name: &str,
+    version_precision: usize,
+) -> Result<Vec<ReviewEntry>, String> {
+    let url = source_url(source)?;
+    let payload = fetch_json(url)?;
+    let releases = payload
+        .as_array()
+        .ok_or_else(|| format!("{} did not return a JSON array", source.id))?;
+    let mut cycles = BTreeSet::new();
+
+    for release in releases {
+        let Some(tag_name) = release.get("tag_name").and_then(Value::as_str) else {
+            continue;
+        };
+
+        if let Some(cycle) = runtime_release_cycle(tag_name, version_precision) {
+            cycles.insert(cycle);
+        }
+    }
+
+    let mut entries = Vec::new();
+
+    for cycle in cycles {
+        let details = serde_json::json!({
+            "runtime": runtime_name,
+            "release": cycle,
+        });
+
+        entries.push(ReviewEntry {
+            id: format!("runtime:{runtime_name}:{cycle}"),
+            title: format!("Compatibility review: {runtime_name} runtime {cycle}"),
+            labels: vec![
+                "runtime".to_string(),
+                "integrity".to_string(),
+                "scanner-review".to_string(),
+            ],
+            source_id: source.id.clone(),
+            body: review_body(
+                &source.category,
+                url,
+                &format!("{runtime_name} runtime release {cycle} appeared upstream."),
+                &details,
+            )?,
+        });
+    }
+
+    Ok(entries)
+}
+
+fn runtime_release_cycle(tag_name: &str, version_precision: usize) -> Option<String> {
+    let version = tag_name
+        .trim_start_matches('v')
+        .split(|character: char| !(character.is_ascii_digit() || character == '.'))
+        .next()
+        .unwrap_or_default();
+
+    let parts = version
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .take(version_precision)
+        .collect::<Vec<_>>();
+
+    if parts.len() == version_precision {
+        Some(parts.join("."))
+    } else {
+        None
+    }
 }
 
 fn rust_target_entries(source: &Source) -> Result<Vec<ReviewEntry>, String> {
@@ -621,7 +809,48 @@ fn known_ids(manifest: &Manifest) -> BTreeSet<String> {
         ids.insert(format!("linux-kernel:{}", series.to_ascii_lowercase()));
     }
 
+    for runtime_release in reviewed_runtime_release_ids(manifest) {
+        ids.insert(runtime_release);
+    }
+
     ids
+}
+
+fn reviewed_runtime_release_ids(manifest: &Manifest) -> BTreeSet<String> {
+    let mut ids = BTreeSet::new();
+
+    for (runtime_name, release) in reviewed_runtime_release_pairs(manifest) {
+        ids.insert(format!("runtime:{runtime_name}:{release}"));
+    }
+
+    ids
+}
+
+fn reviewed_runtime_releases(manifest: &Manifest) -> BTreeSet<String> {
+    let mut releases = BTreeSet::new();
+
+    for (runtime_name, release) in reviewed_runtime_release_pairs(manifest) {
+        releases.insert(format!("{runtime_name}:{release}"));
+    }
+
+    releases
+}
+
+fn reviewed_runtime_release_pairs(manifest: &Manifest) -> Vec<(String, String)> {
+    let Some(runtime_integrity) = &manifest.runtime_integrity else {
+        return Vec::new();
+    };
+    let mut releases = Vec::new();
+
+    for runtime in &runtime_integrity.runtimes {
+        let runtime_name = runtime.name.to_ascii_lowercase();
+
+        for release in &runtime.reviewed_releases {
+            releases.push((runtime_name.clone(), release.to_ascii_lowercase()));
+        }
+    }
+
+    releases
 }
 
 fn known_aliases(manifest: &Manifest) -> BTreeSet<String> {
@@ -789,6 +1018,7 @@ fn review_body(
         "macos" => "macOS lifecycle review for DYLD and hardened-runtime behavior.".to_string(),
         "linux" => format!("Linux support review: {ISSUE_2}"),
         "toolchain" => "Toolchain review for Rust, LLVM, and Xcode behavior.".to_string(),
+        "runtime" => "Runtime integrity review for exact executable trust.".to_string(),
         _ => "Compatibility manifest review required.".to_string(),
     };
 
@@ -847,4 +1077,137 @@ fn json_string(value: &Value, key: &str) -> Result<String, String> {
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
         .ok_or_else(|| format!("JSON entry missing string key {key}"))
+}
+
+fn parse_sha256_hex(hex: &str) -> Option<[u8; 32]> {
+    if hex.len() != 64 {
+        return None;
+    }
+
+    let mut out = [0u8; 32];
+
+    for (index, chunk) in hex.as_bytes().chunks_exact(2).enumerate() {
+        let high = hex_nibble(chunk[0])?;
+        let low = hex_nibble(chunk[1])?;
+        out[index] = (high << 4) | low;
+    }
+
+    Some(out)
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MANIFEST: &str = r#"
+schema_version: 1
+sources:
+  - id: github-node-releases
+    category: runtime
+    url: https://api.github.com/repos/nodejs/node/releases?per_page=10
+labels:
+  base:
+    - compatibility
+cpu_architectures:
+  - id: arm64
+    aliases:
+      - aarch64
+operating_systems:
+  macos:
+    supported:
+      - cycle: "26"
+    best_effort: []
+    tracked: []
+  linux:
+    kernel_series:
+      - "6.12"
+toolchains:
+  xcode:
+    tracked_cycles:
+      - "26"
+  rust:
+    minimum: "1.85.0"
+    pinned: "1.95.0"
+    tracked_releases:
+      - "1.95.0"
+    tracked_targets:
+      - aarch64-apple-darwin
+  llvm:
+    tracked_cycles:
+      - "21"
+runtime_integrity:
+  runtimes:
+    - id: node
+      name: node
+      reviewed_releases:
+        - "24"
+        - "22.21"
+"#;
+
+    fn manifest() -> Manifest {
+        serde_yml::from_str(MANIFEST).expect("test manifest")
+    }
+
+    #[test]
+    fn runtime_release_cycle_uses_requested_precision() {
+        assert_eq!(runtime_release_cycle("v24.11.1", 1).as_deref(), Some("24"));
+        assert_eq!(
+            runtime_release_cycle("v3.14.0rc1", 2).as_deref(),
+            Some("3.14")
+        );
+        assert_eq!(runtime_release_cycle("not-a-version", 1), None);
+    }
+
+    #[test]
+    fn known_ids_include_reviewed_runtime_releases() {
+        let manifest = manifest();
+        let known_ids = known_ids(&manifest);
+
+        assert!(known_ids.contains("runtime:node:24"));
+        assert!(known_ids.contains("runtime:node:22.21"));
+    }
+
+    #[test]
+    fn trusted_runtime_hashes_must_reference_reviewed_releases() {
+        let manifest = manifest();
+        let registry = TrustedRuntimeRegistry {
+            runtimes: vec![TrustedRuntime {
+                sha256: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+                    .to_string(),
+                name: "node".to_string(),
+                version: "24".to_string(),
+                source: "https://nodejs.org/dist/v24.0.0/".to_string(),
+            }],
+        };
+
+        validate_trusted_runtimes(&manifest, &registry).expect("reviewed runtime");
+    }
+
+    #[test]
+    fn unreviewed_trusted_runtime_hashes_are_rejected() {
+        let manifest = manifest();
+        let registry = TrustedRuntimeRegistry {
+            runtimes: vec![TrustedRuntime {
+                sha256: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+                    .to_string(),
+                name: "node".to_string(),
+                version: "25".to_string(),
+                source: "https://nodejs.org/dist/v25.0.0/".to_string(),
+            }],
+        };
+
+        let error = validate_trusted_runtimes(&manifest, &registry)
+            .expect_err("unreviewed runtime should fail validation");
+
+        assert!(error.contains("is not reviewed"));
+    }
 }

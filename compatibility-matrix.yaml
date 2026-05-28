@@ -1,0 +1,266 @@
+# Compatibility review manifest for OS, CPU, syscall, and toolchain drift.
+# Managed manually after reviewing issues opened by scripts/compatibility-tracker.sh.
+schema_version: 1
+
+review_policy:
+  cadence: weekly
+  tracker_workflow: .github/workflows/compatibility-tracker.yml
+  validation_workflow: .github/workflows/ci.yml
+  human_review_only: true
+  related_issues:
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    linux_coverage: https://github.com/stentorian-io/guard/issues/2
+
+labels:
+  base:
+    - compatibility
+    - scanner-review
+  cpu_arch:
+    - cpu-arch
+  macos:
+    - macos
+    - lifecycle
+  toolchain:
+    - toolchain
+  linux:
+    - linux
+    - lifecycle
+
+sources:
+  - id: apple-xnu-machine
+    category: cpu-arch
+    url: https://raw.githubusercontent.com/apple-oss-distributions/xnu/main/osfmk/mach/machine.h
+  - id: llvm-triple-definitions
+    category: cpu-arch
+    url: https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/include/llvm/TargetParser/Triple.h
+  - id: rust-platform-support
+    category: toolchain
+    url: https://doc.rust-lang.org/nightly/rustc/platform-support.html
+  - id: endoflife-lifecycle
+    category: lifecycle
+    products:
+      - id: macos
+        category: macos
+        url: https://endoflife.date/api/macos.json
+      - id: rust
+        category: toolchain
+        url: https://endoflife.date/api/rust.json
+      - id: linux-kernel
+        category: linux
+        url: https://endoflife.date/api/linux.json
+  - id: apple-developer-releases
+    category: toolchain
+    url: https://developer.apple.com/news/releases/
+  - id: github-llvm-releases
+    category: toolchain
+    url: https://api.github.com/repos/llvm/llvm-project/releases?per_page=10
+
+cpu_architectures:
+  - id: arm64
+    aliases:
+      - aarch64
+      - CPU_TYPE_ARM64
+    status: supported
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    source_refs:
+      - apple-xnu-machine
+      - llvm-triple-definitions
+      - rust-platform-support
+  - id: x86_64
+    aliases:
+      - amd64
+      - CPU_TYPE_X86_64
+    status: supported
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    source_refs:
+      - apple-xnu-machine
+      - llvm-triple-definitions
+      - rust-platform-support
+  - id: arm64e
+    aliases:
+      - aarch64e
+      - CPU_SUBTYPE_ARM64E
+    status: tracked
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    source_refs:
+      - apple-xnu-machine
+      - llvm-triple-definitions
+  - id: arm64_32
+    aliases:
+      - aarch64_32
+      - CPU_TYPE_ARM64_32
+    status: historical
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    source_refs:
+      - apple-xnu-machine
+      - llvm-triple-definitions
+  - id: x86
+    aliases:
+      - i386
+      - CPU_TYPE_X86
+      - CPU_TYPE_I386
+    status: historical
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    source_refs:
+      - apple-xnu-machine
+      - llvm-triple-definitions
+  - id: arm32
+    aliases:
+      - arm
+      - CPU_TYPE_ARM
+    status: historical
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    source_refs:
+      - apple-xnu-machine
+      - llvm-triple-definitions
+  - id: powerpc
+    aliases:
+      - ppc
+      - ppc64
+      - powerpc64
+      - CPU_TYPE_POWERPC
+      - CPU_TYPE_POWERPC64
+    status: historical
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    source_refs:
+      - apple-xnu-machine
+      - llvm-triple-definitions
+  - id: riscv64
+    aliases:
+      - riscv32
+    status: tracked-linux
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    linux_coverage: https://github.com/stentorian-io/guard/issues/2
+    source_refs:
+      - llvm-triple-definitions
+  - id: loongarch64
+    status: tracked-linux
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    linux_coverage: https://github.com/stentorian-io/guard/issues/2
+    source_refs:
+      - llvm-triple-definitions
+
+syscall_patterns:
+  - id: libc-connect-family
+    status: covered
+    notes: Standard libc networking entry points are interposed by guard-hook.
+  - id: raw-syscall-instructions
+    status: tracked
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    notes: Native raw syscall instruction scanning fails closed when known patterns are present.
+  - id: scanner-unknown-classification
+    status: covered-macos
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/60
+    notes: Unknown non-script executable formats, unsupported native Mach-O subtypes, malformed Mach-O scan inputs, and scan failures fail closed.
+  - id: hardened-runtime-dyld-strip
+    status: tracked
+    scanner_coverage: https://github.com/stentorian-io/guard/issues/1
+    notes: Hardened-runtime children are treated as coverage gaps and fail closed.
+
+operating_systems:
+  macos:
+    supported:
+      - cycle: "13"
+        codename: Ventura
+      - cycle: "14"
+        codename: Sonoma
+      - cycle: "15"
+        codename: Sequoia
+      - cycle: "26"
+        codename: Tahoe
+    best_effort:
+      - cycle: "12"
+        codename: Monterey
+    tracked:
+      - cycle: "11"
+        codename: Big Sur
+        status: historical
+  linux:
+    status: development-only-initial-support
+    tracking_issue: https://github.com/stentorian-io/guard/issues/2
+    validation_scope:
+      distribution: Ubuntu
+      libc: glibc
+      cpu_architecture: x86_64
+      coverage: smoke
+    kernel_series:
+      - "7.0"
+      - "6.18"
+      - "6.19"
+      - "6.17"
+      - "6.16"
+      - "6.15"
+      - "6.14"
+      - "6.13"
+      - "6.12"
+      - "6.6"
+      - "6.1"
+      - "5.15"
+      - "5.10"
+    kernel_series_status: tracked-not-validated
+    libc:
+      - glibc
+      - musl
+    libc_status:
+      validated:
+        - glibc
+      tracked_not_validated:
+        - musl
+    cpu_architectures:
+      - x86_64
+      - aarch64
+    cpu_architecture_status:
+      validated:
+        - x86_64
+      tracked_not_validated:
+        - aarch64
+    enforcement_notes:
+      - LD_PRELOAD support is limited to wrapped dynamically linked processes.
+      - Unknown non-script ELF child execs fail closed until a supported ELF scanner exists.
+      - Same-namespace peer identity uses SO_PEERCRED and procfs.
+      - Namespace and container semantics remain tracked compatibility work.
+      - Setuid and setgid scope is execve smoke coverage.
+
+toolchains:
+  xcode:
+    tracked_cycles:
+      - "15"
+      - "16"
+      - "26"
+  rust:
+    minimum: "1.85.0"
+    pinned: "1.95.0"
+    tracked_channels:
+      - stable
+    tracked_releases:
+      - "1.95.0"
+      - "1.94"
+      - "1.93"
+      - "1.92"
+      - "1.91"
+    tracked_targets:
+      - aarch64-apple-darwin
+      - arm64e-apple-darwin
+      - i686-apple-darwin
+      - x86_64-apple-darwin
+      - x86_64h-apple-darwin
+      - aarch64-unknown-linux-gnu
+      - aarch64-unknown-linux-musl
+      - i686-unknown-linux-gnu
+      - i686-unknown-linux-musl
+      - x86_64-unknown-linux-gnu
+      - x86_64-unknown-linux-musl
+  llvm:
+    tracked_cycles:
+      - "18"
+      - "19"
+      - "20"
+      - "21"
+      - "22"
+  homebrew:
+    formulas:
+      - rust
+      - llvm
+    current_versions:
+      rust: "1.95.0"
+      llvm: "22.1.6"

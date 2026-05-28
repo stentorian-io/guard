@@ -1,0 +1,43 @@
+name: compatibility-tracker
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # Monday 08:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  scan:
+    name: Scan compatibility sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Ensure review labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh label create compatibility --color 1f883d --description "Compatibility tracking and validation" --force
+          gh label create cpu-arch --color 5319e7 --description "CPU architecture compatibility" --force
+          gh label create scanner-review --color d93f0b --description "Requires scanner coverage review" --force
+          gh label create macos --color 0e8a16 --description "macOS compatibility" --force
+          gh label create toolchain --color 0052cc --description "Toolchain compatibility" --force
+          gh label create lifecycle --color fbca04 --description "Release lifecycle tracking" --force
+          gh label create linux --color c5def5 --description "Linux compatibility placeholder" --force
+
+      - name: Scan sources and open review issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/compatibility-tracker.sh --create-issues

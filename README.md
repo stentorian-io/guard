@@ -32,8 +32,7 @@
   - [Environment](#environment)
   - [Manuals](#manuals)
 - [Coverage](#coverage)
-  - [Compatibility matrix](#compatibility-matrix)
-  - [Automated review pipeline](#automated-review-pipeline)
+  - [Compatibility matrix and tracking](#compatibility-matrix-and-tracking)
   - [Threat intelligence](#threat-intelligence)
   - [Security expectations](#security-expectations)
 - [Found Stentorian Guard useful?](#found-stentorian-guard-useful)
@@ -347,54 +346,22 @@ man stt-guard-daemon   # daemon internals
 
 ## Coverage
 
-### Compatibility matrix
+### Compatibility matrix and tracking
 
-| Surface | Reviewed entries | Status | Details |
-| --- | --- | --- | --- |
-| macOS | 13 Ventura, 14 Sonoma, 15 Sequoia, 26 Tahoe | Supported | [macOS support](docs/macos.md) |
-| macOS | 12 Monterey | Best effort | [macOS support](docs/macos.md) |
-| macOS | 11 Big Sur | Historical tracking | [macOS support](docs/macos.md) |
-| Linux | Ubuntu, `glibc`, `x86_64` | Development-only smoke validation | [Linux support](docs/linux.md) |
-| Linux | kernel 7.0, 6.18, 6.19, 6.17, 6.16, 6.15, 6.14, 6.13, 6.12, 6.6, 6.1, 5.15, 5.10 | Tracked, not production support | [Linux support](docs/linux.md) |
-| Linux | `aarch64`, `musl` | Tracked, not validated | [Linux support](docs/linux.md) |
-| Windows | None | Not planned | [Windows support](docs/windows.md) |
-| CPU architecture | `arm64`/`aarch64`, `x86_64` | Supported | Scanner coverage tracked in the compatibility manifest |
-| CPU architecture | `arm64e` | Tracked | Scanner review required before support claims change |
-| CPU architecture | `arm64_32`, `x86`/`i386`, `arm32`, `powerpc`/`ppc`/`ppc64` | Historical tracking | Kept visible so scanner behavior stays explicit |
-| CPU architecture | `riscv64`/`riscv32`, `loongarch64` | Tracked for Linux | Linux coverage issue tracks validation work |
-| Runtime integrity | Node 25, 24, 22, 20 | Reviewed for trusted-runtime hash eligibility | Hashes still require PR review before being embedded |
-| Runtime integrity | Python 3.14, 3.13, 3.12, 3.11 | Reviewed for trusted-runtime hash eligibility | Hashes still require PR review before being embedded |
-| Syscall and exec scanning | libc connect family | Covered | Standard libc networking calls are interposed |
-| Syscall and exec scanning | raw syscall instructions, hardened-runtime DYLD strip | Tracked | Coverage gaps fail closed |
-| Syscall and exec scanning | Linux ELF exec scanner | Unsupported, fail closed | Linux scanner support is tracked separately |
-| Toolchain | Rust 1.95.0 pinned, 1.85.0 minimum, stable channel | Reviewed | Rust target support is tracked in the manifest |
-| Toolchain | Xcode 15, 16, 26; LLVM 18, 19, 20, 21, 22 | Reviewed | Upstream release drift opens review issues |
-| Packaging | Homebrew `rust` 1.95.0, `llvm` 22.1.6 | Reviewed | Used by packaging and release automation |
+Reviewed OS, runtime, CPU architecture, scanner, toolchain, and packaging
+coverage is tracked in the compatibility matrix. The README keeps the support
+summary short; the comprehensive tables live in
+[docs/compatibility.md](docs/compatibility.md), with platform-specific notes in
+[macOS support](docs/macos.md), [Linux support](docs/linux.md), and
+[Windows support](docs/windows.md).
 
-Reviewed platform, runtime, CPU, scanner, and toolchain coverage is tracked in
-[`compatibility-matrix.yaml`](compatibility-matrix.yaml). The weekly
-compatibility tracker opens human-review issues for new OS, runtime, CPU
-architecture, Rust, LLVM, Xcode, Homebrew, and Linux lifecycle entries; it
-never updates the manifest automatically. See
-[docs/compatibility.md](docs/compatibility.md).
-
-### Automated review pipeline
-
-Stentorian Guard keeps up with upstream drift through scheduled automation, but
-automation is review-only for compatibility and trust decisions. A new release,
-runtime, architecture, or threat-intel entry may be detected automatically, but
-it is not considered supported or trusted until a maintainer reviews the change.
-
-| Surface | Automation | Review boundary |
-| --- | --- | --- |
-| Platform and toolchain compatibility | Weekly scans compare upstream release sources with the reviewed compatibility matrix. | New entries open review issues. The matrix changes only through normal PR review. |
-| Runtime integrity allowlists | Runtime identities are managed as reviewed compatibility inputs when enforcement depends on them. | New runtime releases should be detected as drift, not added to the trusted set automatically. |
-| Threat-intel deny rules | Nightly OSV.dev feed updates open PRs when new malicious-package IOCs are found. | Deny-rule changes land through PR review before being baked into a release. |
-| Curated allow rules | Registry and CDN allowlists are versioned with the codebase and visible through status commands. | Adding or changing an allow rule requires review because it expands what protected processes may reach. |
-
-The rule is simple: scheduled jobs find changes, humans approve compatibility
-and trust changes, and CI verifies that the checked-in policy and compatibility
-metadata still match the support claims.
+Scheduled automation keeps that matrix current without expanding trust by
+itself. The weekly compatibility tracker opens human-review issues for new OS,
+runtime, CPU architecture, Rust, LLVM, Xcode, Homebrew, and Linux lifecycle
+entries. Nightly threat-intel updates open PRs for new malicious-package IOCs.
+New releases, runtime hashes, allow rules, deny rules, and support claims are
+only accepted after review, and CI verifies that the checked-in compatibility
+metadata and trusted-runtime registry still match those claims.
 
 ### Threat intelligence
 

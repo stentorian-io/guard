@@ -2,7 +2,7 @@
 
 Stentorian Guard depends on platform behavior that can drift outside this
 repository: macOS DYLD and hardened-runtime behavior, CPU architecture names,
-Rust and LLVM target support, Xcode releases, Homebrew packaging, reviewed
+Rust and LLVM target support, Xcode releases, installer packaging, reviewed
 runtime identities, and future Linux support expansion. The checked-in source of
 truth is
 [`compatibility-matrix.yaml`](../compatibility-matrix.yaml).

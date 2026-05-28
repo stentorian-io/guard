@@ -55,7 +55,14 @@ class SttGuard < Formula
   end
 
   test do
+    assert_predicate libexec/"stt-guard", :exist?
+    assert_predicate libexec/"stt-guard-daemon", :exist?
+    assert_predicate libexec/"stt-guard-watchdog", :exist?
+    assert_predicate libexec/"stt-guard-hook.dylib", :exist?
+    assert_predicate libexec/"release-meta.json", :exist?
+
     assert_match version.to_s, shell_output("#{bin}/stt-guard --version")
+    assert_match "Initialise Stentorian Guard", shell_output("#{bin}/stt-guard init --help")
   end
 end
 EOF

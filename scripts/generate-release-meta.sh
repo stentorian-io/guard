@@ -24,10 +24,11 @@ if [ -n "$PREV_TAG" ]; then
         | grep -c '^+  - ' || true)
 fi
 
-# Detect security fix commits
 SECURITY_FIXES=false
-if git log --oneline "$RANGE" | grep -qi 'fix(security)'; then
-    SECURITY_FIXES=true
+if git rev-parse --verify --quiet "${NEW_TAG}^{commit}" >/dev/null; then
+    if git log --oneline "$RANGE" | grep -qi 'fix(security)'; then
+        SECURITY_FIXES=true
+    fi
 fi
 
 # Determine severity

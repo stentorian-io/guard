@@ -34,8 +34,43 @@ permissions:
   pull-requests: write
 
 jobs:
+  validate:
+    name: Validate release commit
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact release commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: release-validation
+
+      - name: Validate compatibility manifest
+        run: scripts/compatibility-tracker.sh --offline
+
+      - name: Check rustfmt
+        run: cargo fmt --check
+
+      - name: Check clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test unit targets
+        run: cargo test --workspace --exclude guard-e2e --lib --bins --quiet
+
+      - name: Test integration targets
+        run: cargo test --workspace --exclude guard-e2e --tests --quiet
+
+      - name: Dependency CVE audit
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   build:
     name: Build ${{ matrix.target }}
+    needs: validate
     runs-on: macos-14
     timeout-minutes: 30
     strategy:
@@ -83,10 +118,15 @@ jobs:
           path: artifacts/${{ matrix.target }}/
           retention-days: 5
 
-  release:
-    name: Create release
+  package:
+    name: Package release candidates
     needs: build
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      arm64_sha256: ${{ steps.package.outputs.arm64_sha256 }}
+      x86_64_sha256: ${{ steps.package.outputs.x86_64_sha256 }}
 
     steps:
       - name: Checkout
@@ -146,16 +186,112 @@ jobs:
             > artifacts/Formula/stt-guard.rb
           ruby -c artifacts/Formula/stt-guard.rb
 
+      - name: Upload packaged release candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: |
+            CHANGELOG.md
+            artifacts/guard-${{ steps.version.outputs.version }}-*.tar.gz
+            artifacts/release-meta.json
+            artifacts/Formula/stt-guard.rb
+          retention-days: 5
+
+      - name: Dry-run summary
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true'
+        run: scripts/ci-write-release-dry-run-summary.sh "${{ steps.version.outputs.tag }}"
+
+  homebrew_formula:
+    name: Homebrew formula install
+    needs: package
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact release commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download packaged release candidates
+        uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: release-package
+
+      - name: Generate local-file Homebrew formula
+        run: |
+          set -euo pipefail
+          mkdir -p local-formula
+          arm64_tarball="$(pwd)/release-package/artifacts/guard-${{ needs.package.outputs.version }}-aarch64-apple-darwin.tar.gz"
+          x86_64_tarball="$(pwd)/release-package/artifacts/guard-${{ needs.package.outputs.version }}-x86_64-apple-darwin.tar.gz"
+          scripts/generate-homebrew-formula.sh \
+            "${{ needs.package.outputs.version }}" \
+            "file://${arm64_tarball}" \
+            "${{ needs.package.outputs.arm64_sha256 }}" \
+            "file://${x86_64_tarball}" \
+            "${{ needs.package.outputs.x86_64_sha256 }}" \
+            > local-formula/stt-guard.rb
+          ruby -c local-formula/stt-guard.rb
+
+      - name: Install and test formula
+        run: |
+          set -euo pipefail
+          brew install --formula ./local-formula/stt-guard.rb
+          brew test stt-guard
+          stt-guard init --help
+
+      - name: Verify Homebrew init path
+        run: |
+          set -euo pipefail
+          set +e
+          init_output="$(sudo -n stt-guard init --yes 2>&1)"
+          init_status=$?
+          set -e
+          printf '%s\n' "$init_output"
+          if [ "$init_status" -eq 0 ]; then
+            stt-guard status
+            exit 0
+          fi
+          case "$init_output" in
+            *"create Secure Enclave signing key failed"*|*"hardware-backed signing key unavailable"*|*"failed to generate asymmetric keypair"*)
+              echo "::notice::Skipping full Homebrew init because this runner cannot enroll a Secure Enclave signing key."
+              exit 0
+              ;;
+          esac
+          exit "$init_status"
+
+      - name: Cleanup Homebrew init smoke
+        if: always()
+        run: |
+          sudo -n launchctl bootout system/io.stentorian.guard.daemon 2>/dev/null || true
+          sudo -n rm -f /Library/LaunchDaemons/io.stentorian.guard.daemon.plist
+          sudo -n rm -rf /usr/local/libexec/stt-guard
+          sudo -n rm -rf "/Library/Application Support/Stentorian Guard"
+          sudo -n rm -rf /var/log/stt-guard
+
+  publish:
+    name: Create release
+    needs:
+      - package
+      - homebrew_formula
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packaged release candidates
+        uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: release-package
+
       - name: Create GitHub Release
         if: github.event_name == 'push' || inputs.dry_run == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Guard ${{ steps.version.outputs.version }}
-          body_path: CHANGELOG.md
+          tag_name: ${{ needs.package.outputs.tag }}
+          name: Guard ${{ needs.package.outputs.version }}
+          body_path: release-package/CHANGELOG.md
           files: |
-            artifacts/guard-${{ steps.version.outputs.version }}-*.tar.gz
-            artifacts/release-meta.json
+            release-package/artifacts/guard-${{ needs.package.outputs.version }}-*.tar.gz
+            release-package/artifacts/release-meta.json
 
       - name: Load GitHub app credentials from 1Password
         if: github.event_name == 'push'
@@ -192,31 +328,27 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p homebrew-tap/Formula
-          cp artifacts/Formula/stt-guard.rb homebrew-tap/Formula/stt-guard.rb
+          cp release-package/artifacts/Formula/stt-guard.rb homebrew-tap/Formula/stt-guard.rb
           git -C homebrew-tap config user.name "github-actions[bot]"
           git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C homebrew-tap checkout -B "stt-guard-${{ steps.version.outputs.version }}"
+          git -C homebrew-tap checkout -B "stt-guard-${{ needs.package.outputs.version }}"
           git -C homebrew-tap add Formula/stt-guard.rb
           if git -C homebrew-tap diff --cached --quiet; then
             echo "Homebrew formula is already current."
             exit 0
           fi
-          git -C homebrew-tap commit -m "stt-guard ${{ steps.version.outputs.version }}"
-          git -C homebrew-tap push --force-with-lease origin "stt-guard-${{ steps.version.outputs.version }}"
-          if gh pr view "stt-guard-${{ steps.version.outputs.version }}" --repo stentorian-io/homebrew-tap >/dev/null 2>&1; then
-            gh pr edit "stt-guard-${{ steps.version.outputs.version }}" \
+          git -C homebrew-tap commit -m "stt-guard ${{ needs.package.outputs.version }}"
+          git -C homebrew-tap push --force-with-lease origin "stt-guard-${{ needs.package.outputs.version }}"
+          if gh pr view "stt-guard-${{ needs.package.outputs.version }}" --repo stentorian-io/homebrew-tap >/dev/null 2>&1; then
+            gh pr edit "stt-guard-${{ needs.package.outputs.version }}" \
               --repo stentorian-io/homebrew-tap \
-              --title "stt-guard ${{ steps.version.outputs.version }}" \
-              --body "Updates the stt-guard formula for ${{ steps.version.outputs.tag }}."
+              --title "stt-guard ${{ needs.package.outputs.version }}" \
+              --body "Updates the stt-guard formula for ${{ needs.package.outputs.tag }}."
           else
             gh pr create \
               --repo stentorian-io/homebrew-tap \
               --base main \
-              --head "stt-guard-${{ steps.version.outputs.version }}" \
-              --title "stt-guard ${{ steps.version.outputs.version }}" \
-              --body "Updates the stt-guard formula for ${{ steps.version.outputs.tag }}."
+              --head "stt-guard-${{ needs.package.outputs.version }}" \
+              --title "stt-guard ${{ needs.package.outputs.version }}" \
+              --body "Updates the stt-guard formula for ${{ needs.package.outputs.tag }}."
           fi
-
-      - name: Dry-run summary
-        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true'
-        run: scripts/ci-write-release-dry-run-summary.sh "${{ steps.version.outputs.tag }}"

@@ -32,7 +32,7 @@
   - [Environment](#environment)
   - [Manuals](#manuals)
 - [Coverage](#coverage)
-  - [Platform support](#platform-support)
+  - [Compatibility matrix and tracking](#compatibility-matrix-and-tracking)
   - [Threat intelligence](#threat-intelligence)
   - [Security expectations](#security-expectations)
 - [Found Stentorian Guard useful?](#found-stentorian-guard-useful)
@@ -346,19 +346,22 @@ man stt-guard-daemon   # daemon internals
 
 ## Coverage
 
-### Platform support
+### Compatibility matrix and tracking
 
-| Platform | Versions / kernels | Architectures | Status | Details |
-| --- | --- | --- | --- | --- |
-| macOS | 13+ supported; 12 best-effort | `arm64`/`aarch64`, `x86_64` | **Supported** | [macOS support](docs/macos.md) |
-| Linux | Ubuntu/glibc smoke validation; musl and kernel series tracked | `x86_64` validated; `aarch64` tracked | Development-only initial support | [Linux support](docs/linux.md) |
-| Windows | — | — | Not planned | [Windows support](docs/windows.md) |
+Reviewed OS, runtime, CPU architecture, scanner, toolchain, and packaging
+coverage is tracked in the compatibility matrix. The README keeps the support
+summary short; the comprehensive tables live in
+[docs/compatibility.md](docs/compatibility.md), with platform-specific notes in
+[macOS support](docs/macos.md), [Linux support](docs/linux.md), and
+[Windows support](docs/windows.md).
 
-Reviewed platform and toolchain coverage is tracked in
-[`compatibility-matrix.yaml`](compatibility-matrix.yaml). The weekly
-compatibility tracker opens human-review issues for new OS, CPU architecture,
-Rust, LLVM, Xcode, Homebrew, and Linux lifecycle entries; it never updates the
-manifest automatically. See [docs/compatibility.md](docs/compatibility.md).
+Scheduled automation keeps that matrix current without expanding trust by
+itself. The weekly compatibility tracker opens human-review issues for new OS,
+runtime, CPU architecture, Rust, LLVM, Xcode, Homebrew, and Linux lifecycle
+entries. Nightly threat-intel updates open PRs for new malicious-package IOCs.
+New releases, runtime hashes, allow rules, deny rules, and support claims are
+only accepted after review, and CI verifies that the checked-in compatibility
+metadata and trusted-runtime registry still match those claims.
 
 ### Threat intelligence
 

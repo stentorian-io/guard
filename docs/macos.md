@@ -54,7 +54,9 @@ identity checks cannot provide the guarantees enforcement needs.
 Exec-time classification blocks unsupported Mach-O shapes, unknown native CPU
 subtypes, unknown non-Mach-O formats, unreadable paths, malformed scanner
 inputs, and native binaries with known raw syscall instruction bytes. Clean
-native Mach-O files are classified separately from shebang scripts.
+native Mach-O files are classified separately from shebang scripts. Mach-O
+scanning is compiled only for macOS, and raw syscall instruction matching uses
+the native Rust target architecture's pattern table.
 
 Shebang scripts are the reviewed exception: they remain allowed because the
 interpreter is the runtime that receives the hook and is classified at exec

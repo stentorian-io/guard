@@ -5,7 +5,7 @@
 //! verify the T1 promotion contract without adding synthetic trust entries to
 //! production data.
 
-use guard_hook::macho_scan::{BinaryTier, classify_path_with_registry};
+use guard_hook::scanner::{BinaryTier, classify_path_with_registry};
 use guard_hook::trusted_runtime::TrustedRuntimeRegistry;
 use sha2::{Digest, Sha256};
 use std::ffi::CString;

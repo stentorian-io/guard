@@ -9,6 +9,7 @@
 mod macos {
     use std::ffi::OsStr;
     use std::net::TcpListener;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
     use std::path::PathBuf;
     use std::process::{Command, Output};
@@ -288,8 +289,10 @@ mod macos {
     }
 
     fn test_work_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join("stt-guard-hardened-install-e2e-work");
+        let dir = PathBuf::from("/tmp/stt-guard-hardened-install-e2e-work");
         std::fs::create_dir_all(&dir).expect("create test work dir");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
+            .expect("make test work dir daemon-readable");
         dir
     }
 

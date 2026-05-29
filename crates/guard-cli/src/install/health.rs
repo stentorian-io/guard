@@ -412,6 +412,8 @@ fn is_special_file_type(file_type: FileType) -> bool {
 #[cfg(target_os = "macos")]
 #[must_use]
 pub fn expected_launchdaemon_plist() -> String {
+    let environment_variables = launchdaemon_environment_variables_plist();
+
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -428,7 +430,7 @@ pub fn expected_launchdaemon_plist() -> String {
     </array>
     <key>UserName</key>
     <string>{}</string>
-    <key>RunAtLoad</key>
+{}    <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
@@ -443,9 +445,26 @@ pub fn expected_launchdaemon_plist() -> String {
         paths::SYSTEM_BIN_DIR,
         paths::SYSTEM_STATE_DIR,
         paths::SERVICE_USER,
+        environment_variables,
         paths::SYSTEM_LOG_DIR,
         paths::SYSTEM_LOG_DIR,
     )
+}
+
+#[cfg(all(target_os = "macos", feature = "test-signer"))]
+fn launchdaemon_environment_variables_plist() -> &'static str {
+    concat!(
+        "    <key>EnvironmentVariables</key>\n",
+        "    <dict>\n",
+        "        <key>STT_GUARD_ALLOW_TEST_SIGNER</key>\n",
+        "        <string>1</string>\n",
+        "    </dict>\n",
+    )
+}
+
+#[cfg(all(target_os = "macos", not(feature = "test-signer")))]
+fn launchdaemon_environment_variables_plist() -> &'static str {
+    ""
 }
 
 #[cfg(target_os = "macos")]
@@ -614,6 +633,15 @@ mod tests {
         assert!(plist.contains(paths::SYSTEM_BIN_DIR));
         assert!(plist.contains(paths::SYSTEM_STATE_DIR));
         assert!(plist.contains(paths::SERVICE_USER));
+    }
+
+    #[test]
+    #[cfg(all(target_os = "macos", feature = "test-signer"))]
+    fn expected_plist_allows_test_signer_only_in_test_builds() {
+        let plist = expected_launchdaemon_plist();
+
+        assert!(plist.contains("STT_GUARD_ALLOW_TEST_SIGNER"));
+        assert!(plist.contains("<string>1</string>"));
     }
 
     #[test]

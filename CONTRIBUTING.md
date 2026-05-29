@@ -295,6 +295,30 @@ safe runner should be rebuilt, restored from a clean VM snapshot, or otherwise
 scrubbed after each job so root-owned install artifacts, LaunchDaemon state,
 logs, keychain state, and service-user mutations cannot leak between runs.
 
+For local macOS E2E without mutating the host, use the Tart-backed VM runner:
+
+```sh
+brew install cirruslabs/cli/tart hudochenkov/sshpass/sshpass
+scripts/ci-macos-vm-e2e.sh
+```
+
+The script clones `ghcr.io/cirruslabs/macos-tahoe-base:latest` into
+`stt-guard-macos-base` on first use, creates a disposable per-run clone, enables
+passwordless sudo inside that clone, copies the repo into the guest, and runs
+the macOS E2E suite including `hardened_install_health` with
+`STT_GUARD_E2E_PRIVILEGED_INSTALL=1`. It fails the run if
+`hardened_install_health` reports an internal `SKIP:` because the local no-skip
+target must prove privileged install health rather than accept a missing
+hardware-backed signing path. Override the base image or credentials with
+`STT_GUARD_MACOS_VM_BASE`, `STT_GUARD_MACOS_VM_BASE_NAME`,
+`STT_GUARD_MACOS_VM_USER`, and `STT_GUARD_MACOS_VM_PASSWORD`.
+
+The default Tart macOS base image provides isolated system mutation and
+passwordless sudo after bootstrap, but it may not expose Secure Enclave signing.
+If it fails with `NSOSStatusErrorDomain Code=-34018`, use a disposable physical
+Mac runner or another macOS image/runner that can enroll the hardware-backed
+signer.
+
 ## Troubleshooting
 
 ### SIP strips DYLD_INSERT_LIBRARIES

@@ -264,6 +264,37 @@ validation starts:
 
 PRs must pass the full CI suite before merging.
 
+### Self-hosted privileged macOS validation
+
+`.github/workflows/privileged-macos-self-hosted.yml` is a manual workflow for
+running the privileged install-health E2E on a disposable self-hosted macOS
+runner. It is intentionally not attached to `pull_request` because it runs
+checked-out code with passwordless `sudo` and mutates system install locations.
+
+Use a runner with all of these labels:
+
+```text
+self-hosted, macOS, stt-guard-privileged, disposable
+```
+
+The runner environment must set:
+
+```sh
+STT_GUARD_DISPOSABLE_RUNNER=1
+```
+
+The runner user must also have non-interactive sudo for the commands exercised
+by the install-health test. Verify with:
+
+```sh
+sudo -n true
+```
+
+Use this workflow only for trusted branches or maintainer-reviewed PR heads. A
+safe runner should be rebuilt, restored from a clean VM snapshot, or otherwise
+scrubbed after each job so root-owned install artifacts, LaunchDaemon state,
+logs, keychain state, and service-user mutations cannot leak between runs.
+
 ## Troubleshooting
 
 ### SIP strips DYLD_INSERT_LIBRARIES

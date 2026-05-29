@@ -1,6 +1,6 @@
-//! E2E harness: invokes posix_spawn with env_clear() to trigger
-//! TREE-06 EnvNotPropagatedGap. The wrapped stt-guard wrap inherits
-//! all three STT_GUARD_* / DYLD_* env vars; this harness intentionally
+//! E2E harness: invokes `posix_spawn` with `env_clear()` to trigger
+//! TREE-06 `EnvNotPropagatedGap`. The wrapped stt-guard wrap inherits
+//! all three `STT_GUARD`_* / DYLD_* env vars; this harness intentionally
 //! drops them when spawning the inner child.
 
 use std::ffi::CString;
@@ -18,9 +18,9 @@ fn main() {
 
     // Use mut pointers per posix_spawn signature.
     let argv_mut: [*mut libc::c_char; 4] = [
-        arg0.as_ptr() as *mut libc::c_char,
-        arg1.as_ptr() as *mut libc::c_char,
-        arg2.as_ptr() as *mut libc::c_char,
+        arg0.as_ptr().cast_mut(),
+        arg1.as_ptr().cast_mut(),
+        arg2.as_ptr().cast_mut(),
         ptr::null_mut(),
     ];
 
@@ -31,7 +31,7 @@ fn main() {
     let mut pid: libc::pid_t = 0;
     let rc = unsafe {
         libc::posix_spawn(
-            &mut pid as *mut libc::pid_t,
+            &raw mut pid,
             path.as_ptr(),
             ptr::null(),
             ptr::null(),
@@ -46,11 +46,10 @@ fn main() {
     // Reap the child.
     let mut status: libc::c_int = 0;
     unsafe {
-        libc::waitpid(pid, &mut status, 0);
+        libc::waitpid(pid, &raw mut status, 0);
     }
     // Print the child exit code so the e2e test can correlate.
-    #[allow(unused_unsafe)]
-    let exit_code = unsafe { libc::WEXITSTATUS(status) };
+    let exit_code = libc::WEXITSTATUS(status);
     println!("env_clear_posix_spawn: child pid={pid} exit={exit_code}");
     // The harness itself always exits 0; the e2e test asserts on:
     //   (a) this exit being 0, and

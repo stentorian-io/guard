@@ -1,11 +1,11 @@
-//! Thread-local fd classification bitmap for write()/writev() interpose.
+//! Thread-local fd classification bitmap for `write()/writev()` interpose.
 //!
-//! On first write to an unknown fd, we call getsockopt(SO_TYPE) via raw
+//! On first write to an unknown fd, we call `getsockopt(SO_TYPE)` via raw
 //! syscall to classify the fd as socket or non-socket. The result is cached
 //! in a thread-local bitmap so subsequent writes to the same fd pay zero
 //! overhead beyond a bitmap lookup.
 //!
-//! The bitmap tracks fds 0..MAX_FD. Fds above MAX_FD are classified on
+//! The bitmap tracks fds `0..MAX_FD`. Fds above `MAX_FD` are classified on
 //! every call (no caching) — this is acceptable because high-numbered fds
 //! are rare in practice.
 
@@ -25,21 +25,21 @@ impl FdBitmap {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn is_classified(&self, fd: usize) -> bool {
         let word = fd / 64;
         let bit = fd % 64;
         (self.classified[word] >> bit) & 1 == 1
     }
 
-    #[inline(always)]
+    #[inline]
     fn is_socket(&self, fd: usize) -> bool {
         let word = fd / 64;
         let bit = fd % 64;
         (self.is_socket[word] >> bit) & 1 == 1
     }
 
-    #[inline(always)]
+    #[inline]
     fn set(&mut self, fd: usize, socket: bool) {
         let word = fd / 64;
         let bit = fd % 64;
@@ -51,7 +51,7 @@ impl FdBitmap {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn invalidate(&mut self, fd: usize) {
         let word = fd / 64;
         let bit = fd % 64;
@@ -69,17 +69,18 @@ thread_local! {
 }
 
 /// Classify an fd as socket or non-socket. Returns true if the fd is a
-/// connected TCP socket (the only type where write() can send data to a
+/// connected TCP socket (the only type where `write()` can send data to a
 /// remote host that was already permitted at connect time).
 ///
-/// Classification uses getsockopt(SO_TYPE) via raw syscall to avoid
+/// Classification uses `getsockopt(SO_TYPE)` via raw syscall to avoid
 /// recursion through the interpose chain.
 #[inline]
+#[must_use]
 pub fn is_connected_socket(fd: i32) -> bool {
     if fd < 0 {
         return false;
     }
-    let ufd = fd as usize;
+    let ufd = usize::try_from(fd).unwrap_or(0);
 
     if ufd < MAX_FD {
         let result = FD_MAP.with(|cell| {
@@ -113,7 +114,7 @@ pub fn invalidate_fd(fd: i32) {
     if fd < 0 {
         return;
     }
-    let ufd = fd as usize;
+    let ufd = usize::try_from(fd).unwrap_or(0);
     if ufd < MAX_FD {
         FD_MAP.with(|cell| {
             let map = unsafe { &mut *cell.0.get() };
@@ -122,18 +123,19 @@ pub fn invalidate_fd(fd: i32) {
     }
 }
 
-/// Probe an fd with getsockopt(SOL_SOCKET, SO_TYPE) via raw syscall.
-/// Returns true if the fd is a socket (any type — SOCK_STREAM, SOCK_DGRAM, etc.).
+/// Probe an fd with `getsockopt(SOL_SOCKET`, `SO_TYPE`) via raw syscall.
+/// Returns true if the fd is a socket (any type — `SOCK_STREAM`, `SOCK_DGRAM`, etc.).
 fn classify_fd(fd: i32) -> bool {
     let mut sock_type: libc::c_int = 0;
-    let mut optlen: libc::socklen_t = core::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    let mut optlen: libc::socklen_t =
+        libc::socklen_t::try_from(core::mem::size_of::<libc::c_int>()).unwrap_or(0);
     let ret = unsafe {
         crate::raw_syscall::raw_getsockopt(
             fd,
             libc::SOL_SOCKET,
             libc::SO_TYPE,
-            &mut sock_type as *mut _ as *mut core::ffi::c_void,
-            &mut optlen,
+            (&raw mut sock_type).cast::<core::ffi::c_void>(),
+            &raw mut optlen,
         )
     };
     ret == 0

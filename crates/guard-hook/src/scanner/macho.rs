@@ -11,12 +11,12 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-const MH_MAGIC_64: u32 = 0xfeedfacf;
-const MH_CIGAM_64: u32 = 0xcffaedfe;
-const FAT_MAGIC: u32 = 0xcafebabe;
-const FAT_CIGAM: u32 = 0xbebafeca;
-const FAT_MAGIC_64: u32 = 0xcafebabf;
-const FAT_CIGAM_64: u32 = 0xbfbafeca;
+const MH_MAGIC_64: u32 = 0xfeed_facf;
+const MH_CIGAM_64: u32 = 0xcffa_edfe;
+const FAT_MAGIC: u32 = 0xcafe_babe;
+const FAT_CIGAM: u32 = 0xbeba_feca;
+const FAT_MAGIC_64: u32 = 0xcafe_babf;
+const FAT_CIGAM_64: u32 = 0xbfba_feca;
 const LC_SEGMENT_64: u32 = 0x19;
 const CPU_SUBTYPE_MASK: u32 = 0xff00_0000;
 const CPU_SUBTYPE_ARM64_ALL: u32 = 0;
@@ -63,6 +63,7 @@ pub enum BlockReason {
 }
 
 impl BlockReason {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::HardenedRuntime => "hardened-runtime",
@@ -86,6 +87,7 @@ pub enum SuspiciousReason {
 }
 
 impl SuspiciousReason {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::SyscallInstruction => "syscall-instruction",
@@ -114,11 +116,23 @@ enum HeaderKind {
     },
 }
 
-pub fn classify_path(path: *const libc::c_char) -> BinaryTier {
-    classify_path_with_registry(path, trusted_runtime::registry())
+#[must_use]
+/// Classify a Mach-O executable path against the default trusted runtime registry.
+///
+/// # Safety
+///
+/// `path` must either be null or point to a valid NUL-terminated C string.
+pub unsafe fn classify_path(path: *const libc::c_char) -> BinaryTier {
+    unsafe { classify_path_with_registry(path, trusted_runtime::registry()) }
 }
 
-pub fn classify_path_with_registry(
+#[must_use]
+/// Classify a Mach-O executable path against the trusted runtime registry.
+///
+/// # Safety
+///
+/// `path` must either be null or point to a valid NUL-terminated C string.
+pub unsafe fn classify_path_with_registry(
     path: *const libc::c_char,
     trusted_registry: &TrustedRuntimeRegistry,
 ) -> BinaryTier {
@@ -126,7 +140,7 @@ pub fn classify_path_with_registry(
         return BinaryTier::T0Blocked(BlockReason::UnreadablePath);
     }
 
-    if let Some(shed_reason) = macho_flags::will_shed_dylib(path) {
+    if let Some(shed_reason) = unsafe { macho_flags::will_shed_dylib(path) } {
         let reason = match shed_reason {
             macho_flags::ShedReason::Setuid => BlockReason::PrivilegeEscalation,
             macho_flags::ShedReason::CodeSign => BlockReason::HardenedRuntime,
@@ -139,9 +153,9 @@ pub fn classify_path_with_registry(
         return BinaryTier::T0Blocked(BlockReason::UnreadablePath);
     }
 
-    let mut header = [0u8; MAX_HEADER_READ];
+    let mut header = vec![0u8; MAX_HEADER_READ];
     let n = unsafe {
-        raw_syscall::raw_read(fd, header.as_mut_ptr() as *mut libc::c_void, header.len())
+        raw_syscall::raw_read(fd, header.as_mut_ptr().cast::<libc::c_void>(), header.len())
     };
     unsafe {
         libc::close(fd);
@@ -150,11 +164,16 @@ pub fn classify_path_with_registry(
         return BinaryTier::T0Blocked(BlockReason::HeaderReadFailure);
     }
 
-    match parse_header_kind(&header[..n as usize]) {
-        HeaderKind::Elf => BinaryTier::T0Blocked(BlockReason::UnknownFormat),
+    let Ok(header_len) = usize::try_from(n) else {
+        return BinaryTier::T0Blocked(BlockReason::HeaderReadFailure);
+    };
+
+    match parse_header_kind(&header[..header_len]) {
+        HeaderKind::Elf | HeaderKind::UnknownFormat => {
+            BinaryTier::T0Blocked(BlockReason::UnknownFormat)
+        }
         HeaderKind::Fat => BinaryTier::T0Blocked(BlockReason::FatBinary),
         HeaderKind::Script => BinaryTier::T2AllowedScript,
-        HeaderKind::UnknownFormat => BinaryTier::T0Blocked(BlockReason::UnknownFormat),
         HeaderKind::UnsupportedMachO => BinaryTier::T0Blocked(BlockReason::UnsupportedArch),
         HeaderKind::MalformedMachO => BinaryTier::T0Blocked(BlockReason::MalformedMachO),
         HeaderKind::Thin64 {
@@ -172,7 +191,7 @@ pub fn classify_path_with_registry(
 
             match hash_file(path) {
                 Some(hash) if trusted_registry.get(&hash).is_some() => BinaryTier::T1TrustedRuntime,
-                Some(hash) => match cached_or_scan(path, hash) {
+                Some(hash) => match unsafe { cached_or_scan(path, hash) } {
                     Some(ScanVerdict::Clean) => BinaryTier::T2CleanNativeMachO,
                     Some(ScanVerdict::Suspicious(reason)) => {
                         BinaryTier::T3SuspiciousUnknown(reason)
@@ -185,12 +204,12 @@ pub fn classify_path_with_registry(
     }
 }
 
-fn cached_or_scan(path: *const libc::c_char, hash: [u8; 32]) -> Option<ScanVerdict> {
+unsafe fn cached_or_scan(path: *const libc::c_char, hash: [u8; 32]) -> Option<ScanVerdict> {
     let cache = scan_cache();
     if let Some(verdict) = cache.lock().expect("macho scan cache").get(&hash).copied() {
         return Some(verdict);
     }
-    let verdict = scan_path(path)?;
+    let verdict = unsafe { scan_path(path) }?;
     cache
         .lock()
         .expect("macho scan cache")
@@ -209,10 +228,11 @@ fn hash_file(path: *const libc::c_char) -> Option<[u8; 32]> {
         return None;
     }
     let mut hasher = Sha256::new();
-    let mut buf = [0u8; SCAN_CHUNK];
+    let mut buf = vec![0u8; SCAN_CHUNK];
     loop {
-        let n =
-            unsafe { raw_syscall::raw_read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+        let n = unsafe {
+            raw_syscall::raw_read(fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len())
+        };
         if n < 0 {
             unsafe {
                 libc::close(fd);
@@ -222,7 +242,8 @@ fn hash_file(path: *const libc::c_char) -> Option<[u8; 32]> {
         if n == 0 {
             break;
         }
-        hasher.update(&buf[..n as usize]);
+        let len = usize::try_from(n).ok()?;
+        hasher.update(&buf[..len]);
     }
     unsafe {
         libc::close(fd);
@@ -230,14 +251,14 @@ fn hash_file(path: *const libc::c_char) -> Option<[u8; 32]> {
     Some(hasher.finalize().into())
 }
 
-fn scan_path(path: *const libc::c_char) -> Option<ScanVerdict> {
+unsafe fn scan_path(path: *const libc::c_char) -> Option<ScanVerdict> {
     let fd = unsafe { libc::open(path, libc::O_RDONLY) };
     if fd < 0 {
         return None;
     }
-    let mut header = [0u8; MAX_HEADER_READ];
+    let mut header = vec![0u8; MAX_HEADER_READ];
     let n = unsafe {
-        raw_syscall::raw_read(fd, header.as_mut_ptr() as *mut libc::c_void, header.len())
+        raw_syscall::raw_read(fd, header.as_mut_ptr().cast::<libc::c_void>(), header.len())
     };
     if n < 32 {
         unsafe {
@@ -245,7 +266,8 @@ fn scan_path(path: *const libc::c_char) -> Option<ScanVerdict> {
         }
         return None;
     }
-    let ranges = text_ranges(&header[..n as usize])?;
+    let len = usize::try_from(n).ok()?;
+    let ranges = text_ranges(&header[..len])?;
     for (fileoff, filesize) in ranges {
         match scan_file_range(fd, fileoff, filesize) {
             Some(true) => {
@@ -275,29 +297,37 @@ fn scan_file_range(fd: libc::c_int, fileoff: u64, filesize: u64) -> Option<bool>
     if filesize == 0 {
         return Some(false);
     }
-    let seeked = unsafe { libc::lseek(fd, fileoff as libc::off_t, libc::SEEK_SET) };
+    let fileoff = libc::off_t::try_from(fileoff).ok()?;
+    let seeked = unsafe { libc::lseek(fd, fileoff, libc::SEEK_SET) };
     if seeked < 0 {
         return None;
     }
 
     let mut remaining = filesize;
-    let mut buf = [0u8; SCAN_CHUNK + 3];
+    let mut buf = vec![0u8; SCAN_CHUNK + 3];
     let mut tail_len = 0usize;
     while remaining > 0 {
-        let want = (remaining as usize).min(SCAN_CHUNK);
+        let want = usize::try_from(remaining)
+            .unwrap_or(usize::MAX)
+            .min(SCAN_CHUNK);
         let n = unsafe {
-            raw_syscall::raw_read(fd, buf[tail_len..].as_mut_ptr() as *mut libc::c_void, want)
+            raw_syscall::raw_read(
+                fd,
+                buf[tail_len..].as_mut_ptr().cast::<libc::c_void>(),
+                want,
+            )
         };
         if n <= 0 {
             return None;
         }
-        let total = tail_len + n as usize;
+        let read_len = usize::try_from(n).ok()?;
+        let total = tail_len + read_len;
         if contains_syscall_pattern(&buf[..total]) {
             return Some(true);
         }
         tail_len = total.min(3);
         buf.copy_within(total - tail_len..total, 0);
-        remaining -= n as u64;
+        remaining = remaining.saturating_sub(u64::try_from(n).ok()?);
     }
     Some(false)
 }
@@ -337,7 +367,10 @@ fn parse_header_kind(data: &[u8]) -> HeaderKind {
     }
     let cputype = u32::from_le_bytes(data[4..8].try_into().unwrap());
     let cpusubtype = u32::from_le_bytes(data[8..12].try_into().unwrap());
-    let ncmds = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
+    let ncmds = usize::try_from(u32::from_le_bytes(data[16..20].try_into().unwrap())).ok();
+    let Some(ncmds) = ncmds else {
+        return HeaderKind::MalformedMachO;
+    };
     HeaderKind::Thin64 {
         cputype,
         cpusubtype,
@@ -356,7 +389,10 @@ fn text_ranges(data: &[u8]) -> Option<Vec<(u64, u64)>> {
             return None;
         }
         let cmd = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
-        let cmdsize = u32::from_le_bytes(data[pos + 4..pos + 8].try_into().unwrap()) as usize;
+        let cmdsize = usize::try_from(u32::from_le_bytes(
+            data[pos + 4..pos + 8].try_into().unwrap(),
+        ))
+        .ok()?;
         if cmdsize < 8 || pos + cmdsize > data.len() {
             return None;
         }
@@ -406,13 +442,14 @@ mod tests {
     use crate::trusted_runtime::TrustedRuntimeRegistry;
     use sha2::{Digest, Sha256};
     use std::ffi::CString;
+    use std::fmt::Write as _;
     use std::io::Write;
     use std::os::unix::ffi::OsStrExt;
 
     fn thin_header(cputype: u32, cpusubtype: u32, text_payload: &[u8]) -> Vec<u8> {
-        let fileoff = 0x100u64;
-        let filesize = text_payload.len() as u64;
-        let mut data = vec![0u8; fileoff as usize + text_payload.len()];
+        let fileoff = 0x100usize;
+        let filesize = u64::try_from(text_payload.len()).expect("test payload fits u64");
+        let mut data = vec![0u8; fileoff + text_payload.len()];
         data[0..4].copy_from_slice(&MH_MAGIC_64.to_le_bytes());
         data[4..8].copy_from_slice(&cputype.to_le_bytes());
         data[8..12].copy_from_slice(&cpusubtype.to_le_bytes());
@@ -422,9 +459,13 @@ mod tests {
         data[pos..pos + 4].copy_from_slice(&LC_SEGMENT_64.to_le_bytes());
         data[pos + 4..pos + 8].copy_from_slice(&72u32.to_le_bytes());
         data[pos + 8..pos + 14].copy_from_slice(b"__TEXT");
-        data[pos + 40..pos + 48].copy_from_slice(&fileoff.to_le_bytes());
+        data[pos + 40..pos + 48].copy_from_slice(
+            &u64::try_from(fileoff)
+                .expect("file offset fits u64")
+                .to_le_bytes(),
+        );
         data[pos + 48..pos + 56].copy_from_slice(&filesize.to_le_bytes());
-        data[fileoff as usize..].copy_from_slice(text_payload);
+        data[fileoff..].copy_from_slice(text_payload);
         data
     }
 
@@ -462,6 +503,19 @@ mod tests {
         }
     }
 
+    fn classify_test_path(path: &CString) -> BinaryTier {
+        // SAFETY: `CString` provides a valid NUL-terminated path pointer.
+        unsafe { classify_path(path.as_ptr()) }
+    }
+
+    fn classify_test_path_with_registry(
+        path: &CString,
+        registry: &TrustedRuntimeRegistry,
+    ) -> BinaryTier {
+        // SAFETY: `CString` provides a valid NUL-terminated path pointer.
+        unsafe { classify_path_with_registry(path.as_ptr(), registry) }
+    }
+
     #[test]
     fn detects_fat_magic() {
         let mut data = [0u8; 8];
@@ -476,7 +530,7 @@ mod tests {
         let file = write_temp(&data);
         let path = path_cstring(&file);
         assert_eq!(
-            classify_path(path.as_ptr()),
+            classify_test_path(&path),
             BinaryTier::T0Blocked(BlockReason::FatBinary)
         );
     }
@@ -491,7 +545,7 @@ mod tests {
         let file = write_temp(&data);
         let path = path_cstring(&file);
         assert_eq!(
-            classify_path(path.as_ptr()),
+            classify_test_path(&path),
             BinaryTier::T3SuspiciousUnknown(SuspiciousReason::SyscallInstruction)
         );
     }
@@ -504,15 +558,18 @@ mod tests {
             native_syscall_payload(),
         );
         let hash = Sha256::digest(&data);
+        let mut hash_hex = String::with_capacity(hash.len() * 2);
+        for byte in hash {
+            write!(&mut hash_hex, "{byte:02x}").expect("write hash hex");
+        }
         let registry_yaml = format!(
-            "runtimes:\n  - sha256: \"{}\"\n    name: guard-test-runtime\n    version: \"0.0.0\"\n    source: unit-test\n",
-            hash.iter().map(|b| format!("{b:02x}")).collect::<String>()
+            "runtimes:\n  - sha256: \"{hash_hex}\"\n    name: guard-test-runtime\n    version: \"0.0.0\"\n    source: unit-test\n"
         );
         let registry = TrustedRuntimeRegistry::parse(&registry_yaml);
         let file = write_temp(&data);
         let path = path_cstring(&file);
         assert_eq!(
-            classify_path_with_registry(path.as_ptr(), &registry),
+            classify_test_path_with_registry(&path, &registry),
             BinaryTier::T1TrustedRuntime
         );
     }
@@ -522,7 +579,7 @@ mod tests {
         let file = write_temp(b"#!/bin/sh\nexit 0\n");
         let path = path_cstring(&file);
 
-        assert_eq!(classify_path(path.as_ptr()), BinaryTier::T2AllowedScript);
+        assert_eq!(classify_test_path(&path), BinaryTier::T2AllowedScript);
     }
 
     #[test]
@@ -530,7 +587,7 @@ mod tests {
         let path = CString::new("/definitely/not/a/guard/executable").unwrap();
 
         assert_eq!(
-            classify_path(path.as_ptr()),
+            classify_test_path(&path),
             BinaryTier::T0Blocked(BlockReason::UnreadablePath)
         );
     }
@@ -540,7 +597,7 @@ mod tests {
         let file = write_temp(b"not a script or Mach-O");
         let path = path_cstring(&file);
         assert_eq!(
-            classify_path(path.as_ptr()),
+            classify_test_path(&path),
             BinaryTier::T0Blocked(BlockReason::UnknownFormat)
         );
     }
@@ -551,7 +608,7 @@ mod tests {
         let path = path_cstring(&file);
 
         assert_eq!(
-            classify_path(path.as_ptr()),
+            classify_test_path(&path),
             BinaryTier::T0Blocked(BlockReason::UnknownFormat)
         );
     }
@@ -562,7 +619,7 @@ mod tests {
         let file = write_temp(&data);
         let path = path_cstring(&file);
         assert_eq!(
-            classify_path(path.as_ptr()),
+            classify_test_path(&path),
             BinaryTier::T0Blocked(BlockReason::UnsupportedSubtype)
         );
     }
@@ -577,7 +634,7 @@ mod tests {
         let file = write_temp(&data);
         let path = path_cstring(&file);
         assert_eq!(
-            classify_path(path.as_ptr()),
+            classify_test_path(&path),
             BinaryTier::T0Blocked(BlockReason::UnsupportedArch)
         );
     }
@@ -589,7 +646,7 @@ mod tests {
         let file = write_temp(&data);
         let path = path_cstring(&file);
         assert_eq!(
-            classify_path(path.as_ptr()),
+            classify_test_path(&path),
             BinaryTier::T0Blocked(BlockReason::ScanFailure)
         );
     }
@@ -643,7 +700,7 @@ mod tests {
         // /usr/bin/sudo is setuid on macOS — it should be blocked with
         // PrivilegeEscalation, not HardenedRuntime.
         let path = CString::new("/usr/bin/sudo").unwrap();
-        let tier = classify_path(path.as_ptr());
+        let tier = classify_test_path(&path);
         // sudo is both setuid AND a platform binary; the setuid check runs
         // first in will_shed_dylib, so we expect PrivilegeEscalation.
         assert_eq!(
@@ -656,7 +713,7 @@ mod tests {
     fn classify_system_ls_blocks_as_hardened_runtime() {
         // /bin/ls is a platform binary with CS_RUNTIME but NOT setuid.
         let path = CString::new("/bin/ls").unwrap();
-        let tier = classify_path(path.as_ptr());
+        let tier = classify_test_path(&path);
         assert_eq!(tier, BinaryTier::T0Blocked(BlockReason::HardenedRuntime));
     }
 }

@@ -9,16 +9,24 @@ use std::path::{Path, PathBuf};
 pub const SIZE_THRESHOLD: u64 = 16 * 1024 * 1024; // 16 MiB
 pub const MAX_ARCHIVES: usize = 7;
 pub const MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024; // 256 MiB
+const SECS_PER_DAY: u64 = 86_400;
+const DAYS_PER_400Y: u64 = 146_097;
+const SECS_PER_400Y: u64 = DAYS_PER_400Y * SECS_PER_DAY;
+
 use guard_core::paths::{
     ROTATED_LOG_PREFIX as ROTATED_GLOB_PREFIX, ROTATED_LOG_SUFFIX_GZ as ROTATED_GLOB_SUFFIX_GZ,
 };
 
+#[must_use]
 pub fn should_rotate(active_path: &Path) -> bool {
-    fs::metadata(active_path)
-        .map(|m| m.len() >= SIZE_THRESHOLD)
-        .unwrap_or(false)
+    fs::metadata(active_path).is_ok_and(|m| m.len() >= SIZE_THRESHOLD)
 }
 
+/// Rotate the active log file and start background gzip/retention work.
+///
+/// # Errors
+///
+/// Returns I/O errors from parent-path validation or the atomic rename.
 pub fn rotate(active_path: &Path) -> io::Result<()> {
     let parent = active_path
         .parent()
@@ -38,18 +46,14 @@ pub fn rotate(active_path: &Path) -> io::Result<()> {
         let secs = d.as_secs();
         let millis = d.subsec_millis();
 
-        const SECS_PER_DAY: u64 = 86_400;
-        const DAYS_PER_400Y: u64 = 146_097;
-        const SECS_PER_400Y: u64 = DAYS_PER_400Y * SECS_PER_DAY;
-
         let mut rem = secs;
         let mut year: i64 = 1970;
         let n400 = rem / SECS_PER_400Y;
         rem %= SECS_PER_400Y;
-        year += (n400 * 400) as i64;
+        year += i64::try_from(n400 * 400).unwrap_or(i64::MAX);
 
-        let mut days = (rem / SECS_PER_DAY) as u32;
-        let day_secs = (rem % SECS_PER_DAY) as u32;
+        let mut days = u32::try_from(rem / SECS_PER_DAY).unwrap_or(u32::MAX);
+        let day_secs = u32::try_from(rem % SECS_PER_DAY).unwrap_or(0);
         let hh = day_secs / 3600;
         let mm = (day_secs % 3600) / 60;
         let ss = day_secs % 60;
@@ -155,7 +159,7 @@ fn gzip_in_place(rotated: &Path) -> io::Result<()> {
             .create_new(true)
             .open(&gz_path)?;
         let mut encoder = GzEncoder::new(output, Compression::default());
-        let mut buf = [0u8; 64 * 1024];
+        let mut buf = vec![0u8; 64 * 1024];
         loop {
             let n = input.read(&mut buf)?;
             if n == 0 {
@@ -169,6 +173,11 @@ fn gzip_in_place(rotated: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Remove rotated logs beyond count and total-size retention limits.
+///
+/// # Errors
+///
+/// Returns filesystem metadata errors encountered while scanning archives.
 pub fn enforce_retention(dir: &Path) -> io::Result<()> {
     let mut archives: Vec<(PathBuf, std::time::SystemTime, u64)> = Vec::new();
     if let Ok(entries) = fs::read_dir(dir) {

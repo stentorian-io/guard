@@ -1,8 +1,8 @@
-//! v0.1 fixture tests for snapshot::publish + manifest::write.
+//! v0.1 fixture tests for `snapshot::publish` + `manifest::write`.
 //!
-//! Migrated to SCHEMA_V2 in v0.2: the v0.1 round-trip test used
-//! Snapshot::v1_default() + Snapshot::decode which now rejects SCHEMA_V1
-//! (v0.2 made decode fail-closed). Switching to v2_default() preserves the
+//! Migrated to `SCHEMA_V2` in v0.2: the v0.1 round-trip test used
+//! `Snapshot::v1_default()` + `Snapshot::decode` which now rejects `SCHEMA_V1`
+//! (v0.2 made decode fail-closed). Switching to `v2_default()` preserves the
 //! original test intent — verify that the same bytes round-trip
 //! publish → file → decode → equal — under the V2 schema discipline.
 
@@ -22,7 +22,7 @@ fn publish_then_read_back_with_digest_verification() {
     ensure_state_dir(state_dir).unwrap();
 
     let snap = Snapshot::v2_default();
-    let published = publish(state_dir, &snap, 0xCAFEBABE_DEADBEEF).expect("publish");
+    let published = publish(state_dir, &snap, 0xCAFE_BABE_DEAD_BEEF).expect("publish");
 
     // Verify file mode 0600
     let mode = std::fs::metadata(&published.path)
@@ -81,10 +81,10 @@ fn second_publish_writes_distinct_snapshot_file() {
     assert!(p1.path.exists() && p2.path.exists());
 }
 
-/// Per-run publish_run path (D-29): runs/{uuid}.cbor + runs/{uuid}.manifest
+/// Per-run `publish_run` path (D-29): runs/{uuid}.cbor + runs/{uuid}.manifest
 /// written atomically; manifest references the snapshot path; both files
 /// are mode 0644 so wrapped user processes can load the signed policy artifact;
-/// bytes round-trip Snapshot::decode under SCHEMA_V2.
+/// bytes round-trip `Snapshot::decode` under `SCHEMA_V2`.
 #[test]
 fn publish_run_writes_per_run_files_with_manifest() {
     let tmp = tempfile::tempdir().unwrap();

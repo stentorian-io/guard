@@ -12,7 +12,7 @@ use std::process::Command;
 /// The daemon emits "feed refresh timer spawned" on stderr when the
 /// background feed refresh thread starts. This test starts a daemon
 /// harness and checks its stderr for that log line.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn feed_refresh_timer_spawns_at_startup() {
     let mut harness = DaemonHarness::start().expect("start daemon");
@@ -32,7 +32,7 @@ fn feed_refresh_timer_spawns_at_startup() {
 /// Run `stt-guard wrap node -e 'process.exit(0)'` and verify it exits 0.
 /// The daemon's codesign check runs on every IPC connection; if it
 /// rejected the peer, the stt-guard wrap would fail with a non-zero exit.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn codesign_accepts_legitimate_peer() {
     let cli = resolve_cli();
@@ -70,16 +70,16 @@ fn codesign_accepts_legitimate_peer() {
 
 /// Test 3: Probe self-test passes for non-hardened node.
 ///
-/// When DYLD_INSERT_LIBRARIES loads the hook into a non-hardened process,
-/// the hook's probe_self_test verifies that dlsym(RTLD_DEFAULT, "connect")
-/// returns guard_connect. On success it logs "interpose self-test passed".
+/// When `DYLD_INSERT_LIBRARIES` loads the hook into a non-hardened process,
+/// the hook's `probe_self_test` verifies that `dlsym(RTLD_DEFAULT`, "connect")
+/// returns `guard_connect`. On success it logs "interpose self-test passed".
 /// We check for this in the daemon's stderr (which captures tracing output
 /// from the hook's log buffer drain).
 ///
-/// This test reuses the smoke_dylib_loaded pattern: runs node with the
-/// STT_GUARD_TEST_MARKER to confirm the dylib loaded, then also checks
+/// This test reuses the `smoke_dylib_loaded` pattern: runs node with the
+/// `STT_GUARD_TEST_MARKER` to confirm the dylib loaded, then also checks
 /// for the self-test log line.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn probe_self_test_passes_for_node() {
     let cli = resolve_cli();

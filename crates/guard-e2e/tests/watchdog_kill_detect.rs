@@ -2,7 +2,7 @@
 //! and that the daemon's Ping handler responds correctly when alive.
 //!
 //! Flow:
-//! 1. Start daemon via DaemonHarness
+//! 1. Start daemon via `DaemonHarness`
 //! 2. Verify IPC Ping returns Pong (daemon alive)
 //! 3. Kill daemon with SIGKILL
 //! 4. Verify IPC Ping returns Unreachable (daemon dead)
@@ -61,7 +61,7 @@ fn watchdog_detects_daemon_alive_then_dead() {
     assert!(uptime < 10, "daemon uptime unexpectedly high: {uptime}s");
 
     // Step 2: Kill daemon with SIGKILL
-    let daemon_pid = harness.child.id() as libc::pid_t;
+    let daemon_pid = libc::pid_t::try_from(harness.child.id()).expect("daemon pid fits libc pid");
     unsafe {
         libc::kill(daemon_pid, libc::SIGKILL);
     }

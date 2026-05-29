@@ -1,28 +1,28 @@
-//! TREE-06 gap-closure 02-09 — EnvNotPropagatedGap round-trip tests.
+//! TREE-06 gap-closure 02-09 — `EnvNotPropagatedGap` round-trip tests.
 //!
-//! Tests the daemon-side handler for tag 0x08 (EnvNotPropagatedGap IPC).
+//! Tests the daemon-side handler for tag 0x08 (`EnvNotPropagatedGap` IPC).
 //!
-//! Design note on peer-auth and gap recording (REGISTER-01 + peer_token design):
-//!   The daemon's is_tracked check uses the KERNEL-sourced peer token
-//!   (from LOCAL_PEERTOKEN). The ProcessTree is keyed by AuditToken.
+//! Design note on peer-auth and gap recording (REGISTER-01 + `peer_token` design):
+//!   The daemon's `is_tracked` check uses the KERNEL-sourced peer token
+//!   (from `LOCAL_PEERTOKEN`). The `ProcessTree` is keyed by `AuditToken`.
 //!
-//!   For a test to pass the is_tracked gate, the test process's kernel token
-//!   must be in the tree. We register it via RegisterRoot with wire_pid =
-//!   getpid() (self-registration path), which causes the daemon to call
-//!   insert_root(kernel_peer_token, ...).
+//!   For a test to pass the `is_tracked` gate, the test process's kernel token
+//!   must be in the tree. We register it via `RegisterRoot` with `wire_pid` =
+//!   `getpid()` (self-registration path), which causes the daemon to call
+//!   `insert_root(kernel_peer_token`, ...).
 //!
-//!   After the REGISTER-01 + peer_token design change, the gap is recorded
-//!   on the PEER's node (peer_token = the process that calls posix_spawn).
-//!   The wire's parent_audit_token is advisory only.
+//!   After the REGISTER-01 + `peer_token` design change, the gap is recorded
+//!   on the PEER's node (`peer_token` = the process that calls `posix_spawn`).
+//!   The wire's `parent_audit_token` is advisory only.
 //!
 //!   To locate the gap in the tree after the test, we use `tree.nodes_len()`
 //!   and `tree.get_node_by_pid` (via a scan helper) — the kernel peer token
-//!   has val[5] == getpid(), so we can find it by pid.
+//!   has val[5] == `getpid()`, so we can find it by pid.
 //!
 //! Test 1: round-trip — daemon records gap on the peer's own tree node.
 //! Test 2: untracked peer → daemon replies Err with "untracked peer" message.
 //! Test 3: two consecutive gaps → second overwrites first (last-writer-wins).
-//! Test 4: ipc_dispatch MessageTag::EnvNotPropagatedGap byte value = 0x08.
+//! Test 4: `ipc_dispatch` `MessageTag::EnvNotPropagatedGap` byte value = 0x08.
 
 use guard_core::AuditToken;
 use guard_daemon::gap_detector::GapDetector;
@@ -54,7 +54,7 @@ fn build_state(state_dir: &std::path::Path) -> (Arc<ProcessTree>, Arc<DaemonStat
     (tree, state)
 }
 
-/// Send a tagged EnvNotPropagatedGap (tag 0x08) frame and read back the Ack.
+/// Send a tagged `EnvNotPropagatedGap` (tag 0x08) frame and read back the Ack.
 fn send_env_gap_and_recv_ack(
     stream: &mut UnixStream,
     gap: &EnvNotPropagatedGap,
@@ -67,13 +67,17 @@ fn send_env_gap_and_recv_ack(
     read_frame(stream).expect("read EnvNotPropagatedGapAck")
 }
 
-/// Register this test process as a tracked root via RegisterRoot (uses real peer-auth).
+fn current_pid_for_audit_token() -> u32 {
+    u32::try_from(unsafe { libc::getpid() }).expect("pid fits audit token field")
+}
+
+/// Register this test process as a tracked root via `RegisterRoot` (uses real peer-auth).
 ///
-/// REGISTER-01 self-registration path: wire_pid == kernel_pid.
-/// When wire_pid == kernel_pid, the daemon registers the kernel-sourced peer
+/// REGISTER-01 self-registration path: `wire_pid` == `kernel_pid`.
+/// When `wire_pid` == `kernel_pid`, the daemon registers the kernel-sourced peer
 /// token (the test process's own full 8-field token).
 fn register_self_as_tracked(sock: &std::path::Path) {
-    let self_pid = unsafe { libc::getpid() } as u32;
+    let self_pid = current_pid_for_audit_token();
     let self_token = AuditToken {
         val: [0, 0, 0, 0, 0, self_pid, 0, 0],
     };
@@ -83,8 +87,8 @@ fn register_self_as_tracked(sock: &std::path::Path) {
     let _: Reply = read_frame(&mut stream).expect("read Reply");
 }
 
-/// Find the CoverageGap on any node whose audit_token.val[5] matches `pid`.
-/// Uses ProcessTree::find_node_by_pid which scans all nodes by pid field.
+/// Find the `CoverageGap` on any node whose `audit_token.val`[5] matches `pid`.
+/// Uses `ProcessTree::find_node_by_pid` which scans all nodes by pid field.
 fn find_gap_by_pid(tree: &ProcessTree, pid: u32) -> Option<CoverageGap> {
     tree.find_node_by_pid(pid).and_then(|n| n.coverage_gap)
 }
@@ -111,11 +115,11 @@ fn env_not_propagated_gap_round_trip_records_gap_on_parent() {
 
     // Send the gap. The parent_audit_token is advisory; the daemon records
     // the gap on peer_token (the connecting process's kernel token).
-    let self_pid = unsafe { libc::getpid() } as u32;
+    let self_pid = current_pid_for_audit_token();
     let advisory_parent = AuditTokenWire {
         val: [0, 0, 0, 0, 0, self_pid, 0, 0],
     };
-    let gap = EnvNotPropagatedGap::new(advisory_parent, b"/usr/bin/child".to_vec(), 123456789);
+    let gap = EnvNotPropagatedGap::new(advisory_parent, b"/usr/bin/child".to_vec(), 123_456_789);
     let mut stream = UnixStream::connect(&sock).expect("connect gap");
     let ack = send_env_gap_and_recv_ack(&mut stream, &gap);
     drop(stream);
@@ -124,8 +128,7 @@ fn env_not_propagated_gap_round_trip_records_gap_on_parent() {
     // (a) Ack must be Ok.
     assert!(
         matches!(ack, EnvNotPropagatedGapAck::Ok { schema_version } if schema_version == IPC_SCHEMA_V2),
-        "expected Ok ack; got: {:?}",
-        ack
+        "expected Ok ack; got: {ack:?}"
     );
 
     // (b) The ProcessTree must have recorded the gap on the peer's node.
@@ -137,12 +140,9 @@ fn env_not_propagated_gap_round_trip_records_gap_on_parent() {
             detected_at_ms,
         }) => {
             assert_eq!(binary_path, "/usr/bin/child", "binary_path must match");
-            assert_eq!(detected_at_ms, 123456789, "detected_at_ms must match");
+            assert_eq!(detected_at_ms, 123_456_789, "detected_at_ms must match");
         }
-        other => panic!(
-            "expected CoverageGap::EnvNotPropagated on peer node, got: {:?}",
-            other
-        ),
+        other => panic!("expected CoverageGap::EnvNotPropagated on peer node, got: {other:?}"),
     }
 }
 
@@ -164,7 +164,7 @@ fn env_not_propagated_gap_untracked_peer_returns_err() {
 
     let mut stream = UnixStream::connect(&sock).expect("connect");
     let synthetic_parent = AuditTokenWire {
-        val: [0, 0, 0, 0, 0, 0xdeadbeef, 0, 1],
+        val: [0, 0, 0, 0, 0, 0xdead_beef, 0, 1],
     };
     let gap = EnvNotPropagatedGap::new(synthetic_parent, b"/usr/bin/evil".to_vec(), 999);
     let ack = send_env_gap_and_recv_ack(&mut stream, &gap);
@@ -180,11 +180,12 @@ fn env_not_propagated_gap_untracked_peer_returns_err() {
             assert_eq!(schema_version, IPC_SCHEMA_V2);
             assert!(
                 message.contains("untracked peer"),
-                "error message must contain 'untracked peer'; got: {}",
-                message
+                "error message must contain 'untracked peer'; got: {message}"
             );
         }
-        other => panic!("expected Err ack; got: {:?}", other),
+        other @ EnvNotPropagatedGapAck::Ok { .. } => {
+            panic!("expected Err ack; got: {other:?}");
+        }
     }
 
     // ProcessTree must be empty (no gap recorded).
@@ -211,7 +212,7 @@ fn env_not_propagated_gap_second_overwrites_first() {
 
     register_self_as_tracked(&sock);
 
-    let self_pid = unsafe { libc::getpid() } as u32;
+    let self_pid = current_pid_for_audit_token();
     let advisory_parent = AuditTokenWire {
         val: [0, 0, 0, 0, 0, self_pid, 0, 0],
     };
@@ -223,8 +224,7 @@ fn env_not_propagated_gap_second_overwrites_first() {
         let ack = send_env_gap_and_recv_ack(&mut stream, &gap1);
         assert!(
             matches!(ack, EnvNotPropagatedGapAck::Ok { .. }),
-            "first gap ack must be Ok; got: {:?}",
-            ack
+            "first gap ack must be Ok; got: {ack:?}"
         );
     }
 
@@ -235,8 +235,7 @@ fn env_not_propagated_gap_second_overwrites_first() {
         let ack = send_env_gap_and_recv_ack(&mut stream, &gap2);
         assert!(
             matches!(ack, EnvNotPropagatedGapAck::Ok { .. }),
-            "second gap ack must be Ok; got: {:?}",
-            ack
+            "second gap ack must be Ok; got: {ack:?}"
         );
     }
 
@@ -258,10 +257,7 @@ fn env_not_propagated_gap_second_overwrites_first() {
                 "detected_at_ms must be from second gap"
             );
         }
-        other => panic!(
-            "expected EnvNotPropagated from second gap, got: {:?}",
-            other
-        ),
+        other => panic!("expected EnvNotPropagated from second gap, got: {other:?}"),
     }
 }
 

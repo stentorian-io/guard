@@ -38,8 +38,7 @@ pub fn handle_status(state: &DaemonState) -> StatusReply {
 
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
 
     let install_info = match state.install_artifact_store.list_all() {
         Ok(artifacts) if !artifacts.is_empty() => Some(InstallInfo {
@@ -80,6 +79,7 @@ pub fn handle_status(state: &DaemonState) -> StatusReply {
     )
 }
 
+#[must_use]
 pub fn compute_daemon_state(
     recent_gaps: &[GapInfo],
     snapshot_failed: bool,

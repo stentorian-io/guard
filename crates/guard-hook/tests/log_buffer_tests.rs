@@ -1,5 +1,5 @@
-//! Concurrent-writer correctness for the new ArrayQueue-backed LogRing
-//! (BL-03 / D-43 fix). v0.1's racy SpscRing is replaced with a lock-free
+//! Concurrent-writer correctness for the new ArrayQueue-backed `LogRing`
+//! (BL-03 / D-43 fix). v0.1's racy `SpscRing` is replaced with a lock-free
 //! MPMC `crossbeam_queue::ArrayQueue<Box<[u8]>>` whose append/dump APIs are
 //! safe under concurrent writers.
 
@@ -49,10 +49,9 @@ fn concurrent_writers_no_torn_data() {
     // Each entry must match one of the patterns "msg-NN\n" exactly; tabular check
     // would be expensive, so we sanity-check that 'msg-' substring count is plausible.
     let count = s.matches("msg-").count();
-    assert!(count > 0, "expected some msg-* lines; got: {}", s);
+    assert!(count > 0, "expected some msg-* lines; got: {s}");
     assert!(
         count <= LogRing::CAPACITY,
-        "queue must not exceed capacity ({} found)",
-        count
+        "queue must not exceed capacity ({count} found)"
     );
 }

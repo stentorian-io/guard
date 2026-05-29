@@ -21,8 +21,8 @@ fn open_creates_db_and_runs_migration() {
 fn open_is_idempotent() {
     let tmp = TempDir::new().unwrap();
     let p = guard_core::paths::db_path(tmp.path());
-    let _s1 = RuleStore::open(&p).expect("open #1");
-    drop(_s1); // close
+    let s1 = RuleStore::open(&p).expect("open #1");
+    drop(s1); // close
     let _s2 = RuleStore::open(&p).expect("open #2");
     // No error means migrations are idempotent.
 }

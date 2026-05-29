@@ -1,6 +1,6 @@
 //! v0.5 — allowlist-bleed via *.workers.dev.
 //!
-//! Sibling test to v0.2's curated_deny.rs (do NOT extend that
+//! Sibling test to v0.2's `curated_deny.rs` (do NOT extend that
 //! file — the existing test must remain untouched to preserve the v0.2
 //! enforcement contract assertion shape).
 //!
@@ -11,9 +11,9 @@
 //!
 //! HARD assertion (codebase-aligned shape):
 //!   - verdict = "Deny"
-//!   - source_kind = "builtin-deny"  (non-promptable, direct policy deny)
+//!   - `source_kind` = "builtin-deny"  (non-promptable, direct policy deny)
 //!   - intel = None or absent        (the deny is from abuse-pattern, NOT a feed)
-//!   - dest_host ends with ".workers.dev"
+//!   - `dest_host` ends with ".workers.dev"
 
 use std::process::Command;
 
@@ -22,7 +22,7 @@ use guard_e2e::{DaemonHarness, cargo_workspace_root, resolve_cli, resolve_dylib,
 const DENY_HOST: &str = "exfil.workers.dev";
 const DENY_PORT: &str = "443";
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn workers_dev_deny_emits_jsonl_with_builtin_deny_and_no_intel() {
     let cli = resolve_cli();

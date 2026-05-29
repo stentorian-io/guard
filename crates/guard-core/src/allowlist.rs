@@ -4,7 +4,7 @@
 //! variants) with a single struct carrying:
 //!   - kind: allow | deny       (both directions in one type)
 //!   - tier: priority class     (non-overridable builtin denies + POL-06)
-//!   - match_type: exact | suffix | ip
+//!   - `match_type`: exact | suffix | ip
 //!   - pattern: the host or IP literal
 //!   - reason: required, surfaced in block-log attribution
 //!
@@ -33,13 +33,13 @@ pub enum MatchType {
 /// iterates a flat slice and returns at the FIRST matching entry. The numeric
 /// ordering implements the precedence stack:
 ///
-///   Tier 0: BuiltinDeny       (YAML kind:deny, non-overridable D-26)
-///   Tier 1: CuratedAllow      (YAML kind:allow, beats feed-deny POL-06)
-///   Tier 2: ConfirmedDeny     (structured IOCs from OSV feeds, overrides UserAllow)
-///   Tier 3: UserDeny          (SQLite rules kind:deny)
-///   Tier 4: UserAllow         (SQLite rules kind:allow)
-///   Tier 5: SuspectDeny       (reference-URL IOCs from feeds, prompts if TTY)
-///   Tier 6: DefaultDeny       (implicit — everything else)
+///   Tier 0: `BuiltinDeny`       (YAML kind:deny, non-overridable D-26)
+///   Tier 1: `CuratedAllow`      (YAML kind:allow, beats feed-deny POL-06)
+///   Tier 2: `ConfirmedDeny`     (structured IOCs from OSV feeds, overrides `UserAllow`)
+///   Tier 3: `UserDeny`          (`SQLite` rules kind:deny)
+///   Tier 4: `UserAllow`         (`SQLite` rules kind:allow)
+///   Tier 5: `SuspectDeny`       (reference-URL IOCs from feeds, prompts if TTY)
+///   Tier 6: `DefaultDeny`       (implicit — everything else)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum RuleTier {
@@ -70,6 +70,7 @@ impl AllowlistEntry {
     /// Bytewise host match. host MUST NOT include port or scheme.
     /// Suffix patterns MUST start with `.`; non-conforming suffix patterns
     /// are treated as no-match (do not silently widen to substring).
+    #[must_use]
     pub fn matches(&self, host: &[u8]) -> bool {
         match self.match_type {
             MatchType::Exact | MatchType::Ip => self.pattern.as_bytes() == host,
@@ -85,6 +86,7 @@ impl AllowlistEntry {
 }
 
 /// Single-entry evaluator. Returns Some(Verdict) on match, None on no-match.
+#[must_use]
 pub fn evaluate_rule(entry: &AllowlistEntry, host: &[u8]) -> Option<Verdict> {
     if entry.matches(host) {
         Some(match entry.kind {

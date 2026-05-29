@@ -1,23 +1,23 @@
 //! M005-S05: E2E tests for the full getaddrinfo → daemon Resolve → connect flow.
 //!
 //! These tests exercise the complete DNS proxy pipeline introduced in M005:
-//!   1. Hook's guard_getaddrinfo intercepts libc getaddrinfo
+//!   1. Hook's `guard_getaddrinfo` intercepts libc getaddrinfo
 //!   2. Sends Resolve IPC (tag 0x06) to daemon
 //!   3. Daemon resolves via its own clean libc (not under DYLD interpose)
 //!   4. Hook receives wire addresses, populates DNS cache (sockaddr → hostname)
 //!   5. Hook builds addrinfo linked list and returns to caller
-//!   6. Caller's subsequent connect() uses cached hostname for policy evaluation
-//!   7. connect() deny fires EHOSTUNREACH, or daemon policy gate fired EAI_FAIL at step 3
+//!   6. Caller's subsequent `connect()` uses cached hostname for policy evaluation
+//!   7. `connect()` deny fires EHOSTUNREACH, or daemon policy gate fired `EAI_FAIL` at step 3
 //!
 //! Enforcement architecture:
-//!   - The PRIMARY deny point is connect() — the hook evaluates the cached
+//!   - The PRIMARY deny point is `connect()` — the hook evaluates the cached
 //!     hostname against the snapshot/allowlist and returns EHOSTUNREACH on deny.
 //!   - The SECONDARY deny point is the daemon's Resolve handler policy gate
 //!     (S02/S03), which can reject DNS resolution before returning IPs. This
 //!     fires only when the run has a loaded snapshot with deny entries.
 //!   - For hostname-based connections (vs raw IP), Node.js surfaces the deny
-//!     path differently: EHOSTUNREACH from connect() vs ENOTFOUND from
-//!     getaddrinfo EAI_FAIL. The key invariant is that ECONNREFUSED (kernel
+//!     path differently: EHOSTUNREACH from `connect()` vs ENOTFOUND from
+//!     getaddrinfo `EAI_FAIL`. The key invariant is that ECONNREFUSED (kernel
 //!     network-layer refusal) must NEVER appear for a denied host — that
 //!     would mean Stentorian Guard let the connection through.
 //!
@@ -47,16 +47,14 @@ fn deny_target_resolves() -> bool {
     use std::net::ToSocketAddrs;
     format!("{DENY_HOST}:{DENY_PORT}")
         .to_socket_addrs()
-        .map(|i| i.count() > 0)
-        .unwrap_or(false)
+        .is_ok_and(|i| i.count() > 0)
 }
 
 fn allow_target_resolves() -> bool {
     use std::net::ToSocketAddrs;
     format!("{ALLOW_HOST}:{ALLOW_PORT}")
         .to_socket_addrs()
-        .map(|i| i.count() > 0)
-        .unwrap_or(false)
+        .is_ok_and(|i| i.count() > 0)
 }
 
 // ============================================================================
@@ -65,7 +63,7 @@ fn allow_target_resolves() -> bool {
 //         Both prove the full proxy pipeline reaches the policy gate.
 // ============================================================================
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn getaddrinfo_proxied_then_connect_denied_for_non_allowlisted_host() {
     if !deny_target_resolves() {
@@ -155,7 +153,7 @@ fn getaddrinfo_proxied_then_connect_denied_for_non_allowlisted_host() {
 //         Both outcomes prove Stentorian Guard handled the request.
 // ============================================================================
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn getaddrinfo_resolve_only_succeeds_for_non_allowlisted_host() {
     if !deny_target_resolves() {
@@ -298,7 +296,7 @@ fn getaddrinfo_allowlisted_host_resolves_and_connects() {
 //         Proves Stentorian Guard discriminates, not "everything fails"
 // ============================================================================
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn getaddrinfo_differential_deny_vs_loopback_allow() {
     if !deny_target_resolves() {
@@ -399,7 +397,7 @@ fn getaddrinfo_differential_deny_vs_loopback_allow() {
 // Test 5: Non-TTY mode — denied host exits non-zero (no prompt)
 // ============================================================================
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn getaddrinfo_non_tty_denies_without_prompt() {
     if !deny_target_resolves() {
@@ -472,7 +470,7 @@ fn getaddrinfo_non_tty_denies_without_prompt() {
 //         connect() can look up the hostname from the IP and evaluate policy.
 // ============================================================================
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn dns_cache_enables_hostname_based_connect_deny() {
     if !deny_target_resolves() {
@@ -564,7 +562,7 @@ fn dns_cache_enables_hostname_based_connect_deny() {
 //         Both prove the getaddrinfo→daemon→policy pipeline is working.
 // ============================================================================
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn connect_evil_denied_via_cached_hostname() {
     if !deny_target_resolves() {
@@ -632,7 +630,7 @@ fn connect_evil_denied_via_cached_hostname() {
 // Test 8: Daemon down — getaddrinfo returns EAI_FAIL/EAI_AGAIN, fail-closed
 // ============================================================================
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn daemon_down_getaddrinfo_fails_closed() {
     let cli = resolve_cli();

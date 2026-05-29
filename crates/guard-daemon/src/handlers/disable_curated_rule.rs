@@ -1,9 +1,9 @@
 //! crates/guard-daemon/src/handlers/disable_curated_rule.rs
 //!
-//! v1.0 — DisableCuratedRule handler (stt-guard rules disable).
+//! v1.0 — `DisableCuratedRule` handler (stt-guard rules disable).
 //!
 //! Validates that the pattern is non-empty and matches at least one
-//! curated rule before persisting the override to SQLite.
+//! curated rule before persisting the override to `SQLite`.
 
 use guard_core::AllowlistEntry;
 use guard_ipc::{DisableCuratedRule, DisableCuratedRuleReply};
@@ -132,7 +132,7 @@ mod tests {
                     "expected 'no curated rule' in message; got: {message}"
                 );
             }
-            _ => panic!("expected Err reply"),
+            DisableCuratedRuleReply::Ok { .. } => panic!("expected Err reply"),
         }
     }
 

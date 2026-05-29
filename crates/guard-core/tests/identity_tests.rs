@@ -33,13 +33,13 @@ fn pid_accessor_works_for_both_variants() {
     assert_eq!(u_id.pid(), 42);
 }
 
-/// A8: validate that audit_token_to_pid agrees with our val[5] interpretation.
+/// A8: validate that `audit_token_to_pid` agrees with our val[5] interpretation.
 /// This calls into Apple's libbsm and returns whatever the kernel says.
 #[cfg(target_os = "macos")]
 #[test]
 fn audit_token_to_pid_agrees_with_val_5() {
     let t = AuditToken::synthetic([1, 2, 3, 4, 5, 6789, 7, 8]);
-    let p = unsafe { audit_token_to_pid(&t) };
+    let p = unsafe { audit_token_to_pid(&raw const t) };
     assert_eq!(
         p, 6789,
         "audit_token_to_pid must read val[5] (knight.sc layout)"

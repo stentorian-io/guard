@@ -1,9 +1,9 @@
-//! Dylib-side blocking IPC client for ForkEvent / ExecEvent / DylibLoaded.
+//! Dylib-side blocking IPC client for `ForkEvent` / `ExecEvent` / `DylibLoaded`.
 //!
 //! D-31: synchronous — the calling hook blocks until the daemon Acks.
 //! D-33: fail-closed-on-timeout for fork events (caller kills child + EAGAIN).
 //!
-//! Socket path: derived from well_known_state_dir() at ctor time — the socket
+//! Socket path: derived from `well_known_state_dir()` at ctor time — the socket
 //! is always at `{state_dir}/stt-guard-daemon.sock`.
 //!
 //! Wire shape: each message is a `tag byte (0x03..=0x05) + length-prefixed CBOR
@@ -35,41 +35,44 @@ pub(crate) const TAG_EXEC_BLOCKED: u8 = 0x13;
 pub(crate) const TAG_PERSISTENCE_WRITE: u8 = 0x14;
 static DAEMON_SOCKET_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
+#[derive(Clone)]
+enum TestSocketOverride {
+    Use(PathBuf),
+    NoSocket,
+}
+
 /// Per-test override for the daemon socket path.
 ///
-/// OnceLock is correct for production (set once at ctor time from state dir,
+/// `OnceLock` is correct for production (set once at ctor time from state dir,
 /// never changes). Integration tests need a per-test override so each test can
-/// point at its own stub Unix socket without racing on the OnceLock.
+/// point at its own stub Unix socket without racing on the `OnceLock`.
 ///
-/// Tri-state: `None` = no override (fall through to OnceLock),
-/// `Some(None)` = explicitly no socket (NotConfigured),
-/// `Some(Some(path))` = use this path.
-static TEST_SOCKET_OVERRIDE: std::sync::Mutex<Option<Option<PathBuf>>> =
+static TEST_SOCKET_OVERRIDE: std::sync::Mutex<Option<TestSocketOverride>> =
     std::sync::Mutex::new(None);
 
 /// Override the daemon socket path for the current test. Test-only by convention.
 pub fn _set_daemon_socket_for_test(path: PathBuf) {
-    let mut g = TEST_SOCKET_OVERRIDE
-        .lock()
-        .expect("test socket override mutex");
-    *g = Some(Some(path));
+    let Ok(mut guard) = TEST_SOCKET_OVERRIDE.lock() else {
+        return;
+    };
+    *guard = Some(TestSocketOverride::Use(path));
 }
 
-/// Clear the test socket override so daemon_socket_path() returns None
-/// (NotConfigured). Call this to simulate "no daemon" in tests.
+/// Clear the test socket override so `daemon_socket_path()` returns None
+/// (`NotConfigured`). Call this to simulate "no daemon" in tests.
 pub fn _clear_daemon_socket_for_test() {
-    let mut g = TEST_SOCKET_OVERRIDE
-        .lock()
-        .expect("test socket override mutex");
-    *g = Some(None);
+    let Ok(mut guard) = TEST_SOCKET_OVERRIDE.lock() else {
+        return;
+    };
+    *guard = Some(TestSocketOverride::NoSocket);
 }
 
-/// Remove the test override entirely, falling through to the OnceLock.
+/// Remove the test override entirely, falling through to the `OnceLock`.
 pub fn _reset_daemon_socket_for_test() {
-    let mut g = TEST_SOCKET_OVERRIDE
-        .lock()
-        .expect("test socket override mutex");
-    *g = None;
+    let Ok(mut guard) = TEST_SOCKET_OVERRIDE.lock() else {
+        return;
+    };
+    *guard = None;
 }
 
 #[derive(Debug)]
@@ -107,7 +110,7 @@ impl std::fmt::Display for IpcClientError {
     }
 }
 
-/// Derive the daemon socket path from well_known_state_dir().
+/// Derive the daemon socket path from `well_known_state_dir()`.
 /// Idempotent — subsequent calls are no-ops. Called once from the dylib ctor.
 pub fn cache_daemon_socket_path() {
     DAEMON_SOCKET_PATH.get_or_init(|| {
@@ -117,19 +120,18 @@ pub fn cache_daemon_socket_path() {
 }
 
 /// Returns the daemon socket path. The test override (set via `_set_daemon_socket_for_test`)
-/// is consulted first; in production, the OnceLock value (derived from state dir at ctor
+/// is consulted first; in production, the `OnceLock` value (derived from state dir at ctor
 /// time) is used.
 pub fn daemon_socket_path() -> Option<PathBuf> {
-    let g = TEST_SOCKET_OVERRIDE
-        .lock()
-        .expect("test socket override mutex");
-    if let Some(override_val) = &*g {
-        let result = override_val.clone();
-        drop(g);
-        return result;
+    if let Ok(guard) = TEST_SOCKET_OVERRIDE.lock() {
+        match guard.as_ref() {
+            Some(TestSocketOverride::Use(path)) => return Some(path.clone()),
+            Some(TestSocketOverride::NoSocket) => return None,
+            None => {}
+        }
     }
-    drop(g);
-    DAEMON_SOCKET_PATH.get().and_then(|o| o.clone())
+
+    DAEMON_SOCKET_PATH.get().and_then(std::clone::Clone::clone)
 }
 
 pub(crate) fn connect_with_timeout(
@@ -184,11 +186,16 @@ where
     Ok(ack)
 }
 
-/// Synchronous round trip: sends a tagged ForkEvent frame, waits for ForkAck.
+/// Synchronous round trip: sends a tagged `ForkEvent` frame, waits for `ForkAck`.
 /// Returns Ok(()) on `ForkAck::Ok`, `IpcClientError::DaemonRejected(msg)` on
 /// `ForkAck::Err`, `IpcClientError::Timeout` on read/write timeout.
 ///
 /// On error the caller MUST fail-closed (D-33): kill the child, set EAGAIN.
+///
+/// # Errors
+///
+/// Returns an IPC client error when the daemon socket is missing, unavailable,
+/// times out, rejects the event, or sends an invalid frame.
 pub fn send_fork_event_sync(
     parent_token: AuditTokenWire,
     child_pid: i32,
@@ -208,7 +215,7 @@ pub fn send_fork_event_sync(
     }
 }
 
-/// Synchronous round trip for ExecEvent. The dylib supplies `target_path` as
+/// Synchronous round trip for `ExecEvent`. The dylib supplies `target_path` as
 /// bytes already copied from the user's `path` argument; this function caps
 /// the slice at `ExecEvent::MAX_TARGET_PATH (1024)` before serializing
 /// (T-02-01-06 closure carry-forward).
@@ -217,7 +224,7 @@ pub fn send_fork_event_sync(
 /// time (closes v0.1 milestone audit BLOCKER #1 — LOG-02 + VAL-01). Pass
 /// `Vec::new()` for callers that have no envp to walk (e.g. fork-without-
 /// exec); pass the result of
-/// `pm_env_filter::extract_pm_env_from_envp{_mut}` for exec/posix_spawn
+/// `pm_env_filter::extract_pm_env_from_envp{_mut}` for `exec/posix_spawn`
 /// shadows.
 ///
 /// When `pm_env` is non-empty the wire frame is upgraded to
@@ -225,6 +232,11 @@ pub fn send_fork_event_sync(
 /// when empty, the frame stays at `IPC_SCHEMA_V2` and serializes
 /// identically to the previous shape (forward-compatible — daemon
 /// `handle_exec_event_frame` accepts both V2 and V3).
+///
+/// # Errors
+///
+/// Returns an IPC client error when the daemon cannot be reached, rejects the
+/// event, times out, or returns an invalid acknowledgment.
 pub fn send_exec_event_sync(
     audit_token: AuditTokenWire,
     target_path: &[u8],
@@ -253,10 +265,15 @@ pub fn send_exec_event_sync(
     }
 }
 
-/// Synchronous round trip for DylibLoaded (D-35). Best-effort: caller logs
-/// failure but does NOT fail-closed (the wrapped command's main() runs even if
+/// Synchronous round trip for `DylibLoaded` (D-35). Best-effort: caller logs
+/// failure but does NOT fail-closed (the wrapped command's `main()` runs even if
 /// this times out — the daemon's gap-detector then records
 /// `UnknownInjectionFailure`).
+///
+/// # Errors
+///
+/// Returns an IPC client error when the daemon is unavailable, rejects the
+/// event, times out, or returns an invalid frame.
 pub fn send_dylib_loaded_sync(
     audit_token: AuditTokenWire,
     timeout_ms: u64,
@@ -284,7 +301,12 @@ pub fn send_dylib_loaded_sync(
 ///   - `Err(IpcClientError::Timeout)` if the round-trip exceeds `timeout_ms`
 ///
 /// Called on the libc connect cache-miss path — guarded by the caller to run
-/// at most MAX_RESOLVE_ATTEMPTS = 4 times per connect invocation.
+/// at most `MAX_RESOLVE_ATTEMPTS` = 4 times per connect invocation.
+///
+/// # Errors
+///
+/// Returns an IPC client error when the daemon is unavailable, denies the
+/// destination, times out, or returns an invalid reply.
 pub fn send_resolve_sync(
     host: &str,
     port: u16,
@@ -313,14 +335,19 @@ pub fn send_resolve_sync(
     }
 }
 
-/// Best-effort round trip for EnvNotPropagatedGap (TREE-06 — gap-closure 02-09).
+/// Best-effort round trip for `EnvNotPropagatedGap` (TREE-06 — gap-closure 02-09).
 ///
 /// Like `send_dylib_loaded_sync` (D-35), this does NOT fail-closed — the
-/// calling posix_spawn shadow continues regardless of the result. TREE-06 is
+/// calling `posix_spawn` shadow continues regardless of the result. TREE-06 is
 /// an informational gap detector, not enforcement.
 ///
 /// Returns `Ok(())` on `EnvNotPropagatedGapAck::Ok`, `Err(DaemonRejected)` on
 /// `Err`, and `Err(Timeout)` / `Err(NotConfigured)` on IPC failures.
+///
+/// # Errors
+///
+/// Returns an IPC client error when the best-effort notification cannot be
+/// delivered or decoded.
 pub fn send_env_not_propagated_gap_sync(
     parent: AuditTokenWire,
     child_binary_path: &[u8],
@@ -360,14 +387,13 @@ pub fn send_deny_notify(
 ) {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
     let ev = DenyNotify {
         schema_version: IPC_SCHEMA_V4,
         audit_token,
-        dest_host: dest_host.map(|s| s.to_string()),
+        dest_host: dest_host.map(std::string::ToString::to_string),
         dest_port,
-        dest_ip: dest_ip.map(|s| s.to_string()),
+        dest_ip: dest_ip.map(std::string::ToString::to_string),
         source_surface: source_surface.to_string(),
         denied_at_ms: now_ms,
         source_kind: source_kind.to_string(),
@@ -379,8 +405,7 @@ pub fn send_deny_notify(
 pub fn send_exec_blocked(audit_token: AuditTokenWire, target_path: &[u8], reason: &str) {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
     let ev = ExecBlocked::new(audit_token, target_path, reason, now_ms);
     let _ = send_tagged_and_recv_ack::<ExecBlocked, ExecBlockedAck>(TAG_EXEC_BLOCKED, &ev, 50);
 }
@@ -388,8 +413,7 @@ pub fn send_exec_blocked(audit_token: AuditTokenWire, target_path: &[u8], reason
 pub fn send_persistence_write(audit_token: AuditTokenWire, target_path: &[u8], category: &str) {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
     let ev = PersistenceWrite::new(audit_token, target_path, category, now_ms);
     let _ = send_tagged_and_recv_ack::<PersistenceWrite, PersistenceWriteAck>(
         TAG_PERSISTENCE_WRITE,
@@ -412,8 +436,9 @@ pub fn send_persistence_write(audit_token: AuditTokenWire, target_path: &[u8], c
 /// `[u8; 1024]` so the copy is `O(min(strlen(p), 1024))` worst-case.
 ///
 /// # Safety
+///
 /// `p` must either be null or point to a valid NUL-terminated C string.
-pub fn copy_cstr_to_buf(p: *const c_char, buf: &mut [u8]) -> usize {
+pub unsafe fn copy_cstr_to_buf(p: *const c_char, buf: &mut [u8]) -> usize {
     if p.is_null() {
         return 0;
     }
@@ -421,7 +446,7 @@ pub fn copy_cstr_to_buf(p: *const c_char, buf: &mut [u8]) -> usize {
     while n < buf.len() {
         // SAFETY: caller's invariant — p points to a NUL-terminated C string,
         // so reading bytes up to and including the first NUL is in-bounds.
-        let b = unsafe { *p.add(n) as u8 };
+        let b = unsafe { *p.cast::<u8>().add(n) };
         if b == 0 {
             break;
         }

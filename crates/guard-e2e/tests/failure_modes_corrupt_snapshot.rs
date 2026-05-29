@@ -9,19 +9,20 @@
 //! because `crates/guard-cli/src/spawn.rs:38` strips and re-sets the
 //! manifest envp unconditionally (RESEARCH §A1 verified at plan time). We use
 //! node (not curl) because curl is hardened-runtime on macos-14 and would
-//! strip DYLD_INSERT_LIBRARIES on exec — the dylib would never load and the
+//! strip `DYLD_INSERT_LIBRARIES` on exec — the dylib would never load and the
 //! test would silently no-op. Node from setup-node@v4 is non-hardened
 //! (RESEARCH §A4) so DYLD injection is honored at node ctor.
 //!
-//! The dylib's snapshot::load_from_env returns LoadError::Codec, sets
-//! FAIL_CLOSED=true, and every subsequent connect denies. node observes
+//! The dylib's `snapshot::load_from_env` returns `LoadError::Codec`, sets
+//! `FAIL_CLOSED=true`, and every subsequent connect denies. node observes
 //! the connect failure and prints DENIED.
 
+use sha2::{Digest, Sha256};
 use std::process::Command;
 
 use guard_e2e::{DaemonHarness, resolve_dylib, resolve_node};
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn corrupt_snapshot_causes_dylib_to_fail_closed() {
     let dylib = resolve_dylib();
@@ -56,9 +57,8 @@ fn corrupt_snapshot_causes_dylib_to_fail_closed() {
     // path; we want LoadError::Codec to fire). The digest_hex is the SHA-256
     // of the garbage bytes. Manifest format = `{snapshot_path}\ndigest={hex}\n`
     // per crates/guard-hook/tests/snapshot_loader_tests.rs.
-    use sha2::{Digest, Sha256};
     let digest_hex = format!("{:x}", Sha256::digest(garbage));
-    let manifest_content = format!("{}\ndigest={}\n", snap_path.display(), digest_hex,);
+    let manifest_content = format!("{}\ndigest={}\n", snap_path.display(), digest_hex);
     std::fs::write(&manifest_path, manifest_content).expect("write manifest");
 
     // Spawn node directly with DYLD_INSERT_LIBRARIES + manifest envp injected.

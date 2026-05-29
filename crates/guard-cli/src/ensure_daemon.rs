@@ -3,7 +3,7 @@
 //! Called from `main.rs` before any CLI command that needs IPC. Verifies the
 //! hardened installation is present, then checks daemon reachability.
 //! Linux v2 remains development-only, so it starts a sibling daemon binary
-//! instead of pretending the macOS LaunchDaemon install model exists there.
+//! instead of pretending the macOS `LaunchDaemon` install model exists there.
 
 use std::path::Path;
 #[cfg(target_os = "linux")]
@@ -24,14 +24,20 @@ const RETRY_DELAYS: &[Duration] = &[
 
 /// Verify or start the daemon path appropriate for the current platform.
 /// macOS requires hardened installation; Linux v2 starts a development daemon.
-pub fn ensure_daemon(sock: &Path, _state_dir: &Path) -> Result<(), CliError> {
+///
+/// # Errors
+///
+/// Returns an error when the install gate fails or the daemon cannot be made
+/// reachable.
+pub fn ensure_daemon(sock: &Path, state_dir: &Path) -> Result<(), CliError> {
     #[cfg(target_os = "linux")]
     {
-        ensure_linux_development_daemon(sock, _state_dir)
+        ensure_linux_development_daemon(sock, state_dir)
     }
 
     #[cfg(not(target_os = "linux"))]
     {
+        let _ = state_dir;
         ensure_installed_daemon(sock)
     }
 }
@@ -134,6 +140,10 @@ fn daemon_binary_next_to_current_exe(current_exe: &Path) -> Result<PathBuf, CliE
 ///
 /// Skipped when `STT_GUARD_STATE_DIR` is set — the caller is explicitly
 /// managing a non-system daemon (dev/test harness).
+///
+/// # Errors
+///
+/// Returns an error when the hardened installation is missing or unhealthy.
 pub fn require_installed() -> Result<(), CliError> {
     if std::env::var_os(guard_core::paths::ENV_STATE_DIR).is_some() {
         return Ok(());

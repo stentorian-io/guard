@@ -154,6 +154,11 @@ pub enum RuleSignatureError {
     SignatureMismatch,
 }
 
+/// Serialize a rule signature payload in canonical CBOR form.
+///
+/// # Errors
+///
+/// Returns `RuleSignatureError::Encode` if CBOR serialization fails.
 pub fn canonical_rule_payload_bytes(
     payload: &RuleSignaturePayloadV1,
 ) -> Result<Vec<u8>, RuleSignatureError> {
@@ -163,6 +168,11 @@ pub fn canonical_rule_payload_bytes(
     Ok(bytes)
 }
 
+/// Serialize a snapshot signature payload in canonical CBOR form.
+///
+/// # Errors
+///
+/// Returns `RuleSignatureError::Encode` if CBOR serialization fails.
 pub fn canonical_snapshot_payload_bytes(
     payload: &SnapshotSignaturePayloadV1,
 ) -> Result<Vec<u8>, RuleSignatureError> {
@@ -172,6 +182,11 @@ pub fn canonical_snapshot_payload_bytes(
     Ok(bytes)
 }
 
+/// Serialize a management action payload in canonical CBOR form.
+///
+/// # Errors
+///
+/// Returns `RuleSignatureError::Encode` if CBOR serialization fails.
 pub fn canonical_management_action_payload_bytes(
     payload: &ManagementActionPayloadV1,
 ) -> Result<Vec<u8>, RuleSignatureError> {
@@ -181,10 +196,18 @@ pub fn canonical_management_action_payload_bytes(
     Ok(bytes)
 }
 
+#[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex_lower(&Sha256::digest(bytes))
 }
 
+/// Verify a signed user rule payload against the configured signer policy.
+///
+/// # Errors
+///
+/// Returns a structured signature error when the payload schema, signature
+/// scheme, signer kind, public key hash, signed payload hash, key encoding, or
+/// signature verification fails.
 pub fn verify_rule_signature(
     payload: &RuleSignaturePayloadV1,
     signature: &RuleSignatureV1,
@@ -223,6 +246,13 @@ pub fn verify_rule_signature(
         .map_err(|_| RuleSignatureError::SignatureMismatch)
 }
 
+/// Verify a signed snapshot payload against the configured signer policy.
+///
+/// # Errors
+///
+/// Returns a structured signature error when the payload schema, signature
+/// scheme, signer kind, public key hash, signed payload hash, key encoding, or
+/// signature verification fails.
 pub fn verify_snapshot_signature(
     payload: &SnapshotSignaturePayloadV1,
     signature: &SnapshotSignatureV1,
@@ -261,6 +291,13 @@ pub fn verify_snapshot_signature(
         .map_err(|_| RuleSignatureError::SignatureMismatch)
 }
 
+/// Verify a signed management action payload against the configured signer policy.
+///
+/// # Errors
+///
+/// Returns a structured signature error when the payload schema, signature
+/// scheme, signer kind, public key hash, signed payload hash, key encoding, or
+/// signature verification fails.
 pub fn verify_management_action_signature(
     payload: &ManagementActionPayloadV1,
     signature: &RuleSignatureV1,
@@ -331,6 +368,12 @@ pub mod test_support {
     use p256::ecdsa::SigningKey;
     use p256::ecdsa::signature::Signer;
 
+    /// Return the deterministic test signer tuple.
+    ///
+    /// # Errors
+    ///
+    /// Returns `RuleSignatureError::InvalidPublicKey` if the fixed test scalar
+    /// cannot be converted into a signing key.
     pub fn test_simulator_public_signer() -> Result<(String, String, Vec<u8>), RuleSignatureError> {
         let signing_key =
             SigningKey::from_slice(&[7u8; 32]).map_err(|_| RuleSignatureError::InvalidPublicKey)?;
@@ -346,6 +389,12 @@ pub mod test_support {
         ))
     }
 
+    /// Sign a rule payload with the deterministic test signer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an encoding or key-construction error if payload serialization or
+    /// test key creation fails.
     pub fn sign_with_test_simulator(
         payload: &RuleSignaturePayloadV1,
     ) -> Result<RuleSignatureV1, RuleSignatureError> {
@@ -367,6 +416,12 @@ pub mod test_support {
         })
     }
 
+    /// Sign a snapshot payload with the deterministic test signer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an encoding or key-construction error if payload serialization or
+    /// test key creation fails.
     pub fn sign_snapshot_with_test_simulator(
         payload: &SnapshotSignaturePayloadV1,
     ) -> Result<SnapshotSignatureV1, RuleSignatureError> {
@@ -388,6 +443,12 @@ pub mod test_support {
         })
     }
 
+    /// Sign a management action payload with the deterministic test signer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an encoding or key-construction error if payload serialization or
+    /// test key creation fails.
     pub fn sign_management_action_with_test_simulator(
         payload: &ManagementActionPayloadV1,
     ) -> Result<RuleSignatureV1, RuleSignatureError> {

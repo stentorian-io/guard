@@ -17,6 +17,12 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
+/// Atomically write the active snapshot manifest.
+///
+/// # Errors
+///
+/// Returns filesystem errors from temporary-file creation, writes, sync, or
+/// rename.
 pub fn write(state_dir: &Path, snap: &PublishedSnapshot) -> std::io::Result<()> {
     let tmp = manifest_tmp_path(state_dir);
     let final_path = manifest_path(state_dir);
@@ -39,7 +45,12 @@ pub fn write(state_dir: &Path, snap: &PublishedSnapshot) -> std::io::Result<()> 
 }
 
 /// Reader-side helper: parses a manifest file's contents (NOT the path —
-/// caller has already validated the path lives under state_dir).
+/// caller has already validated the path lives under `state_dir`).
+///
+/// # Errors
+///
+/// Returns parse errors when required lines are missing or the digest line is
+/// malformed.
 pub fn parse(contents: &str) -> Result<ParsedManifest, ParseError> {
     let mut lines = contents.lines();
     let path = lines.next().ok_or(ParseError::MissingPath)?.to_string();

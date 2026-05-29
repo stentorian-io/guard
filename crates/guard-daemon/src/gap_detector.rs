@@ -1,16 +1,16 @@
 //! Two-step coverage-gap detector.
 //!
-//! When the daemon receives an ExecEvent and the calling process's csops
+//! When the daemon receives an `ExecEvent` and the calling process's csops
 //! flags indicate hardened-runtime, this module schedules a 500 ms timer
-//! that watches for a matching DylibLoaded arrival. If none arrives, the
-//! gap is recorded on the relevant node in the ProcessTree. Enforced arms
+//! that watches for a matching `DylibLoaded` arrival. If none arrives, the
+//! gap is recorded on the relevant node in the `ProcessTree`. Enforced arms
 //! also kill the process so it cannot continue outside Stentorian Guard coverage.
-//! If DylibLoaded arrives in time (cancel called), the gap is NOT recorded.
+//! If `DylibLoaded` arrives in time (cancel called), the gap is NOT recorded.
 //!
-//! Implementation: one std::thread per armed timer. Each thread sleeps up
+//! Implementation: one `std::thread` per armed timer. Each thread sleeps up
 //! to 500 ms or until a cancel signal arrives via crossbeam-channel.
 //! Threads are short-lived (≤ 500 ms) so peak thread count is bounded
-//! by ExecEvent rate × 500 ms.
+//! by `ExecEvent` rate × 500 ms.
 //!
 //! v0.3: on gap fire, ALSO push to `recent_gaps` ring and
 //! emit a `LogRow::Gap` to `log_writer` (repudiation mitigation).
@@ -42,23 +42,24 @@ enum TimeoutAction {
 }
 
 impl GapDetector {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Arm a timeout. If `cancel(audit_token)` is not called within
-    /// GAP_TIMEOUT_MS, sets `pending_gap` on the node in `tree`.
+    /// `GAP_TIMEOUT_MS`, sets `pending_gap` on the node in `tree`.
     /// Re-arming the same token cancels the prior timer.
     ///
     /// v0.3: on timeout, ALSO push to `recent_gaps` + `log_writer`
     /// (two independent forensic records of every gap).
     pub fn arm(&self, audit_token: AuditToken, pending_gap: CoverageGap, tree: Arc<ProcessTree>) {
-        self.arm_with_forensics(audit_token, pending_gap, tree, None, None)
+        self.arm_with_forensics(audit_token, pending_gap, tree, None, None);
     }
 
     /// Extended arm that also records the gap in `recent_gaps` and `log_writer`
-    /// when provided. Called from ipc_server.rs after v0.3 wires
-    /// the forensic sinks into the ExecEvent / ForkEvent handlers.
+    /// when provided. Called from `ipc_server.rs` after v0.3 wires
+    /// the forensic sinks into the `ExecEvent` / `ForkEvent` handlers.
     pub fn arm_with_forensics(
         &self,
         audit_token: AuditToken,
@@ -77,7 +78,7 @@ impl GapDetector {
         );
     }
 
-    /// Arm a timeout that fail-closes the process when the DylibLoaded
+    /// Arm a timeout that fail-closes the process when the `DylibLoaded`
     /// handshake never arrives. This is for coverage gaps whose process would
     /// otherwise continue outside Stentorian Guard enforcement.
     pub fn arm_enforced_with_forensics(
@@ -115,14 +116,14 @@ impl GapDetector {
         let _old = self
             .pending
             .lock()
-            .expect("gap_detector pending")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(audit_token, tx);
 
         std::thread::spawn(move || {
             match rx.recv_timeout(Duration::from_millis(GAP_TIMEOUT_MS)) {
-                Ok(()) => {
+                Ok(()) | Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
                     // Cancellation signal received — DylibLoaded arrived in time.
-                    // Do not record gap.
+                    // Do not record gap. A disconnected channel means this arm was replaced.
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     // No DylibLoaded within window → record the gap.
@@ -160,8 +161,7 @@ impl GapDetector {
                     };
                     let detected_at_ms = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
+                        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
                     let binary_path_opt = if binary_path.is_empty() {
                         None
                     } else {
@@ -205,17 +205,16 @@ impl GapDetector {
                     }
                     timeout_action.apply(audit_token, &pending_gap);
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                    // Detector dropped tx (re-armed or detector freed).
-                    // Do not record — the new arm owns this slot now.
-                }
             }
         });
     }
 
     /// Cancel a pending timer. Returns true if there was a pending timer to cancel.
     pub fn cancel(&self, audit_token: &AuditToken) -> bool {
-        let mut g = self.pending.lock().expect("gap_detector pending");
+        let mut g = self
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match g.remove(audit_token) {
             Some(tx) => {
                 let _ = tx.send(());
@@ -225,8 +224,12 @@ impl GapDetector {
         }
     }
 
+    #[must_use]
     pub fn pending_count(&self) -> usize {
-        self.pending.lock().expect("gap_detector pending").len()
+        self.pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 }
 
@@ -247,11 +250,13 @@ fn kill_gap_process(audit_token: AuditToken, gap: &CoverageGap) {
         return;
     }
 
-    let pid = audit_token.val[5] as libc::pid_t;
-    if pid <= 0 {
-        warn!(pid, "coverage gap fail-closed skipped: invalid pid");
+    let Some(pid) = audit_token_pid(audit_token) else {
+        warn!(
+            pid = audit_token.val[5],
+            "coverage gap fail-closed skipped: invalid pid"
+        );
         return;
-    }
+    };
 
     if !pidversion_still_matches(pid, audit_token.val[7]) {
         warn!(
@@ -288,6 +293,11 @@ fn kill_gap_process(audit_token: AuditToken, gap: &CoverageGap) {
             "coverage gap fail-closed failed to kill process"
         );
     }
+}
+
+fn audit_token_pid(audit_token: AuditToken) -> Option<libc::pid_t> {
+    let pid = libc::pid_t::try_from(audit_token.val[5]).ok()?;
+    (pid > 0).then_some(pid)
 }
 
 fn gap_kind(gap: &CoverageGap) -> &'static str {

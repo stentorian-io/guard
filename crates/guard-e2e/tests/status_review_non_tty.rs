@@ -2,7 +2,7 @@
 //!
 //! v0.7 — `status review` is interactive only.
 //! Non-TTY callers must exit 64 with the "developer machine" hint emitted
-//! directly by status::review::run (eprintln + return Ok(64) BEFORE any
+//! directly by `status::review::run` (eprintln + return Ok(64) BEFORE any
 //! daemon IPC), so the test does not require a live daemon.
 
 #[cfg(target_os = "macos")]

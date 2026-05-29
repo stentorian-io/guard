@@ -1,6 +1,6 @@
 //! JSONL log parser for persistence-write gap events (M003-S05).
 //!
-//! Mirrors denial_log.rs but filters for `event=gap, gap_kind=persistence-write`.
+//! Mirrors `denial_log.rs` but filters for `event=gap, gap_kind=persistence-write`.
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -17,6 +17,11 @@ pub struct PersistenceEntry {
     pub pid: Option<u64>,
 }
 
+/// Walk the JSONL log filtering persistence-write gap events.
+///
+/// # Errors
+///
+/// Returns an error when the log exists but cannot be opened.
 pub fn filter_persistence_writes(
     log_path: &Path,
     run_uuid: Option<&str>,
@@ -29,9 +34,8 @@ pub fn filter_persistence_writes(
     let reader = BufReader::new(file);
     let mut out = Vec::new();
     for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => continue,
+        let Ok(line) = line else {
+            continue;
         };
         if line.trim().is_empty() {
             continue;
@@ -69,7 +73,7 @@ pub fn filter_persistence_writes(
         let pid = v
             .get("process")
             .and_then(|p| p.get("pid"))
-            .and_then(|p| p.as_u64());
+            .and_then(serde_json::Value::as_u64);
 
         if binary_path.is_empty() {
             continue;

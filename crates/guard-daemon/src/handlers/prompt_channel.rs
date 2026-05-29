@@ -2,11 +2,11 @@
 //!
 //! v0.3 — long-lived prompt channel handler.
 //!
-//! After PromptChannelInit ACK, this thread owns the stream until EOF or run exit.
+//! After `PromptChannelInit` ACK, this thread owns the stream until EOF or run exit.
 //! Pitfall 4: must run in a dedicated thread (not a worker pool slot).
 //!
-//! BLOCKER: PromptResponse dispatch resolves the parked oneshot
-//! in DeferredResolveTable; the dylib's blocked Resolve IPC handler thread wakes
+//! BLOCKER: `PromptResponse` dispatch resolves the parked oneshot
+//! in `DeferredResolveTable`; the dylib's blocked Resolve IPC handler thread wakes
 //! and replies with the user-chosen verdict.
 
 use std::os::unix::net::UnixStream;
@@ -14,30 +14,32 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use guard_ipc::{PackageContext, PromptCancel, PromptRequest, PromptResponse, PromptVerdict};
+use guard_ipc::{
+    InsertUserRule, PackageContext, PromptCancel, PromptRequest, PromptResponse, PromptVerdict,
+    RulePattern,
+};
 
-use crate::ipc_server::DaemonState;
+use crate::ipc_server::{DaemonState, DeferredEntry};
 use crate::log_writer::{
     self, Decision, GapRecord, JSONL_SCHEMA_VERSION, LogRow, ProcessCtxLog, RootCtxLog, now_rfc3339,
 };
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "frame_kind", rename_all = "snake_case")]
-#[allow(clippy::large_enum_variant)]
 pub enum ClientChannelFrame {
-    Response(PromptResponse),
+    Response(Box<PromptResponse>),
     Cancel(PromptCancel),
 }
 
 /// Cap. Beyond this many concurrent prompt channels, the dispatch arm in
-/// ipc_server.rs Err-Acks instead of spawning a new handler thread.
+/// `ipc_server.rs` Err-Acks instead of spawning a new handler thread.
 pub const MAX_CONCURRENT_CHANNELS: usize = 64;
 
-pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
+pub fn run(mut stream: UnixStream, state: &Arc<DaemonState>, run_uuid: &str) {
     use crossbeam_channel::{bounded, select};
 
     let (tx, rx) = bounded::<PromptRequest>(64);
-    state.process_tree.set_prompt_channel(&run_uuid, tx);
+    state.process_tree.set_prompt_channel(run_uuid, tx);
 
     // Spawn a reader thread that converts stream reads → ClientChannelFrame events.
     let (reader_tx, reader_rx) = bounded::<ClientChannelFrame>(64);
@@ -45,18 +47,18 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = %e, "prompt_channel: try_clone failed");
-            state.process_tree.take_prompt_channel(&run_uuid);
+            state.process_tree.take_prompt_channel(run_uuid);
             return;
         }
     };
-    let reader_uuid = run_uuid.clone();
+    let reader_uuid = run_uuid.to_string();
     // CR-09: distinguish benign EOF from decode errors so we can log decode
     // problems explicitly. In both cases we tear down promptly to keep the
     // registry clean — a Resolve handler that parks on a stale channel would
     // otherwise block until the channel is naturally torn down by an EPIPE
     // on a write attempt, allowing a flurry of PromptRequests to queue up
     // first.
-    let reader_state = Arc::clone(&state);
+    let reader_state = Arc::clone(state);
     let reader_uuid_for_cleanup = reader_uuid.clone();
     // WR-02: capture the spawn result and tear down on failure. Previously a
     // `let _ = ... .spawn(...)` swallowed any spawn error silently. With no
@@ -116,7 +118,7 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
             run_uuid = %run_uuid,
             "prompt_channel: reader thread spawn failed; tearing down channel"
         );
-        state.process_tree.take_prompt_channel(&run_uuid);
+        state.process_tree.take_prompt_channel(run_uuid);
         return;
     }
 
@@ -138,8 +140,8 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
                 Err(_) => break,
             },
             recv(reader_rx) -> f => match f {
-                Ok(ClientChannelFrame::Response(resp)) => dispatch_response(&state, &run_uuid, resp),
-                Ok(ClientChannelFrame::Cancel(c)) => dispatch_cancel(&state, &run_uuid, c),
+                Ok(ClientChannelFrame::Response(resp)) => dispatch_response(state, run_uuid, &resp),
+                Ok(ClientChannelFrame::Cancel(c)) => dispatch_cancel(state, run_uuid, &c),
                 Err(_) => break,
             },
             recv(gc_tick) -> _ => {
@@ -155,191 +157,37 @@ pub fn run(mut stream: UnixStream, state: Arc<DaemonState>, run_uuid: String) {
     // this, dedup state for terminated runs accumulates until daemon
     // restart — gc_expired is only called from this thread's gc_tick arm,
     // which stops ticking after the loop exits.
-    let drained = state.deferred_resolve.drain_for_run(&run_uuid);
+    let drained = state.deferred_resolve.drain_for_run(run_uuid);
     for (host, port) in drained {
-        state.prompt_dedup.forget(&run_uuid, &host, port);
+        state.prompt_dedup.forget(run_uuid, &host, port);
     }
-    state.process_tree.take_prompt_channel(&run_uuid);
-    let _ = state.baseline_staging.take(&run_uuid);
+    state.process_tree.take_prompt_channel(run_uuid);
+    let _ = state.baseline_staging.take(run_uuid);
     tracing::debug!(run_uuid = %run_uuid, "prompt_channel thread exit");
 }
 
-fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) {
+fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: &PromptResponse) {
     let now = now_rfc3339();
-    // CR-02: enforce per-run prompt_id ownership. Without this, a malicious or
-    // misbehaving dylib running under run-A could send a PromptResponse with
-    // a prompt_id parked under run-B (sequential 8-digit ids are predictable),
-    // causing the daemon to insert allow rules for run-B, wake run-B's parked
-    // Resolve handler, AND mis-attribute the Decision row to run-A's run_uuid.
-    let entry_opt = match state
-        .deferred_resolve
-        .take_full_if_owned(&resp.prompt_id, run_uuid)
-    {
-        Ok(opt) => opt,
-        Err(foreign_run_uuid) => {
-            tracing::warn!(
-                run_uuid = %run_uuid,
-                foreign_run_uuid = %foreign_run_uuid,
-                foreign_prompt_id = %resp.prompt_id,
-                "CR-02: refused cross-run PromptResponse (per-run prompt_id ownership)"
-            );
-            return;
-        }
-    };
-    // BLOCKER / WR-11: peek the deferred entry to recover the (host, port)
-    // tuple for the row we're about to emit. We must NOT call take_full here
-    // because the verdict signal (sender.send) needs to fire AFTER the
-    // decision row is written. Look up via take_full at the end and recover
-    // the host before then via a deferred-table snapshot read.
-    //
-    // The DeferredResolveTable currently only exposes `take_full`, so do a
-    // best-effort read by taking the entry up front, holding the host/port,
-    // and re-routing the sender after the row emit. Since we're about to
-    // resolve the entry anyway this re-orders one tiny step without changing
-    // observable behavior.
-    let dest_host = entry_opt
-        .as_ref()
-        .map(|e| e.host.clone())
-        .unwrap_or_default();
-    let dest_port = entry_opt.as_ref().map(|e| e.port).unwrap_or(0);
-    // v0.5 / CONTEXT C-01: pull the package_context that the
-    // Resolve handler stashed on the DeferredEntry at park-time, so the JSONL
-    // Decision row emitted below carries it. Cloned because entry_opt is
-    // consumed by the entry.sender.send(...) path further down.
-    let entry_pkg: Option<guard_ipc::PackageContext> =
-        entry_opt.as_ref().and_then(|e| e.package_context.clone());
+    let entry_opt = take_prompt_response_entry(state, run_uuid, resp);
+    let response_context = prompt_response_context(entry_opt.as_ref());
 
-    let verdict_for_dylib = match &resp.verdict {
-        PromptVerdict::AllowOnce => {
-            emit_decision_row(
-                state,
+    let emit = |verdict: &'static str, source_kind: &str| {
+        emit_decision_row(
+            state,
+            &DecisionRowInput {
                 run_uuid,
-                &now,
-                "Allow",
-                "prompt_allow_once",
-                &dest_host,
-                dest_port,
-                entry_pkg.as_ref(),
-            );
-            guard_core::Verdict::Allow
-        }
-        PromptVerdict::AllowAlwaysMachine => {
-            match (resp.signed_rule.as_ref(), resp.rule_pattern.as_ref()) {
-                (None, _) => {
-                    tracing::warn!(
-                        run_uuid = %run_uuid,
-                        host = %dest_host,
-                        "prompt allow-always missing signed rule attestation; denying fail-closed"
-                    );
-                    emit_decision_row(
-                        state,
-                        run_uuid,
-                        &now,
-                        "Deny",
-                        "prompt_allow_machine_missing_signature",
-                        &dest_host,
-                        dest_port,
-                        entry_pkg.as_ref(),
-                    );
-                    guard_core::Verdict::Deny
-                }
-                (Some(_), None) => {
-                    tracing::warn!(
-                        run_uuid = %run_uuid,
-                        host = %dest_host,
-                        "prompt allow-always missing rule pattern; denying fail-closed"
-                    );
-                    emit_decision_row(
-                        state,
-                        run_uuid,
-                        &now,
-                        "Deny",
-                        "prompt_allow_machine_missing_pattern",
-                        &dest_host,
-                        dest_port,
-                        entry_pkg.as_ref(),
-                    );
-                    guard_core::Verdict::Deny
-                }
-                (Some(signed_rule), Some(rp)) => {
-                    if signed_rule.kind != "allow"
-                        || signed_rule.match_type != rp.match_type
-                        || signed_rule.pattern != rp.pattern
-                        || signed_rule.run_uuid.as_deref() != Some(run_uuid)
-                    {
-                        tracing::warn!(
-                            run_uuid = %run_uuid,
-                            host = %dest_host,
-                            "prompt allow-always signed rule does not match prompt response; denying fail-closed"
-                        );
-                        emit_decision_row(
-                            state,
-                            run_uuid,
-                            &now,
-                            "Deny",
-                            "prompt_allow_machine_signature_mismatch",
-                            &dest_host,
-                            dest_port,
-                            entry_pkg.as_ref(),
-                        );
-                        guard_core::Verdict::Deny
-                    } else {
-                        match crate::handlers::insert_user_rule::handle_insert_user_rule(
-                            signed_rule,
-                            &state.rule_store,
-                            state.rule_signature_policy,
-                        ) {
-                            guard_ipc::InsertUserRuleReply::Ok { .. } => {
-                                emit_decision_row(
-                                    state,
-                                    run_uuid,
-                                    &now,
-                                    "Allow",
-                                    "prompt_allow_machine",
-                                    &dest_host,
-                                    dest_port,
-                                    entry_pkg.as_ref(),
-                                );
-                                guard_core::Verdict::Allow
-                            }
-                            guard_ipc::InsertUserRuleReply::Err { message, .. } => {
-                                tracing::warn!(
-                                    run_uuid = %run_uuid,
-                                    host = %dest_host,
-                                    error = %message,
-                                    "prompt allow-always signed rule rejected; denying fail-closed"
-                                );
-                                emit_decision_row(
-                                    state,
-                                    run_uuid,
-                                    &now,
-                                    "Deny",
-                                    "prompt_allow_machine_signature_rejected",
-                                    &dest_host,
-                                    dest_port,
-                                    entry_pkg.as_ref(),
-                                );
-                                guard_core::Verdict::Deny
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        PromptVerdict::Deny => {
-            emit_decision_row(
-                state,
-                run_uuid,
-                &now,
-                "Deny",
-                "prompt_deny",
-                &dest_host,
-                dest_port,
-                entry_pkg.as_ref(),
-            );
-            guard_core::Verdict::Deny
-        }
+                ts: &now,
+                verdict,
+                source_kind,
+                dest_host: &response_context.dest_host,
+                dest_port: response_context.dest_port,
+                package_context: response_context.package_context.as_ref(),
+            },
+        );
     };
+
+    let verdict_for_dylib =
+        verdict_for_prompt_response(state, run_uuid, resp, &response_context.dest_host, emit);
 
     // Signal the parked Resolve handler thread.
     // WR-11: forget() the dedup entry so PromptDedup doesn't pile up over the
@@ -357,7 +205,149 @@ fn dispatch_response(state: &DaemonState, run_uuid: &str, resp: PromptResponse) 
     }
 }
 
-fn dispatch_cancel(state: &DaemonState, run_uuid: &str, cancel: PromptCancel) {
+fn take_prompt_response_entry(
+    state: &DaemonState,
+    run_uuid: &str,
+    resp: &PromptResponse,
+) -> Option<DeferredEntry> {
+    // CR-02: enforce per-run prompt_id ownership. Without this, a malicious or
+    // misbehaving dylib running under run-A could send a PromptResponse with
+    // a prompt_id parked under run-B (sequential 8-digit ids are predictable),
+    // causing the daemon to insert allow rules for run-B, wake run-B's parked
+    // Resolve handler, AND mis-attribute the Decision row to run-A's run_uuid.
+    match state
+        .deferred_resolve
+        .take_full_if_owned(&resp.prompt_id, run_uuid)
+    {
+        Ok(entry_opt) => entry_opt,
+        Err(foreign_run_uuid) => {
+            tracing::warn!(
+                run_uuid = %run_uuid,
+                foreign_run_uuid = %foreign_run_uuid,
+                foreign_prompt_id = %resp.prompt_id,
+                "CR-02: refused cross-run PromptResponse (per-run prompt_id ownership)"
+            );
+            None
+        }
+    }
+}
+
+struct PromptResponseContext {
+    dest_host: String,
+    dest_port: u16,
+    package_context: Option<guard_ipc::PackageContext>,
+}
+
+fn prompt_response_context(entry_opt: Option<&DeferredEntry>) -> PromptResponseContext {
+    // BLOCKER / WR-11: recover the (host, port) tuple before the sender is
+    // signalled. The entry has already been removed from the table because this
+    // path is about to resolve it, but the row must be emitted first.
+    let dest_host = entry_opt.map_or_else(String::new, |entry| entry.host.clone());
+    let dest_port = entry_opt.map_or(0, |entry| entry.port);
+
+    // v0.5 / CONTEXT C-01: pull the package_context stashed at park-time so the
+    // JSONL Decision row carries package-manager context when available.
+    let package_context = entry_opt.and_then(|entry| entry.package_context.clone());
+
+    PromptResponseContext {
+        dest_host,
+        dest_port,
+        package_context,
+    }
+}
+
+fn verdict_for_prompt_response(
+    state: &DaemonState,
+    run_uuid: &str,
+    resp: &PromptResponse,
+    dest_host: &str,
+    emit: impl Fn(&'static str, &str),
+) -> guard_core::Verdict {
+    match &resp.verdict {
+        PromptVerdict::AllowOnce => {
+            emit("Allow", "prompt_allow_once");
+            guard_core::Verdict::Allow
+        }
+        PromptVerdict::AllowAlwaysMachine => allow_always_machine_verdict(
+            state,
+            run_uuid,
+            dest_host,
+            resp.signed_rule.as_ref(),
+            resp.rule_pattern.as_ref(),
+            emit,
+        ),
+        PromptVerdict::Deny => {
+            emit("Deny", "prompt_deny");
+            guard_core::Verdict::Deny
+        }
+    }
+}
+
+fn allow_always_machine_verdict(
+    state: &DaemonState,
+    run_uuid: &str,
+    dest_host: &str,
+    signed_rule: Option<&InsertUserRule>,
+    rule_pattern: Option<&RulePattern>,
+    emit: impl Fn(&'static str, &str),
+) -> guard_core::Verdict {
+    let Some(signed_rule) = signed_rule else {
+        tracing::warn!(
+            run_uuid = %run_uuid,
+            host = %dest_host,
+            "prompt allow-always missing signed rule attestation; denying fail-closed"
+        );
+        emit("Deny", "prompt_allow_machine_missing_signature");
+        return guard_core::Verdict::Deny;
+    };
+
+    let Some(rule_pattern) = rule_pattern else {
+        tracing::warn!(
+            run_uuid = %run_uuid,
+            host = %dest_host,
+            "prompt allow-always missing rule pattern; denying fail-closed"
+        );
+        emit("Deny", "prompt_allow_machine_missing_pattern");
+        return guard_core::Verdict::Deny;
+    };
+
+    if signed_rule.kind != "allow"
+        || signed_rule.match_type != rule_pattern.match_type
+        || signed_rule.pattern != rule_pattern.pattern
+        || signed_rule.run_uuid.as_deref() != Some(run_uuid)
+    {
+        tracing::warn!(
+            run_uuid = %run_uuid,
+            host = %dest_host,
+            "prompt allow-always signed rule does not match prompt response; denying fail-closed"
+        );
+        emit("Deny", "prompt_allow_machine_signature_mismatch");
+        return guard_core::Verdict::Deny;
+    }
+
+    match crate::handlers::insert_user_rule::handle_insert_user_rule(
+        signed_rule,
+        &state.rule_store,
+        state.rule_signature_policy,
+    ) {
+        guard_ipc::InsertUserRuleReply::Ok { .. } => {
+            emit("Allow", "prompt_allow_machine");
+            guard_core::Verdict::Allow
+        }
+        guard_ipc::InsertUserRuleReply::Err { message, .. } => {
+            tracing::warn!(
+                run_uuid = %run_uuid,
+                host = %dest_host,
+                error = %message,
+                "prompt allow-always signed rule rejected; denying fail-closed"
+            );
+            emit("Deny", "prompt_allow_machine_signature_rejected");
+            guard_core::Verdict::Deny
+        }
+    }
+}
+
+fn dispatch_cancel(state: &DaemonState, run_uuid: &str, cancel: &PromptCancel) {
     // CR-02: enforce per-run prompt_id ownership. Without this, run-A could
     // cancel any parked prompt in run-B by guessing the prompt_id.
     let entry_opt = match state
@@ -402,31 +392,31 @@ fn dispatch_cancel(state: &DaemonState, run_uuid: &str, cancel: PromptCancel) {
 ///
 /// v0.4: the helper now takes `dest_host` and an
 /// optional `package_context` so the IPC handler context (which knows both)
-/// can drive log_writer enrichment caller-side, NOT in the writer thread
+/// can drive `log_writer` enrichment caller-side, NOT in the writer thread
 /// (v0.3 caller-side contention discipline).
 ///
 /// `intel` is computed by combining package-source matches (when
-/// package_context is provided) with host-source matches (always probed when
-/// the source_kind looks like a feed-derived verdict (confirmed-deny or
+/// `package_context` is provided) with host-source matches (always probed when
+/// the `source_kind` looks like a feed-derived verdict (confirmed-deny or
 /// suspect-deny), since those are the principal paths that host_ioc-derived
 /// rows produce).
-#[allow(clippy::too_many_arguments)]
-fn emit_decision_row(
-    state: &DaemonState,
-    run_uuid: &str,
-    ts: &str,
+struct DecisionRowInput<'a> {
+    run_uuid: &'a str,
+    ts: &'a str,
     verdict: &'static str,
-    source_kind: &str,
-    dest_host: &str,
+    source_kind: &'a str,
+    dest_host: &'a str,
     dest_port: u16,
-    package_context: Option<&PackageContext>,
-) {
+    package_context: Option<&'a PackageContext>,
+}
+
+fn emit_decision_row(state: &DaemonState, input: &DecisionRowInput<'_>) {
     let mut intel_combined: Vec<guard_ipc::IntelMatch> = Vec::new();
-    if let Some(pkg) = package_context {
+    if let Some(pkg) = input.package_context {
         intel_combined.extend(log_writer::enrich(pkg));
     }
-    if matches!(source_kind, "confirmed-deny" | "suspect-deny") {
-        intel_combined.extend(log_writer::enrich_for_host(dest_host));
+    if matches!(input.source_kind, "confirmed-deny" | "suspect-deny") {
+        intel_combined.extend(log_writer::enrich_for_host(input.dest_host));
     }
     let intel = if intel_combined.is_empty() {
         None
@@ -436,13 +426,13 @@ fn emit_decision_row(
 
     let dec = Decision {
         schema_version: JSONL_SCHEMA_VERSION,
-        ts: ts.to_string(),
-        verdict,
-        dest_host: dest_host.to_string(),
-        dest_port,
+        ts: input.ts.to_string(),
+        verdict: input.verdict,
+        dest_host: input.dest_host.to_string(),
+        dest_port: input.dest_port,
         dest_ip: None,
-        run_uuid: run_uuid.to_string(),
-        source_kind: source_kind.to_string(),
+        run_uuid: input.run_uuid.to_string(),
+        source_kind: input.source_kind.to_string(),
         source_locator: None,
         process: ProcessCtxLog {
             pid: 0,
@@ -460,10 +450,10 @@ fn emit_decision_row(
             audit_token: [0; 8],
             argv: vec![],
         },
-        package_context: package_context.cloned(),
+        package_context: input.package_context.cloned(),
         intel,
     };
-    if verdict == "Allow" {
+    if input.verdict == "Allow" {
         state.log_writer.send(LogRow::Allow(dec));
     } else {
         state.log_writer.send(LogRow::Block(dec));
@@ -472,8 +462,8 @@ fn emit_decision_row(
 
 #[cfg(test)]
 mod plan_05_03_tests {
-    //! v0.5 — pin the entry_pkg extraction shape used by
-    //! handle_prompt_response. The HARD wiring test (entire daemon under
+    //! v0.5 — pin the `entry_pkg` extraction shape used by
+    //! `handle_prompt_response`. The HARD wiring test (entire daemon under
     //! `npm install` → JSONL row carries package_context.package="ua-parser-js")
     //! lives in Plan 05-04 (VAL-01). This test only pins the local-binding
     //! contract so a future refactor can't silently regress it.
@@ -491,7 +481,7 @@ mod plan_05_03_tests {
         // Simulate the entry_pkg extraction binding from handle_prompt_response:
         //   entry_opt.as_ref().and_then(|e| e.package_context.clone())
         let stashed: Option<PackageContext> = Some(pkg.clone());
-        let extracted: Option<PackageContext> = stashed.as_ref().cloned();
+        let extracted: Option<PackageContext> = stashed.clone();
         assert!(extracted.is_some());
         assert_eq!(extracted.unwrap().package, "ua-parser-js");
     }
@@ -503,7 +493,7 @@ mod plan_05_03_tests {
         // and entry_pkg.as_ref() flows None into emit_decision_row, which in
         // turn omits the field on the wire (skip_serializing_if).
         let stashed: Option<PackageContext> = None;
-        let extracted: Option<PackageContext> = stashed.as_ref().cloned();
+        let extracted: Option<PackageContext> = stashed.clone();
         assert!(extracted.is_none());
     }
 }

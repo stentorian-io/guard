@@ -39,6 +39,7 @@ pub struct RegisterRoot {
 }
 
 impl RegisterRoot {
+    #[must_use]
     pub fn new(token: guard_core::AuditToken) -> Self {
         Self {
             schema_version: IPC_SCHEMA_V1,
@@ -71,7 +72,7 @@ impl RegisterRoot {
     }
 }
 
-/// Daemon → CLI: response to RegisterRoot.
+/// Daemon → CLI: response to `RegisterRoot`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Reply {
     Ack {
@@ -84,6 +85,7 @@ pub enum Reply {
 }
 
 impl Reply {
+    #[must_use]
     pub fn ack() -> Self {
         Reply::Ack {
             schema_version: IPC_SCHEMA_V1,
@@ -97,6 +99,7 @@ impl Reply {
         }
     }
 
+    #[must_use]
     pub fn schema(&self) -> u16 {
         match self {
             Reply::Ack { schema_version } | Reply::Err { schema_version, .. } => *schema_version,
@@ -123,7 +126,7 @@ pub const IPC_SCHEMA_V5: u16 = 5;
 // ============================================================
 
 /// Per-feed match record attached to JSONL block-log entries via the `intel`
-/// array, and to PromptRequest for pre-prompt enrichment. Multiple matches
+/// array, and to `PromptRequest` for pre-prompt enrichment. Multiple matches
 /// preserve cross-feed cross-reference (a malicious package present in both
 /// OSV and GHSA shows two rows).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -153,6 +156,7 @@ pub enum SnapshotInputsReply {
 }
 
 impl SnapshotInputsReply {
+    #[must_use]
     pub fn ok(input: guard_core::SnapshotBuildInput, is_tty: bool, baseline_mode: bool) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V5,
@@ -202,9 +206,9 @@ impl PublishSignedSnapshot {
 
 // --- PrepareSnapshot / SnapshotReply ----------------------------------------
 
-/// CLI → daemon: sent BEFORE posix_spawn. Daemon merges curated YAML + SQLite
+/// CLI → daemon: sent BEFORE `posix_spawn`. Daemon merges curated YAML + `SQLite`
 /// rules, writes per-run snapshot, returns the manifest path the CLI will set
-/// as STT_GUARD_SNAPSHOT_MANIFEST.
+/// as `STT_GUARD_SNAPSHOT_MANIFEST`.
 ///
 /// V3 additions: `is_tty` and `baseline_mode`. Both are
 /// `#[serde(default)]` so V2-encoded messages decode cleanly with false.
@@ -219,7 +223,7 @@ pub struct PrepareSnapshot {
 }
 
 impl PrepareSnapshot {
-    /// V2-compatible constructor — emits V2 schema_version; new fields default false.
+    /// V2-compatible constructor — emits V2 `schema_version`; new fields default false.
     /// Existing callers do NOT break.
     pub fn new(cwd: impl Into<String>) -> Self {
         Self {
@@ -273,8 +277,8 @@ impl SnapshotReply {
 
 // --- ForkEvent / ForkAck ----------------------------------------------------
 
-/// Dylib → daemon: a fork(2) / vfork(2) / posix_spawn completed in a tracked
-/// process. Sent synchronously: the dylib blocks until ForkAck.
+/// Dylib → daemon: a fork(2) / vfork(2) / `posix_spawn` completed in a tracked
+/// process. Sent synchronously: the dylib blocks until `ForkAck`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ForkEvent {
     pub schema_version: u16,
@@ -284,6 +288,7 @@ pub struct ForkEvent {
 }
 
 impl ForkEvent {
+    #[must_use]
     pub fn new(parent: AuditTokenWire, child_pid: i32, child_pidversion: u32) -> Self {
         Self {
             schema_version: IPC_SCHEMA_V2,
@@ -306,6 +311,7 @@ pub enum ForkAck {
 }
 
 impl ForkAck {
+    #[must_use]
     pub fn ok() -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V2,
@@ -321,9 +327,9 @@ impl ForkAck {
 
 // --- ExecEvent / ExecAck ----------------------------------------------------
 
-/// Dylib → daemon: an execve / posix_spawn / exec* call is being made.
+/// Dylib → daemon: an execve / `posix_spawn` / exec* call is being made.
 /// `target_path` is the binary the calling process is about to load. The
-/// daemon uses csops(CS_OPS_STATUS) on the calling process's pid to decide
+/// daemon uses `csops(CS_OPS_STATUS)` on the calling process's pid to decide
 /// if exec into target will strip DYLD env vars.
 ///
 /// SECURITY: the wire allows arbitrary length but the daemon
@@ -331,8 +337,8 @@ impl ForkAck {
 /// at 1024 bytes before sending.
 ///
 /// V3 addition: `pm_env` carries package-manager environment variables
-/// captured at exec time (e.g. npm_package_name, npm_lifecycle_event).
-/// `#[serde(default)]` ensures V2-encoded messages decode with empty pm_env.
+/// captured at exec time (e.g. `npm_package_name`, `npm_lifecycle_event`).
+/// `#[serde(default)]` ensures V2-encoded messages decode with empty `pm_env`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExecEvent {
     pub schema_version: u16,
@@ -344,14 +350,15 @@ pub struct ExecEvent {
 }
 
 impl ExecEvent {
-    /// Maximum acceptable target_path length. Senders MUST cap;
+    /// Maximum acceptable `target_path` length. Senders MUST cap;
     /// receivers MUST reject longer payloads.
     pub const MAX_TARGET_PATH: usize = 1024;
 
-    /// Maximum total wire bytes for pm_env key+value pairs.
+    /// Maximum total wire bytes for `pm_env` key+value pairs.
     pub const MAX_PM_ENV_BYTES: usize = 4096;
 
-    /// V2-compatible constructor — emits V2 schema_version; pm_env defaults to empty.
+    /// V2-compatible constructor — emits V2 `schema_version`; `pm_env` defaults to empty.
+    #[must_use]
     pub fn new(token: AuditTokenWire, target_path: Vec<u8>) -> Self {
         Self {
             schema_version: IPC_SCHEMA_V2,
@@ -361,7 +368,8 @@ impl ExecEvent {
         }
     }
 
-    /// V3 constructor — includes pm_env key-value pairs.
+    /// V3 constructor — includes `pm_env` key-value pairs.
+    #[must_use]
     pub fn new_v3(
         audit_token: AuditTokenWire,
         target_path: Vec<u8>,
@@ -388,6 +396,7 @@ pub enum ExecAck {
 }
 
 impl ExecAck {
+    #[must_use]
     pub fn ok() -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V2,
@@ -412,6 +421,7 @@ pub struct DylibLoaded {
 }
 
 impl DylibLoaded {
+    #[must_use]
     pub fn new(token: AuditTokenWire) -> Self {
         Self {
             schema_version: IPC_SCHEMA_V2,
@@ -432,6 +442,7 @@ pub enum DylibLoadedAck {
 }
 
 impl DylibLoadedAck {
+    #[must_use]
     pub fn ok() -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V2,
@@ -467,7 +478,7 @@ impl Resolve {
     }
 }
 
-/// 28 bytes = sizeof(sockaddr_in6) on Darwin — fits both AF_INET and AF_INET6
+/// 28 bytes = `sizeof(sockaddr_in6)` on Darwin — fits both `AF_INET` and `AF_INET6`
 /// addresses with room for the family/length prefix.
 pub const SOCKADDR_WIRE_LEN: usize = 28;
 
@@ -488,6 +499,7 @@ pub enum ResolveReply {
 }
 
 impl ResolveReply {
+    #[must_use]
     pub fn addresses(addrs: Vec<[u8; SOCKADDR_WIRE_LEN]>) -> Self {
         Self::Addresses {
             schema_version: IPC_SCHEMA_V2,
@@ -511,12 +523,12 @@ impl ResolveReply {
 // --- EnvNotPropagatedGap / Ack -----------------------------------------------
 
 /// Dylib → daemon: parent process detected pre-spawn that the envp passed to
-/// libc::posix_spawn is missing one or more required Stentorian Guard env vars
-/// (DYLD_INSERT_LIBRARIES, STT_GUARD_DAEMON_SOCKET, or STT_GUARD_SNAPSHOT_MANIFEST).
+/// `libc::posix_spawn` is missing one or more required Stentorian Guard env vars
+/// (`DYLD_INSERT_LIBRARIES`, `STT_GUARD_DAEMON_SOCKET`, or `STT_GUARD_SNAPSHOT_MANIFEST`).
 /// The about-to-be-spawned child cannot inherit the dylib injection.
 ///
 /// This is informational (not enforcement) — the dylib emits the IPC and
-/// continues; the daemon records the gap on the PARENT's ProcessNode (the child
+/// continues; the daemon records the gap on the PARENT's `ProcessNode` (the child
 /// does not yet exist at pre-spawn time).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EnvNotPropagatedGap {
@@ -530,6 +542,7 @@ pub struct EnvNotPropagatedGap {
 impl EnvNotPropagatedGap {
     pub const MAX_TARGET_PATH: usize = 1024;
 
+    #[must_use]
     pub fn new(parent: AuditTokenWire, path: Vec<u8>, ts_ms: u64) -> Self {
         let mut p = path;
         if p.len() > Self::MAX_TARGET_PATH {
@@ -556,6 +569,7 @@ pub enum EnvNotPropagatedGapAck {
 }
 
 impl EnvNotPropagatedGapAck {
+    #[must_use]
     pub fn ok() -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V2,
@@ -580,6 +594,7 @@ pub struct Status {
 }
 
 impl Status {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             schema_version: IPC_SCHEMA_V3,
@@ -593,7 +608,7 @@ impl Default for Status {
     }
 }
 
-/// Discriminant for daemon health state — used in StatusReply.
+/// Discriminant for daemon health state — used in `StatusReply`.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DaemonStateKind {
     Degraded,
@@ -637,7 +652,7 @@ pub struct InstallArtifact {
     pub guard_version: String,
 }
 
-/// Aggregated install metadata returned by ReadInstallArtifacts or StatusReply.
+/// Aggregated install metadata returned by `ReadInstallArtifacts` or `StatusReply`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstallInfo {
     pub version: String, // guard-cli compile-time version
@@ -658,20 +673,22 @@ pub struct SigningInfo {
     pub action: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StatusOk {
+    pub schema_version: u16,
+    pub daemon_state: DaemonStateKind,
+    pub tracked_roots: Vec<TrackedRootInfo>,
+    pub recent_gaps: Vec<GapInfo>,
+    pub counters: StatusCounters,
+    pub install_info: Option<InstallInfo>,
+    #[serde(default)]
+    pub signing_info: Option<SigningInfo>,
+}
+
 /// Daemon → CLI: response to Status request.
-#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StatusReply {
-    Ok {
-        schema_version: u16,
-        daemon_state: DaemonStateKind,
-        tracked_roots: Vec<TrackedRootInfo>,
-        recent_gaps: Vec<GapInfo>,
-        counters: StatusCounters,
-        install_info: Option<InstallInfo>,
-        #[serde(default)]
-        signing_info: Option<SigningInfo>,
-    },
+    Ok(Box<StatusOk>),
     Err {
         schema_version: u16,
         message: String,
@@ -679,6 +696,7 @@ pub enum StatusReply {
 }
 
 impl StatusReply {
+    #[must_use]
     pub fn ok(
         daemon_state: DaemonStateKind,
         tracked_roots: Vec<TrackedRootInfo>,
@@ -687,7 +705,7 @@ impl StatusReply {
         install_info: Option<InstallInfo>,
         signing_info: Option<SigningInfo>,
     ) -> Self {
-        Self::Ok {
+        Self::Ok(Box::new(StatusOk {
             schema_version: IPC_SCHEMA_V3,
             daemon_state,
             tracked_roots,
@@ -695,7 +713,7 @@ impl StatusReply {
             counters,
             install_info,
             signing_info,
-        }
+        }))
     }
     pub fn err(message: impl Into<String>) -> Self {
         Self::Err {
@@ -717,7 +735,7 @@ pub struct PromptChannelInit {
     pub run_uuid: String,    // ties channel to RunRecord
 }
 
-/// Daemon → CLI: response to PromptChannelInit.
+/// Daemon → CLI: response to `PromptChannelInit`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PromptChannelInitAck {
     Ok {
@@ -730,6 +748,7 @@ pub enum PromptChannelInitAck {
 }
 
 impl PromptChannelInitAck {
+    #[must_use]
     pub fn ok() -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V3,
@@ -808,7 +827,7 @@ pub struct RulePattern {
     pub pattern: String,
 }
 
-/// CLI → daemon (prompt channel): user's decision on a PromptRequest.
+/// CLI → daemon (prompt channel): user's decision on a `PromptRequest`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptResponse {
     pub schema_version: u16, // V5 when signed_rule is present
@@ -830,7 +849,7 @@ pub struct PromptCancel {
 // v0.3 — InsertUserRule (tag 0x0B; stt-guard approve)
 // ============================================================
 
-/// CLI → daemon: insert a user-authored rule into the SQLite rule store.
+/// CLI → daemon: insert a user-authored rule into the `SQLite` rule store.
 ///
 /// v0.8 / issue #31: persistent user rules must carry an asymmetric rule
 /// signature. Legacy unsigned requests decode for compatibility but daemon
@@ -852,7 +871,7 @@ pub struct InsertUserRule {
     pub signature: Option<guard_core::RuleSignatureV1>,
 }
 
-/// Daemon → CLI: response to InsertUserRule.
+/// Daemon → CLI: response to `InsertUserRule`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum InsertUserRuleReply {
     Ok {
@@ -866,6 +885,7 @@ pub enum InsertUserRuleReply {
 }
 
 impl InsertUserRuleReply {
+    #[must_use]
     pub fn ok(rule_id: i64) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V5,
@@ -891,6 +911,7 @@ pub struct ReadInstallArtifacts {
 }
 
 impl ReadInstallArtifacts {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             schema_version: IPC_SCHEMA_V3,
@@ -904,7 +925,7 @@ impl Default for ReadInstallArtifacts {
     }
 }
 
-/// Daemon → CLI: response to ReadInstallArtifacts.
+/// Daemon → CLI: response to `ReadInstallArtifacts`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ReadInstallArtifactsReply {
     Ok {
@@ -918,6 +939,7 @@ pub enum ReadInstallArtifactsReply {
 }
 
 impl ReadInstallArtifactsReply {
+    #[must_use]
     pub fn ok(artifacts: Vec<InstallArtifact>) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V3,
@@ -951,7 +973,7 @@ pub struct ProposedRule {
     pub reason: String, // "baseline: recorded YYYY-MM-DD by stt-guard wrap --baseline"
 }
 
-/// Daemon → CLI: response to BaselineCommit.
+/// Daemon → CLI: response to `BaselineCommit`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BaselineCommitReply {
     Ok {
@@ -965,6 +987,7 @@ pub enum BaselineCommitReply {
 }
 
 impl BaselineCommitReply {
+    #[must_use]
     pub fn ok(proposed_rules: Vec<ProposedRule>) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V3,
@@ -985,7 +1008,7 @@ impl BaselineCommitReply {
 
 /// CLI → daemon: enumerate rules visible to the daemon.
 ///
-/// Additive at IPC_SCHEMA_V3. The management-IPC family lives at the V3
+/// Additive at `IPC_SCHEMA_V3`. The management-IPC family lives at the V3
 /// schema level — new tag, new wire shape, no schema bump because this
 /// neither modifies an existing message body nor breaks an existing
 /// discriminator.
@@ -997,6 +1020,7 @@ pub struct ListRules {
 }
 
 impl ListRules {
+    #[must_use]
     pub fn new(include_builtins: bool) -> Self {
         Self {
             schema_version: IPC_SCHEMA_V3,
@@ -1011,7 +1035,7 @@ impl Default for ListRules {
     }
 }
 
-/// Wire-friendly rule row. String discriminators match the InsertUserRule
+/// Wire-friendly rule row. String discriminators match the `InsertUserRule`
 /// convention; downstream tooling can pattern-match on `source` / `kind` /
 /// `match_type` strings without importing core enum types.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1036,6 +1060,7 @@ pub enum ListRulesReply {
 }
 
 impl ListRulesReply {
+    #[must_use]
     pub fn ok(rules: Vec<RuleRow>) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V3,
@@ -1061,15 +1086,16 @@ impl ListRulesReply {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeleteInstallArtifacts {
     pub schema_version: u16, // V3
-    /// artifact_kind values to remove. The daemon iterates each value
-    /// and calls InstallArtifactStore::delete_by_kind for it.
+    /// `artifact_kind` values to remove. The daemon iterates each value
+    /// and calls `InstallArtifactStore::delete_by_kind` for it.
     /// Caller-controlled vocabulary: "launchagent" | "binary" |
-    /// "marker_block" | "init_script" | "state_dir" | "log_dir".
+    /// "`marker_block`" | "`init_script`" | "`state_dir`" | "`log_dir`".
     /// Unknown kinds are accepted (delete is a no-op for unmatched rows).
     pub kinds: Vec<String>,
 }
 
 impl DeleteInstallArtifacts {
+    #[must_use]
     pub fn new(kinds: Vec<String>) -> Self {
         Self {
             schema_version: IPC_SCHEMA_V3,
@@ -1091,6 +1117,7 @@ pub enum DeleteInstallArtifactsReply {
 }
 
 impl DeleteInstallArtifactsReply {
+    #[must_use]
     pub fn ok(removed: u64) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V3,
@@ -1162,6 +1189,7 @@ pub enum DenyNotifyAck {
 }
 
 impl DenyNotifyAck {
+    #[must_use]
     pub fn ok() -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V4,
@@ -1224,6 +1252,7 @@ pub enum ExecBlockedAck {
 }
 
 impl ExecBlockedAck {
+    #[must_use]
     pub fn ok() -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V4,
@@ -1283,6 +1312,7 @@ pub enum PersistenceWriteAck {
 }
 
 impl PersistenceWriteAck {
+    #[must_use]
     pub fn ok() -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V4,
@@ -1341,7 +1371,7 @@ impl DisableCuratedRule {
     }
 }
 
-/// Daemon → CLI: response to DisableCuratedRule.
+/// Daemon → CLI: response to `DisableCuratedRule`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DisableCuratedRuleReply {
     Ok {
@@ -1354,6 +1384,7 @@ pub enum DisableCuratedRuleReply {
 }
 
 impl DisableCuratedRuleReply {
+    #[must_use]
     pub fn ok() -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V3,
@@ -1406,7 +1437,7 @@ impl EnableCuratedRule {
     }
 }
 
-/// Daemon → CLI: response to EnableCuratedRule.
+/// Daemon → CLI: response to `EnableCuratedRule`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EnableCuratedRuleReply {
     Ok {
@@ -1421,6 +1452,7 @@ pub enum EnableCuratedRuleReply {
 }
 
 impl EnableCuratedRuleReply {
+    #[must_use]
     pub fn ok(was_disabled: bool) -> Self {
         Self::Ok {
             schema_version: IPC_SCHEMA_V3,
@@ -1445,6 +1477,7 @@ pub struct Ping {
 }
 
 impl Ping {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             schema_version: IPC_SCHEMA_V4,
@@ -1472,6 +1505,7 @@ pub enum PingReply {
 }
 
 impl PingReply {
+    #[must_use]
     pub fn pong(pid: u32, uptime_secs: u64) -> Self {
         Self::Pong {
             schema_version: IPC_SCHEMA_V4,

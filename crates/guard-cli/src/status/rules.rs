@@ -9,6 +9,11 @@ use guard_ipc::RuleRow;
 use crate::CliError;
 use crate::ipc_client;
 
+/// List or modify daemon rules.
+///
+/// # Errors
+///
+/// Returns an error when rule IPC, authentication, or signing fails.
 pub fn run(
     sock: &Path,
     include_built_in: bool,

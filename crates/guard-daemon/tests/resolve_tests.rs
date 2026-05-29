@@ -14,10 +14,12 @@ fn resolve_localhost_returns_addresses() {
                 "localhost should resolve to at least one address"
             );
             // Second byte is family (AF_INET=2 or AF_INET6=30 on Darwin).
+            let af_inet = u8::try_from(libc::AF_INET).unwrap_or(0);
+            let af_inet6 = u8::try_from(libc::AF_INET6).unwrap_or(0);
             for a in &addrs {
                 let family = a[1];
                 assert!(
-                    family == libc::AF_INET as u8 || family == libc::AF_INET6 as u8,
+                    family == af_inet || family == af_inet6,
                     "unexpected family {family}"
                 );
             }

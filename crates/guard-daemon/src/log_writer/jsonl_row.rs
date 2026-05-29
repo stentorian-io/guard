@@ -12,6 +12,9 @@ use serde::Serialize;
 /// re-skip the field — a schema bump is the right discipline per v0.2 convention.
 pub const JSONL_SCHEMA_VERSION: u16 = 2;
 pub const MAX_ARGV_BYTES: usize = 1024;
+const SECS_PER_DAY: u64 = 86_400;
+const DAYS_PER_400Y: u64 = 146_097;
+const SECS_PER_400Y: u64 = DAYS_PER_400Y * SECS_PER_DAY;
 
 /// WR-12: cap on the number of argv elements logged per row. A malicious or
 /// buggy package manager could spawn `tool arg1 arg2 ... argN` with N=100k,
@@ -48,7 +51,7 @@ pub struct Decision {
     pub package_context: Option<PackageContext>,
     /// v0.4: array of feed-derived match records. Type-changed
     /// from `Option<()>` placeholder to `Option<Vec<IntelMatch>>` at JSONL
-    /// schema_version 2. Per v0.3 omit-when-empty convention, callers MUST set
+    /// `schema_version` 2. Per v0.3 omit-when-empty convention, callers MUST set
     /// `None` (not `Some(vec![])`) when no matches were found so the field
     /// is omitted from the on-disk row.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,12 +84,13 @@ pub struct RootCtxLog {
 
 /// Per-element argv truncation per LOG schema (R-08 belt-and-braces, plus log-volume bound).
 ///
-/// WR-12: also cap the total ELEMENT COUNT at MAX_ARGV_ELEMENTS. The previous
+/// WR-12: also cap the total ELEMENT COUNT at `MAX_ARGV_ELEMENTS`. The previous
 /// implementation only bounded each element's length, leaving the vector itself
 /// unbounded — a buggy or hostile package manager spawning a tool with 100k
 /// args would produce log rows that won't fit in the 64 KiB IPC frame limit
 /// downstream. Append a synthetic placeholder telling the analyst how many
 /// elements were dropped.
+#[must_use]
 pub fn truncate_argv(mut argv: Vec<String>) -> Vec<String> {
     let original_len = argv.len();
     if original_len > MAX_ARGV_ELEMENTS {
@@ -113,6 +117,7 @@ fn truncate_str(s: String, max: usize) -> String {
 }
 
 /// Pitfall 9: explicit Millis precision + Z suffix → lexicographically-sortable.
+#[must_use]
 pub fn now_rfc3339() -> String {
     let d = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -120,19 +125,15 @@ pub fn now_rfc3339() -> String {
     let secs = d.as_secs();
     let millis = d.subsec_millis();
 
-    const SECS_PER_DAY: u64 = 86_400;
-    const DAYS_PER_400Y: u64 = 146_097;
-    const SECS_PER_400Y: u64 = DAYS_PER_400Y * SECS_PER_DAY;
-
     let mut rem = secs;
     let mut year: i64 = 1970;
 
     let n400 = rem / SECS_PER_400Y;
     rem %= SECS_PER_400Y;
-    year += (n400 * 400) as i64;
+    year += i64::try_from(n400 * 400).unwrap_or(i64::MAX);
 
-    let mut days = (rem / SECS_PER_DAY) as u32;
-    let day_secs = (rem % SECS_PER_DAY) as u32;
+    let mut days = u32::try_from(rem / SECS_PER_DAY).unwrap_or(u32::MAX);
+    let day_secs = u32::try_from(rem % SECS_PER_DAY).unwrap_or(u32::MAX);
     let hh = day_secs / 3600;
     let mm = (day_secs % 3600) / 60;
     let ss = day_secs % 60;
@@ -182,6 +183,10 @@ fn is_leap(y: i64) -> bool {
 }
 
 /// Append one row as a JSON line to the open writer. Preserves caller's file-open mode.
+///
+/// # Errors
+///
+/// Returns an error when serialization or writing to the log file fails.
 pub fn append(writer: &mut std::fs::File, row: &LogRow) -> std::io::Result<()> {
     use std::io::Write;
     serde_json::to_writer(&mut *writer, row)?;

@@ -117,70 +117,86 @@ pub const ENV_DYLD: &str = ENV_HOOK_INJECTION;
 // Path builders (all derive from a state_dir root)
 // ---------------------------------------------------------------------------
 
+#[must_use]
 pub fn db_path(state_dir: &Path) -> PathBuf {
     state_dir.join(DB_FILENAME)
 }
 
+#[must_use]
 pub fn socket_path(state_dir: &Path) -> PathBuf {
     state_dir.join(SOCKET_FILENAME)
 }
 
+#[must_use]
 pub fn ready_path(state_dir: &Path) -> PathBuf {
     state_dir.join(READY_FILENAME)
 }
 
+#[must_use]
 pub fn manifest_path(state_dir: &Path) -> PathBuf {
     state_dir.join(MANIFEST_FILENAME)
 }
 
+#[must_use]
 pub fn manifest_tmp_path(state_dir: &Path) -> PathBuf {
     state_dir.join(format!(".{MANIFEST_FILENAME}.tmp"))
 }
 
+#[must_use]
 pub fn hook_hash_path(state_dir: &Path) -> PathBuf {
     state_dir.join(HOOK_HASH_FILENAME)
 }
 
+#[must_use]
 pub fn trusted_rule_signers_path() -> PathBuf {
     PathBuf::from(SYSTEM_BIN_DIR).join(TRUSTED_RULE_SIGNERS_FILENAME)
 }
 
+#[must_use]
 pub fn snapshot_path(state_dir: &Path, nonce: u64) -> PathBuf {
     state_dir.join(format!("snapshot-{nonce:016x}.cbor"))
 }
 
+#[must_use]
 pub fn snapshot_tmp_path(state_dir: &Path, nonce: u64) -> PathBuf {
     state_dir.join(format!(".snapshot-{nonce:016x}.cbor.tmp"))
 }
 
+#[must_use]
 pub fn watchdog_state_path(state_dir: &Path) -> PathBuf {
     state_dir.join(WATCHDOG_STATE_FILENAME)
 }
 
 // --- Per-run paths ---
 
+#[must_use]
 pub fn runs_dir(state_dir: &Path) -> PathBuf {
     state_dir.join(RUNS_DIR_NAME)
 }
 
+#[must_use]
 pub fn run_snapshot_path(state_dir: &Path, run_uuid: &str) -> PathBuf {
     runs_dir(state_dir).join(format!("{run_uuid}.cbor"))
 }
 
+#[must_use]
 pub fn run_snapshot_tmp_path(state_dir: &Path, run_uuid: &str) -> PathBuf {
     runs_dir(state_dir).join(format!(".{run_uuid}.cbor.tmp"))
 }
 
+#[must_use]
 pub fn run_manifest_path(state_dir: &Path, run_uuid: &str) -> PathBuf {
     runs_dir(state_dir).join(format!("{run_uuid}.manifest"))
 }
 
+#[must_use]
 pub fn run_manifest_tmp_path(state_dir: &Path, run_uuid: &str) -> PathBuf {
     runs_dir(state_dir).join(format!(".{run_uuid}.manifest.tmp"))
 }
 
 // --- State dir resolution ---
 
+#[must_use]
 pub fn is_system_install(state_dir: &Path) -> bool {
     state_dir == Path::new(SYSTEM_STATE_DIR)
 }
@@ -189,6 +205,7 @@ pub fn is_system_install(state_dir: &Path) -> bool {
 ///
 /// Priority: `STT_GUARD_STATE_DIR` env override → system dir (if exists) →
 /// platform user-level state directory.
+#[must_use]
 pub fn default_state_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os(ENV_STATE_DIR) {
         return PathBuf::from(dir);
@@ -201,6 +218,7 @@ pub fn default_state_dir() -> PathBuf {
 }
 
 /// User-level log directory (used when not running as system install).
+#[must_use]
 pub fn user_log_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
@@ -262,6 +280,7 @@ fn linux_user_state_dir(
 }
 
 /// Runtime JSONL log directory for a daemon using `state_dir`.
+#[must_use]
 pub fn log_dir_for_state(state_dir: &Path) -> PathBuf {
     if is_system_install(state_dir) {
         PathBuf::from(SYSTEM_LOG_DIR)
@@ -271,6 +290,10 @@ pub fn log_dir_for_state(state_dir: &Path) -> PathBuf {
 }
 
 /// Ensure `state_dir` exists with mode 0700. Idempotent.
+///
+/// # Errors
+///
+/// Returns the underlying filesystem error if the directory cannot be created.
 pub fn ensure_state_dir(state_dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
     if state_dir.exists() {
@@ -288,6 +311,11 @@ pub fn ensure_state_dir(state_dir: &Path) -> std::io::Result<()> {
 /// inputs for wrapped user processes. The directory is searchable but not
 /// listable so a wrapped process can open the exact manifest path handed to it
 /// without exposing mutable daemon state.
+///
+/// # Errors
+///
+/// Returns the underlying filesystem error if the directory cannot be created or
+/// its permissions cannot be set.
 pub fn ensure_runs_dir(state_dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
     use std::os::unix::fs::PermissionsExt;

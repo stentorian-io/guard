@@ -8,17 +8,18 @@
 //! cleanly within the test deadline, i.e. the dylib's fork-hook didn't
 //! fail-closed under non-pathological use.
 //!
-//! Plan 02-04's process_tree_tests::tree_05_grandchild_inherits_original_root
+//! Plan 02-04's `process_tree_tests::tree_05_grandchild_inherits_original_root`
 //! covers the hard data-structure-level TREE-05 invariant directly. This e2e
 //! test only confirms the dispatch path doesn't crash under the double-fork
 //! + setsid pattern — full daemon-introspection of the tree state is a
 //!   v0.3 polish (`stt-guard status` will surface this).
 
 use guard_e2e::{DaemonHarness, cargo_workspace_root, resolve_cli, resolve_dylib};
+use std::io::Read;
 use std::process::Command;
 use std::time::Duration;
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn double_fork_setsid_wrapped_command_completes() {
     let cli = resolve_cli();
@@ -79,7 +80,6 @@ fn double_fork_setsid_wrapped_command_completes() {
             .take()
             .map(|mut s| {
                 let mut buf = Vec::new();
-                use std::io::Read;
                 let _ = s.read_to_end(&mut buf);
                 buf
             })

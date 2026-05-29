@@ -21,7 +21,7 @@ use std::process::Command;
 const DENY_HOST: &str = "guard-test.workers.dev";
 const DENY_PORT: &str = "443";
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn curated_yaml_workers_dev_deny_is_enforced() {
     let cli = resolve_cli();

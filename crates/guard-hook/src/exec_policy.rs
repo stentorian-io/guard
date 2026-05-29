@@ -12,8 +12,14 @@ pub enum ExecDecision {
     Trace(SuspiciousReason),
 }
 
-pub fn check_exec_target(path: *const libc::c_char) -> ExecDecision {
-    match scanner::classify_path(path) {
+#[must_use]
+/// Evaluate exec-time policy for a target path.
+///
+/// # Safety
+///
+/// `path` must either be null or point to a valid NUL-terminated C string.
+pub unsafe fn check_exec_target(path: *const libc::c_char) -> ExecDecision {
+    match unsafe { scanner::classify_path(path) } {
         BinaryTier::T0Blocked(reason) => ExecDecision::Block(reason),
         BinaryTier::T3SuspiciousUnknown(reason) => ExecDecision::Trace(reason),
         BinaryTier::T1TrustedRuntime

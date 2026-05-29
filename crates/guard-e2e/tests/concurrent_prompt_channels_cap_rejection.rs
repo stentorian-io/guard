@@ -1,17 +1,17 @@
-//! v0.3 cap rejection: 65th PromptChannelInit must
+//! v0.3 cap rejection: 65th `PromptChannelInit` must
 //! Err-Ack with the exact message `"max concurrent channels reached (64)"`.
 //!
 //! Locks the cap-rejection acceptance for the WARNING raised in the plan-03-12
 //! review (the unit test `r05_cap_constant_is_64` only locks the constant; this
 //! test exercises the dispatch arm in `ipc_server.rs::handle_prompt_channel_init`).
 //!
-//! Wire protocol for PromptChannelInit (mirroring PromptChannel::open in CLI):
-//!   Request:  [1-byte tag 0x0A][4-byte len BE][CBOR PromptChannelInit body]
-//!   Response: [1-byte tag echo 0x0A][4-byte len BE][CBOR PromptChannelInitAck body]
+//! Wire protocol for `PromptChannelInit` (mirroring `PromptChannel::open` in CLI):
+//!   Request:  [1-byte tag 0x0A][4-byte len BE][CBOR `PromptChannelInit` body]
+//!   Response: [1-byte tag echo 0x0A][4-byte len BE][CBOR `PromptChannelInitAck` body]
 //!
-//! Marked #[ignore]: requires running daemon + registered run_uuid + 65 open
+//! Marked #[ignore]: requires running daemon + registered `run_uuid` + 65 open
 //! file descriptors. Opt-in via:
-//!   cargo test -p guard-e2e -- --ignored sixty_fifth_prompt_channel
+//!   cargo test -p guard-e2e -- --ignored `sixty_fifth_prompt_channel`
 
 #[cfg(target_os = "macos")]
 use std::io::{Read, Write};
@@ -25,11 +25,11 @@ use guard_ipc::frame::{read_frame, write_frame};
 #[cfg(target_os = "macos")]
 use guard_ipc::{IPC_SCHEMA_V3, PromptChannelInit, PromptChannelInitAck};
 
-/// Tag byte for PromptChannelInit — mirrors TAG_PROMPT_CHANNEL_INIT in CLI.
+/// Tag byte for `PromptChannelInit` — mirrors `TAG_PROMPT_CHANNEL_INIT` in CLI.
 #[cfg(target_os = "macos")]
 const TAG_PROMPT_CHANNEL_INIT: u8 = 0x0A;
 
-/// Open a raw PromptChannelInit exchange against the daemon socket.
+/// Open a raw `PromptChannelInit` exchange against the daemon socket.
 ///
 /// Sends: [1-byte tag 0x0A][framed CBOR PromptChannelInit]
 /// Reads: [1-byte tag echo][framed CBOR PromptChannelInitAck]
@@ -72,9 +72,9 @@ fn open_prompt_channel_init(
     Ok((s, ack))
 }
 
-/// Start a background `stt-guard wrap -- /bin/sleep 600` so a run_uuid is
+/// Start a background `stt-guard wrap -- /bin/sleep 600` so a `run_uuid` is
 /// registered with the daemon. Returns the child handle (caller must kill it)
-/// and the run_uuid (recovered from the manifest written by PrepareSnapshot).
+/// and the `run_uuid` (recovered from the manifest written by `PrepareSnapshot`).
 #[cfg(target_os = "macos")]
 fn start_background_tracked_run(
     harness: &guard_e2e::DaemonHarness,
@@ -104,19 +104,13 @@ fn start_background_tracked_run(
     let runs_dir = harness.state_dir.join("runs");
     let run_uuid = std::fs::read_dir(&runs_dir)
         .expect("read runs dir")
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map(|ext| ext == "manifest")
-                .unwrap_or(false)
-        })
-        .filter_map(|e| {
+        .filter_map(std::result::Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "manifest"))
+        .find_map(|e| {
             e.path()
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
         })
-        .next()
         .expect("at least one registered run_uuid in runs/");
     (child, run_uuid)
 }
@@ -173,8 +167,7 @@ fn sixty_fifth_prompt_channel_init_is_err_acked_with_cap_message() {
         .expect("66th PromptChannelInit after slot freed");
     assert!(
         matches!(ack66, PromptChannelInitAck::Ok { .. }),
-        "after freeing one slot, next Init must Ok-Ack; got: {:?}",
-        ack66
+        "after freeing one slot, next Init must Ok-Ack; got: {ack66:?}"
     );
 
     // Teardown.

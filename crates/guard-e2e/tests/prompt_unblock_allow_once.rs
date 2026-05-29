@@ -1,15 +1,15 @@
-//! M005-S05: AllowOnce verdict via PTY prompt.
+//! M005-S05: `AllowOnce` verdict via PTY prompt.
 //!
 //! Test: stt-guard wrap wraps node against a non-allowlisted hostname. The hook's
-//! guard_getaddrinfo sends Resolve IPC to the daemon. Because the run is
-//! TTY-attached, the daemon parks the Resolve and sends a PromptRequest to the
-//! CLI. The test sends "1\n" (AllowOnce) into the PTY. The daemon unparks,
+//! `guard_getaddrinfo` sends Resolve IPC to the daemon. Because the run is
+//! TTY-attached, the daemon parks the Resolve and sends a `PromptRequest` to the
+//! CLI. The test sends "1\n" (`AllowOnce`) into the PTY. The daemon unparks,
 //! resolves DNS, returns addresses to the hook. The JSONL log records a
-//! source_kind=prompt_allow_once row.
+//! `source_kind=prompt_allow_once` row.
 //!
 //! Marked #[ignore]: requires PTY (portable-pty) + non-hardened node + macOS
 //! daemon. Opt-in via:
-//!   cargo test -p guard-e2e -- --ignored allow_once_unblocks
+//!   cargo test -p guard-e2e -- --ignored `allow_once_unblocks`
 
 #[cfg(target_os = "macos")]
 use std::io::{BufRead, BufReader, Write as _};
@@ -71,9 +71,10 @@ fn allow_once_unblocks_connection_in_live_run() {
     let mut buf = String::new();
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        if Instant::now() > deadline {
-            panic!("prompt never appeared in PTY output within 15s; buf so far:\n{buf}");
-        }
+        assert!(
+            Instant::now() <= deadline,
+            "prompt never appeared in PTY output within 15s; buf so far:\n{buf}"
+        );
         let mut line = String::new();
         match br.read_line(&mut line) {
             Ok(0) | Err(_) => break,

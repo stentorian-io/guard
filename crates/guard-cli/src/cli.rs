@@ -97,13 +97,13 @@ pub enum StatusSub {
         #[arg(long, requires = "disable")]
         reason: Option<String>,
     },
-    /// View denials from a specific run_uuid.
+    /// View denials from a specific `run_uuid`.
     Denials { run_uuid: String },
     /// Interactively walk a previous run's denials. TTY-required.
     Review { run_uuid: Option<String> },
     /// List detected persistence-write events.
     Persistence {
-        /// Filter to a specific run_uuid.
+        /// Filter to a specific `run_uuid`.
         run_uuid: Option<String>,
     },
     /// Look up details for a threat-intel advisory ID (e.g. MAL-2025-3008).

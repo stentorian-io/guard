@@ -6,7 +6,7 @@ use std::os::unix::net::UnixStream;
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::*;
+    use super::{AuditToken, OsError, UnixStream};
     use core::ffi::c_void;
     use std::os::unix::io::AsRawFd;
 
@@ -18,14 +18,15 @@ mod imp {
 
     pub fn peer_audit_token(stream: &UnixStream) -> Result<AuditToken, OsError> {
         let mut tok = AuditToken::synthetic([0; 8]);
-        let mut len: libc::socklen_t = core::mem::size_of::<AuditToken>() as _;
+        let mut len = libc::socklen_t::try_from(core::mem::size_of::<AuditToken>())
+            .expect("audit token size fits socklen_t");
         let r = unsafe {
             libc::getsockopt(
                 stream.as_raw_fd(),
                 SOL_LOCAL,
                 LOCAL_PEERTOKEN,
-                &mut tok as *mut AuditToken as *mut c_void,
-                &mut len,
+                (&raw mut tok).cast::<c_void>(),
+                &raw mut len,
             )
         };
         if r < 0 {
@@ -34,7 +35,8 @@ mod imp {
                 std::io::Error::last_os_error(),
             ));
         }
-        if len as usize != core::mem::size_of::<AuditToken>() {
+        if usize::try_from(len).expect("socklen_t fits usize") != core::mem::size_of::<AuditToken>()
+        {
             return Err(OsError::unexpected_data(
                 PEER_AUDIT_TOKEN,
                 format!("LOCAL_PEERTOKEN returned unexpected length {len}"),
@@ -46,7 +48,7 @@ mod imp {
 
 #[cfg(not(target_os = "macos"))]
 mod imp {
-    use super::*;
+    use super::{AuditToken, OsError, UnixStream};
 
     #[cfg(target_os = "linux")]
     pub fn peer_audit_token(stream: &UnixStream) -> Result<AuditToken, OsError> {
@@ -54,14 +56,15 @@ mod imp {
         use std::os::unix::io::AsRawFd;
 
         let mut cred: libc::ucred = unsafe { core::mem::zeroed() };
-        let mut len: libc::socklen_t = core::mem::size_of::<libc::ucred>() as _;
+        let mut len = libc::socklen_t::try_from(core::mem::size_of::<libc::ucred>())
+            .expect("ucred size fits socklen_t");
         let rc = unsafe {
             libc::getsockopt(
                 stream.as_raw_fd(),
                 libc::SOL_SOCKET,
                 libc::SO_PEERCRED,
-                &mut cred as *mut libc::ucred as *mut c_void,
-                &mut len,
+                (&raw mut cred).cast::<c_void>(),
+                &raw mut len,
             )
         };
         if rc < 0 {
@@ -70,7 +73,9 @@ mod imp {
                 std::io::Error::last_os_error(),
             ));
         }
-        if len as usize != core::mem::size_of::<libc::ucred>() {
+        if usize::try_from(len).expect("socklen_t fits usize")
+            != core::mem::size_of::<libc::ucred>()
+        {
             return Err(OsError::unexpected_data(
                 "peer credentials",
                 format!("SO_PEERCRED returned unexpected length {len}"),
@@ -91,7 +96,12 @@ mod imp {
         val[2] = cred.gid;
         val[3] = cred.uid;
         val[4] = cred.gid;
-        val[5] = cred.pid as u32;
+        val[5] = u32::try_from(cred.pid).map_err(|_| {
+            OsError::unexpected_data(
+                "peer credentials",
+                format!("SO_PEERCRED returned invalid pid {}", cred.pid),
+            )
+        })?;
         val[7] = pidversion;
         Ok(AuditToken::synthetic(val))
     }
@@ -103,7 +113,12 @@ mod imp {
 }
 
 /// Retrieve the peer process's kernel-sourced audit token from a connected
-/// UnixStream.
+/// `UnixStream`.
+///
+/// # Errors
+///
+/// Returns an OS error when peer credentials cannot be retrieved, are malformed,
+/// or are unsupported on the current platform.
 pub fn peer_audit_token(stream: &UnixStream) -> Result<AuditToken, OsError> {
     imp::peer_audit_token(stream)
 }
@@ -112,6 +127,10 @@ pub fn peer_audit_token(stream: &UnixStream) -> Result<AuditToken, OsError> {
 ///
 /// The unsafe block here is the trust-boundary annotation: `peer_audit_token`
 /// is the kernel source on platforms that support this capability.
+///
+/// # Errors
+///
+/// Returns any error from `peer_audit_token`.
 pub fn peer_identity(stream: &UnixStream) -> Result<ProcessIdentity, OsError> {
     let token = peer_audit_token(stream)?;
     Ok(unsafe { ProcessIdentity::from_kernel_token(token) })
@@ -127,7 +146,10 @@ mod linux_tests {
 
         let token = peer_audit_token(&a).expect("peer audit token");
 
-        assert_eq!(token.val[5] as libc::pid_t, unsafe { libc::getpid() });
+        assert_eq!(
+            libc::pid_t::try_from(token.val[5]).expect("audit token pid fits libc pid"),
+            unsafe { libc::getpid() }
+        );
         assert_eq!(token.val[1], unsafe { libc::geteuid() });
         assert_eq!(token.val[2], unsafe { libc::getegid() });
         assert_ne!(token.val[7], 0, "linux starttime pidversion should be set");

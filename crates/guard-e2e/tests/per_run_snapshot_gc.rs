@@ -1,15 +1,15 @@
-//! D-29 per-run snapshot lifecycle: gc_sweep removes stale entries.
+//! D-29 per-run snapshot lifecycle: `gc_sweep` removes stale entries.
 //!
 //! Three invariants the GC sweeper MUST hold:
-//!   1. Orphan removal — files in runs/ with NO matching RunRecord (e.g. left
+//!   1. Orphan removal — files in runs/ with NO matching `RunRecord` (e.g. left
 //!      over from a daemon restart) are removed.
-//!   2. Live preservation — files whose RunRecord pid is alive are NOT removed.
-//!   3. Dead-pid removal — files whose RunRecord pid is no longer alive are
-//!      removed AND the RunRecord is dropped from the ProcessTree.
+//!   2. Live preservation — files whose `RunRecord` pid is alive are NOT removed.
+//!   3. Dead-pid removal — files whose `RunRecord` pid is no longer alive are
+//!      removed AND the `RunRecord` is dropped from the `ProcessTree`.
 //!
 //! These tests do NOT exercise the daemon's IPC path or the periodic timer;
 //! they call `gc_sweep` directly. The periodic loop (`spawn_gc_thread`) is
-//! a thin wrapper that calls `gc_sweep` every GC_INTERVAL_SECS and is exercised
+//! a thin wrapper that calls `gc_sweep` every `GC_INTERVAL_SECS` and is exercised
 //! implicitly when the daemon runs end-to-end.
 
 use guard_core::AuditToken;
@@ -19,7 +19,7 @@ use guard_daemon::tracked::{ProcessTree, RunRecord};
 use std::sync::Arc;
 use tempfile::TempDir;
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn gc_removes_orphan_snapshots() {
     let tmp = TempDir::new().unwrap();
@@ -42,7 +42,7 @@ fn gc_removes_orphan_snapshots() {
     assert!(!manifest_path.exists(), "orphan manifest must be GC'd");
 }
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn gc_preserves_live_snapshots() {
     let tmp = TempDir::new().unwrap();
@@ -57,8 +57,9 @@ fn gc_preserves_live_snapshots() {
     std::fs::write(&snap_path, b"live-snapshot-bytes").unwrap();
     std::fs::write(&manifest_path, b"live-manifest").unwrap();
     let my_pid = unsafe { libc::getpid() };
+    let my_pid = u32::try_from(my_pid).expect("pid fits audit token field");
     let token = AuditToken {
-        val: [0, 0, 0, 0, 0, my_pid as u32, 0, 0],
+        val: [0, 0, 0, 0, 0, my_pid, 0, 0],
     };
     tree.insert_run(RunRecord {
         run_uuid: live_uuid.to_string(),
@@ -76,7 +77,7 @@ fn gc_preserves_live_snapshots() {
     assert!(tree.get_run(live_uuid).is_some(), "RunRecord preserved");
 }
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn gc_removes_dead_pid_snapshots() {
     let tmp = TempDir::new().unwrap();
@@ -111,7 +112,7 @@ fn gc_removes_dead_pid_snapshots() {
     assert!(tree.get_run(dead_uuid).is_none(), "RunRecord removed");
 }
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn gc_skips_runrecord_with_zero_pid_placeholder() {
     // PrepareSnapshot inserts RunRecord with placeholder zero AuditToken
@@ -147,7 +148,7 @@ fn gc_skips_runrecord_with_zero_pid_placeholder() {
     assert!(tree.get_run(pending_uuid).is_some(), "RunRecord preserved");
 }
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn gc_handles_missing_runs_dir_gracefully() {
     // If runs/ doesn't exist yet (daemon just started, no PrepareSnapshot

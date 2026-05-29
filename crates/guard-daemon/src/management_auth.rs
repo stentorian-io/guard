@@ -15,6 +15,12 @@ use crate::rule_store::RuleStore;
 pub const ACTION_DISABLE_CURATED_RULE: &str = "disable-curated-rule";
 pub const ACTION_ENABLE_CURATED_RULE: &str = "enable-curated-rule";
 
+/// Authorize a signed mutable management action.
+///
+/// # Errors
+///
+/// Returns a string error when the signature is missing, invalid, stale by
+/// policy, or signed by an untrusted key.
 pub fn authorize_management_action(
     rule_store: &RuleStore,
     policy: RuleSignaturePolicy,

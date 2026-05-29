@@ -1,4 +1,4 @@
-//! Stentorian Guard domain types — ProcessIdentity, allowlist matcher, snapshot codec.
+//! Stentorian Guard domain types — `ProcessIdentity`, allowlist matcher, snapshot codec.
 
 pub mod allowlist;
 pub mod env_filter;

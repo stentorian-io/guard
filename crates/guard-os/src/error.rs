@@ -21,6 +21,7 @@ pub enum OsError {
 }
 
 impl OsError {
+    #[must_use]
     pub const fn unsupported(capability: &'static str) -> Self {
         Self::Unsupported {
             capability,
@@ -28,6 +29,7 @@ impl OsError {
         }
     }
 
+    #[must_use]
     pub fn io(capability: &'static str, source: std::io::Error) -> Self {
         Self::Io { capability, source }
     }

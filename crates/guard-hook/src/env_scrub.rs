@@ -9,9 +9,9 @@
 //! injection variable to inherit hook injection.
 //!
 //! Hidden from application code (after ctor):
-//!   - STT_GUARD_SNAPSHOT_MANIFEST
-//!   - STT_GUARD_STATE_DIR
-//!   - STT_GUARD_TEST_MARKER
+//!   - `STT_GUARD_SNAPSHOT_MANIFEST`
+//!   - `STT_GUARD_STATE_DIR`
+//!   - `STT_GUARD_TEST_MARKER`
 //!   - platform hook injection variable (hides our hook library path)
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -26,7 +26,7 @@ unsafe extern "C" {
     /// C strings. We read this directly to implement getenv without calling
     /// libc's getenv (which is interposed by us, creating infinite recursion).
     /// dlsym also can't help because dyld patches ALL symbol tables including
-    /// libSystem's, so dlsym(anything, "getenv") returns guard_getenv.
+    /// libSystem's, so dlsym(anything, "getenv") returns `guard_getenv`.
     #[link_name = "environ"]
     static environ: *const *mut libc::c_char;
 }
@@ -84,7 +84,12 @@ const HIDDEN_NAMES: &[&CStr] = &[
 ];
 
 /// Check whether a getenv key should be hidden from application code.
-pub fn is_hidden_key(name: *const libc::c_char) -> bool {
+///
+/// # Safety
+///
+/// `name` must either be null or point to a valid NUL-terminated C string.
+#[must_use]
+pub unsafe fn is_hidden_key(name: *const libc::c_char) -> bool {
     if name.is_null() {
         return false;
     }
@@ -92,14 +97,14 @@ pub fn is_hidden_key(name: *const libc::c_char) -> bool {
     HIDDEN_NAMES.contains(&name_cstr)
 }
 
-/// Interposed getenv: returns NULL for hidden keys once SCRUB_ACTIVE is
+/// Interposed getenv: returns NULL for hidden keys once `SCRUB_ACTIVE` is
 /// true. During ctor initialization, passes through to real getenv.
 ///
 /// # Safety
 /// C-ABI passthrough; `name` must be a valid C string (caller contract).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn guard_getenv(name: *const libc::c_char) -> *mut libc::c_char {
-    if SCRUB_ACTIVE.load(Ordering::Acquire) && is_hidden_key(name) {
+    if SCRUB_ACTIVE.load(Ordering::Acquire) && unsafe { is_hidden_key(name) } {
         return std::ptr::null_mut();
     }
     unsafe { raw_getenv(name) }
@@ -111,21 +116,21 @@ mod tests {
 
     #[test]
     fn hidden_keys_detected() {
-        assert!(is_hidden_key(c"STT_GUARD_SNAPSHOT_MANIFEST".as_ptr()));
-        assert!(is_hidden_key(c"STT_GUARD_STATE_DIR".as_ptr()));
-        assert!(is_hidden_key(c"STT_GUARD_TEST_MARKER".as_ptr()));
+        assert!(unsafe { is_hidden_key(c"STT_GUARD_SNAPSHOT_MANIFEST".as_ptr()) });
+        assert!(unsafe { is_hidden_key(c"STT_GUARD_STATE_DIR".as_ptr()) });
+        assert!(unsafe { is_hidden_key(c"STT_GUARD_TEST_MARKER".as_ptr()) });
         #[cfg(target_os = "macos")]
-        assert!(is_hidden_key(c"DYLD_INSERT_LIBRARIES".as_ptr()));
+        assert!(unsafe { is_hidden_key(c"DYLD_INSERT_LIBRARIES".as_ptr()) });
         #[cfg(target_os = "linux")]
-        assert!(is_hidden_key(c"LD_PRELOAD".as_ptr()));
+        assert!(unsafe { is_hidden_key(c"LD_PRELOAD".as_ptr()) });
     }
 
     #[test]
     fn non_hidden_keys_pass_through() {
-        assert!(!is_hidden_key(c"HOME".as_ptr()));
-        assert!(!is_hidden_key(c"PATH".as_ptr()));
-        assert!(!is_hidden_key(c"npm_config_registry".as_ptr()));
-        assert!(!is_hidden_key(std::ptr::null()));
+        assert!(!unsafe { is_hidden_key(c"HOME".as_ptr()) });
+        assert!(!unsafe { is_hidden_key(c"PATH".as_ptr()) });
+        assert!(!unsafe { is_hidden_key(c"npm_config_registry".as_ptr()) });
+        assert!(!unsafe { is_hidden_key(std::ptr::null()) });
     }
 
     #[test]

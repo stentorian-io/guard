@@ -16,11 +16,11 @@
 //!  * `ALLOWLIST` is a process-global `OnceLock` (guard-hook/src/lib.rs:50);
 //!    set it ONCE before the bench loop or the bench measures a noise floor
 //!    (RESEARCH §Pitfall 6). We do this via a single warm-up call to
-//!    `_test_decide_for_sockaddr(entries, ...)` whose first-call side effect
-//!    populates the OnceLock.
-//!  * The entries Vec is NOT cloned inside the iter_custom closure
+//!    `test_decide_for_sockaddr(entries, ...)` whose first-call side effect
+//!    populates the `OnceLock`.
+//!  * The entries Vec is NOT cloned inside the `iter_custom` closure
 //!    (RESEARCH §Anti-Patterns: clone of a ~10-entry `Vec<AllowlistEntry>` is
-//!    ~10µs and would mask the real number). After the warm-up, `_test_decide_for_sockaddr`
+//!    ~10µs and would mask the real number). After the warm-up, `test_decide_for_sockaddr`
 //!    is called with `Vec::new()` — the OnceLock.set inside the seam is silently
 //!    a no-op once already set, so the empty Vec is never read. The bench
 //!    measures the cache-lookup + tier-walk path against the warm-up's ALLOWLIST.
@@ -36,7 +36,7 @@
 //!
 //! See:
 //!   * `crates/guard-hook/src/replace_libc.rs::decide_for_sockaddr` — function under measurement
-//!   * `crates/guard-hook/src/lib.rs::_test_decide_for_sockaddr` — test seam used to drive it
+//!   * `crates/guard-hook/src/lib.rs::test_decide_for_sockaddr` — test seam used to drive it
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
@@ -49,7 +49,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 #[cfg(target_os = "macos")]
 use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
 #[cfg(target_os = "macos")]
-use guard_hook::_test_decide_for_sockaddr;
+use guard_hook::test_decide_for_sockaddr;
 #[cfg(target_os = "macos")]
 use hdrhistogram::Histogram;
 #[cfg(target_os = "macos")]
@@ -58,7 +58,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 #[cfg(target_os = "macos")]
-/// Build a realistic per-run snapshot's entry mix — CuratedAllow + UserAllow,
+/// Build a realistic per-run snapshot's entry mix — `CuratedAllow` + `UserAllow`,
 /// Exact + Suffix + Ip match types. Mirrors what `prepare_snapshot` produces for
 /// a typical npm-install run. The fixed entries match RESEARCH §Pattern 1
 /// lines 358-367; the additional padding to ~10 entries makes the tier-walk
@@ -108,20 +108,20 @@ fn realistic_entries() -> Vec<AllowlistEntry> {
 }
 
 #[cfg(target_os = "macos")]
-/// AF_INET sockaddr literal for `104.16.16.35:443` — one of registry.npmjs.org's
+/// `AF_INET` sockaddr literal for `104.16.16.35:443` — one of registry.npmjs.org's
 /// Cloudflare IPs. Fixed value so the bench is deterministic across runs.
 /// Layout matches `crates/guard-hook/tests/resolve_client_tests.rs:217-224`.
 fn sockaddr_for_npmjs_443() -> (libc::sockaddr_in, libc::socklen_t) {
     let sa = libc::sockaddr_in {
         sin_len: 16,
-        sin_family: libc::AF_INET as u8,
+        sin_family: u8::try_from(libc::AF_INET).unwrap_or(0),
         sin_port: 443u16.to_be(),
         sin_addr: libc::in_addr {
             s_addr: u32::from_be_bytes([104, 16, 16, 35]).to_be(),
         },
         sin_zero: [0i8; 8],
     };
-    let addrlen = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+    let addrlen = libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_in>()).unwrap_or(0);
     (sa, addrlen)
 }
 
@@ -134,11 +134,13 @@ fn cache_hit_bench(c: &mut Criterion) {
     // Warm-up: first call sets ALLOWLIST (OnceLock; RESEARCH §Pitfall 6).
     // We discard the verdict — we only care that ALLOWLIST is now seeded so
     // subsequent calls take the fast path (no OnceLock contention).
-    let _warmup = _test_decide_for_sockaddr(
-        entries.clone(),
-        &sa as *const _ as *const libc::sockaddr,
-        addrlen,
-    );
+    let _warmup = unsafe {
+        test_decide_for_sockaddr(
+            entries.clone(),
+            (&raw const sa).cast::<libc::sockaddr>(),
+            addrlen,
+        )
+    };
 
     // hdrhistogram captures per-iteration nanos from inside iter_custom.
     // sigfig=3 → 0.1% precision; ample for µs-scale measurements.
@@ -149,23 +151,25 @@ fn cache_hit_bench(c: &mut Criterion) {
             let mut total_ns: u64 = 0;
             for _ in 0..iters {
                 let t0 = Instant::now();
-                // Pass an empty Vec — `_test_decide_for_sockaddr` does
+                // Pass an empty Vec — `test_decide_for_sockaddr` does
                 // `let _ = ALLOWLIST.set(entries)` which silently no-ops once
                 // ALLOWLIST is set, so the empty Vec is never read. The bench
                 // measures `decide_for_sockaddr` against the warm-up's
                 // ALLOWLIST.
-                let _v = _test_decide_for_sockaddr(
-                    Vec::new(),
-                    black_box(&sa as *const _ as *const libc::sockaddr),
-                    black_box(addrlen),
-                );
+                let _v = unsafe {
+                    test_decide_for_sockaddr(
+                        Vec::new(),
+                        black_box((&raw const sa).cast::<libc::sockaddr>()),
+                        black_box(addrlen),
+                    )
+                };
                 let dt = t0.elapsed();
-                let ns = dt.as_nanos() as u64;
+                let ns = u64::try_from(dt.as_nanos()).unwrap_or(u64::MAX);
                 hist.record(ns).ok();
                 total_ns = total_ns.saturating_add(ns);
             }
             std::time::Duration::from_nanos(total_ns)
-        })
+        });
     });
 
     // Print percentile line — `scripts/bench-hot-path.sh`

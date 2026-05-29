@@ -1,9 +1,9 @@
 //! v0.3 — SIGINT handler unit test.
 //!
-//! Note: we cannot test killpg() in a unit test (would kill the test runner).
-//! We test ONLY the in-flight prompt_id snapshot semantics. The cancel-emission
-//! over a live PromptChannel + the killpg propagation are observed in e2e
-//! (prompt_cancel_via_sigint).
+//! Note: we cannot test `killpg()` in a unit test (would kill the test runner).
+//! We test ONLY the in-flight `prompt_id` snapshot semantics. The cancel-emission
+//! over a live `PromptChannel` + the killpg propagation are observed in e2e
+//! (`prompt_cancel_via_sigint`).
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};

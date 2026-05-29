@@ -1,4 +1,4 @@
-use guard_core::{MatchType, RuleKind, RuleTier};
+use guard_core::{RuleKind, RuleTier};
 use guard_daemon::curated::{CuratedError, MIN_SUFFIX_LEN, load_curated, parse_yaml};
 
 #[test]
@@ -53,8 +53,7 @@ fn allow_entries_get_curated_allow_tier() {
         if matches!(e.kind, RuleKind::Allow) {
             assert!(
                 matches!(e.tier, RuleTier::CuratedAllow),
-                "allow entry must be CuratedAllow tier: {:?}",
-                e
+                "allow entry must be CuratedAllow tier: {e:?}"
             );
         }
     }
@@ -68,14 +67,12 @@ fn deny_entries_get_expected_tier() {
             if e.reason.contains("(FEED)") {
                 assert!(
                     matches!(e.tier, RuleTier::ConfirmedDeny | RuleTier::SuspectDeny),
-                    "feed deny entry must carry a feed confidence tier: {:?}",
-                    e
+                    "feed deny entry must carry a feed confidence tier: {e:?}"
                 );
             } else {
                 assert!(
                     matches!(e.tier, RuleTier::BuiltinDeny),
-                    "builtin deny entry must be BuiltinDeny tier: {:?}",
-                    e
+                    "builtin deny entry must be BuiltinDeny tier: {e:?}"
                 );
             }
         }
@@ -86,13 +83,12 @@ fn deny_entries_get_expected_tier() {
 fn every_entry_has_nonempty_reason() {
     let entries = load_curated().expect("load");
     for e in &entries {
-        assert!(!e.reason.trim().is_empty(), "empty reason on {:?}", e);
+        assert!(!e.reason.trim().is_empty(), "empty reason on {e:?}");
     }
 }
 
 #[test]
-#[allow(non_snake_case)]
-fn cloud_metadata_is_NOT_in_yaml_only_in_code() {
+fn cloud_metadata_is_not_in_yaml_only_in_code() {
     let entries = load_curated().expect("load");
     let patterns: Vec<&str> = entries.iter().map(|e| e.pattern.as_str()).collect();
     assert!(
@@ -103,13 +99,13 @@ fn cloud_metadata_is_NOT_in_yaml_only_in_code() {
 
 #[test]
 fn parse_yaml_rejects_overbroad_suffix() {
-    let bad = r#"
+    let bad = r"
 entries:
   - kind: deny
     match: suffix
     pattern: .x
     reason: too short
-"#;
+";
     let res = parse_yaml(bad);
     match res {
         Err(CuratedError::InvalidPattern { reason, .. }) => {
@@ -130,15 +126,12 @@ entries:
 fn parse_yaml_rejects_top_level_tld_suffix() {
     for bad_tld in [".com", ".org", ".net", ".dev", ".app", ".io"] {
         let yaml = format!(
-            "entries:\n  - kind: deny\n    match: suffix\n    pattern: {}\n    reason: too broad\n",
-            bad_tld
+            "entries:\n  - kind: deny\n    match: suffix\n    pattern: {bad_tld}\n    reason: too broad\n"
         );
         let res = parse_yaml(&yaml);
         assert!(
             matches!(res, Err(CuratedError::InvalidPattern { .. })),
-            "WARNING: pattern {} must be rejected as too short; got {:?}",
-            bad_tld,
-            res
+            "WARNING: pattern {bad_tld} must be rejected as too short; got {res:?}"
         );
     }
     // Sanity check: legitimate suffixes >= 6 bytes still pass.
@@ -151,13 +144,13 @@ fn parse_yaml_rejects_top_level_tld_suffix() {
 
 #[test]
 fn parse_yaml_rejects_suffix_without_leading_dot() {
-    let bad = r#"
+    let bad = r"
 entries:
   - kind: deny
     match: suffix
     pattern: workers.dev
     reason: missing leading dot
-"#;
+";
     let res = parse_yaml(bad);
     match res {
         Err(CuratedError::InvalidPattern { reason, .. }) => {
@@ -199,10 +192,4 @@ fn min_suffix_len_const_is_6() {
     // WARNING: raised from 4 to 6 to reject single-TLD suffixes like
     // ".com" / ".org" / ".net" / ".dev" / ".app" / ".io".
     assert_eq!(MIN_SUFFIX_LEN, 6);
-}
-
-// Suppress dev-dep usage warning for MatchType (used implicitly via load_curated entries).
-#[allow(dead_code)]
-fn _force_match_type_use() -> MatchType {
-    MatchType::Exact
 }

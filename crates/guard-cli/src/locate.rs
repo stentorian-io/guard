@@ -12,6 +12,12 @@ use guard_core::paths::{
     SYSTEM_HOOK_PATH as SYSTEM_INSTALL_PATH,
 };
 
+/// Locate the hook dynamic library for production or development mode.
+///
+/// # Errors
+///
+/// Returns an error when the required production hook is absent, an override is
+/// invalid, or no development hook can be found next to the CLI.
 pub fn find_dylib() -> std::io::Result<PathBuf> {
     let dev_mode = std::env::var_os(ENV_STATE_DIR).is_some();
 
@@ -68,12 +74,16 @@ fn hook_library_filename_matches(name: &str) -> bool {
 
 #[cfg(target_os = "macos")]
 fn platform_hook_extension_matches(name: &str) -> bool {
-    name.ends_with(".dylib")
+    std::path::Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("dylib"))
 }
 
 #[cfg(target_os = "linux")]
 fn platform_hook_extension_matches(name: &str) -> bool {
-    name.ends_with(".so")
+    std::path::Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("so"))
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]

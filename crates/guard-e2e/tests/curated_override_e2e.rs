@@ -74,7 +74,9 @@ fn direct_unsigned_disable_and_enable_are_rejected() {
             message.contains("signed management authorization required"),
             "expected authorization failure; got: {message}"
         ),
-        _ => panic!("unsigned direct disable should fail; got {reply:?}"),
+        DisableCuratedRuleReply::Ok { .. } => {
+            panic!("unsigned direct disable should fail; got {reply:?}");
+        }
     }
 
     let req = ListRules::new(true);
@@ -100,7 +102,9 @@ fn direct_unsigned_disable_and_enable_are_rejected() {
             message.contains("signed management authorization required"),
             "expected authorization failure; got: {message}"
         ),
-        _ => panic!("unsigned direct enable should fail; got {reply:?}"),
+        EnableCuratedRuleReply::Ok { .. } => {
+            panic!("unsigned direct enable should fail; got {reply:?}");
+        }
     }
 }
 
@@ -119,7 +123,9 @@ fn disable_nonexistent_pattern_returns_error() {
                 "expected 'no curated rule' in error; got: {message}"
             );
         }
-        _ => panic!("expected error for nonexistent pattern; got {reply:?}"),
+        DisableCuratedRuleReply::Ok { .. } => {
+            panic!("expected error for nonexistent pattern; got {reply:?}");
+        }
     }
 }
 

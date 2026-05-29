@@ -1,7 +1,7 @@
-//! SQLite rule store.
+//! `SQLite` rule store.
 //!
-//! Owned by the daemon. The dylib never reads SQLite directly — instead, the
-//! daemon merges SQLite rules into the per-run snapshot at PrepareSnapshot
+//! Owned by the daemon. The dylib never reads `SQLite` directly — instead, the
+//! daemon merges `SQLite` rules into the per-run snapshot at `PrepareSnapshot`
 //! time.
 //!
 //! WARNING fix (v0.2 review): the original implementation wrapped a
@@ -12,7 +12,7 @@
 //! `PrepareSnapshot`, which blocks `stt-guard wrap` startup, which blocks
 //! the user's `npm install`.
 //!
-//! The fix opens a fresh `Connection` per read call. SQLite supports this
+//! The fix opens a fresh `Connection` per read call. `SQLite` supports this
 //! natively (file-level locking + WAL mode handles concurrent readers
 //! cleanly). Writes still take a mutex on the long-lived connection so
 //! migrations and the singleton write path are serialized. In WAL mode this
@@ -53,7 +53,7 @@ pub struct RuleSigningStatus {
     pub action: Option<String>,
 }
 
-/// v0.7 — storage-side row for ListRules. String discriminators
+/// v0.7 — storage-side row for `ListRules`. String discriminators
 /// match the wire shape exactly so the handler does no enum mapping.
 #[derive(Debug, Clone)]
 pub struct StoredRule {
@@ -62,6 +62,30 @@ pub struct StoredRule {
     pub match_type: String, // "exact" | "suffix" | "ip"
     pub pattern: String,
     pub reason: String,
+}
+
+struct TrustedManifestSigner {
+    fingerprint: String,
+    signer_kind: String,
+    public_key_hex: String,
+}
+
+struct VerifiedRuleRow {
+    kind: String,
+    match_type: String,
+    pattern: String,
+    reason: String,
+    created_at: i64,
+    scheme: String,
+    signer_kind: String,
+    public_key_x963: Vec<u8>,
+    public_key_sha256: String,
+    signature_der: Vec<u8>,
+    signed_payload_sha256: String,
+    signature_created_at_unix_ms: i64,
+    origin: String,
+    run_uuid: Option<String>,
+    payload_created_at: i64,
 }
 
 const SQL_001_SCHEMA: &str = include_str!("../migrations/001_schema.sql");
@@ -82,8 +106,12 @@ pub struct RuleStore {
 }
 
 impl RuleStore {
-    /// Open or create the SQLite database at `db_path`. On creation, sets
+    /// Open or create the `SQLite` database at `db_path`. On creation, sets
     /// mode 0600. Idempotent — runs migrations to latest on every open.
+    ///
+    /// # Errors
+    ///
+    /// Returns database, migration, or trusted-signer manifest errors.
     pub fn open(db_path: &Path) -> Result<Self, RuleStoreError> {
         let mut conn = Connection::open(db_path).map_err(RuleStoreError::Sql)?;
         // Defense-in-depth: tighten file permissions if the DB file was just
@@ -147,9 +175,17 @@ impl RuleStore {
     }
 
     /// Insert a user-approved rule (called by legacy tests and pre-signature paths).
-    /// New persistence paths must use insert_signed_user_rule.
-    /// Validates kind/match_type at the boundary; reason must be non-empty.
+    /// New persistence paths must use `insert_signed_user_rule`.
+    /// Validates `kind/match_type` at the boundary; reason must be non-empty.
     /// Returns the new row id.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` errors from inserting the rule.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store mutex is poisoned.
     pub fn insert_user_rule(
         &self,
         kind: &str,
@@ -170,6 +206,15 @@ impl RuleStore {
     }
 
     /// Insert a signed user rule and its authenticity metadata in one transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` or rule-store errors from inserting the rule and
+    /// signature metadata.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store mutex is poisoned.
     pub fn insert_signed_user_rule(
         &self,
         payload: &RuleSignaturePayloadV1,
@@ -224,6 +269,10 @@ impl RuleStore {
     /// Enroll a public rule-signing key as trusted. Production enrollment must
     /// happen only after hardware attestation; tests use this for the explicit
     /// test simulator signer.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` errors from persisting the trusted signer.
     pub fn register_trusted_rule_signer(
         &self,
         signature: &RuleSignatureV1,
@@ -237,6 +286,15 @@ impl RuleStore {
         )
     }
 
+    /// Enroll a trusted rule-signing public key directly.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` errors from persisting the trusted signer.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store mutex is poisoned.
     pub fn register_trusted_rule_signer_key(
         &self,
         public_key_sha256: &str,
@@ -260,6 +318,15 @@ impl RuleStore {
         Ok(())
     }
 
+    /// Check whether a rule signer is trusted in both the database and manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` or trusted-signer manifest verification errors.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store reader mutex is poisoned.
     pub fn is_trusted_rule_signer(
         &self,
         public_key_sha256: &str,
@@ -280,111 +347,134 @@ impl RuleStore {
 
     pub fn rule_signing_status(&self) -> RuleSigningStatus {
         let Some(path) = &self.trusted_signers_manifest_path else {
-            return RuleSigningStatus {
-                configured: false,
-                status: "not-configured".to_string(),
-                signer_kind: None,
-                fingerprint: None,
-                trust_root_path: None,
-                trust_root_ok: false,
-                reason: Some(
-                    "system trusted signer manifest is unavailable for this state directory"
-                        .to_string(),
-                ),
-                action: Some(
-                    "run the installer on a supported hardware-backed signing platform".to_string(),
-                ),
-            };
+            return Self::rule_signing_status_no_trust_root();
         };
         let trust_root_path = Some(path.display().to_string());
-        if let Err(e) = self.verify_trusted_manifest_path(path) {
-            return RuleSigningStatus {
-                configured: false,
-                status: "invalid".to_string(),
-                signer_kind: None,
-                fingerprint: None,
-                trust_root_path,
-                trust_root_ok: false,
-                reason: Some(e.to_string()),
-                action: Some("rerun the installer to repair signer enrollment".to_string()),
-            };
+
+        if let Err(e) = Self::verify_trusted_manifest_path(path) {
+            return Self::rule_signing_status_invalid_trust_root(trust_root_path, e.to_string());
         }
-        let contents = match std::fs::read_to_string(path) {
+
+        let contents = match Self::read_trusted_manifest_contents(path) {
             Ok(contents) => contents,
-            Err(e) => {
-                return RuleSigningStatus {
-                    configured: false,
-                    status: "invalid".to_string(),
-                    signer_kind: None,
-                    fingerprint: None,
-                    trust_root_path,
-                    trust_root_ok: false,
-                    reason: Some(format!("trusted signer manifest unreadable: {e}")),
-                    action: Some("rerun the installer to repair signer enrollment".to_string()),
-                };
+            Err(reason) => {
+                return Self::rule_signing_status_invalid_trust_root(trust_root_path, reason);
             }
         };
-        let Some((fingerprint, signer_kind, public_key_hex)) =
-            (match guard_core::first_trusted_signer(&contents) {
-                Ok(signer) => signer.map(|signer| {
-                    (
-                        signer.public_key_sha256,
-                        signer.signer_kind,
-                        signer.public_key_x963_hex,
-                    )
-                }),
-                Err(e) => {
-                    return RuleSigningStatus {
-                        configured: false,
-                        status: "invalid".to_string(),
-                        signer_kind: None,
-                        fingerprint: None,
-                        trust_root_path,
-                        trust_root_ok: false,
-                        reason: Some(e.to_string()),
-                        action: Some("rerun the installer to repair signer enrollment".to_string()),
-                    };
-                }
-            })
-        else {
-            return RuleSigningStatus {
-                configured: false,
-                status: "not-configured".to_string(),
-                signer_kind: None,
-                fingerprint: None,
-                trust_root_path,
-                trust_root_ok: true,
-                reason: Some("trusted signer manifest contains no signer entries".to_string()),
-                action: Some("run the installer to enroll a hardware-backed signer".to_string()),
-            };
+
+        let signer = match Self::first_trusted_manifest_signer(&contents) {
+            Ok(Some(signer)) => signer,
+            Ok(None) => return Self::rule_signing_status_manifest_has_no_signers(trust_root_path),
+            Err(reason) => {
+                return Self::rule_signing_status_invalid_trust_root(trust_root_path, reason);
+            }
         };
         let db_matches = self
-            .trusted_signer_db_matches(&fingerprint, &signer_kind, &public_key_hex)
+            .trusted_signer_db_matches(
+                &signer.fingerprint,
+                &signer.signer_kind,
+                &signer.public_key_hex,
+            )
             .unwrap_or(false);
+
         if !db_matches {
-            return RuleSigningStatus {
-                configured: false,
-                status: "invalid".to_string(),
-                signer_kind: Some(signer_kind),
-                fingerprint: Some(fingerprint),
-                trust_root_path,
-                trust_root_ok: true,
-                reason: Some(
-                    "trusted signer manifest does not match daemon signer cache".to_string(),
-                ),
-                action: Some("rerun the installer to repair signer enrollment".to_string()),
-            };
+            return Self::rule_signing_status_cache_mismatch(trust_root_path, signer);
         }
+
         RuleSigningStatus {
             configured: true,
             status: "configured".to_string(),
-            signer_kind: Some(signer_kind),
-            fingerprint: Some(fingerprint),
+            signer_kind: Some(signer.signer_kind),
+            fingerprint: Some(signer.fingerprint),
             trust_root_path,
             trust_root_ok: true,
             reason: None,
             action: None,
         }
+    }
+
+    fn rule_signing_status_no_trust_root() -> RuleSigningStatus {
+        RuleSigningStatus {
+            configured: false,
+            status: "not-configured".to_string(),
+            signer_kind: None,
+            fingerprint: None,
+            trust_root_path: None,
+            trust_root_ok: false,
+            reason: Some(
+                "system trusted signer manifest is unavailable for this state directory"
+                    .to_string(),
+            ),
+            action: Some(
+                "run the installer on a supported hardware-backed signing platform".to_string(),
+            ),
+        }
+    }
+
+    fn rule_signing_status_invalid_trust_root(
+        trust_root_path: Option<String>,
+        reason: String,
+    ) -> RuleSigningStatus {
+        RuleSigningStatus {
+            configured: false,
+            status: "invalid".to_string(),
+            signer_kind: None,
+            fingerprint: None,
+            trust_root_path,
+            trust_root_ok: false,
+            reason: Some(reason),
+            action: Some("rerun the installer to repair signer enrollment".to_string()),
+        }
+    }
+
+    fn rule_signing_status_manifest_has_no_signers(
+        trust_root_path: Option<String>,
+    ) -> RuleSigningStatus {
+        RuleSigningStatus {
+            configured: false,
+            status: "not-configured".to_string(),
+            signer_kind: None,
+            fingerprint: None,
+            trust_root_path,
+            trust_root_ok: true,
+            reason: Some("trusted signer manifest contains no signer entries".to_string()),
+            action: Some("run the installer to enroll a hardware-backed signer".to_string()),
+        }
+    }
+
+    fn rule_signing_status_cache_mismatch(
+        trust_root_path: Option<String>,
+        signer: TrustedManifestSigner,
+    ) -> RuleSigningStatus {
+        RuleSigningStatus {
+            configured: false,
+            status: "invalid".to_string(),
+            signer_kind: Some(signer.signer_kind),
+            fingerprint: Some(signer.fingerprint),
+            trust_root_path,
+            trust_root_ok: true,
+            reason: Some("trusted signer manifest does not match daemon signer cache".to_string()),
+            action: Some("rerun the installer to repair signer enrollment".to_string()),
+        }
+    }
+
+    fn read_trusted_manifest_contents(path: &Path) -> Result<String, String> {
+        std::fs::read_to_string(path)
+            .map_err(|e| format!("trusted signer manifest unreadable: {e}"))
+    }
+
+    fn first_trusted_manifest_signer(
+        contents: &str,
+    ) -> Result<Option<TrustedManifestSigner>, String> {
+        guard_core::first_trusted_signer(contents)
+            .map(|signer| {
+                signer.map(|signer| TrustedManifestSigner {
+                    fingerprint: signer.public_key_sha256,
+                    signer_kind: signer.signer_kind,
+                    public_key_hex: signer.public_key_x963_hex,
+                })
+            })
+            .map_err(|e| e.to_string())
     }
 
     fn trusted_manifest_contains(
@@ -396,7 +486,7 @@ impl RuleStore {
         let Some(path) = &self.trusted_signers_manifest_path else {
             return Ok(true);
         };
-        self.verify_trusted_manifest_path(path)?;
+        Self::verify_trusted_manifest_path(path)?;
         let contents = std::fs::read_to_string(path).map_err(|e| {
             RuleStoreError::Signature(format!(
                 "trusted signer manifest unreadable at {}: {e}",
@@ -429,7 +519,7 @@ impl RuleStore {
         Ok(count == 1)
     }
 
-    fn verify_trusted_manifest_path(&self, path: &Path) -> Result<(), RuleStoreError> {
+    fn verify_trusted_manifest_path(path: &Path) -> Result<(), RuleStoreError> {
         let meta = std::fs::symlink_metadata(path).map_err(|e| {
             RuleStoreError::Signature(format!(
                 "trusted signer manifest metadata unreadable at {}: {e}",
@@ -482,16 +572,32 @@ impl RuleStore {
     }
 
     /// Count all rows in the rules table (user-approved rules added via `stt-guard approve`).
-    /// Used by StatusReply handler.
+    /// Used by `StatusReply` handler.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` errors from counting rows.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store reader mutex is poisoned.
     pub fn count_user_rules(&self) -> SqlResult<u64> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         conn.query_row("SELECT COUNT(*) FROM rules", [], |r| r.get::<_, i64>(0))
-            .map(|n| n as u64)
+            .map(|n| u64::try_from(n).unwrap_or(0))
     }
 
-    /// Read all user rules; map each row to an AllowlistEntry with tier
-    /// UserDeny / UserAllow. Legacy helper retained for status/tests; snapshot
-    /// preparation must use all_verified_user_rules.
+    /// Read all user rules; map each row to an `AllowlistEntry` with tier
+    /// `UserDeny` / `UserAllow`. Legacy helper retained for status/tests; snapshot
+    /// preparation must use `all_verified_user_rules`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` errors from reading or mapping rows.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store reader mutex is poisoned.
     pub fn all_user_rules(&self) -> SqlResult<Vec<AllowlistEntry>> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         let mut stmt =
@@ -546,6 +652,14 @@ impl RuleStore {
     /// Read and verify all signed user rules. Any unsigned or tampered user rule
     /// is a fail-closed error; callers must not silently proceed without user
     /// rules when this returns Err.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite`, signature verification, or unsigned-rule errors.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store reader mutex is poisoned.
     pub fn all_verified_user_rules(
         &self,
         policy: RuleSignaturePolicy,
@@ -595,119 +709,12 @@ impl RuleStore {
              JOIN rule_signatures s ON s.rule_id = r.id
              ORDER BY r.id",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, i64>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, Vec<u8>>(7)?,
-                row.get::<_, String>(8)?,
-                row.get::<_, Vec<u8>>(9)?,
-                row.get::<_, String>(10)?,
-                row.get::<_, i64>(11)?,
-                row.get::<_, String>(12)?,
-                row.get::<_, Option<String>>(13)?,
-                row.get::<_, i64>(14)?,
-            ))
-        })?;
+        let rows = stmt.query_map([], Self::verified_rule_row_from_sql)?;
 
         let mut out = Vec::new();
         let mut verified_rows = 0_i64;
         for row in rows {
-            let (
-                kind_str,
-                match_str,
-                pattern,
-                reason,
-                created_at,
-                scheme,
-                signer_kind,
-                public_key_x963,
-                public_key_sha256,
-                signature_der,
-                signed_payload_sha256,
-                signature_created_at_unix_ms,
-                origin,
-                run_uuid,
-                payload_created_at,
-            ) = row?;
-            if created_at != payload_created_at {
-                return Err(RuleStoreError::Signature(
-                    "rule created_at does not match signed payload".into(),
-                ));
-            }
-            let payload = RuleSignaturePayloadV1::new(
-                kind_str.clone(),
-                match_str.clone(),
-                pattern.clone(),
-                reason.clone(),
-                created_at,
-                origin,
-                run_uuid,
-            );
-            let signature = RuleSignatureV1 {
-                scheme,
-                signer_kind,
-                public_key_x963,
-                public_key_sha256,
-                signature_der,
-                signed_payload_sha256,
-                signature_created_at_unix_ms,
-            };
-            verify_rule_signature(&payload, &signature, policy)
-                .map_err(|e| RuleStoreError::Signature(e.to_string()))?;
-            let trusted_count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM trusted_rule_signers
-                 WHERE public_key_sha256 = ?1 AND signer_kind = ?2",
-                params![
-                    signature.public_key_sha256.as_str(),
-                    signature.signer_kind.as_str()
-                ],
-                |r| r.get(0),
-            )?;
-            if trusted_count != 1
-                || !self.trusted_manifest_contains(
-                    &signature.public_key_sha256,
-                    &signature.signer_kind,
-                    Some(&signature.public_key_x963),
-                )?
-            {
-                return Err(RuleStoreError::Signature(format!(
-                    "untrusted rule signer: {}",
-                    signature.public_key_sha256
-                )));
-            }
-
-            let kind = match kind_str.as_str() {
-                "allow" => RuleKind::Allow,
-                "deny" => RuleKind::Deny,
-                other => return Err(RuleStoreError::Signature(format!("invalid kind: {other}"))),
-            };
-            let match_type = match match_str.as_str() {
-                "exact" => MatchType::Exact,
-                "suffix" => MatchType::Suffix,
-                "ip" => MatchType::Ip,
-                other => {
-                    return Err(RuleStoreError::Signature(format!(
-                        "invalid match_type: {other}"
-                    )));
-                }
-            };
-            let tier = match kind {
-                RuleKind::Allow => RuleTier::UserAllow,
-                RuleKind::Deny => RuleTier::UserDeny,
-            };
-            out.push(AllowlistEntry {
-                kind,
-                tier,
-                match_type,
-                pattern,
-                reason,
-            });
+            out.push(self.verify_user_rule_row(&conn, row?, policy)?);
             verified_rows += 1;
         }
         if verified_rows != total_rules {
@@ -718,13 +725,140 @@ impl RuleStore {
         Ok(out)
     }
 
-    /// v0.7 — enumerate user rules for ListRules.
+    fn verified_rule_row_from_sql(row: &rusqlite::Row<'_>) -> SqlResult<VerifiedRuleRow> {
+        Ok(VerifiedRuleRow {
+            kind: row.get(0)?,
+            match_type: row.get(1)?,
+            pattern: row.get(2)?,
+            reason: row.get(3)?,
+            created_at: row.get(4)?,
+            scheme: row.get(5)?,
+            signer_kind: row.get(6)?,
+            public_key_x963: row.get(7)?,
+            public_key_sha256: row.get(8)?,
+            signature_der: row.get(9)?,
+            signed_payload_sha256: row.get(10)?,
+            signature_created_at_unix_ms: row.get(11)?,
+            origin: row.get(12)?,
+            run_uuid: row.get(13)?,
+            payload_created_at: row.get(14)?,
+        })
+    }
+
+    fn verify_user_rule_row(
+        &self,
+        conn: &Connection,
+        row: VerifiedRuleRow,
+        policy: RuleSignaturePolicy,
+    ) -> Result<AllowlistEntry, RuleStoreError> {
+        if row.created_at != row.payload_created_at {
+            return Err(RuleStoreError::Signature(
+                "rule created_at does not match signed payload".into(),
+            ));
+        }
+
+        let payload = RuleSignaturePayloadV1::new(
+            row.kind.clone(),
+            row.match_type.clone(),
+            row.pattern.clone(),
+            row.reason.clone(),
+            row.created_at,
+            row.origin,
+            row.run_uuid,
+        );
+        let signature = RuleSignatureV1 {
+            scheme: row.scheme,
+            signer_kind: row.signer_kind,
+            public_key_x963: row.public_key_x963,
+            public_key_sha256: row.public_key_sha256,
+            signature_der: row.signature_der,
+            signed_payload_sha256: row.signed_payload_sha256,
+            signature_created_at_unix_ms: row.signature_created_at_unix_ms,
+        };
+        verify_rule_signature(&payload, &signature, policy)
+            .map_err(|e| RuleStoreError::Signature(e.to_string()))?;
+        self.verify_rule_signer_trusted(conn, &signature)?;
+
+        let kind = Self::parse_rule_kind(&row.kind)?;
+        let match_type = Self::parse_match_type(&row.match_type)?;
+        let tier = match kind {
+            RuleKind::Allow => RuleTier::UserAllow,
+            RuleKind::Deny => RuleTier::UserDeny,
+        };
+
+        Ok(AllowlistEntry {
+            kind,
+            tier,
+            match_type,
+            pattern: row.pattern,
+            reason: row.reason,
+        })
+    }
+
+    fn verify_rule_signer_trusted(
+        &self,
+        conn: &Connection,
+        signature: &RuleSignatureV1,
+    ) -> Result<(), RuleStoreError> {
+        let trusted_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM trusted_rule_signers
+             WHERE public_key_sha256 = ?1 AND signer_kind = ?2",
+            params![
+                signature.public_key_sha256.as_str(),
+                signature.signer_kind.as_str()
+            ],
+            |r| r.get(0),
+        )?;
+        if trusted_count == 1
+            && self.trusted_manifest_contains(
+                &signature.public_key_sha256,
+                &signature.signer_kind,
+                Some(&signature.public_key_x963),
+            )?
+        {
+            return Ok(());
+        }
+
+        Err(RuleStoreError::Signature(format!(
+            "untrusted rule signer: {}",
+            signature.public_key_sha256
+        )))
+    }
+
+    fn parse_rule_kind(kind: &str) -> Result<RuleKind, RuleStoreError> {
+        match kind {
+            "allow" => Ok(RuleKind::Allow),
+            "deny" => Ok(RuleKind::Deny),
+            other => Err(RuleStoreError::Signature(format!("invalid kind: {other}"))),
+        }
+    }
+
+    fn parse_match_type(match_type: &str) -> Result<MatchType, RuleStoreError> {
+        match match_type {
+            "exact" => Ok(MatchType::Exact),
+            "suffix" => Ok(MatchType::Suffix),
+            "ip" => Ok(MatchType::Ip),
+            other => Err(RuleStoreError::Signature(format!(
+                "invalid match_type: {other}"
+            ))),
+        }
+    }
+
+    /// v0.7 — enumerate user rules for `ListRules`.
     ///
     /// Built-in / curated rules are NOT a parameter here: they live on
     /// `DaemonState.curated: Arc<Vec<AllowlistEntry>>` (loaded from
     /// `crates/guard-core/data/{trusted-registry,malicious,suspicious}-*.yaml` via
     /// `crates/guard-daemon/src/curated.rs::load_curated()`). The
     /// caller (`handle_list_rules`) merges them in.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` errors from reading rows.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store reader mutex is poisoned.
     pub fn all_rules_with_source(&self) -> SqlResult<Vec<StoredRule>> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         let mut out: Vec<StoredRule> = Vec::new();
@@ -752,7 +886,15 @@ impl RuleStore {
     // ==================================================================
 
     /// Disable a curated rule by pattern. INSERT OR REPLACE into
-    /// curated_overrides so repeated calls are idempotent.
+    /// `curated_overrides` so repeated calls are idempotent.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` errors from persisting the override.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store mutex is poisoned.
     pub fn disable_curated_rule(&self, pattern: &str, reason: &str) -> SqlResult<()> {
         debug_assert!(!pattern.trim().is_empty(), "pattern must be non-empty");
         debug_assert!(!reason.trim().is_empty(), "reason must be non-empty");
@@ -768,6 +910,14 @@ impl RuleStore {
 
     /// Re-enable a previously disabled curated rule. Returns true if a
     /// row was actually deleted (the rule was disabled), false otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` errors from deleting the override.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store mutex is poisoned.
     pub fn enable_curated_rule(&self, pattern: &str) -> SqlResult<bool> {
         let conn = self.conn.lock().expect("rule store mutex");
         let deleted = conn.execute(
@@ -778,7 +928,15 @@ impl RuleStore {
     }
 
     /// Return the set of all currently-disabled curated rule patterns.
-    /// Used by PrepareSnapshot to filter out disabled curated rules.
+    /// Used by `PrepareSnapshot` to filter out disabled curated rules.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` errors from reading overrides.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store reader mutex is poisoned.
     pub fn disabled_curated_patterns(&self) -> SqlResult<HashSet<String>> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         let mut stmt = conn.prepare("SELECT pattern FROM curated_overrides WHERE disabled = 1")?;
@@ -790,6 +948,15 @@ impl RuleStore {
         Ok(set)
     }
 
+    /// Check whether a user allow rule already exists for a pattern.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SQLite` errors from counting matching rows.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rule-store reader mutex is poisoned.
     pub fn has_user_allow_for(&self, pattern: &str) -> SqlResult<bool> {
         let conn = self.reader.lock().expect("rule store reader mutex");
         let count: i64 = conn.query_row(
@@ -801,11 +968,13 @@ impl RuleStore {
     }
 }
 
+#[must_use]
 pub fn unix_ms_now() -> i64 {
-    std::time::SystemTime::now()
+    let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis() as i64
+        .as_millis();
+    i64::try_from(millis).unwrap_or(i64::MAX)
 }
 
 fn decode_hex(s: &str) -> Result<Vec<u8>, RuleStoreError> {

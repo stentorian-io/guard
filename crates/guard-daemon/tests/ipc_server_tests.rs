@@ -1,12 +1,12 @@
-//! End-to-end test: spin up an IpcServer on a tempdir socket, connect a client
-//! UnixStream, send a v0.1 (legacy length-prefixed) RegisterRoot, assert
-//! Ack received and ProcessTree contains the test process's kernel-sourced
-//! AuditToken as a tracked root.
+//! End-to-end test: spin up an `IpcServer` on a tempdir socket, connect a client
+//! `UnixStream`, send a v0.1 (legacy length-prefixed) `RegisterRoot`, assert
+//! Ack received and `ProcessTree` contains the test process's kernel-sourced
+//! `AuditToken` as a tracked root.
 //!
 //! This test exercises the v0.1 backward-compat path through v0.2's
 //! tagged-frame dispatcher. The dispatcher peeks the first byte: 0x00 (high
-//! byte of a small length prefix) → LegacyUntagged → handle_legacy_register_root.
-//! The integration test must continue to pass against the rewired ipc_server.
+//! byte of a small length prefix) → `LegacyUntagged` → `handle_legacy_register_root`.
+//! The integration test must continue to pass against the rewired `ipc_server`.
 
 use guard_core::AuditToken;
 use guard_daemon::gap_detector::GapDetector;
@@ -27,6 +27,14 @@ use std::process::Command;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+
+fn current_pid_for_audit_token() -> u32 {
+    u32::try_from(unsafe { libc::getpid() }).expect("pid fits audit token field")
+}
+
+fn child_pid_for_libc(pid: u32) -> libc::pid_t {
+    libc::pid_t::try_from(pid).expect("child pid fits libc pid")
+}
 
 fn build_state(state_dir: &Path) -> (Arc<ProcessTree>, Arc<DaemonState>) {
     let tree = Arc::new(ProcessTree::new());
@@ -55,9 +63,9 @@ fn read_tagged_fork_ack(stream: &mut UnixStream) -> ForkAck {
     read_frame(stream).expect("read ForkAck")
 }
 
-/// REGISTER-01 self-registration path: wire_pid == kernel_pid.
+/// REGISTER-01 self-registration path: `wire_pid` == `kernel_pid`.
 ///
-/// When the connecting process sends a RegisterRoot with wire_pid == kernel_pid
+/// When the connecting process sends a `RegisterRoot` with `wire_pid` == `kernel_pid`
 /// (it is registering ITSELF as a tracked root), the daemon stores the kernel-sourced
 /// peer token (not the wire token). This is the standard path used by `stt-guard wrap`
 /// when the CLI registers itself — before REGISTER-01 it was the only path.
@@ -80,7 +88,7 @@ fn register_root_round_trip_records_kernel_sourced_token() {
 
     // REGISTER-01 self-registration: send wire_pid = getpid() so the daemon
     // takes the "wire_pid == kernel_pid" branch and stores the kernel peer token.
-    let our_pid = unsafe { libc::getpid() } as u32;
+    let our_pid = current_pid_for_audit_token();
     let self_wire = AuditToken::synthetic([0, 0, 0, 0, 0, our_pid, 0, 0]);
     let mut stream = UnixStream::connect(&sock).expect("connect");
     let msg = RegisterRoot::new(self_wire);
@@ -88,7 +96,7 @@ fn register_root_round_trip_records_kernel_sourced_token() {
     let reply: Reply = read_frame(&mut stream).expect("read Reply");
     match reply {
         Reply::Ack { .. } => {}
-        other => panic!("expected Ack, got {:?}", other),
+        other @ Reply::Err { .. } => panic!("expected Ack, got {other:?}"),
     }
     drop(stream);
 
@@ -111,13 +119,13 @@ fn register_root_round_trip_records_kernel_sourced_token() {
     // (The node key is the full 8-field kernel AuditToken from LOCAL_PEERTOKEN.)
 }
 
-/// REGISTER-01 delegation path: wire_pid != kernel_pid.
+/// REGISTER-01 delegation path: `wire_pid` != `kernel_pid`.
 ///
-/// When the connecting process (the CLI, with kernel_pid=X) sends RegisterRoot
+/// When the connecting process (the CLI, with `kernel_pid=X`) sends `RegisterRoot`
 /// with a wire-claimed token whose val[5] is a DIFFERENT pid (the wrapped child,
 /// pid=Y), the daemon stores the wire-claimed token (the child's token) rather
 /// than the CLI's kernel token. This allows the child's dylib to later connect
-/// and be recognized as a tracked peer (is_tracked → true).
+/// and be recognized as a tracked peer (`is_tracked` → true).
 ///
 /// Security note: the daemon socket is mode 0600 (owner-only), so only the user
 /// can connect. Registering a different process's token grants no privilege (the
@@ -147,14 +155,14 @@ fn register_root_delegation_stores_wire_claimed_child_token() {
         .spawn()
         .expect("spawn sleep child");
     let child_pid_real = child.id();
-    let our_pid = unsafe { libc::getpid() } as u32;
+    let our_pid = current_pid_for_audit_token();
     assert_ne!(
         child_pid_real, our_pid,
         "test assumption: child pid must differ from our pid"
     );
     // TREE-07: use the child's real kernel pidversion so the daemon's
     // pidversion cross-check passes.
-    let child_pv = kernel_pidversion(child_pid_real as libc::pid_t)
+    let child_pv = kernel_pidversion(child_pid_for_libc(child_pid_real))
         .expect("kernel pidversion for child process");
     let uid = unsafe { libc::getuid() };
     let child_wire = AuditToken::synthetic([0, uid, 0, uid, 0, child_pid_real, 0, child_pv]);
@@ -163,7 +171,7 @@ fn register_root_delegation_stores_wire_claimed_child_token() {
     let reply: Reply = read_frame(&mut stream).expect("read Reply");
     match reply {
         Reply::Ack { .. } => {}
-        other => panic!("expected Ack, got {:?}", other),
+        other @ Reply::Err { .. } => panic!("expected Ack, got {other:?}"),
     }
     drop(stream);
     handle.join().unwrap();
@@ -204,7 +212,7 @@ fn register_root_delegation_rejects_wrong_pidversion() {
         .spawn()
         .expect("spawn sleep child");
     let child_pid_real = child.id();
-    let real_pv = kernel_pidversion(child_pid_real as libc::pid_t)
+    let real_pv = kernel_pidversion(child_pid_for_libc(child_pid_real))
         .expect("kernel pidversion for child process");
 
     // Send a wire token with a wrong pidversion (real + 1).
@@ -221,7 +229,9 @@ fn register_root_delegation_rejects_wrong_pidversion() {
                 "rejection should cite WR-08: {message}"
             );
         }
-        other => panic!("expected Err (pidversion mismatch), got {:?}", other),
+        other @ Reply::Ack { .. } => {
+            panic!("expected Err (pidversion mismatch), got {other:?}");
+        }
     }
     drop(stream);
     handle.join().unwrap();
@@ -236,7 +246,7 @@ fn register_root_delegation_rejects_wrong_pidversion() {
     let _ = child.wait();
 }
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn fork_event_for_hardened_child_fails_closed_on_dylib_timeout() {
     let mut child = Command::new("/bin/sleep")
@@ -245,11 +255,8 @@ fn fork_event_for_hardened_child_fails_closed_on_dylib_timeout() {
         .expect("spawn sleep child");
     let child_pid = child.id();
 
-    if !is_hardened_runtime(child_pid as libc::pid_t) {
-        eprintln!(
-            "SKIP: /bin/sleep pid={} is not hardened-runtime on this host",
-            child_pid
-        );
+    if !is_hardened_runtime(child_pid_for_libc(child_pid)) {
+        eprintln!("SKIP: /bin/sleep pid={child_pid} is not hardened-runtime on this host");
         let _ = child.kill();
         let _ = child.wait();
         return;
@@ -268,7 +275,7 @@ fn fork_event_for_hardened_child_fails_closed_on_dylib_timeout() {
         server.accept_one().expect("accept fork");
     });
 
-    let our_pid = unsafe { libc::getpid() } as u32;
+    let our_pid = current_pid_for_audit_token();
     let self_wire = AuditToken::synthetic([0, 0, 0, 0, 0, our_pid, 0, 0]);
     let mut register_stream = UnixStream::connect(&sock).expect("connect register");
     write_frame(&mut register_stream, &RegisterRoot::new(self_wire)).expect("write RegisterRoot");
@@ -279,7 +286,11 @@ fn fork_event_for_hardened_child_fails_closed_on_dylib_timeout() {
     );
     drop(register_stream);
 
-    let fork = ForkEvent::new(AuditTokenWire::from(self_wire), child_pid as i32, 0);
+    let fork = ForkEvent::new(
+        AuditTokenWire::from(self_wire),
+        child_pid_for_libc(child_pid),
+        0,
+    );
     let mut fork_stream = UnixStream::connect(&sock).expect("connect fork");
     write_tagged(&mut fork_stream, MessageTag::ForkEvent, &fork);
     let ack = read_tagged_fork_ack(&mut fork_stream);
@@ -337,7 +348,7 @@ fn idempotent_register_root_for_same_token() {
     // check the wire pid against the OS process table) by sending a wire
     // token whose val[5] matches the test's own kernel pid. The handler then
     // takes the same-pid arm and uses peer_token directly.
-    let our_pid = unsafe { libc::getpid() } as u32;
+    let our_pid = current_pid_for_audit_token();
     for _ in 0..2 {
         let mut stream = UnixStream::connect(&sock).unwrap();
         let self_wire = AuditToken::synthetic([0, 0, 0, 0, 0, our_pid, 0, 0]);
@@ -355,7 +366,7 @@ fn idempotent_register_root_for_same_token() {
 /// A peer that connects then closes without sending a frame (the connect-only
 /// liveness probe shape that `probe_daemon_alive` produces) MUST be handled
 /// User-mode socket gets 0o600 (owner-only). Tests that the default tempdir
-/// state_dir (not the system path) produces a socket that only the owner can
+/// `state_dir` (not the system path) produces a socket that only the owner can
 /// read/write.
 #[test]
 fn socket_mode_user_install_is_0600() {
@@ -377,8 +388,8 @@ fn socket_mode_user_install_is_0600() {
 /// peer auth is the trust boundary, not filesystem permissions.
 ///
 /// We can't bind at the real `/Library/...` path in tests (too long for
-/// SUN_LEN), so we bind in a tmpdir but construct `DaemonState` with the
-/// system state_dir so `is_system_install` returns true.
+/// `SUN_LEN`), so we bind in a tmpdir but construct `DaemonState` with the
+/// system `state_dir` so `is_system_install` returns true.
 #[test]
 fn socket_mode_system_install_is_0666() {
     use std::os::unix::fs::PermissionsExt;
@@ -409,7 +420,7 @@ fn socket_mode_system_install_is_0666() {
 }
 
 /// benignly by the daemon — no state change, no Reply written, no panic.
-/// This locks the schema (RegisterRoot + Reply) — no new wire variant needed
+/// This locks the schema (`RegisterRoot` + Reply) — no new wire variant needed
 /// for liveness.
 #[test]
 fn connect_close_no_frame_is_benign() {

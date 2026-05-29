@@ -1,7 +1,7 @@
 //! Exec target scanner selected by OS boundary.
 //!
 //! macOS has supported Mach-O/DYLD classification. Linux intentionally does
-//! not reuse that scanner for ELF/LD_PRELOAD exec targets.
+//! not reuse that scanner for `ELF/LD_PRELOAD` exec targets.
 
 #[cfg(target_os = "linux")]
 mod elf;

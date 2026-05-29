@@ -19,8 +19,8 @@ fn detect_macos_major() -> u32 {
     let rc = unsafe {
         libc::sysctlbyname(
             name.as_ptr(),
-            buf.as_mut_ptr() as *mut libc::c_void,
-            &mut len,
+            buf.as_mut_ptr().cast::<libc::c_void>(),
+            &raw mut len,
             core::ptr::null_mut(),
             0,
         )

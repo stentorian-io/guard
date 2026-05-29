@@ -19,15 +19,13 @@
 //!   - `nw_endpoint_copy_hostname` → replaced by `nw_endpoint_get_hostname`
 //!     (non-owning `const char*`; no caller-free contract, no `libc::free` needed).
 //!   - `nw_resolver_create` / `nw_resolver_resolve` — private API removed from
-//!     macOS 26; logged as D-20 coverage-gap; AtomicPtrs kept null.
+//!     macOS 26; logged as D-20 coverage-gap; `AtomicPtrs` kept null.
 //!
 //! Active shadow exports (5): `nw_connection_create`, `nw_connection_start`,
 //!   `nw_connection_cancel`, `nw_endpoint_get_hostname`, `nw_connection_copy_endpoint`.
 //!
-//! D-20 gap symbols (2, AtomicPtrs null, log at init): `nw_resolver_create`,
+//! D-20 gap symbols (2, `AtomicPtrs` null, log at init): `nw_resolver_create`,
 //!   `nw_resolver_resolve`.
-
-#![allow(unused_unsafe)]
 
 use crate::ALLOWLIST;
 use crate::log_buffer::LOG_RING;
@@ -144,9 +142,9 @@ const NW_SYMBOLS: &[NwSym] = &[
 
 /// Deferred init — called lazily from each NW shadow export on first use.
 ///
-/// Moved out of the ctor to avoid dispatch_once reentrancy deadlock on
+/// Moved out of the ctor to avoid `dispatch_once` reentrancy deadlock on
 /// macOS 26+: dlopen(Network.framework) during the dylib constructor
-/// triggers CoreFoundation initialization which re-enters dispatch_once
+/// triggers CoreFoundation initialization which re-enters `dispatch_once`
 /// in Network.framework's own init chain, crashing the process.
 pub fn ensure_init() {
     use std::sync::Once;
@@ -154,7 +152,7 @@ pub fn ensure_init() {
     INIT.call_once(|| {
         let handle = unsafe {
             libc::dlopen(
-                NW_FRAMEWORK_PATH.as_ptr() as *const c_char,
+                NW_FRAMEWORK_PATH.as_ptr().cast::<c_char>(),
                 libc::RTLD_LAZY,
             )
         };
@@ -167,7 +165,7 @@ pub fn ensure_init() {
         NW_AVAILABLE.store(true, Ordering::Release);
 
         for sym in NW_SYMBOLS {
-            let p = unsafe { libc::dlsym(handle, sym.name_z.as_ptr() as *const c_char) };
+            let p = unsafe { libc::dlsym(handle, sym.name_z.as_ptr().cast::<c_char>()) };
             sym.slot.store(p, Ordering::Release);
             if p.is_null() {
                 let mut msg = [0u8; 96];
@@ -184,16 +182,6 @@ pub fn ensure_init() {
 }
 
 // ---- Helpers ----
-
-fn allowlist_or_deny() -> Option<&'static [guard_core::AllowlistEntry]> {
-    if FAIL_CLOSED.load(Ordering::Acquire) {
-        return None;
-    }
-    if !NW_AVAILABLE.load(Ordering::Acquire) {
-        return None;
-    }
-    ALLOWLIST.get().map(|v| v.as_slice())
-}
 
 /// Extract a hostname string from an `nw_endpoint_t` via the captured
 /// `nw_endpoint_get_hostname`. Returns None if the symbol is unavailable
@@ -227,7 +215,7 @@ unsafe fn copy_to_stack(p: *const c_char) -> Option<([u8; 256], usize)> {
             if n >= buf.len() {
                 return None;
             }
-            let b = *p.add(n) as u8;
+            let b = *p.cast::<u8>().add(n);
             if b == 0 {
                 break;
             }
@@ -281,13 +269,18 @@ fn do_cancel(connection: *mut c_void) {
 /// opaque non-NW pointers through `nw_connection_start`; this gate replaces
 /// the pass-through with a safe class-name check (D-41).
 #[inline]
-pub fn is_nw_object(ptr: *mut c_void) -> bool {
+/// Returns true when the pointer appears to reference a Network.framework object.
+///
+/// # Safety
+///
+/// `ptr` must be null or point to mapped memory that is safe for
+/// `object_getClassName` to inspect.
+pub unsafe fn is_nw_object(ptr: *mut c_void) -> bool {
     if ptr.is_null() {
         return false;
     }
-    let get_class_name = match resolve_object_get_class_name() {
-        Some(f) => f,
-        None => return false,
+    let Some(get_class_name) = resolve_object_get_class_name() else {
+        return false;
     };
     let cls = unsafe { get_class_name(ptr) };
     if cls.is_null() {
@@ -300,7 +293,7 @@ pub fn is_nw_object(ptr: *mut c_void) -> bool {
 /// Render the verdict for an NW connection: extract its endpoint, get the
 /// hostname, run `evaluate_policy` against the loaded ALLOWLIST. Returns
 /// `true` if the verdict is Deny. Returns `false` (pass-through / fail-open)
-/// on any failure to extract the hostname, on FAIL_CLOSED state, or on
+/// on any failure to extract the hostname, on `FAIL_CLOSED` state, or on
 /// missing NW symbols — the libc connect-level enforcement still catches
 /// the connection in those degraded paths.
 fn decide_for_nw_connection(connection: *mut c_void) -> bool {
@@ -309,11 +302,11 @@ fn decide_for_nw_connection(connection: *mut c_void) -> bool {
     if FAIL_CLOSED.load(Ordering::Acquire) {
         return false;
     }
-    let host_bytes = match extract_endpoint_hostname(connection) {
-        Some(h) => h,
-        None => return false,
+    let Some(host_bytes) = extract_endpoint_hostname(connection) else {
+        return false;
     };
-    let entries = ALLOWLIST.get().map(|v| v.as_slice()).unwrap_or(&[]);
+    let entries: &[guard_core::AllowlistEntry] =
+        ALLOWLIST.get().map_or(&[], std::vec::Vec::as_slice);
     let (verdict, source) = guard_core::policy::evaluate_policy(&host_bytes, None, true, entries);
     if matches!(verdict, Verdict::Deny) {
         let host_str = core::str::from_utf8(&host_bytes).unwrap_or("<non-utf8>");
@@ -366,7 +359,7 @@ fn extract_endpoint_hostname(connection: *mut c_void) -> Option<Vec<u8>> {
     }
     // The endpoint must itself be an OS_nw_* object — defense in depth in
     // case copy_endpoint returned an unexpected pointer.
-    if !is_nw_object(endpoint) {
+    if !unsafe { is_nw_object(endpoint) } {
         return None;
     }
     let p_host = unsafe { get_hostname_from_endpoint(endpoint) }?;
@@ -383,6 +376,11 @@ fn extract_endpoint_hostname(connection: *mut c_void) -> Option<Vec<u8>> {
 // real Network.framework and confirm non-null resolution.
 
 /// Shadow `nw_connection_create` — observe endpoint+params; pass through.
+///
+/// # Safety
+///
+/// `endpoint` and `parameters` must satisfy Network.framework's
+/// `nw_connection_create` contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_connection_create(
     endpoint: *mut c_void,
@@ -412,7 +410,7 @@ pub unsafe extern "C" fn nw_connection_create(
     r
 }
 
-/// Shadow `nw_connection_start` — verdict path with safe is_nw_object gate
+/// Shadow `nw_connection_start` — verdict path with safe `is_nw_object` gate
 /// (D-41 closure).
 ///
 /// v0.1 left this as a pass-through after observing SIGSEGV on libuv's
@@ -429,6 +427,11 @@ pub unsafe extern "C" fn nw_connection_create(
 /// On Allow / no-match / extraction failure, falls through to the real
 /// `nw_connection_start`. The libc connect/getaddrinfo path remains the
 /// dominant supply-chain enforcement layer and is unaffected.
+///
+/// # Safety
+///
+/// `connection` must satisfy Network.framework's `nw_connection_start`
+/// contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_connection_start(connection: *mut c_void) {
     ensure_init();
@@ -445,7 +448,7 @@ pub unsafe extern "C" fn nw_connection_start(connection: *mut c_void) {
     // is not an OS_nw_* Objective-C object (libuv opaque pointer or similar),
     // pass through unchanged. Preserves v0.1's no-crash behavior on
     // non-NW callers.
-    if !is_nw_object(connection) {
+    if !unsafe { is_nw_object(connection) } {
         let real = REAL_NW_CONNECTION_START.load(Ordering::Relaxed);
         if !real.is_null() {
             let f: unsafe extern "C" fn(*mut c_void) = unsafe { core::mem::transmute(real) };
@@ -475,6 +478,11 @@ pub unsafe extern "C" fn nw_connection_start(connection: *mut c_void) {
 }
 
 /// Shadow `nw_connection_cancel` — pass through. Cancel is benign.
+///
+/// # Safety
+///
+/// `connection` must satisfy Network.framework's `nw_connection_cancel`
+/// contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_connection_cancel(connection: *mut c_void) {
     ensure_init();
@@ -497,6 +505,11 @@ pub unsafe extern "C" fn nw_connection_cancel(connection: *mut c_void) {
 /// Shadow `nw_endpoint_get_hostname` — observe hostname; pass through.
 ///
 /// Returns a non-owning `const char*` valid for the endpoint's lifetime.
+///
+/// # Safety
+///
+/// `endpoint` must satisfy Network.framework's `nw_endpoint_get_hostname`
+/// contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_endpoint_get_hostname(endpoint: *mut c_void) -> *const c_char {
     ensure_init();
@@ -524,6 +537,11 @@ pub unsafe extern "C" fn nw_endpoint_get_hostname(endpoint: *mut c_void) -> *con
 }
 
 /// Shadow `nw_connection_copy_endpoint` — observe endpoint; pass through.
+///
+/// # Safety
+///
+/// `connection` must satisfy Network.framework's
+/// `nw_connection_copy_endpoint` contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nw_connection_copy_endpoint(connection: *mut c_void) -> *mut c_void {
     ensure_init();

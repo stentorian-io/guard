@@ -1,8 +1,8 @@
-//! v0.2 IPC handlers — PrepareSnapshot, Resolve.
-//! v0.3 additions — Status, InsertUserRule, ReadInstallArtifacts, BaselineCommit.
+//! v0.2 IPC handlers — `PrepareSnapshot`, Resolve.
+//! v0.3 additions — Status, `InsertUserRule`, `ReadInstallArtifacts`, `BaselineCommit`.
 //!
-//! The v0.2 fork/exec/dylib_loaded handlers live
-//! inline in ipc_server.rs because they're small and tightly coupled to
+//! The v0.2 `fork/exec/dylib_loaded` handlers live
+//! inline in `ipc_server.rs` because they're small and tightly coupled to
 //! peer-auth). The handlers in this submodule are larger and have
 //! independent unit tests, so they live as separate modules.
 

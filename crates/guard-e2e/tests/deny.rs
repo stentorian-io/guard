@@ -1,6 +1,6 @@
 //! Roadmap success criterion #2: a wrapped Node attempt to connect to a
 //! non-allowlisted host is BLOCKED by the dylib (intercepted at
-//! connect()/getaddrinfo() against the hand-coded allowlist) and the
+//! `connect()/getaddrinfo()` against the hand-coded allowlist) and the
 //! wrapped command exits non-zero.
 //!
 //! DIFFERENTIAL ASSERTION:
@@ -15,8 +15,8 @@
 //!     Stentorian Guard (real A records). NOT in D-18's v0.1 allowlist. The
 //!     ONLY failure path is Stentorian Guard-induced. We assert the connect-time
 //!     errno class is one of Stentorian Guard's deny errnos (EHOSTUNREACH from
-//!     libc connect deny, EAI_FAIL from getaddrinfo deny -- surfaced by
-//!     Node as ENOTFOUND for the EAI_FAIL path or EHOSTUNREACH for the
+//!     libc connect deny, `EAI_FAIL` from getaddrinfo deny -- surfaced by
+//!     Node as ENOTFOUND for the `EAI_FAIL` path or EHOSTUNREACH for the
 //!     connect path). NXDOMAIN cannot happen for a resolvable host so
 //!     ENOTFOUND in this test is unambiguous evidence of Stentorian Guard firing
 //!     at the getaddrinfo layer.
@@ -54,20 +54,18 @@ const DENY_PORT: &str = "443";
 /// produce a meaningless pass.
 fn deny_target_resolves_outside_guard() -> bool {
     use std::net::ToSocketAddrs;
-    format!("{}:{}", DENY_HOST, DENY_PORT)
+    format!("{DENY_HOST}:{DENY_PORT}")
         .to_socket_addrs()
-        .map(|i| i.count() > 0)
-        .unwrap_or(false)
+        .is_ok_and(|i| i.count() > 0)
 }
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn node_connect_to_non_allowlisted_host_is_denied() {
     if !deny_target_resolves_outside_guard() {
         eprintln!(
-            "SKIP: {}:{} did not resolve outside Stentorian Guard -- cannot \
-                   discriminate Stentorian Guard-deny from offline-DNS (sanity gate)",
-            DENY_HOST, DENY_PORT
+            "SKIP: {DENY_HOST}:{DENY_PORT} did not resolve outside Stentorian Guard -- cannot \
+                   discriminate Stentorian Guard-deny from offline-DNS (sanity gate)"
         );
         return;
     }
@@ -160,7 +158,7 @@ fn node_connect_to_non_allowlisted_host_is_denied() {
     );
 }
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn node_connect_to_loopback_is_allowed() {
     // Differential companion: 127.0.0.1 IS in the v0.1 allowlist

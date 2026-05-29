@@ -1,11 +1,11 @@
 //! v0.3 — non-TTY stt-guard wrap → no prompt → deny-with-log.
 //!
-//! AC-NTTY-02 / D-74: When stdin is not a TTY, stt-guard wrap sets is_tty=false;
+//! AC-NTTY-02 / D-74: When stdin is not a TTY, stt-guard wrap sets `is_tty=false`;
 //! the daemon's Resolve handler fires deny immediately (no prompt park). The
 //! wrapped command exits non-zero on a denied connection.
 //!
 //! NOTE: The JSONL log assertion is a soft assert (v1 limitation): the dylib's
-//! libc connect-deny path does NOT currently route through log_writer (it relies
+//! libc connect-deny path does NOT currently route through `log_writer` (it relies
 //! on the GapDetector/RecentGapsRing path instead). The hard assertion is exit
 //! non-zero; the JSONL check is best-effort and will pass when the log-writer
 //! integration is complete.

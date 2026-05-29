@@ -4,6 +4,9 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "hardened_exec_probe"
 path = "src/main.rs"

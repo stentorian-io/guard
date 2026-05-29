@@ -1,7 +1,7 @@
 //! M005-S05: POL-03 5-second batching/dedup window.
 //!
 //! Spawns two concurrent dns.lookup calls to the same (host, port) inside one
-//! wrapped child. The dedup keyed on (run_uuid, host, port) MUST collapse the
+//! wrapped child. The dedup keyed on (`run_uuid`, host, port) MUST collapse the
 //! two attempts into a single prompt. The test writes "1\n" once and asserts
 //! the PTY received exactly one "Choose: [1]" line.
 
@@ -95,9 +95,8 @@ fn second_attempt_within_5s_does_not_reprompt() {
     while Instant::now() < drain_deadline {
         buf.clear();
         match br.read_line(&mut buf) {
-            Ok(0) => break,
+            Ok(0) | Err(_) => break,
             Ok(_) => full.push_str(&buf),
-            Err(_) => break,
         }
     }
     let _ = child.wait();

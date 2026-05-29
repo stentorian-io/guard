@@ -1,7 +1,7 @@
 //! Concurrent-writer-safe log ring (BL-03 / D-43 fix).
 //!
-//! v0.1's SpscRing was a single-producer-single-consumer approximation
-//! that accepted writes from multiple threads (replace_libc.rs hot paths) —
+//! v0.1's `SpscRing` was a single-producer-single-consumer approximation
+//! that accepted writes from multiple threads (`replace_libc.rs` hot paths) —
 //! racy by design. v0.2 replaces it with `crossbeam_queue::ArrayQueue<Box<[u8]>>`,
 //! a lock-free MPMC queue with proven correctness.
 //!
@@ -9,7 +9,7 @@
 //! owned `Box<[u8]>` — this allocates, which would normally violate D-03's
 //! no-alloc-on-the-hot-path rule, BUT the log ring is NOT on the verdict hot
 //! path (the hot path is connect/sendto, which decides allow/deny without
-//! touching LOG_RING). Fork/exec hooks DO call append, and they are not on
+//! touching `LOG_RING`). Fork/exec hooks DO call append, and they are not on
 //! the <100µs budget — they pay an IPC round trip. A small-byte malloc is
 //! fine in that context.
 //!
@@ -30,7 +30,7 @@ fn ring() -> &'static ArrayQueue<Box<[u8]>> {
 /// Process-global log ring. v0.1 callers wrote `LOG_RING.append(...)`.
 /// The static is a unit struct delegating to the OnceLock-backed inner queue;
 /// this preserves the call-site syntax exactly while routing all writes
-/// through the lock-free MPMC ArrayQueue.
+/// through the lock-free MPMC `ArrayQueue`.
 pub struct LogRing;
 
 pub static LOG_RING: LogRing = LogRing;
@@ -58,12 +58,14 @@ impl LogRing {
     }
 
     /// Number of entries currently buffered. Useful for tests.
+    #[must_use]
     pub fn len(&self) -> usize {
         ring().len()
     }
 
     /// True if the buffer is empty. Pairs with `len()` to satisfy
-    /// clippy::len_without_is_empty.
+    /// `clippy::len_without_is_empty`.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         ring().is_empty()
     }

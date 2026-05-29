@@ -5,7 +5,7 @@ use guard_core::AuditToken;
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::*;
+    use super::{AuditToken, OsError};
 
     type MachPortT = u32;
     type KernReturnT = i32;
@@ -31,7 +31,7 @@ mod imp {
 
     pub fn audit_token_for_pid(pid: libc::pid_t) -> Result<AuditToken, OsError> {
         let mut task_port: MachPortT = MACH_PORT_NULL;
-        let kr = unsafe { task_name_for_pid(mach_task_self(), pid, &mut task_port) };
+        let kr = unsafe { task_name_for_pid(mach_task_self(), pid, &raw mut task_port) };
         if kr == KERN_SUCCESS {
             let mut token = AuditToken::synthetic([0u32; 8]);
             let mut count: u32 = 8;
@@ -40,7 +40,7 @@ mod imp {
                     task_port,
                     TASK_AUDIT_TOKEN,
                     token.val.as_mut_ptr(),
-                    &mut count,
+                    &raw mut count,
                 )
             };
             unsafe { mach_port_deallocate(mach_task_self(), task_port) };
@@ -105,7 +105,7 @@ mod imp {
                 pid,
                 PROC_PIDTBSDINFO,
                 0,
-                info.as_mut_ptr() as *mut libc::c_void,
+                info.as_mut_ptr().cast::<libc::c_void>(),
                 PROC_PIDTBSDINFO_SIZE,
             )
         };
@@ -118,11 +118,27 @@ mod imp {
             ));
         }
         let info = unsafe { info.assume_init() };
-        let pidversion_analog: u32 = (info.pbi_start_tvsec as u32) ^ (info.pbi_start_tvusec as u32);
+        let start_seconds = u32::try_from(info.pbi_start_tvsec).map_err(|_| {
+            OsError::unexpected_data(
+                "process audit token",
+                "proc_pidinfo start seconds do not fit pidversion slot",
+            )
+        })?;
+        let start_microseconds = u32::try_from(info.pbi_start_tvusec).map_err(|_| {
+            OsError::unexpected_data(
+                "process audit token",
+                "proc_pidinfo start microseconds do not fit pidversion slot",
+            )
+        })?;
+        let pid_u32 = u32::try_from(pid).map_err(|_| {
+            OsError::unexpected_data("process audit token", format!("invalid pid {pid}"))
+        })?;
+        let pidversion_analog = start_seconds ^ start_microseconds;
+
         let mut val = [0u32; 8];
         val[1] = info.pbi_uid;
         val[2] = info.pbi_gid;
-        val[5] = pid as u32;
+        val[5] = pid_u32;
         val[7] = pidversion_analog;
         Ok(AuditToken::synthetic(val))
     }
@@ -130,7 +146,7 @@ mod imp {
 
 #[cfg(not(target_os = "macos"))]
 mod imp {
-    use super::*;
+    use super::{AuditToken, OsError};
 
     #[cfg(target_os = "linux")]
     pub fn audit_token_for_pid(pid: libc::pid_t) -> Result<AuditToken, OsError> {
@@ -151,7 +167,9 @@ mod imp {
         val[2] = gid;
         val[3] = uid;
         val[4] = gid;
-        val[5] = pid as u32;
+        val[5] = u32::try_from(pid).map_err(|_| {
+            OsError::unexpected_data("process audit token", format!("invalid pid {pid}"))
+        })?;
         val[7] = pidversion;
         Ok(AuditToken::synthetic(val))
     }
@@ -169,6 +187,11 @@ mod imp {
 /// pidversion context. Linux returns a synthetic token using procfs uid/gid,
 /// pid, and starttime-derived pidversion context. Other platforms report the
 /// capability as unsupported.
+///
+/// # Errors
+///
+/// Returns an OS error when the platform lookup fails, returns malformed data,
+/// or is unsupported.
 pub fn audit_token_for_pid(pid: libc::pid_t) -> Result<AuditToken, OsError> {
     imp::audit_token_for_pid(pid)
 }
@@ -182,7 +205,7 @@ mod tests {
     fn audit_token_for_self_pid_succeeds() {
         let pid = unsafe { libc::getpid() };
         let token = audit_token_for_pid(pid).expect("audit_token_for_pid");
-        assert_eq!(token.val[5] as libc::pid_t, pid);
+        assert_eq!(token.pid(), pid);
     }
 
     #[test]
@@ -190,7 +213,10 @@ mod tests {
     fn audit_token_for_self_pid_succeeds_on_linux() {
         let pid = unsafe { libc::getpid() };
         let token = audit_token_for_pid(pid).expect("audit_token_for_pid");
-        assert_eq!(token.val[5] as libc::pid_t, pid);
+        assert_eq!(
+            libc::pid_t::try_from(token.val[5]).expect("audit token pid fits libc pid"),
+            pid
+        );
         assert_ne!(token.val[7], 0, "linux starttime pidversion should be set");
     }
 

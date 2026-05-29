@@ -1,16 +1,16 @@
-//! Harness probe for the zero_config_allow_deny e2e test.
+//! Harness probe for the `zero_config_allow_deny` e2e test.
 //!
 //! Usage: `zero_config_probe <addr_a> <addr_b>`
 //! Both addrs must be `<host>:<port>` strings — IP literal hosts only (the
 //! probe deliberately uses `addr.parse()` to bypass getaddrinfo so the test
-//! exercises the dylib's libc connect() shadow specifically).
+//! exercises the dylib's libc `connect()` shadow specifically).
 //!
 //! Exit code is a bitmask:
-//!   bit 0 (value 1) = addr_a connect succeeded
-//!   bit 1 (value 2) = addr_b connect succeeded
+//!   bit 0 (value 1) = `addr_a` connect succeeded
+//!   bit 1 (value 2) = `addr_b` connect succeeded
 //! Expected outcomes:
 //!   - Without stt-guard wrap: 3 (both succeed)
-//!   - Under stt-guard wrap with addr_a allowlisted, addr_b not: 1 (only A)
+//!   - Under stt-guard wrap with `addr_a` allowlisted, `addr_b` not: 1 (only A)
 
 use std::net::TcpStream;
 use std::time::Duration;

@@ -1,4 +1,4 @@
-//! PrepareSnapshot handler.
+//! `PrepareSnapshot` handler.
 //!
 //! Legacy flow still supports daemon-built snapshots for compatibility. The
 //! signed-snapshot flow splits this into collecting verified inputs, letting the
@@ -18,6 +18,17 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 const PENDING_SNAPSHOT_INPUT_TTL: Duration = Duration::from_secs(10 * 60);
+const FORBIDDEN_CWD_PREFIXES: &[&str] = &[
+    "/etc",
+    "/private/etc",
+    "/System",
+    "/usr/bin",
+    "/usr/sbin",
+    "/sbin",
+    "/bin",
+    "/var/db",
+    "/var/root",
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum PrepareError {
@@ -167,16 +178,28 @@ fn record_run(
     process_tree.set_run_baseline_mode(run_uuid, baseline_mode);
 }
 
-#[allow(clippy::too_many_arguments)]
+pub struct PrepareSnapshotArgs<'a> {
+    pub cwd: &'a Path,
+    pub curated: &'a [AllowlistEntry],
+    pub rule_store: &'a RuleStore,
+    pub process_tree: &'a Arc<ProcessTree>,
+    pub state_dir: &'a Path,
+    pub rule_signature_policy: guard_core::RuleSignaturePolicy,
+    pub is_tty: bool,
+    pub baseline_mode: bool,
+}
+
 pub fn handle_prepare_snapshot(
-    cwd: &Path,
-    curated: &[AllowlistEntry],
-    rule_store: &RuleStore,
-    process_tree: &Arc<ProcessTree>,
-    state_dir: &Path,
-    rule_signature_policy: guard_core::RuleSignaturePolicy,
-    is_tty: bool,
-    baseline_mode: bool,
+    PrepareSnapshotArgs {
+        cwd,
+        curated,
+        rule_store,
+        process_tree,
+        state_dir,
+        rule_signature_policy,
+        is_tty,
+        baseline_mode,
+    }: PrepareSnapshotArgs<'_>,
 ) -> SnapshotReply {
     let collected = match collect_snapshot_build_input(
         cwd,
@@ -225,10 +248,16 @@ fn prune_pending_snapshot_inputs(state: &Arc<DaemonState>) {
     state
         .pending_snapshot_inputs
         .lock()
-        .expect("pending snapshot inputs mutex")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .retain(|_, pending| pending.prepared_at.elapsed() < PENDING_SNAPSHOT_INPUT_TTL);
 }
 
+/// Collect verified snapshot inputs and park them for CLI-side signing.
+///
+/// # Panics
+///
+/// Does not intentionally panic; a poisoned pending-input lock is recovered so the daemon can
+/// continue fail-closed validation.
 pub fn handle_prepare_snapshot_inputs_full(
     state: &Arc<DaemonState>,
     cwd: &Path,
@@ -248,7 +277,7 @@ pub fn handle_prepare_snapshot_inputs_full(
             state
                 .pending_snapshot_inputs
                 .lock()
-                .expect("pending snapshot inputs mutex")
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .insert(
                     collected.input.run_uuid.clone(),
                     PendingSnapshotInput {
@@ -264,6 +293,12 @@ pub fn handle_prepare_snapshot_inputs_full(
     }
 }
 
+/// Verify and publish a CLI-signed snapshot previously prepared by the daemon.
+///
+/// # Panics
+///
+/// Does not intentionally panic; a poisoned pending-input lock is recovered so the daemon can
+/// continue fail-closed validation.
 pub fn handle_publish_signed_snapshot_full(
     state: &Arc<DaemonState>,
     req: PublishSignedSnapshot,
@@ -278,7 +313,7 @@ pub fn handle_publish_signed_snapshot_full(
     let Some(pending) = state
         .pending_snapshot_inputs
         .lock()
-        .expect("pending snapshot inputs mutex")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .remove(&req.run_uuid)
     else {
         return SnapshotReply::err("signed snapshot was not prepared by daemon");
@@ -371,19 +406,8 @@ fn validate_cwd(cwd: &Path) -> Result<std::path::PathBuf, String> {
     if !canonical.is_dir() {
         return Err(format!("not a directory: {}", canonical.display()));
     }
-    const FORBIDDEN_PREFIXES: &[&str] = &[
-        "/etc",
-        "/private/etc",
-        "/System",
-        "/usr/bin",
-        "/usr/sbin",
-        "/sbin",
-        "/bin",
-        "/var/db",
-        "/var/root",
-    ];
     let canonical_str = canonical.to_string_lossy();
-    for prefix in FORBIDDEN_PREFIXES {
+    for prefix in FORBIDDEN_CWD_PREFIXES {
         if canonical_str == *prefix || canonical_str.starts_with(&format!("{prefix}/")) {
             return Err(format!(
                 "cwd in forbidden system path: {}",
@@ -395,8 +419,10 @@ fn validate_cwd(cwd: &Path) -> Result<std::path::PathBuf, String> {
 }
 
 fn unix_ms_now() -> i64 {
-    std::time::SystemTime::now()
+    let unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis() as i64
+        .as_millis();
+
+    i64::try_from(unix_ms).unwrap_or(i64::MAX)
 }

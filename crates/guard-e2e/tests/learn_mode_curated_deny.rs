@@ -1,16 +1,16 @@
-//! Learn-mode hard-deny: curated BuiltinDeny still blocks under `--learn`.
+//! Learn-mode hard-deny: curated `BuiltinDeny` still blocks under `--learn`.
 //!
-//! `*.workers.dev` is in the curated YAML deny list with tier BuiltinDeny.
-//! Even with `--learn`, ConfirmedDeny and BuiltinDeny are non-overridable
-//! hard blocks -- the learn-mode passthrough only applies to DefaultDeny,
-//! UserDeny, and SuspectDeny.
+//! `*.workers.dev` is in the curated YAML deny list with tier `BuiltinDeny`.
+//! Even with `--learn`, `ConfirmedDeny` and `BuiltinDeny` are non-overridable
+//! hard blocks -- the learn-mode passthrough only applies to `DefaultDeny`,
+//! `UserDeny`, and `SuspectDeny`.
 //!
 //! Uses `connect_workers_dev.js` which calls `net.connect()` -- the hook
-//! intercepts at the connect() syscall level using the in-process snapshot.
+//! intercepts at the `connect()` syscall level using the in-process snapshot.
 //! No daemon Resolve IPC is involved (the host is denied before DNS).
 //!
 //! Differential companion: `learn_mode_default_deny_passthrough.rs` verifies
-//! that DefaultDeny hosts ARE allowed through in learn mode.
+//! that `DefaultDeny` hosts ARE allowed through in learn mode.
 //!
 //! Requires PTY because `--learn` gates on `stdin_is_tty()`.
 //! Opt-in via: `cargo test -p guard-e2e -- --ignored learn_mode_still_blocks`

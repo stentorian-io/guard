@@ -1,7 +1,7 @@
 //! Exec-family interpose shadows (D-32).
 //!
 //! exec succeeds by replacing the process image — the function does not return
-//! on success. On failure it returns -1 with errno set. We send an ExecEvent
+//! on success. On failure it returns -1 with errno set. We send an `ExecEvent`
 //! IPC BEFORE the syscall (best-effort: failure is logged, not fail-closed;
 //! the exec still proceeds — exec is not the boundary that D-33 protects).
 //!
@@ -56,24 +56,24 @@ impl Drop for InHookGuard {
 /// parent identity remains the kernel-sourced peer token (ENF-08).
 fn current_audit_token_wire() -> AuditTokenWire {
     // SAFETY: getpid()/getppid() are async-signal-safe and always succeed.
-    let pid = unsafe { libc::getpid() } as u32;
-    let ppid = unsafe { libc::getppid() } as u32;
+    let process_id = u32::try_from(unsafe { libc::getpid() }).unwrap_or(0);
+    let parent_process_id = u32::try_from(unsafe { libc::getppid() }).unwrap_or(0);
     let mut val = [0u32; 8];
-    val[5] = pid;
-    val[6] = ppid;
+    val[5] = process_id;
+    val[6] = parent_process_id;
     AuditTokenWire { val }
 }
 
 fn report_exec_blocked(path: *const c_char, reason: BlockReason) {
     let mut path_buf = [0u8; 1024];
-    let n = copy_cstr_to_buf(path, &mut path_buf);
+    let n = unsafe { copy_cstr_to_buf(path, &mut path_buf) };
     let token = current_audit_token_wire();
     send_exec_blocked(token, &path_buf[..n], reason.as_str());
 }
 
 fn block_exec_trace_required(path: *const c_char, reason: SuspiciousReason) -> c_int {
     let mut path_buf = [0u8; 1024];
-    let n = copy_cstr_to_buf(path, &mut path_buf);
+    let n = unsafe { copy_cstr_to_buf(path, &mut path_buf) };
     let line = format!(
         "[guard-hook] T3 fail-closed for exec-family call reason={} path={}",
         reason.as_str(),
@@ -84,7 +84,7 @@ fn block_exec_trace_required(path: *const c_char, reason: SuspiciousReason) -> c
     -1
 }
 
-/// Send an ExecEvent IPC for `path`. Best-effort: errors are silently dropped
+/// Send an `ExecEvent` IPC for `path`. Best-effort: errors are silently dropped
 /// (the exec proceeds regardless — exec is not D-33's failure boundary).
 ///
 /// `pm_env` is captured by the caller from envp (or `**environ`) before the
@@ -92,25 +92,28 @@ fn block_exec_trace_required(path: *const c_char, reason: SuspiciousReason) -> c
 /// quick-260508-et9 (BLOCKER #1).
 fn report_exec(path: *const c_char, pm_env: Vec<(String, String)>) {
     let mut path_buf = [0u8; 1024];
-    let n = copy_cstr_to_buf(path, &mut path_buf);
+    let n = unsafe { copy_cstr_to_buf(path, &mut path_buf) };
     let token = current_audit_token_wire();
     let _ = send_exec_event_sync(token, &path_buf[..n], n, pm_env, IPC_TIMEOUT_MS);
 }
 
 #[cfg_attr(target_os = "macos", unsafe(no_mangle))]
 #[cfg_attr(target_os = "linux", unsafe(export_name = "execve"))]
+/// Interposed `execve(2)` entrypoint.
+///
+/// # Safety
+///
+/// `path`, `argv`, and `envp` must satisfy the platform `execve(2)` contract.
+#[must_use]
 pub unsafe extern "C" fn guard_execve(
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => {
-            return unsafe { raw_syscall::raw_execve(path, argv, envp) };
-        }
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { raw_syscall::raw_execve(path, argv, envp) };
     };
-    match exec_policy::check_exec_target(path) {
+    match unsafe { exec_policy::check_exec_target(path) } {
         ExecDecision::Block(reason) => {
             report_exec_blocked(path, reason);
             set_errno(libc::EACCES);
@@ -125,12 +128,16 @@ pub unsafe extern "C" fn guard_execve(
 }
 
 #[unsafe(no_mangle)]
+/// Interposed `execvp(3)` entrypoint.
+///
+/// # Safety
+///
+/// `path` and `argv` must satisfy the platform `execvp(3)` contract.
 pub unsafe extern "C" fn guard_execvp(path: *const c_char, argv: *const *const c_char) -> c_int {
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => return unsafe { libc::execvp(path, argv) },
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { libc::execvp(path, argv) };
     };
-    match exec_policy::check_exec_target(path) {
+    match unsafe { exec_policy::check_exec_target(path) } {
         ExecDecision::Block(reason) => {
             report_exec_blocked(path, reason);
             set_errno(libc::EACCES);
@@ -145,12 +152,16 @@ pub unsafe extern "C" fn guard_execvp(path: *const c_char, argv: *const *const c
 }
 
 #[unsafe(no_mangle)]
+/// Interposed `execv(3)` entrypoint.
+///
+/// # Safety
+///
+/// `path` and `argv` must satisfy the platform `execv(3)` contract.
 pub unsafe extern "C" fn guard_execv(path: *const c_char, argv: *const *const c_char) -> c_int {
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => return unsafe { libc::execv(path, argv) },
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { libc::execv(path, argv) };
     };
-    match exec_policy::check_exec_target(path) {
+    match unsafe { exec_policy::check_exec_target(path) } {
         ExecDecision::Block(reason) => {
             report_exec_blocked(path, reason);
             set_errno(libc::EACCES);
@@ -181,18 +192,33 @@ pub unsafe extern "C" fn guard_execv(path: *const c_char, argv: *const *const c_
 // ---------------------------------------------------------------------------
 
 #[unsafe(no_mangle)]
+/// Defense-in-depth `execl(3)` shadow that intentionally fails closed.
+///
+/// # Safety
+///
+/// This function is exposed with C ABI for dyld symbol resolution only.
 pub unsafe extern "C" fn guard_execl(_path: *const c_char, _arg0: *const c_char) -> c_int {
     set_errno(libc::ENOSYS);
     -1
 }
 
 #[unsafe(no_mangle)]
+/// Defense-in-depth `execlp(3)` shadow that intentionally fails closed.
+///
+/// # Safety
+///
+/// This function is exposed with C ABI for dyld symbol resolution only.
 pub unsafe extern "C" fn guard_execlp(_path: *const c_char, _arg0: *const c_char) -> c_int {
     set_errno(libc::ENOSYS);
     -1
 }
 
 #[unsafe(no_mangle)]
+/// Defense-in-depth `execle(3)` shadow that intentionally fails closed.
+///
+/// # Safety
+///
+/// This function is exposed with C ABI for dyld symbol resolution only.
 pub unsafe extern "C" fn guard_execle(_path: *const c_char, _arg0: *const c_char) -> c_int {
     set_errno(libc::ENOSYS);
     -1

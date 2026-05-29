@@ -1,14 +1,14 @@
 //! M005-S05: Deny verdict via PTY prompt.
 //!
 //! Test: stt-guard wrap wraps node against a non-allowlisted hostname. The hook's
-//! guard_getaddrinfo sends Resolve IPC to the daemon. Because the run is
-//! TTY-attached, the daemon parks the Resolve and sends a PromptRequest to the
+//! `guard_getaddrinfo` sends Resolve IPC to the daemon. Because the run is
+//! TTY-attached, the daemon parks the Resolve and sends a `PromptRequest` to the
 //! CLI. The test sends "4\n" (Deny) into the PTY. The daemon resumes Resolve
 //! with Deny → node fails with connection-denied semantics. A JSONL row with
-//! source_kind=prompt_deny appears.
+//! `source_kind=prompt_deny` appears.
 //!
 //! Marked #[ignore]: requires PTY + non-hardened node + macOS daemon.
-//! Opt-in via: cargo test -p guard-e2e -- --ignored prompt_deny
+//! Opt-in via: cargo test -p guard-e2e -- --ignored `prompt_deny`
 
 #[cfg(target_os = "macos")]
 use std::io::{BufRead, BufReader, Write as _};
@@ -70,9 +70,10 @@ fn deny_blocks_connection_and_logs_prompt_deny() {
     let mut buf = String::new();
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        if Instant::now() > deadline {
-            panic!("prompt never appeared in PTY output within 15s; buf so far:\n{buf}");
-        }
+        assert!(
+            Instant::now() <= deadline,
+            "prompt never appeared in PTY output within 15s; buf so far:\n{buf}"
+        );
         let mut line = String::new();
         match br.read_line(&mut line) {
             Ok(0) | Err(_) => break,

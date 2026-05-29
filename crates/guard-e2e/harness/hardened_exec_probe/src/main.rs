@@ -1,17 +1,17 @@
 //! Test binary for exec-time layered enforcement.
 //!
-//! Usage: hardened_exec_probe <mode>
-//!   mode = "exec_curl"       — try to execve /usr/bin/curl
-//!          "exec_env"        — try to execve /usr/bin/env
-//!          "exec_env_delayed" — sleep briefly, then execve /usr/bin/env
-//!          "posix_spawn_curl" — try to posix_spawn /usr/bin/curl
-//!          "posix_spawn_env_delayed" — sleep, then posix_spawn /usr/bin/env
-//!          "exec_synthetic_fat" — exec synthetic fat Mach-O (T0 block)
-//!          "exec_synthetic_syscall" — exec synthetic thin Mach-O with syscall bytes (T3 fail-closed)
-//!          "posix_spawn_synthetic_syscall_attr" — posix_spawn T3 with caller attrs (T3 fail-closed)
+//! Usage: `hardened_exec_probe` <mode>
+//!   mode = "`exec_curl`"       — try to execve /usr/bin/curl
+//!          "`exec_env`"        — try to execve /usr/bin/env
+//!          "`exec_env_delayed`" — sleep briefly, then execve /usr/bin/env
+//!          "`posix_spawn_curl`" — try to `posix_spawn` /usr/bin/curl
+//!          "`posix_spawn_env_delayed`" — sleep, then `posix_spawn` /usr/bin/env
+//!          "`exec_synthetic_fat`" — exec synthetic fat Mach-O (T0 block)
+//!          "`exec_synthetic_syscall`" — exec synthetic thin Mach-O with syscall bytes (T3 fail-closed)
+//!          "`posix_spawn_synthetic_syscall_attr`" — `posix_spawn` T3 with caller attrs (T3 fail-closed)
 //!
 //! Exit codes:
-//!   0 — exec succeeded (or child ran successfully for posix_spawn)
+//!   0 — exec succeeded (or child ran successfully for `posix_spawn`)
 //!   2 — exec failed with EACCES (Stentorian Guard blocked it)
 //!   3 — unexpected error
 //!   4 — usage error
@@ -67,9 +67,9 @@ mod macos_probe {
         let path = CString::new("/usr/bin/curl").unwrap();
         let arg0 = CString::new("curl").unwrap();
         let arg1 = CString::new("--version").unwrap();
-        let argv = [arg0.as_ptr(), arg1.as_ptr(), std::ptr::null()];
+        let command_argv = [arg0.as_ptr(), arg1.as_ptr(), std::ptr::null()];
 
-        let ret = unsafe { libc::execve(path.as_ptr(), argv.as_ptr(), std::ptr::null()) };
+        let ret = unsafe { libc::execve(path.as_ptr(), command_argv.as_ptr(), std::ptr::null()) };
         if ret < 0 {
             let errno = unsafe { *libc::__error() };
             if errno == libc::EACCES {
@@ -87,14 +87,14 @@ mod macos_probe {
         let arg0 = CString::new("env").unwrap();
         let arg1 = CString::new("echo").unwrap();
         let arg2 = CString::new("ENV-EXEC-OK").unwrap();
-        let argv = [
+        let command_argv = [
             arg0.as_ptr(),
             arg1.as_ptr(),
             arg2.as_ptr(),
             std::ptr::null(),
         ];
 
-        let ret = unsafe { libc::execve(path.as_ptr(), argv.as_ptr(), std::ptr::null()) };
+        let ret = unsafe { libc::execve(path.as_ptr(), command_argv.as_ptr(), std::ptr::null()) };
         if ret < 0 {
             let errno = unsafe { *libc::__error() };
             if errno == libc::EACCES {
@@ -110,20 +110,20 @@ mod macos_probe {
         let path = CString::new("/usr/bin/curl").unwrap();
         let arg0 = CString::new("curl").unwrap();
         let arg1 = CString::new("--version").unwrap();
-        let argv: Vec<*mut libc::c_char> = vec![
-            arg0.as_ptr() as *mut _,
-            arg1.as_ptr() as *mut _,
+        let command_argv: Vec<*mut libc::c_char> = vec![
+            arg0.as_ptr().cast_mut(),
+            arg1.as_ptr().cast_mut(),
             std::ptr::null_mut(),
         ];
 
         let mut pid: libc::pid_t = 0;
         let ret = unsafe {
             libc::posix_spawn(
-                &mut pid,
+                &raw mut pid,
                 path.as_ptr(),
                 std::ptr::null(),
                 std::ptr::null(),
-                argv.as_ptr(),
+                command_argv.as_ptr(),
                 std::ptr::null_mut(),
             )
         };
@@ -139,7 +139,7 @@ mod macos_probe {
 
         // Wait for child
         let mut status: libc::c_int = 0;
-        unsafe { libc::waitpid(pid, &mut status, 0) };
+        unsafe { libc::waitpid(pid, &raw mut status, 0) };
         println!("POSIX-SPAWN-OK pid={pid}");
         std::process::exit(0);
     }
@@ -149,21 +149,21 @@ mod macos_probe {
         let arg0 = CString::new("env").unwrap();
         let arg1 = CString::new("echo").unwrap();
         let arg2 = CString::new("ENV-POSIX-SPAWN-OK").unwrap();
-        let argv: Vec<*mut libc::c_char> = vec![
-            arg0.as_ptr() as *mut _,
-            arg1.as_ptr() as *mut _,
-            arg2.as_ptr() as *mut _,
+        let command_argv: Vec<*mut libc::c_char> = vec![
+            arg0.as_ptr().cast_mut(),
+            arg1.as_ptr().cast_mut(),
+            arg2.as_ptr().cast_mut(),
             std::ptr::null_mut(),
         ];
 
         let mut pid: libc::pid_t = 0;
         let ret = unsafe {
             libc::posix_spawn(
-                &mut pid,
+                &raw mut pid,
                 path.as_ptr(),
                 std::ptr::null(),
                 std::ptr::null(),
-                argv.as_ptr(),
+                command_argv.as_ptr(),
                 std::ptr::null_mut(),
             )
         };
@@ -178,7 +178,7 @@ mod macos_probe {
         }
 
         let mut status: libc::c_int = 0;
-        unsafe { libc::waitpid(pid, &mut status, 0) };
+        unsafe { libc::waitpid(pid, &raw mut status, 0) };
         println!("POSIX-SPAWN-ENV-OK pid={pid}");
         std::process::exit(0);
     }
@@ -209,9 +209,10 @@ mod macos_probe {
         let path = write_executable_fixture("guard-syscall-spawn", &thin_syscall_fixture());
         let c_path = CString::new(path.as_os_str().as_bytes()).expect("fixture path");
         let arg0 = CString::new("fixture").unwrap();
-        let argv: Vec<*mut libc::c_char> = vec![arg0.as_ptr() as *mut _, std::ptr::null_mut()];
+        let command_argv: Vec<*mut libc::c_char> =
+            vec![arg0.as_ptr().cast_mut(), std::ptr::null_mut()];
         let mut attr = std::ptr::null_mut();
-        let attr_init = unsafe { libc::posix_spawnattr_init(&mut attr) };
+        let attr_init = unsafe { libc::posix_spawnattr_init(&raw mut attr) };
         if attr_init != 0 {
             eprintln!("posix_spawnattr_init failed with errno={attr_init}");
             std::process::exit(3);
@@ -220,16 +221,16 @@ mod macos_probe {
         let mut pid: libc::pid_t = 0;
         let ret = unsafe {
             libc::posix_spawn(
-                &mut pid,
+                &raw mut pid,
                 c_path.as_ptr(),
                 std::ptr::null(),
-                &attr,
-                argv.as_ptr(),
+                &raw const attr,
+                command_argv.as_ptr(),
                 std::ptr::null_mut(),
             )
         };
         unsafe {
-            libc::posix_spawnattr_destroy(&mut attr);
+            libc::posix_spawnattr_destroy(&raw mut attr);
         }
 
         if ret == libc::ENOTSUP {
@@ -249,8 +250,8 @@ mod macos_probe {
     fn exec_fixture(path: &std::path::Path) -> ExecOutcome {
         let c_path = CString::new(path.as_os_str().as_bytes()).expect("fixture path");
         let arg0 = CString::new("fixture").unwrap();
-        let argv = [arg0.as_ptr(), std::ptr::null()];
-        let ret = unsafe { libc::execve(c_path.as_ptr(), argv.as_ptr(), std::ptr::null()) };
+        let command_argv = [arg0.as_ptr(), std::ptr::null()];
+        let ret = unsafe { libc::execve(c_path.as_ptr(), command_argv.as_ptr(), std::ptr::null()) };
         if ret < 0 {
             ExecOutcome::Errno(unsafe { *libc::__error() })
         } else {
@@ -271,12 +272,12 @@ mod macos_probe {
 
     fn fat_macho_fixture() -> Vec<u8> {
         let mut data = vec![0u8; 8];
-        data[0..4].copy_from_slice(&0xcafebabe_u32.to_be_bytes());
+        data[0..4].copy_from_slice(&0xcafe_babe_u32.to_be_bytes());
         data
     }
 
     fn thin_syscall_fixture() -> Vec<u8> {
-        const MH_MAGIC_64: u32 = 0xfeedfacf;
+        const MH_MAGIC_64: u32 = 0xfeed_facf;
         const LC_SEGMENT_64: u32 = 0x19;
         #[cfg(target_arch = "aarch64")]
         const NATIVE_CPU_TYPE: u32 = 0x0100_000c;
@@ -290,7 +291,8 @@ mod macos_probe {
         };
         let fileoff = 0x100u64;
         let filesize = payload.len() as u64;
-        let mut data = vec![0u8; fileoff as usize + payload.len()];
+        let payload_offset = usize::try_from(fileoff).expect("fixture file offset fits usize");
+        let mut data = vec![0u8; payload_offset + payload.len()];
         data[0..4].copy_from_slice(&MH_MAGIC_64.to_le_bytes());
         data[4..8].copy_from_slice(&NATIVE_CPU_TYPE.to_le_bytes());
         data[16..20].copy_from_slice(&1u32.to_le_bytes());
@@ -302,7 +304,7 @@ mod macos_probe {
         data[pos + 8..pos + 14].copy_from_slice(b"__TEXT");
         data[pos + 40..pos + 48].copy_from_slice(&fileoff.to_le_bytes());
         data[pos + 48..pos + 56].copy_from_slice(&filesize.to_le_bytes());
-        data[fileoff as usize..].copy_from_slice(payload);
+        data[payload_offset..].copy_from_slice(payload);
         data
     }
 }

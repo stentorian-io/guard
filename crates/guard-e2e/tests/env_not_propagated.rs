@@ -1,14 +1,14 @@
-//! TREE-06 e2e: a tracked process that calls posix_spawn with env_clear()
-//! triggers EnvNotPropagatedGap; the daemon records it.
+//! TREE-06 e2e: a tracked process that calls `posix_spawn` with `env_clear()`
+//! triggers `EnvNotPropagatedGap`; the daemon records it.
 //!
-//! HARD assertion (env_clear_posix_spawn_emits_gap_log_line):
-//!   - Runs env_clear_posix_spawn under `stt-guard wrap`.
-//!   - DaemonHarness::drain_stderr() captures the daemon child's stderr.
+//! HARD assertion (`env_clear_posix_spawn_emits_gap_log_line)`:
+//!   - Runs `env_clear_posix_spawn` under `stt-guard wrap`.
+//!   - `DaemonHarness::drain_stderr()` captures the daemon child's stderr.
 //!   - Assert it contains BOTH `TREE-06` AND `env-not-propagated`
 //!     (case-insensitive) — both literals are emitted by
-//!     handle_env_not_propagated_frame's single tracing::warn site.
+//!     `handle_env_not_propagated_frame`'s single `tracing::warn` site.
 //!
-//! SOFT smoke (env_clear_posix_spawn_records_tree_06_gap):
+//! SOFT smoke (`env_clear_posix_spawn_records_tree_06_gap)`:
 //!   - Just asserts the wrapped command exits 0 (best-effort discipline:
 //!     did NOT fail-closed) and the dispatch path didn't crash. Kept as a
 //!     diagnostic sibling for when the HARD test fails.
@@ -48,7 +48,7 @@ fn run_under_guard(harness: &DaemonHarness) -> std::process::Output {
 
 /// Soft structural smoke — the wrapped command exits 0 (best-effort discipline).
 /// Kept as a diagnostic sibling for the HARD test below.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn env_clear_posix_spawn_records_tree_06_gap() {
     let harness = DaemonHarness::start().expect("start daemon");
@@ -64,9 +64,9 @@ fn env_clear_posix_spawn_records_tree_06_gap() {
 }
 
 /// HARD assertion — empirical confirmation that the gap was recorded.
-/// Uses DaemonHarness::drain_stderr (added in this Task) to capture the
-/// daemon's tracing::warn line.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+/// Uses `DaemonHarness::drain_stderr` (added in this Task) to capture the
+/// daemon's `tracing::warn` line.
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn env_clear_posix_spawn_emits_gap_log_line() {
     let mut harness = DaemonHarness::start().expect("start daemon");
@@ -88,13 +88,11 @@ fn env_clear_posix_spawn_emits_gap_log_line() {
     let stderr_lc = lc(&stderr);
     assert!(
         stderr_lc.contains("tree-06"),
-        "daemon stderr missing `TREE-06` marker.\nstderr:\n{}",
-        stderr,
+        "daemon stderr missing `TREE-06` marker.\nstderr:\n{stderr}",
     );
     assert!(
         stderr_lc.contains("env-not-propagated"),
-        "daemon stderr missing `env-not-propagated` marker.\nstderr:\n{}",
-        stderr,
+        "daemon stderr missing `env-not-propagated` marker.\nstderr:\n{stderr}",
     );
     drop(harness);
 }

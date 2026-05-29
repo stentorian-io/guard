@@ -45,48 +45,11 @@ fn live_wrap_npmjs_loop_p99_context() {
     };
     let harness = DaemonHarness::start().expect("start daemon");
 
-    // Tight measure-loop: 50 warm-up + 1000 measured connect/end pairs against
-    // a curated host (registry.npmjs.org is in the default CuratedAllow tier).
-    // Print a single LIVE_WRAP_NS summary line that the runner script greps.
-    let script = r#"
-        const net = require('net');
-        const ITERS = 1000;
-        const samples = [];
-        function one() {
-            return new Promise((resolve, reject) => {
-                const t0 = process.hrtime.bigint();
-                const s = net.connect(443, 'registry.npmjs.org');
-                s.on('connect', () => {
-                    const dt = process.hrtime.bigint() - t0;
-                    s.end();
-                    resolve(Number(dt));
-                });
-                s.on('error', reject);
-            });
-        }
-        (async () => {
-            try {
-                for (let i = 0; i < 50; i++) { await one(); }   // warm up
-                for (let i = 0; i < ITERS; i++) { samples.push(await one()); }
-                samples.sort((a, b) => a - b);
-                const p = q => samples[Math.floor((samples.length - 1) * q)];
-                console.log('LIVE_WRAP_NS p50=' + p(0.5) +
-                            ' p95=' + p(0.95) +
-                            ' p99=' + p(0.99) +
-                            ' p999=' + p(0.999) +
-                            ' max=' + samples[samples.length - 1]);
-            } catch (e) {
-                console.log('LIVE_WRAP_ERROR ' + (e && e.code ? e.code : e));
-                process.exitCode = 1;
-            }
-        })();
-    "#;
-
     let mut wrapped = Command::new(&cli)
         .arg("wrap")
         .arg(&node)
         .arg("-e")
-        .arg(script)
+        .arg(live_wrap_script())
         .env_clear()
         .env("HOME", harness.home.path())
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -136,31 +99,64 @@ fn live_wrap_npmjs_loop_p99_context() {
     let _ = wrapped.wait();
     drop(harness);
 
-    match summary {
-        Some(line) => {
-            // Echo the summary to stderr in the structured shape the runner script greps.
-            // (--nocapture forwards this to the user.)
-            eprintln!("[live-wrap] {line}");
-            // Truncate at a UTF-8 char boundary — `&all_stdout[..4096]` would
-            // panic ("byte index N is not a char boundary") if byte 4096 lands
-            // inside a multi-byte codepoint. The injected node script emits
-            // ASCII today, but a node panic stack trace, a non-ASCII path
-            // component, or future emoji in diagnostic output would otherwise
-            // hide the real failure behind a slicing panic.
-            let dump_end = std::cmp::min(4096, all_stdout.len());
-            let dump_end = (0..=dump_end)
-                .rev()
-                .find(|&i| all_stdout.is_char_boundary(i))
-                .unwrap_or(0);
-            eprintln!(
-                "[live-wrap] full stdout dump (first 4 KiB):\n{}",
-                &all_stdout[..dump_end]
-            );
-        }
-        None => {
-            eprintln!("[live-wrap] no LIVE_WRAP_NS summary observed before deadline");
-            eprintln!("full stdout:\n{all_stdout}");
-            panic!("live-wrap bench timed out before producing summary line");
-        }
+    if let Some(line) = summary {
+        // Echo the summary to stderr in the structured shape the runner script greps.
+        // (--nocapture forwards this to the user.)
+        eprintln!("[live-wrap] {line}");
+        // Truncate at a UTF-8 char boundary — `&all_stdout[..4096]` would
+        // panic ("byte index N is not a char boundary") if byte 4096 lands
+        // inside a multi-byte codepoint. The injected node script emits
+        // ASCII today, but a node panic stack trace, a non-ASCII path
+        // component, or future emoji in diagnostic output would otherwise
+        // hide the real failure behind a slicing panic.
+        let dump_end = std::cmp::min(4096, all_stdout.len());
+        let dump_end = (0..=dump_end)
+            .rev()
+            .find(|&i| all_stdout.is_char_boundary(i))
+            .unwrap_or(0);
+        eprintln!(
+            "[live-wrap] full stdout dump (first 4 KiB):\n{}",
+            &all_stdout[..dump_end]
+        );
+    } else {
+        eprintln!("[live-wrap] no LIVE_WRAP_NS summary observed before deadline");
+        eprintln!("full stdout:\n{all_stdout}");
+        panic!("live-wrap bench timed out before producing summary line");
     }
+}
+
+fn live_wrap_script() -> &'static str {
+    r"
+        const net = require('net');
+        const ITERS = 1000;
+        const samples = [];
+        function one() {
+            return new Promise((resolve, reject) => {
+                const t0 = process.hrtime.bigint();
+                const s = net.connect(443, 'registry.npmjs.org');
+                s.on('connect', () => {
+                    const dt = process.hrtime.bigint() - t0;
+                    s.end();
+                    resolve(Number(dt));
+                });
+                s.on('error', reject);
+            });
+        }
+        (async () => {
+            try {
+                for (let i = 0; i < 50; i++) { await one(); }
+                for (let i = 0; i < ITERS; i++) { samples.push(await one()); }
+                samples.sort((a, b) => a - b);
+                const p = q => samples[Math.floor((samples.length - 1) * q)];
+                console.log('LIVE_WRAP_NS p50=' + p(0.5) +
+                            ' p95=' + p(0.95) +
+                            ' p99=' + p(0.99) +
+                            ' p999=' + p(0.999) +
+                            ' max=' + samples[samples.length - 1]);
+            } catch (e) {
+                console.log('LIVE_WRAP_ERROR ' + (e && e.code ? e.code : e));
+                process.exitCode = 1;
+            }
+        })();
+    "
 }

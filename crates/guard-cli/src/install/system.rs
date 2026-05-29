@@ -2,43 +2,58 @@
 //!
 //! Creates the `_stt_guard` service user, deploys root-owned binaries to
 //! `/usr/local/libexec/stt-guard/`, creates state and log directories owned
-//! by `_stt_guard`, installs a LaunchDaemon, and starts it.
+//! by `_stt_guard`, installs a `LaunchDaemon`, and starts it.
 
-#![cfg_attr(target_os = "linux", allow(dead_code))]
-
+#[cfg(not(target_os = "linux"))]
 use std::io::Write;
+#[cfg(not(target_os = "linux"))]
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "linux"))]
+use std::path::Path;
+use std::path::PathBuf;
+#[cfg(not(target_os = "linux"))]
 use std::process::Command;
 
 use crate::CliError;
+#[cfg(not(target_os = "linux"))]
 use crate::hardware_signing::HardwareSignerEnrollment;
 
 use guard_core::paths;
 
+#[cfg(not(target_os = "linux"))]
 const SERVICE_USER: &str = paths::SERVICE_USER;
+#[cfg(not(target_os = "linux"))]
 const SERVICE_USER_REALNAME: &str = paths::SERVICE_USER_REALNAME;
 
+#[cfg(not(target_os = "linux"))]
 const BIN_DIR: &str = paths::SYSTEM_BIN_DIR;
 const STATE_DIR: &str = paths::SYSTEM_STATE_DIR;
+#[cfg(not(target_os = "linux"))]
 const LOG_DIR: &str = paths::SYSTEM_LOG_DIR;
+#[cfg(not(target_os = "linux"))]
 const PLIST_LABEL: &str = paths::PLIST_LABEL;
+#[cfg(not(target_os = "linux"))]
 const PLIST_PATH: &str = paths::PLIST_PATH;
 
+#[cfg(not(target_os = "linux"))]
 const BINARIES: &[&str] = paths::INSTALLED_BINARIES;
+#[cfg(not(target_os = "linux"))]
 const DYLIB: &str = paths::HOOK_DYLIB;
 
 /// Check whether the hardened installation is present and internally coherent.
+#[must_use]
 pub fn is_installed() -> bool {
     install_health().is_healthy()
 }
 
 /// Return the full hardened-install health result.
+#[must_use]
 pub fn install_health() -> crate::install::health::InstallHealth {
     crate::install::health::check_installation()
 }
 
 /// Return the system-level state directory path.
+#[must_use]
 pub fn system_state_dir() -> PathBuf {
     PathBuf::from(STATE_DIR)
 }
@@ -69,6 +84,11 @@ pub fn print_plan() {
 }
 
 /// Execute the full hardened installation. Must be run as root.
+///
+/// # Errors
+///
+/// Always returns an error on Linux because the hardened installer is not
+/// implemented there yet.
 #[cfg(target_os = "linux")]
 pub fn run_install() -> Result<(), CliError> {
     Err(CliError::Other(
@@ -79,6 +99,10 @@ pub fn run_install() -> Result<(), CliError> {
 }
 
 /// Execute the full hardened installation. Must be run as root.
+///
+/// # Errors
+///
+/// Returns an error when root privileges are missing or any install step fails.
 #[cfg(not(target_os = "linux"))]
 pub fn run_install() -> Result<(), CliError> {
     require_root()?;
@@ -93,6 +117,7 @@ pub fn run_install() -> Result<(), CliError> {
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
 fn require_root() -> Result<(), CliError> {
     if !nix_is_root() {
         return Err(CliError::Other(
@@ -102,10 +127,12 @@ fn require_root() -> Result<(), CliError> {
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
 fn nix_is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
+#[cfg(not(target_os = "linux"))]
 fn create_service_user() -> Result<u32, CliError> {
     // Check if user already exists.
     let check = Command::new("dscl")
@@ -163,6 +190,7 @@ fn create_service_user() -> Result<u32, CliError> {
     Ok(gid)
 }
 
+#[cfg(not(target_os = "linux"))]
 fn set_service_user_attributes(gid: u32) -> Result<(), CliError> {
     let gid_str = gid.to_string();
     let user = format!("/Users/{SERVICE_USER}");
@@ -180,6 +208,7 @@ fn set_service_user_attributes(gid: u32) -> Result<(), CliError> {
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
 fn ensure_record_attr(
     record: &str,
     attr: &str,
@@ -200,6 +229,7 @@ fn ensure_record_attr(
     )
 }
 
+#[cfg(not(target_os = "linux"))]
 fn service_record_attr_matches(record: &str, attr: &str, expected: &str) -> Result<bool, CliError> {
     let output = Command::new("dscl")
         .args([".", "-read", record, attr])
@@ -217,6 +247,7 @@ fn service_record_attr_matches(record: &str, attr: &str, expected: &str) -> Resu
     )
 }
 
+#[cfg(not(target_os = "linux"))]
 fn dscl_attribute_values(output: &str, attr: &str) -> Vec<String> {
     let Some(first_line) = output.lines().next() else {
         return Vec::new();
@@ -239,6 +270,7 @@ fn dscl_attribute_values(output: &str, attr: &str) -> Vec<String> {
         .collect()
 }
 
+#[cfg(not(target_os = "linux"))]
 fn service_gid() -> Result<u32, CliError> {
     let output = Command::new("id")
         .args(["-g", SERVICE_USER])
@@ -259,6 +291,7 @@ fn service_gid() -> Result<u32, CliError> {
     })
 }
 
+#[cfg(not(target_os = "linux"))]
 fn find_available_uid() -> Result<u32, CliError> {
     for uid in 400..500 {
         let check = Command::new("dscl")
@@ -275,6 +308,7 @@ fn find_available_uid() -> Result<u32, CliError> {
     ))
 }
 
+#[cfg(not(target_os = "linux"))]
 fn deploy_binaries() -> Result<(), CliError> {
     eprintln!("  Deploying binaries to {BIN_DIR}/...");
 
@@ -337,14 +371,16 @@ fn deploy_binaries() -> Result<(), CliError> {
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
 fn source_bin_dir() -> Result<PathBuf, CliError> {
     // The running stt-guard binary's parent directory contains the build artifacts.
     let exe = std::env::current_exe().map_err(|e| CliError::Other(format!("current_exe: {e}")))?;
     exe.parent()
-        .map(|p| p.to_path_buf())
+        .map(std::path::Path::to_path_buf)
         .ok_or_else(|| CliError::Other("cannot determine source binary directory".into()))
 }
 
+#[cfg(not(target_os = "linux"))]
 fn create_directories(service_gid: u32) -> Result<(), CliError> {
     let service_owner = format!("{SERVICE_USER}:{service_gid}");
 
@@ -367,6 +403,7 @@ fn create_directories(service_gid: u32) -> Result<(), CliError> {
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
 fn register_rule_signer(
     enrollment: &HardwareSignerEnrollment,
     service_gid: u32,
@@ -396,6 +433,7 @@ fn register_rule_signer(
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
 fn write_trusted_signer_manifest(enrollment: &HardwareSignerEnrollment) -> Result<(), CliError> {
     let path = paths::trusted_rule_signers_path();
     let content = format!(
@@ -437,6 +475,7 @@ fn write_trusted_signer_manifest(enrollment: &HardwareSignerEnrollment) -> Resul
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
 fn hex_lower(bytes: &[u8]) -> String {
     const HEX: &[u8] = b"0123456789abcdef";
     let mut s = String::with_capacity(bytes.len() * 2);
@@ -447,6 +486,7 @@ fn hex_lower(bytes: &[u8]) -> String {
     s
 }
 
+#[cfg(not(target_os = "linux"))]
 fn install_launchdaemon() -> Result<(), CliError> {
     eprintln!("  Installing LaunchDaemon ({PLIST_LABEL})...");
 
@@ -460,6 +500,7 @@ fn install_launchdaemon() -> Result<(), CliError> {
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
 fn start_daemon() -> Result<(), CliError> {
     eprintln!("  Starting daemon...");
 
@@ -477,6 +518,7 @@ fn start_daemon() -> Result<(), CliError> {
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
 fn run_cmd(program: &str, args: &[&str], description: &str) -> Result<(), CliError> {
     let output = Command::new(program)
         .args(args)

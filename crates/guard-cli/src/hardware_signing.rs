@@ -1,7 +1,7 @@
 //! Hardware-backed rule signing for production persistent user rules.
 //!
 //! macOS production support uses a non-exportable Secure Enclave P-256 key in
-//! the invoking user's keychain. `stt-guard init` enrolls/locates that key and
+//! the invoking user's keychain. The system installer enrolls/locates that key and
 //! registers the public half with the daemon's trusted signer registry. Later
 //! rule approvals sign the canonical rule payload with the private key; the
 //! daemon can verify but cannot forge those signatures.
@@ -113,7 +113,7 @@ func enroll() {
 
 func sign(_ payloadHex: String) {
     guard let key = findPrivateKey() else {
-        fail("hardware-backed signing key unavailable; run sudo stt-guard init to enroll Secure Enclave signing")
+        fail("hardware-backed signing key unavailable; run the installer to enroll Secure Enclave signing")
     }
     guard let payload = dataFromHex(payloadHex) else {
         fail("invalid payload hex")
@@ -306,8 +306,8 @@ fn init_user_swift_command(swift: &str) -> Result<Command, CliError> {
     let sudo_user = std::env::var("SUDO_USER").ok().filter(|u| u != "root");
     let Some(user) = sudo_user else {
         return Err(CliError::Other(
-            "hardware signer enrollment requires running init via sudo from the target user \
-             (for example: sudo stt-guard init); refusing to enroll a root-owned signing key"
+            "hardware signer enrollment requires running the system install via sudo from the target user; \
+             refusing to enroll a root-owned signing key"
                 .into(),
         ));
     };

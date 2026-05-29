@@ -45,7 +45,7 @@ impl InstallHealth {
         let mut msg = String::from(
             "Stentorian Guard hardened install is missing, corrupted, or incorrectly set up.\n\
              Refusing to continue because this can silently weaken protection.\n\
-             Run: sudo stt-guard init\n\nProblems:",
+             Run the installer, or run stt-guard update from an existing install.\n\nProblems:",
         );
         for problem in &self.problems {
             msg.push_str("\n  - ");
@@ -381,7 +381,7 @@ mod tests {
             problems: vec!["first".into(), "second".into()],
         };
         let msg = health.error_message();
-        assert!(msg.contains("sudo stt-guard init"));
+        assert!(msg.contains("Run the installer"));
         assert!(msg.contains("first"));
         assert!(msg.contains("second"));
     }

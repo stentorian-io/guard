@@ -2,38 +2,76 @@ use clap::Parser;
 use guard_cli::cli::{Cli, Cmd, StatusSub};
 use std::ffi::OsString;
 
-// ---- stt-guard init parser shape ------------------------------------------------
+// ---- stt-guard install-system parser shape --------------------------------------
 
 #[test]
-fn init_bare_parses() {
-    let cli = Cli::try_parse_from(["stt-guard", "init"]).expect("parse");
+fn install_system_bare_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "install-system"]).expect("parse");
     match cli.cmd {
-        Cmd::Init { yes } => {
+        Cmd::InstallSystem { yes } => {
             assert!(!yes);
         }
-        other => panic!("expected Init variant, got {other:?}"),
+        other => panic!("expected InstallSystem variant, got {other:?}"),
     }
 }
 
 #[test]
-fn init_yes_flag_parses() {
-    let cli = Cli::try_parse_from(["stt-guard", "init", "--yes"]).expect("parse");
+fn install_system_yes_flag_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "install-system", "--yes"]).expect("parse");
     match cli.cmd {
-        Cmd::Init { yes } => {
+        Cmd::InstallSystem { yes } => {
             assert!(yes);
         }
-        other => panic!("expected Init variant, got {other:?}"),
+        other => panic!("expected InstallSystem variant, got {other:?}"),
     }
 }
 
 #[test]
-fn init_short_y_flag_parses() {
-    let cli = Cli::try_parse_from(["stt-guard", "init", "-y"]).expect("parse");
+fn install_system_short_y_flag_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "install-system", "-y"]).expect("parse");
     match cli.cmd {
-        Cmd::Init { yes } => {
+        Cmd::InstallSystem { yes } => {
             assert!(yes);
         }
-        other => panic!("expected Init variant, got {other:?}"),
+        other => panic!("expected InstallSystem variant, got {other:?}"),
+    }
+}
+
+// ---- stt-guard update parser shape ---------------------------------------------
+
+#[test]
+fn update_bare_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "update"]).expect("parse");
+    match cli.cmd {
+        Cmd::Update { check, version } => {
+            assert!(!check);
+            assert_eq!(version, None);
+        }
+        other => panic!("expected Update variant, got {other:?}"),
+    }
+}
+
+#[test]
+fn update_check_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "update", "--check"]).expect("parse");
+    match cli.cmd {
+        Cmd::Update { check, version } => {
+            assert!(check);
+            assert_eq!(version, None);
+        }
+        other => panic!("expected Update variant, got {other:?}"),
+    }
+}
+
+#[test]
+fn update_version_parses() {
+    let cli = Cli::try_parse_from(["stt-guard", "update", "--version", "v0.2.0"]).expect("parse");
+    match cli.cmd {
+        Cmd::Update { check, version } => {
+            assert!(!check);
+            assert_eq!(version.as_deref(), Some("v0.2.0"));
+        }
+        other => panic!("expected Update variant, got {other:?}"),
     }
 }
 

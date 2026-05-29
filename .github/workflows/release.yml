@@ -6,7 +6,7 @@
 # Can also be triggered manually via workflow_dispatch for dry-run testing.
 #
 # Supported install path: the repo-hosted installer downloads these GitHub
-# Release artifacts and invokes the hardened init path. Raw release artifacts
+# Release artifacts and invokes the hardened system install path. Raw release artifacts
 # are not a documented manual install surface because incorrect placement,
 # ownership, or plist setup can weaken the deployment model.
 #
@@ -220,29 +220,29 @@ jobs:
           test -f "$tarball"
           tar -xzf "$tarball" -C local-release
           ./local-release/stt-guard --version
-          ./local-release/stt-guard init --help
+          ./local-release/stt-guard install-system --help
 
-      - name: Verify hardened init path
+      - name: Verify hardened system install path
         run: |
           set -euo pipefail
           set +e
-          init_output="$(sudo -n ./local-release/stt-guard init --yes 2>&1)"
-          init_status=$?
+          install_output="$(sudo -n ./local-release/stt-guard install-system --yes 2>&1)"
+          install_status=$?
           set -e
-          printf '%s\n' "$init_output"
-          if [ "$init_status" -eq 0 ]; then
+          printf '%s\n' "$install_output"
+          if [ "$install_status" -eq 0 ]; then
             /usr/local/libexec/stt-guard/stt-guard status
             exit 0
           fi
-          case "$init_output" in
+          case "$install_output" in
             *"create Secure Enclave signing key failed"*|*"hardware-backed signing key unavailable"*|*"failed to generate asymmetric keypair"*)
-              echo "::notice::Skipping full hardened init because this runner cannot enroll a Secure Enclave signing key."
+              echo "::notice::Skipping full hardened system install because this runner cannot enroll a Secure Enclave signing key."
               exit 0
               ;;
           esac
-          exit "$init_status"
+          exit "$install_status"
 
-      - name: Cleanup hardened init smoke
+      - name: Cleanup hardened system install smoke
         if: always()
         run: |
           sudo -n launchctl bootout system/io.stentorian.guard.daemon 2>/dev/null || true

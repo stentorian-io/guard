@@ -10,7 +10,8 @@ usage() {
 Usage: install.sh [--version vX.Y.Z] [--yes]
 
 Downloads a verified Stentorian Guard release artifact and runs the hardened
-init flow. The script runs unprivileged until it invokes sudo for init.
+system install. The script runs unprivileged until it invokes sudo for the
+system install step.
 EOF
 }
 
@@ -116,9 +117,9 @@ fi
 tar -xzf "${tmpdir}/${asset}" -C "$tmpdir"
 
 if [ "$yes" -eq 1 ]; then
-  sudo "${tmpdir}/stt-guard" init --yes
+  sudo "${tmpdir}/stt-guard" install-system --yes
 else
-  sudo "${tmpdir}/stt-guard" init
+  sudo "${tmpdir}/stt-guard" install-system
 fi
 
 echo "stt-guard: installed ${tag}"

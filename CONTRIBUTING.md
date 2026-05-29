@@ -36,7 +36,7 @@ Build output lands in `target/release/`. The installable artifacts are:
 | `stt-guard` | CLI |
 | `stt-guard-daemon` | Background daemon |
 | `stt-guard-watchdog` | Daemon liveness monitor |
-| `libguard_hook.dylib` | Cargo-built DYLD-injected interposition library. Release packaging and `stt-guard init` install it as `stt-guard-hook.dylib`. |
+| `libguard_hook.dylib` | Cargo-built DYLD-injected interposition library. Release packaging and the system installer install it as `stt-guard-hook.dylib`. |
 
 ## Development install
 
@@ -48,9 +48,9 @@ Consumer installs should use the repo-hosted installer; see the
 cp target/release/stt-guard /usr/local/bin/
 ```
 
-`sudo stt-guard init` deploys the daemon, watchdog, and hook to the root-owned
-system install under `/usr/local/libexec/stt-guard/`. `wrap` and `status` refuse
-to run until that hardened install is present and healthy.
+The repo-hosted installer deploys the daemon, watchdog, and hook to the
+root-owned system install under `/usr/local/libexec/stt-guard/`. `wrap` and
+`status` refuse to run until that hardened install is present and healthy.
 
 Verify the install:
 

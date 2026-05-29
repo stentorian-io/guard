@@ -2,7 +2,7 @@
 //!
 //! v0.3 — install_artifacts CRUD.
 //!
-//! Records what `stt-guard init` did so `stt-guard uninstall` can precisely reverse.
+//! Records what the system installer did so uninstall can precisely reverse it.
 //! Migrations are owned by RuleStore; this struct just opens connections to the same DB.
 
 use std::path::{Path, PathBuf};

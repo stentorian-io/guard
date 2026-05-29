@@ -491,7 +491,7 @@ jobs:
         run: cargo test -p guard-e2e --features test-signer --test failure_modes_corrupt_snapshot --release -- --nocapture
       - name: VAL-04 D-10 — hardened-binary exec gap
         run: cargo test -p guard-e2e --features test-signer --test failure_modes_hardened_exec --release -- --nocapture
-      - name: VAL-05 — privileged init and install health
+      - name: VAL-05 — privileged system install health
         run: cargo test -p guard-e2e --features test-signer --test hardened_install_health --release -- --nocapture
         env:
           STT_GUARD_E2E_PRIVILEGED_INSTALL: '1'

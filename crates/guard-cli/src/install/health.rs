@@ -480,9 +480,10 @@ fn check_plist_content(health: &mut InstallHealth) {
 }
 
 #[cfg(target_os = "linux")]
+#[must_use]
 pub fn expected_systemd_daemon_unit() -> String {
     format!(
-        r#"[Unit]
+        r"[Unit]
 Description=Stentorian Guard daemon
 Documentation=https://github.com/stentorian-io/guard
 After=network-online.target
@@ -507,7 +508,7 @@ SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target
-"#,
+",
         paths::SERVICE_USER,
         paths::SERVICE_USER,
         paths::SYSTEM_BIN_DIR,

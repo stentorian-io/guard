@@ -63,10 +63,19 @@ pub fn system_state_dir() -> PathBuf {
 pub fn print_plan() {
     eprintln!("stt-guard Linux system install is not enabled yet.");
     eprintln!("The production layout is defined for:");
-    eprintln!("  • {SERVICE_USER} service user (no login shell, {STATE_DIR} home)");
-    eprintln!("  • root-owned binaries and hook library under {BIN_DIR}/");
+    eprintln!(
+        "  • {} service user (no login shell, {STATE_DIR} home)",
+        paths::SERVICE_USER
+    );
+    eprintln!(
+        "  • root-owned binaries and hook library under {}/",
+        paths::SYSTEM_BIN_DIR
+    );
     eprintln!("  • service-owned state directory at {STATE_DIR}/");
-    eprintln!("  • service-owned log directory at {LOG_DIR}/");
+    eprintln!(
+        "  • service-owned log directory at {}/",
+        paths::SYSTEM_LOG_DIR
+    );
     eprintln!(
         "  • systemd daemon unit at {}",
         paths::SYSTEMD_DAEMON_UNIT_PATH

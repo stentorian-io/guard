@@ -12,7 +12,17 @@ use std::process::Command;
 use guard_core::paths;
 
 const ROOT_UID: u32 = 0;
-const WHEEL_GID: u32 = 0;
+const ROOT_GROUP_GID: u32 = 0;
+
+#[cfg(target_os = "macos")]
+const SERVICE_USER_HOME: &str = "/var/empty";
+#[cfg(target_os = "linux")]
+const SERVICE_USER_HOME: &str = paths::SYSTEM_STATE_DIR;
+
+#[cfg(target_os = "macos")]
+const SERVICE_USER_SHELL: &str = "/usr/bin/false";
+#[cfg(target_os = "linux")]
+const SERVICE_USER_SHELL: &str = "/usr/sbin/nologin";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallHealth {
@@ -77,7 +87,7 @@ pub fn check_installation() -> InstallHealth {
         Path::new(paths::SYSTEM_BIN_DIR),
         ExpectedKind::Directory,
         ROOT_UID,
-        WHEEL_GID,
+        ROOT_GROUP_GID,
         0o755,
     );
     for binary in paths::INSTALLED_BINARIES {
@@ -86,7 +96,7 @@ pub fn check_installation() -> InstallHealth {
             &Path::new(paths::SYSTEM_BIN_DIR).join(binary),
             ExpectedKind::RegularFile,
             ROOT_UID,
-            WHEEL_GID,
+            ROOT_GROUP_GID,
             0o755,
         );
     }
@@ -95,7 +105,15 @@ pub fn check_installation() -> InstallHealth {
         Path::new(paths::SYSTEM_HOOK_PATH),
         ExpectedKind::RegularFile,
         ROOT_UID,
-        WHEEL_GID,
+        ROOT_GROUP_GID,
+        0o644,
+    );
+    check_path(
+        &mut health,
+        &paths::trusted_rule_signers_path(),
+        ExpectedKind::RegularFile,
+        ROOT_UID,
+        ROOT_GROUP_GID,
         0o644,
     );
 
@@ -121,15 +139,21 @@ pub fn check_installation() -> InstallHealth {
         check_path_exists_only(&mut health, Path::new(paths::SYSTEM_LOG_DIR));
     }
 
-    check_path(
-        &mut health,
-        Path::new(paths::PLIST_PATH),
-        ExpectedKind::RegularFile,
-        ROOT_UID,
-        WHEEL_GID,
-        0o644,
-    );
-    check_plist_content(&mut health);
+    #[cfg(target_os = "macos")]
+    {
+        check_path(
+            &mut health,
+            Path::new(paths::PLIST_PATH),
+            ExpectedKind::RegularFile,
+            ROOT_UID,
+            ROOT_GROUP_GID,
+            0o644,
+        );
+        check_plist_content(&mut health);
+    }
+
+    #[cfg(target_os = "linux")]
+    check_systemd_unit(&mut health);
 
     health
 }
@@ -148,12 +172,13 @@ fn check_service_identity(health: &mut InstallHealth) -> Option<(u32, u32)> {
         health,
     )?;
 
-    check_service_user_cache_record(health, uid, gid);
+    check_service_user_record(health, uid, gid);
 
     Some((uid, gid))
 }
 
-fn check_service_user_cache_record(health: &mut InstallHealth, uid: u32, gid: u32) {
+#[cfg(target_os = "macos")]
+fn check_service_user_record(health: &mut InstallHealth, uid: u32, gid: u32) {
     let output = Command::new("dscacheutil")
         .args(["-q", "user", "-a", "name", paths::SERVICE_USER])
         .output();
@@ -177,9 +202,64 @@ fn check_service_user_cache_record(health: &mut InstallHealth, uid: u32, gid: u3
     let record = String::from_utf8_lossy(&output.stdout);
     require_cache_field(health, &record, "uid", &uid.to_string());
     require_cache_field(health, &record, "gid", &gid.to_string());
-    require_cache_field(health, &record, "dir", "/var/empty");
-    require_cache_field(health, &record, "shell", "/usr/bin/false");
+    require_cache_field(health, &record, "dir", SERVICE_USER_HOME);
+    require_cache_field(health, &record, "shell", SERVICE_USER_SHELL);
     require_cache_field(health, &record, "gecos", paths::SERVICE_USER_REALNAME);
+}
+
+#[cfg(target_os = "linux")]
+fn check_service_user_record(health: &mut InstallHealth, uid: u32, gid: u32) {
+    let output = Command::new("getent")
+        .args(["passwd", paths::SERVICE_USER])
+        .output();
+    let output = match output {
+        Ok(output) => output,
+        Err(err) => {
+            health.push(format!(
+                "service user record invalid: cannot execute getent: {err}"
+            ));
+            return;
+        }
+    };
+    if !output.status.success() {
+        health.push(format!(
+            "service user record invalid: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+        return;
+    }
+
+    let record = String::from_utf8_lossy(&output.stdout);
+    check_getent_passwd_record(health, &record, uid, gid);
+}
+
+#[cfg(target_os = "linux")]
+fn check_getent_passwd_record(health: &mut InstallHealth, record: &str, uid: u32, gid: u32) {
+    let Some(line) = record.lines().next() else {
+        health.push("service user record invalid: getent returned no passwd row");
+        return;
+    };
+    let fields: Vec<&str> = line.split(':').collect();
+    if fields.len() != 7 {
+        health.push("service user record invalid: malformed passwd row");
+        return;
+    }
+
+    require_passwd_field(health, "name", fields[0], paths::SERVICE_USER);
+    require_passwd_field(health, "uid", fields[2], &uid.to_string());
+    require_passwd_field(health, "gid", fields[3], &gid.to_string());
+    require_passwd_field(health, "gecos", fields[4], paths::SERVICE_USER_REALNAME);
+    require_passwd_field(health, "dir", fields[5], SERVICE_USER_HOME);
+    require_passwd_field(health, "shell", fields[6], SERVICE_USER_SHELL);
+}
+
+#[cfg(target_os = "linux")]
+fn require_passwd_field(health: &mut InstallHealth, key: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        health.push(format!(
+            "service user {key} does not match expected {expected:?}"
+        ));
+    }
 }
 
 fn numeric_id(
@@ -216,6 +296,7 @@ fn numeric_id(
     }
 }
 
+#[cfg(target_os = "macos")]
 fn require_cache_field(health: &mut InstallHealth, record: &str, key: &str, value: &str) {
     if !cache_field_values(record, key)
         .iter()
@@ -227,6 +308,7 @@ fn require_cache_field(health: &mut InstallHealth, record: &str, key: &str, valu
     }
 }
 
+#[cfg(target_os = "macos")]
 fn cache_field_values(record: &str, key: &str) -> Vec<String> {
     record
         .lines()
@@ -327,6 +409,7 @@ fn is_special_file_type(file_type: FileType) -> bool {
         || file_type.is_socket()
 }
 
+#[cfg(target_os = "macos")]
 #[must_use]
 pub fn expected_launchdaemon_plist() -> String {
     format!(
@@ -365,6 +448,7 @@ pub fn expected_launchdaemon_plist() -> String {
     )
 }
 
+#[cfg(target_os = "macos")]
 fn check_plist_content(health: &mut InstallHealth) {
     match fs::read_to_string(paths::PLIST_PATH) {
         Ok(content) if content == expected_launchdaemon_plist() => {}
@@ -373,6 +457,69 @@ fn check_plist_content(health: &mut InstallHealth) {
             paths::PLIST_PATH
         )),
         Err(err) => health.push(format!("{} unreadable: {err}", paths::PLIST_PATH)),
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn expected_systemd_daemon_unit() -> String {
+    format!(
+        r#"[Unit]
+Description=Stentorian Guard daemon
+Documentation=https://github.com/stentorian-io/guard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={}
+Group={}
+ExecStart={}/{} serve --state-dir {}
+Restart=always
+RestartSec=1s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths={} {}
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
+"#,
+        paths::SERVICE_USER,
+        paths::SERVICE_USER,
+        paths::SYSTEM_BIN_DIR,
+        paths::DAEMON_BIN,
+        paths::SYSTEM_STATE_DIR,
+        paths::SYSTEM_STATE_DIR,
+        paths::SYSTEM_LOG_DIR,
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn check_systemd_unit(health: &mut InstallHealth) {
+    check_path(
+        health,
+        Path::new(paths::SYSTEMD_DAEMON_UNIT_PATH),
+        ExpectedKind::RegularFile,
+        ROOT_UID,
+        ROOT_GROUP_GID,
+        0o644,
+    );
+
+    match fs::read_to_string(paths::SYSTEMD_DAEMON_UNIT_PATH) {
+        Ok(content) if content == expected_systemd_daemon_unit() => {}
+        Ok(_) => health.push(format!(
+            "{} content differs from expected systemd unit definition",
+            paths::SYSTEMD_DAEMON_UNIT_PATH
+        )),
+        Err(err) => health.push(format!(
+            "{} unreadable: {err}",
+            paths::SYSTEMD_DAEMON_UNIT_PATH
+        )),
     }
 }
 
@@ -460,11 +607,43 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn expected_plist_contains_hardened_paths() {
         let plist = expected_launchdaemon_plist();
         assert!(plist.contains(paths::PLIST_LABEL));
         assert!(plist.contains(paths::SYSTEM_BIN_DIR));
         assert!(plist.contains(paths::SYSTEM_STATE_DIR));
         assert!(plist.contains(paths::SERVICE_USER));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn expected_systemd_unit_contains_hardened_paths() {
+        let unit = expected_systemd_daemon_unit();
+
+        assert!(unit.contains(paths::DAEMON_BIN));
+        assert!(unit.contains(paths::SYSTEM_BIN_DIR));
+        assert!(unit.contains(paths::SYSTEM_STATE_DIR));
+        assert!(unit.contains(paths::SYSTEM_LOG_DIR));
+        assert!(unit.contains(paths::SERVICE_USER));
+        assert!(unit.contains("NoNewPrivileges=true"));
+        assert!(unit.contains("ProtectSystem=strict"));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn getent_passwd_record_requires_locked_service_identity() {
+        let record = format!(
+            "{}:x:427:427:{}:{}:{}\n",
+            paths::SERVICE_USER,
+            paths::SERVICE_USER_REALNAME,
+            SERVICE_USER_HOME,
+            SERVICE_USER_SHELL
+        );
+        let mut health = InstallHealth::healthy();
+
+        check_getent_passwd_record(&mut health, &record, 427, 427);
+
+        assert!(health.is_healthy(), "{:?}", health.problems());
     }
 }

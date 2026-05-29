@@ -2,8 +2,8 @@
 //!
 //! Called from `main.rs` before any CLI command that needs IPC. Verifies the
 //! hardened installation is present, then checks daemon reachability.
-//! Linux v2 remains development-only, so it starts a sibling daemon binary
-//! instead of pretending the macOS `LaunchDaemon` install model exists there.
+//! Linux development mode starts a sibling daemon binary. A Linux system-state
+//! directory is treated as a hardened install and must pass the install gate.
 
 use std::path::Path;
 #[cfg(target_os = "linux")]
@@ -23,7 +23,8 @@ const RETRY_DELAYS: &[Duration] = &[
 ];
 
 /// Verify or start the daemon path appropriate for the current platform.
-/// macOS requires hardened installation; Linux v2 starts a development daemon.
+/// System installs require the hardened gate; Linux user-state paths remain
+/// development mode.
 ///
 /// # Errors
 ///
@@ -32,7 +33,7 @@ const RETRY_DELAYS: &[Duration] = &[
 pub fn ensure_daemon(sock: &Path, state_dir: &Path) -> Result<(), CliError> {
     #[cfg(target_os = "linux")]
     {
-        ensure_linux_development_daemon(sock, state_dir)
+        ensure_linux_daemon(sock, state_dir)
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -42,7 +43,15 @@ pub fn ensure_daemon(sock: &Path, state_dir: &Path) -> Result<(), CliError> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "linux")]
+fn ensure_linux_daemon(sock: &Path, state_dir: &Path) -> Result<(), CliError> {
+    if guard_core::paths::is_system_install(state_dir) {
+        return ensure_installed_daemon(sock);
+    }
+
+    ensure_linux_development_daemon(sock, state_dir)
+}
+
 fn ensure_installed_daemon(sock: &Path) -> Result<(), CliError> {
     require_installed()?;
 
@@ -50,8 +59,8 @@ fn ensure_installed_daemon(sock: &Path) -> Result<(), CliError> {
         return Ok(());
     }
 
-    // Daemon is installed but not responding — give it a moment (launchd
-    // may be restarting it after a crash).
+    // Daemon is installed but not responding; give the platform service
+    // manager a moment to restart it after a crash.
     eprintln!("stt-guard: waiting for daemon...");
     for delay in RETRY_DELAYS {
         std::thread::sleep(*delay);
@@ -62,7 +71,7 @@ fn ensure_installed_daemon(sock: &Path) -> Result<(), CliError> {
 
     Err(CliError::Other(
         "stt-guard: daemon is installed but not responding. \
-         Check /var/log/stt-guard/daemon.err.log for details."
+         Check the service manager logs for details."
             .into(),
     ))
 }

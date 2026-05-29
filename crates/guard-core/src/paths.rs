@@ -78,11 +78,6 @@ pub const SYSTEM_HOOK_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub const SYSTEM_HOOK_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook";
 
-#[cfg(target_os = "macos")]
-pub const HOMEBREW_HOOK_PATH: &str = "/opt/homebrew/lib/stt-guard/stt-guard-hook.dylib";
-#[cfg(not(target_os = "macos"))]
-pub const HOMEBREW_HOOK_PATH: &str = "";
-
 // ---------------------------------------------------------------------------
 // LaunchDaemon
 // ---------------------------------------------------------------------------

@@ -42,8 +42,7 @@ Stentorian Guard depends on can drift between releases:
 - Xcode SDK and Rust target support
 
 For that reason, the compatibility tracker reviews new macOS, CPU architecture,
-Xcode, Rust, LLVM, and Homebrew entries before the project treats them as
-covered.
+Xcode, Rust, and LLVM entries before the project treats them as covered.
 
 ## Support Decisions
 

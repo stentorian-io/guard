@@ -148,39 +148,56 @@ Socket/Snyk, lockfiles, and more), see [docs/alternatives.md](docs/alternatives.
 
 ### Installation
 
-#### Homebrew (supported install path)
+#### Supported install path
 
 ```sh
-brew install stentorian-io/tap/stt-guard
-sudo stt-guard init
+curl -fsSL https://raw.githubusercontent.com/stentorian-io/guard/main/install.sh | sh
 ```
 
-The init step creates a `_stt_guard` service user, deploys root-owned
-binaries to `/usr/local/libexec/stt-guard/`, enrolls a non-exportable Secure
-Enclave rule-signing key for the invoking sudo user, registers that public
-signer with the daemon state, and starts the daemon as a LaunchDaemon. This is
-the only supported consumer deployment mode — it prevents a compromised process
-from tampering with the guard itself. See the
+The installer downloads the latest GitHub Release artifact for your Mac,
+verifies it against the release checksum file, and then runs the hardened init
+flow with `sudo`. The init step creates a `_stt_guard` service user, deploys
+root-owned binaries to `/usr/local/libexec/stt-guard/`, enrolls a
+non-exportable Secure Enclave rule-signing key for the invoking sudo user,
+registers that public signer with the daemon state, and starts the daemon as a
+LaunchDaemon. This is the only supported consumer deployment mode — it prevents
+a compromised process from tampering with the guard itself. See the
 [deployment model](SECURITY.md#deployment-model) for details.
 
 All other commands (`wrap`, `status`) require initialisation to be complete
 and will refuse to run otherwise.
 
 GitHub Releases are used for changelogs, release metadata, auditability, and
-Homebrew automation inputs. Manual binary installation from a release artifact
-is not a supported install path: a misplaced binary, hook library, plist, or
-ownership bit can silently weaken the deployment model.
+installer inputs. Manual binary installation from a release artifact is not a
+supported install path: a misplaced binary, hook library, plist, or ownership
+bit can silently weaken the deployment model.
 
 ### Updating
 
 ```sh
-brew upgrade stt-guard
+curl -fsSL https://raw.githubusercontent.com/stentorian-io/guard/main/install.sh | sh
 ```
+
+Rerunning the installer upgrades the release artifact and reruns the hardened
+init flow.
 
 Check your installed version:
 
 ```sh
 stt-guard --version
+```
+
+### Uninstalling
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/stentorian-io/guard/main/uninstall.sh | sh
+```
+
+The default uninstall removes the LaunchDaemon and root-owned binaries while
+preserving daemon state, user rules, and logs. To remove state and logs too:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/stentorian-io/guard/main/uninstall.sh | sh -s -- --purge
 ```
 
 ### Manual
@@ -357,7 +374,7 @@ summary short; the comprehensive tables live in
 
 Scheduled automation keeps that matrix current without expanding trust by
 itself. The weekly compatibility tracker opens human-review issues for new OS,
-runtime, CPU architecture, Rust, LLVM, Xcode, Homebrew, and Linux lifecycle
+runtime, CPU architecture, Rust, LLVM, Xcode, and Linux lifecycle
 entries. Nightly threat-intel updates open PRs for new malicious-package IOCs.
 New releases, runtime hashes, allow rules, deny rules, and support claims are
 only accepted after review, and CI verifies that the checked-in compatibility

@@ -271,14 +271,6 @@ toolchains:
       - "20"
       - "21"
       - "22"
-  homebrew:
-    formulas:
-      - rust
-      - llvm
-    current_versions:
-      rust: "1.95.0"
-      llvm: "22.1.6"
-
 runtime_integrity:
   review_scope: Exact executable hashes from official runtime release artifacts.
   registry: crates/guard-core/data/trusted-runtimes.yaml

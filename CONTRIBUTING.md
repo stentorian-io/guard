@@ -14,7 +14,7 @@ everything you need to clone, build, test, and submit changes.
 - **Git**
 
 ```sh
-brew bundle       # installs actionlint, Docker/Colima, Node, and helpers
+brew bundle       # optional: installs actionlint, Docker/Colima, Node, and helpers
 colima start      # required before Docker-backed local checks
 rustc --version   # 1.95 or later
 node --version    # 20 or later
@@ -40,8 +40,8 @@ Build output lands in `target/release/`. The installable artifacts are:
 
 ## Development install
 
-Consumer installs should use Homebrew and then run `sudo stt-guard init`; see
-the [README](README.md#installation). For source-build development, either add
+Consumer installs should use the repo-hosted installer; see the
+[README](README.md#installation). For source-build development, either add
 `target/release/` to your `$PATH` or copy the CLI somewhere convenient:
 
 ```sh

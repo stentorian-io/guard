@@ -5,6 +5,8 @@ set -euo pipefail
 
 version="${1:?usage: ci-package-release-tarballs.sh <version>}"
 
+: > artifacts/checksums.txt
+
 for target_dir in artifacts/guard-*; do
   target="${target_dir#artifacts/guard-}"
   cp artifacts/release-meta.json "${target_dir}/release-meta.json"
@@ -13,6 +15,7 @@ for target_dir in artifacts/guard-*; do
     -czf "${tarball}" \
     stt-guard stt-guard-daemon stt-guard-watchdog stt-guard-hook.dylib release-meta.json
   sha=$(sha256sum "${tarball}" | awk '{print $1}')
+  printf '%s  %s\n' "${sha}" "$(basename "${tarball}")" >> artifacts/checksums.txt
   case "${target}" in
     aarch64-apple-darwin)
       echo "arm64_tarball=${tarball}" >> "$GITHUB_OUTPUT"

@@ -62,12 +62,12 @@ We would rather triage a known limitation than miss a real vulnerability.
 
 ## Deployment Model
 
-`stt-guard init` deploys root-owned binaries, enrolls the invoking sudo user's
-non-exportable Secure Enclave rule-signing key, registers that public signer
-with daemon state, and runs the daemon as a dedicated `_stt_guard` service user
-(no login shell, no home directory — the same convention as macOS's `_postgres`
-and `_mysql`). This is the only deployment mode and prevents a compromised
-process from tampering with the guard itself.
+The repo-hosted installer deploys root-owned binaries, enrolls the invoking
+sudo user's non-exportable Secure Enclave rule-signing key, registers that
+public signer with daemon state, and runs the daemon as a dedicated
+`_stt_guard` service user (no login shell, no home directory — the same
+convention as macOS's `_postgres` and `_mysql`). This is the only deployment
+mode and prevents a compromised process from tampering with the guard itself.
 
 | Component | Path | Owner |
 |---|---|---|
@@ -99,18 +99,20 @@ policy artifact authenticity lives in hardware-backed signatures.
 Baseline/snapshot authenticity signing has a stricter key-storage requirement
 than file ownership integrity: private signing keys must be hardware-backed
 (Secure Enclave, security key, TPM-backed key, or an equivalent non-exportable
-platform facility). On macOS, `sudo stt-guard init` creates or locates a
-Secure Enclave P-256 key in the invoking user's keychain, requires user
+platform facility). On macOS, the privileged system install creates or locates
+a Secure Enclave P-256 key in the invoking user's keychain, requires user
 presence for signing, records the signer in a root-owned manifest under
 `/usr/local/libexec/stt-guard/`, and mirrors only public signing metadata into
-daemon state for operational lookups. Software-only private keys are not a
-because the daemon must be able to verify signatures without being able to
-forge new trusted baselines if the daemon or its writable state is compromised.
+daemon state for operational lookups. Software-only private keys are not
+acceptable because the daemon must be able to verify signatures without being
+able to forge new trusted baselines if the daemon or its writable state is
+compromised.
 
 **Performance and UX impact:** the deployment has zero runtime overhead. The
 protection is purely ownership and permissions on disk — the daemon, hook, and
-policy engine execute the same code paths regardless. The only user-visible
-difference is the one-time `sudo stt-guard init` during setup.
+policy engine execute the same code paths regardless. The user-visible
+difference is the one-time privileged step performed by the installer during
+setup.
 
 ## Disclosure Policy
 

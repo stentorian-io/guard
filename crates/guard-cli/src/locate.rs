@@ -21,7 +21,7 @@ pub fn find_dylib() -> std::io::Result<PathBuf> {
             return system.canonicalize();
         }
         return Err(std::io::Error::other(format!(
-            "hardened install is missing {SYSTEM_INSTALL_PATH}; run: sudo stt-guard init"
+            "hardened install is missing {SYSTEM_INSTALL_PATH}; run the installer or stt-guard update"
         )));
     }
 

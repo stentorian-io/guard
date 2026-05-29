@@ -3,3 +3,4 @@
 pub mod health;
 pub mod launchagent;
 pub mod system;
+pub mod update;

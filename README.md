@@ -126,7 +126,7 @@ Cache hits resolve in under 100 microseconds with no IPC; see the
 CI gate, and regression review process.
 
 - No kernel extensions or system extensions
-- One-time `sudo stt-guard init` — tamper-resistant by default
+- One-line installer with root-owned hardened deployment
 - Works with any command or binary run from the terminal, not just package managers
 - Root-owned binaries + `_stt_guard` service user — tamper-resistant
 
@@ -151,20 +151,20 @@ Socket/Snyk, lockfiles, and more), see [docs/alternatives.md](docs/alternatives.
 #### Supported install path
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/stentorian-io/guard/main/install.sh | sh
+curl -fsSL https://stentorian.io/guard/install.sh | sh
 ```
 
 The installer downloads the latest GitHub Release artifact for your Mac,
-verifies it against the release checksum file, and then runs the hardened init
-flow with `sudo`. The init step creates a `_stt_guard` service user, deploys
-root-owned binaries to `/usr/local/libexec/stt-guard/`, enrolls a
+verifies it against the release checksum file, and then runs the hardened system
+install with `sudo`. The system install creates a `_stt_guard` service user,
+deploys root-owned binaries to `/usr/local/libexec/stt-guard/`, enrolls a
 non-exportable Secure Enclave rule-signing key for the invoking sudo user,
 registers that public signer with the daemon state, and starts the daemon as a
 LaunchDaemon. This is the only supported consumer deployment mode — it prevents
 a compromised process from tampering with the guard itself. See the
 [deployment model](SECURITY.md#deployment-model) for details.
 
-All other commands (`wrap`, `status`) require initialisation to be complete
+All other commands (`wrap`, `status`) require the hardened install to be healthy
 and will refuse to run otherwise.
 
 GitHub Releases are used for changelogs, release metadata, auditability, and
@@ -175,11 +175,18 @@ bit can silently weaken the deployment model.
 ### Updating
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/stentorian-io/guard/main/install.sh | sh
+stt-guard update
 ```
 
-Rerunning the installer upgrades the release artifact and reruns the hardened
-init flow.
+The update command downloads the latest GitHub Release artifact, verifies it
+against the release checksum file, and reruns the hardened system install from
+the downloaded binary. Updates preserve daemon state, user rules, and logs.
+
+Check for an available update without installing it:
+
+```sh
+stt-guard update --check
+```
 
 Check your installed version:
 
@@ -190,14 +197,14 @@ stt-guard --version
 ### Uninstalling
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/stentorian-io/guard/main/uninstall.sh | sh
+curl -fsSL https://stentorian.io/guard/uninstall.sh | sh
 ```
 
 The default uninstall removes the LaunchDaemon and root-owned binaries while
 preserving daemon state, user rules, and logs. To remove state and logs too:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/stentorian-io/guard/main/uninstall.sh | sh -s -- --purge
+curl -fsSL https://stentorian.io/guard/uninstall.sh | sh -s -- --purge
 ```
 
 ### Manual
@@ -344,7 +351,7 @@ stt-guard
 Usage: stt-guard <COMMAND>
 
 Commands:
-  init    Initialise Stentorian Guard (hardened mode). Requires root
+  update  Download, verify, and install the latest release
   wrap    Wrap a command under default-deny network enforcement
   status  Inspect daemon health, rules, denials
   help    Print this message or the help of the given subcommand(s)

@@ -627,7 +627,7 @@ pub struct StatusCounters {
     pub gaps_today: u64,
 }
 
-/// Single install artifact recorded by `stt-guard init`.
+/// Single install artifact recorded by the system installer.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstallArtifact {
     pub artifact_kind: String, // "launchagent"|"marker_block"|"init_script"|"state_dir"|"log_dir"|"binary"

@@ -31,4 +31,4 @@ docker run --rm \
   -v "$TARGET_CACHE:/target" \
   -w /work \
   "$IMAGE" \
-  bash -lc 'set -euo pipefail; export PATH=/usr/local/cargo/bin:$PATH; export CARGO_TARGET_DIR=/target; cargo test -p guard-hook --test linux_ld_preload_smoke -- --nocapture'
+  bash -lc 'set -euo pipefail; export PATH=/usr/local/cargo/bin:$PATH; export CARGO_TARGET_DIR=/target; cargo build -p guard-cli --release; cargo test -p guard-e2e --test linux_system_install_gate --release -- --nocapture; cargo test -p guard-hook --test linux_ld_preload_smoke -- --nocapture'

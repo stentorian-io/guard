@@ -68,6 +68,10 @@ public signer with daemon state, and runs the daemon as a dedicated
 `_stt_guard` service user (no login shell, no home directory — the same
 convention as macOS's `_postgres` and `_mysql`). This is the only deployment
 mode and prevents a compromised process from tampering with the guard itself.
+Linux production install support is being designed around the same root-owned
+and service-owned split with systemd, but it is not enabled until
+hardware-backed Linux signer enrollment and install-health validation are
+complete.
 
 | Component | Path | Owner |
 |---|---|---|

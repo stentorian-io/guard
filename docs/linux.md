@@ -17,7 +17,8 @@ complete yet.
 | Tracked architecture coverage | `aarch64` |
 | Enforcement implementation | `LD_PRELOAD` for wrapped dynamically linked processes; not complete dynamically linked enforcement |
 | Production signer | Not implemented yet |
-| Tracking issue | [#2](https://github.com/stentorian-io/guard/issues/2) |
+| Production install tracker | [#70](https://github.com/stentorian-io/guard/issues/70) |
+| Runtime coverage tracker | [#2](https://github.com/stentorian-io/guard/issues/2) |
 
 Tracked CPU architectures are `x86_64` and `aarch64`, but only Ubuntu `glibc`
 `x86_64` smoke coverage is validated today.
@@ -55,6 +56,58 @@ the dynamic loader remain design-sensitive cases.
 
 Linux support must preserve the same high-level rule as macOS support: unknown or
 unverified network access fails closed.
+
+## Production Install Design
+
+The supported Linux production target is a systemd-managed system install on a
+clean Ubuntu `glibc` `x86_64` host. The layout is intentionally close to the
+macOS hardened install model:
+
+| Component | Path | Owner and mode |
+| --- | --- | --- |
+| CLI, daemon, watchdog | `/usr/local/libexec/stt-guard/` | `root:root` directory `0755`; executables `0755` |
+| Hook library | `/usr/local/libexec/stt-guard/stt-guard-hook.so` | `root:root` `0644` |
+| Trusted signer manifest | `/usr/local/libexec/stt-guard/trusted-rule-signers.tsv` | `root:root` `0644` |
+| Runtime state, DB, snapshots, IPC socket | `/var/lib/stt-guard/` | `_stt_guard:_stt_guard` `0711` |
+| Logs | `/var/log/stt-guard/` | `_stt_guard:_stt_guard` `0711` |
+| Daemon service | `/etc/systemd/system/stt-guard-daemon.service` | `root:root` `0644` |
+
+The service identity is `_stt_guard` with home `/var/lib/stt-guard` and shell
+`/usr/sbin/nologin`. The daemon unit runs
+`/usr/local/libexec/stt-guard/stt-guard-daemon serve --state-dir
+/var/lib/stt-guard` as that service identity, restarts on failure, and restricts
+writes to the state and log directories with `ProtectSystem=strict`.
+
+Linux production activation is still blocked on hardware-backed signer
+enrollment. A production install must have a non-exportable signing key backed
+by a Linux platform facility such as a security key or TPM-backed key before the
+CLI can enable the systemd install path. Software-only private keys are not a
+supported substitute.
+
+If the default state directory resolves to `/var/lib/stt-guard`, the CLI treats
+the host as a system install candidate and requires the hardened install health
+gate. It must not auto-start a development daemon against the system state
+directory.
+
+## Install Health Failure Modes
+
+Linux install health is fail-closed. `wrap`, `status`, and other protected
+commands must refuse to proceed when any enforcement-critical artifact is
+missing or malformed, including:
+
+- missing `_stt_guard` service identity, wrong UID/GID mapping, login shell, or
+  unexpected home directory
+- missing daemon, watchdog, CLI, hook library, trusted signer manifest, state
+  directory, log directory, or systemd unit
+- non-root ownership or writable modes on binaries, hook library, trusted signer
+  manifest, or the systemd unit
+- state or log directories not owned by `_stt_guard`
+- a systemd unit whose content differs from the reviewed definition
+- missing, invalid, or untrusted hardware-backed signer enrollment
+- invalid or missing policy snapshot material
+
+Unsupported ELF child exec classification remains a runtime fail-closed
+condition until production ELF classification is implemented.
 
 ## Compatibility Assumptions
 

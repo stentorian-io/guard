@@ -160,6 +160,19 @@ pub struct HardwareSignerEnrollment {
 /// Returns an error when hardware signing is disabled, the Swift helper fails,
 /// or the helper output cannot be parsed.
 pub fn enroll_secure_enclave_for_init() -> Result<HardwareSignerEnrollment, CliError> {
+    #[cfg(feature = "test-signer")]
+    {
+        return enroll_test_simulator_for_init();
+    }
+
+    #[cfg(not(feature = "test-signer"))]
+    {
+        enroll_secure_enclave_for_init_impl()
+    }
+}
+
+#[cfg(not(feature = "test-signer"))]
+fn enroll_secure_enclave_for_init_impl() -> Result<HardwareSignerEnrollment, CliError> {
     if hardware_signer_disabled() {
         return Err(unavailable_error());
     }
@@ -171,6 +184,20 @@ pub fn enroll_secure_enclave_for_init() -> Result<HardwareSignerEnrollment, CliE
         public_key_x963,
         public_key_sha256,
         label: init_user_label(),
+    })
+}
+
+#[cfg(feature = "test-signer")]
+fn enroll_test_simulator_for_init() -> Result<HardwareSignerEnrollment, CliError> {
+    let (public_key_sha256, signer_kind, public_key_x963) =
+        guard_core::rule_signature::test_support::test_simulator_public_signer()
+            .map_err(|e| CliError::Other(format!("test signer enrollment failed: {e}")))?;
+
+    Ok(HardwareSignerEnrollment {
+        signer_kind,
+        public_key_x963,
+        public_key_sha256,
+        label: "macOS test-signer simulator".to_string(),
     })
 }
 
@@ -273,12 +300,14 @@ fn run_swift_current_user(mode: &str, payload_hex: Option<&str>) -> Result<Strin
     run_swift_command(&CommandSpec::CurrentUser, mode, payload_hex)
 }
 
+#[cfg(not(feature = "test-signer"))]
 fn run_swift_as_init_user(mode: &str, payload_hex: Option<&str>) -> Result<String, CliError> {
     run_swift_command(&CommandSpec::InitInvokingUser, mode, payload_hex)
 }
 
 enum CommandSpec {
     CurrentUser,
+    #[cfg(not(feature = "test-signer"))]
     InitInvokingUser,
 }
 
@@ -294,6 +323,7 @@ fn run_swift_command(
 
     let mut command = match command_spec {
         CommandSpec::CurrentUser => Command::new(swift),
+        #[cfg(not(feature = "test-signer"))]
         CommandSpec::InitInvokingUser => init_user_swift_command(swift)?,
     };
     command
@@ -322,6 +352,7 @@ fn run_swift_command(
     })
 }
 
+#[cfg(not(feature = "test-signer"))]
 fn init_user_swift_command(swift: &str) -> Result<Command, CliError> {
     if unsafe { libc::geteuid() } != 0 {
         return Ok(Command::new(swift));
@@ -341,6 +372,7 @@ fn init_user_swift_command(swift: &str) -> Result<Command, CliError> {
     Ok(command)
 }
 
+#[cfg(not(feature = "test-signer"))]
 fn init_user_label() -> String {
     if unsafe { libc::geteuid() } == 0 {
         if let Ok(user) = std::env::var("SUDO_USER") {

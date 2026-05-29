@@ -142,8 +142,8 @@ else
 fi
 
 scripts/ci-linux-e2e.sh \
-  || fail "Linux E2E LD_PRELOAD smoke"
-pass "Linux E2E LD_PRELOAD smoke"
+  || fail "Linux E2E parity"
+pass "Linux E2E parity"
 
 cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer \
   || fail "build release binaries with test signer"

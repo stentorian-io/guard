@@ -57,3 +57,20 @@ fn test_signer_feature_signs_with_explicit_simulator_kind() {
         .expect("test snapshot signer");
     assert_eq!(sig.signer_kind, guard_core::SIGNER_KIND_TEST_SIMULATOR);
 }
+
+#[cfg(feature = "test-signer")]
+#[test]
+fn test_signer_feature_enrolls_simulator_for_system_install() {
+    let enrollment =
+        guard_cli::hardware_signing::enroll_secure_enclave_for_init().expect("test enrollment");
+
+    assert_eq!(
+        enrollment.signer_kind,
+        guard_core::SIGNER_KIND_TEST_SIMULATOR
+    );
+    assert_eq!(
+        enrollment.public_key_sha256,
+        guard_core::sha256_hex(&enrollment.public_key_x963)
+    );
+    assert_eq!(enrollment.label, "macOS test-signer simulator");
+}

@@ -264,6 +264,24 @@ validation starts:
 
 PRs must pass the full CI suite before merging.
 
+For local macOS E2E without mutating the host, use the Tart-backed VM runner:
+
+```sh
+brew install cirruslabs/cli/tart hudochenkov/sshpass/sshpass
+scripts/ci-macos-vm-e2e.sh
+```
+
+The script clones `ghcr.io/cirruslabs/macos-tahoe-base:latest` into
+`stt-guard-macos-base` on first use, creates a disposable per-run clone, enables
+passwordless sudo inside that clone, copies the repo into the guest, and runs
+the macOS E2E suite including `hardened_install_health` with
+`STT_GUARD_E2E_PRIVILEGED_INSTALL=1`. It fails the run if
+`hardened_install_health` reports an internal `SKIP:` because the local no-skip
+target must prove privileged install health rather than accept a missing test
+capability. Override the base image or credentials with
+`STT_GUARD_MACOS_VM_BASE`, `STT_GUARD_MACOS_VM_BASE_NAME`,
+`STT_GUARD_MACOS_VM_USER`, and `STT_GUARD_MACOS_VM_PASSWORD`.
+
 ## Troubleshooting
 
 ### SIP strips DYLD_INSERT_LIBRARIES

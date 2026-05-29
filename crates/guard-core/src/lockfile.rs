@@ -13,6 +13,7 @@ pub struct LockfileRegistries {
     pub registries: BTreeSet<String>,
 }
 
+#[must_use]
 pub fn discover_lockfile(cwd: &Path) -> Option<PathBuf> {
     const LOCKFILES: &[&str] = &[
         "package-lock.json",
@@ -45,6 +46,7 @@ pub fn discover_lockfile(cwd: &Path) -> Option<PathBuf> {
     None
 }
 
+#[must_use]
 pub fn extract_registries(lockfile: &Path) -> Option<LockfileRegistries> {
     let name = lockfile.file_name()?.to_str()?;
     let content = std::fs::read_to_string(lockfile).ok()?;
@@ -91,29 +93,29 @@ fn extract_npm_registries(content: &str) -> BTreeSet<String> {
         Err(_) => return hosts,
     };
 
-    fn walk_resolved(v: &serde_json::Value, hosts: &mut BTreeSet<String>) {
-        match v {
-            serde_json::Value::Object(map) => {
-                if let Some(serde_json::Value::String(url)) = map.get("resolved") {
-                    if let Some(h) = extract_host_from_url(url) {
-                        hosts.insert(h);
-                    }
-                }
-                for val in map.values() {
-                    walk_resolved(val, hosts);
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for val in arr {
-                    walk_resolved(val, hosts);
-                }
-            }
-            _ => {}
-        }
-    }
-
     walk_resolved(&v, &mut hosts);
     hosts
+}
+
+fn walk_resolved(v: &serde_json::Value, hosts: &mut BTreeSet<String>) {
+    match v {
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::String(url)) = map.get("resolved") {
+                if let Some(h) = extract_host_from_url(url) {
+                    hosts.insert(h);
+                }
+            }
+            for val in map.values() {
+                walk_resolved(val, hosts);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for val in arr {
+                walk_resolved(val, hosts);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn extract_yarn_registries(content: &str) -> BTreeSet<String> {
@@ -182,31 +184,31 @@ fn extract_composer_registries(content: &str) -> BTreeSet<String> {
         Err(_) => return hosts,
     };
 
-    fn walk_dist(v: &serde_json::Value, hosts: &mut BTreeSet<String>) {
-        match v {
-            serde_json::Value::Object(map) => {
-                if let Some(dist) = map.get("dist") {
-                    if let Some(url) = dist.get("url").and_then(|u| u.as_str()) {
-                        if let Some(h) = extract_host_from_url(url) {
-                            hosts.insert(h);
-                        }
-                    }
-                }
-                for val in map.values() {
-                    walk_dist(val, hosts);
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for val in arr {
-                    walk_dist(val, hosts);
-                }
-            }
-            _ => {}
-        }
-    }
-
     walk_dist(&v, &mut hosts);
     hosts
+}
+
+fn walk_dist(v: &serde_json::Value, hosts: &mut BTreeSet<String>) {
+    match v {
+        serde_json::Value::Object(map) => {
+            if let Some(dist) = map.get("dist") {
+                if let Some(url) = dist.get("url").and_then(|u| u.as_str()) {
+                    if let Some(h) = extract_host_from_url(url) {
+                        hosts.insert(h);
+                    }
+                }
+            }
+            for val in map.values() {
+                walk_dist(val, hosts);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for val in arr {
+                walk_dist(val, hosts);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]

@@ -153,6 +153,12 @@ pub struct HardwareSignerEnrollment {
     pub label: String,
 }
 
+/// Enroll or locate the init user's Secure Enclave signing key.
+///
+/// # Errors
+///
+/// Returns an error when hardware signing is disabled, the Swift helper fails,
+/// or the helper output cannot be parsed.
 pub fn enroll_secure_enclave_for_init() -> Result<HardwareSignerEnrollment, CliError> {
     if hardware_signer_disabled() {
         return Err(unavailable_error());
@@ -168,6 +174,12 @@ pub fn enroll_secure_enclave_for_init() -> Result<HardwareSignerEnrollment, CliE
     })
 }
 
+/// Sign a persistent rule payload with the hardware-backed key.
+///
+/// # Errors
+///
+/// Returns an error when hardware signing is disabled, payload canonicalization
+/// fails, the Swift helper fails, or the helper output cannot be parsed.
 pub fn sign_rule_payload(payload: &RuleSignaturePayloadV1) -> Result<RuleSignatureV1, CliError> {
     if hardware_signer_disabled() {
         return Err(unavailable_error());
@@ -188,6 +200,12 @@ pub fn sign_rule_payload(payload: &RuleSignaturePayloadV1) -> Result<RuleSignatu
     })
 }
 
+/// Sign a snapshot payload with the hardware-backed key.
+///
+/// # Errors
+///
+/// Returns an error when hardware signing is disabled, payload canonicalization
+/// fails, the Swift helper fails, or the helper output cannot be parsed.
 pub fn sign_snapshot_payload(
     payload: &SnapshotSignaturePayloadV1,
 ) -> Result<SnapshotSignatureV1, CliError> {
@@ -210,6 +228,12 @@ pub fn sign_snapshot_payload(
     })
 }
 
+/// Sign a management action payload with the hardware-backed key.
+///
+/// # Errors
+///
+/// Returns an error when hardware signing is disabled, payload canonicalization
+/// fails, the Swift helper fails, or the helper output cannot be parsed.
 pub fn sign_management_action_payload(
     payload: &ManagementActionPayloadV1,
 ) -> Result<RuleSignatureV1, CliError> {
@@ -246,11 +270,11 @@ fn unavailable_error() -> CliError {
 }
 
 fn run_swift_current_user(mode: &str, payload_hex: Option<&str>) -> Result<String, CliError> {
-    run_swift_command(CommandSpec::CurrentUser, mode, payload_hex)
+    run_swift_command(&CommandSpec::CurrentUser, mode, payload_hex)
 }
 
 fn run_swift_as_init_user(mode: &str, payload_hex: Option<&str>) -> Result<String, CliError> {
-    run_swift_command(CommandSpec::InitInvokingUser, mode, payload_hex)
+    run_swift_command(&CommandSpec::InitInvokingUser, mode, payload_hex)
 }
 
 enum CommandSpec {
@@ -259,7 +283,7 @@ enum CommandSpec {
 }
 
 fn run_swift_command(
-    command_spec: CommandSpec,
+    command_spec: &CommandSpec,
     mode: &str,
     payload_hex: Option<&str>,
 ) -> Result<String, CliError> {

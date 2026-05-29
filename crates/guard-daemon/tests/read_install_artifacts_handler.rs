@@ -19,7 +19,7 @@ fn empty_store_returns_empty_list() {
     let r = handle_read_install_artifacts(&store);
     match r {
         ReadInstallArtifactsReply::Ok { artifacts, .. } => assert!(artifacts.is_empty()),
-        _ => panic!("expected Ok"),
+        ReadInstallArtifactsReply::Err { .. } => panic!("expected Ok"),
     }
 }
 
@@ -36,6 +36,6 @@ fn populated_store_returns_entries() {
     let r = handle_read_install_artifacts(&store);
     match r {
         ReadInstallArtifactsReply::Ok { artifacts, .. } => assert_eq!(artifacts.len(), 2),
-        _ => panic!("expected Ok"),
+        ReadInstallArtifactsReply::Err { .. } => panic!("expected Ok"),
     }
 }

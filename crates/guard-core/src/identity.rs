@@ -1,5 +1,5 @@
-//! ProcessIdentity — provenance-typed wrapper around audit_token_t.
-//! Bare pid_t cannot construct Verified; only kernel-sourced AuditToken values
+//! `ProcessIdentity` — provenance-typed wrapper around `audit_token_t`.
+//! Bare `pid_t` cannot construct Verified; only kernel-sourced `AuditToken` values
 //! can, and only via the `unsafe` constructor.
 //!
 //! Hand-rolled FFI (rejected mach2 / bsm-sys / endpoint-sec-sys).
@@ -17,19 +17,22 @@ pub struct AuditToken {
 }
 
 impl AuditToken {
-    /// Construct a synthetic AuditToken for testing. NOT a kernel-sourced token —
-    /// callers cannot upgrade this to ProcessIdentity::Verified via `from_kernel_token`
+    /// Construct a synthetic `AuditToken` for testing. NOT a kernel-sourced token —
+    /// callers cannot upgrade this to `ProcessIdentity::Verified` via `from_kernel_token`
     /// without committing the safety lie themselves.
+    #[must_use]
     pub const fn synthetic(val: [u32; 8]) -> Self {
         Self { val }
     }
 
     /// Returns the pid encoded in the token (val[5]).
+    #[must_use]
     pub fn pid(&self) -> libc::pid_t {
-        self.val[5] as libc::pid_t
+        libc::pid_t::from_ne_bytes(self.val[5].to_ne_bytes())
     }
 
     /// Returns the pidversion encoded in the token (val[7]).
+    #[must_use]
     pub fn pidversion(&self) -> u32 {
         self.val[7]
     }
@@ -37,7 +40,7 @@ impl AuditToken {
 
 unsafe extern "C" {
     /// Apple libbsm: returns the pid encoded in the audit token.
-    /// Resolves from libsystem_kernel.dylib / libbsm at link time on macOS.
+    /// Resolves from `libsystem_kernel.dylib` / libbsm at link time on macOS.
     pub fn audit_token_to_pid(token: *const AuditToken) -> libc::pid_t;
 
     /// Apple libbsm: returns the pidversion encoded in the audit token.
@@ -67,12 +70,14 @@ impl ProcessIdentity {
     /// `pid_for_task`, `xpc_connection_get_audit_token`, or
     /// `getsockopt(SOL_LOCAL, LOCAL_PEERTOKEN, ...)`. The `unsafe` is the
     /// type-system enforcement of ENF-08; misusing it is a security bug.
+    #[must_use]
     pub unsafe fn from_kernel_token(t: AuditToken) -> Self {
         Self::Verified(t)
     }
 
-    /// Construct an `Unverified` identity from a raw pid_t.
+    /// Construct an `Unverified` identity from a raw `pid_t`.
     /// This cannot be used as a policy key.
+    #[must_use]
     pub fn from_pid_unverified(p: libc::pid_t) -> Self {
         Self::Unverified(p)
     }
@@ -81,6 +86,7 @@ impl ProcessIdentity {
     ///
     /// Policy signatures accept `&AuditToken` and so cannot be called with
     /// `Unverified` without an explicit upgrade through `from_kernel_token`.
+    #[must_use]
     pub fn as_policy_key(&self) -> Option<&AuditToken> {
         match self {
             Self::Verified(t) => Some(t),
@@ -90,6 +96,7 @@ impl ProcessIdentity {
 
     /// Returns the pid for either variant.
     /// For `Verified`, reads from `val[5]` directly (avoids FFI call).
+    #[must_use]
     pub fn pid(&self) -> libc::pid_t {
         match self {
             Self::Verified(t) => t.pid(),

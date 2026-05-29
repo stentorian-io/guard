@@ -1,8 +1,8 @@
 //! ENF-04 success criterion #1: ambient (non-wrapped) traffic is unaffected
 //! when stt-guard-daemon is running.
 //!
-//! Approach: start DaemonHarness; then run `curl http://example.com/` WITHOUT
-//! `stt-guard wrap` and WITHOUT DYLD_INSERT_LIBRARIES. The dylib is NOT injected
+//! Approach: start `DaemonHarness`; then run `curl http://example.com/` WITHOUT
+//! `stt-guard wrap` and WITHOUT `DYLD_INSERT_LIBRARIES`. The dylib is NOT injected
 //! into curl → no enforcement → the connect should succeed.
 //!
 //! Pre-test sanity: if curl is unavailable OR example.com is unreachable
@@ -10,7 +10,7 @@
 //!
 //! ENF-04 is structurally satisfied at the daemon side (see plan 02-06a's
 //! summary): the daemon emits no system-wide filter; per-run snapshots are
-//! published only when a CLI invokes PrepareSnapshot. This test verifies the
+//! published only when a CLI invokes `PrepareSnapshot`. This test verifies the
 //! property end-to-end: the user's other terminal sessions, GUI apps, etc.
 //! remain unaffected by Stentorian Guard even when stt-guard-daemon is running.
 
@@ -18,7 +18,7 @@ use guard_e2e::DaemonHarness;
 use std::path::PathBuf;
 use std::process::Command;
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn ambient_curl_succeeds_with_daemon_running() {
     let _harness = DaemonHarness::start().expect("start daemon");

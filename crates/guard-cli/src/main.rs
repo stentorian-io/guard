@@ -50,7 +50,7 @@ fn real_main() -> Result<i32, CliError> {
             let state = resolve_state_dir();
             let sock = socket_path(&state);
             guard_cli::ensure_daemon::ensure_daemon(&sock, &state)?;
-            run_orchestrator::run(&sock, &state, argv, learn)
+            run_orchestrator::run(&sock, &state, &argv, learn)
         }
         Cmd::Status { sub } => {
             let state = resolve_state_dir();

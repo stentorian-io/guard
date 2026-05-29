@@ -10,8 +10,8 @@ use tracing::{debug, warn};
 /// Check peer codesign and apply policy. Returns `true` if the peer should
 /// be accepted, `false` if it should be rejected.
 ///
-/// Policy: strict — Valid is accepted, Invalid and CfError are rejected.
-/// LookupFailed is accepted (peer may have exited between connect and check).
+/// Policy: strict — Valid is accepted, Invalid and `CfError` are rejected.
+/// `LookupFailed` is accepted (peer may have exited between connect and check).
 pub fn should_accept_peer(token: &AuditToken) -> bool {
     let verdict = verify_peer_signature(token);
     let pid = token.pid();
@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn should_accept_peer_accepts_own_process() {
-        let pid = unsafe { libc::getpid() } as u32;
+        let pid = u32::try_from(unsafe { libc::getpid() }).expect("pid fits audit token field");
         let token = AuditToken::synthetic([0, 0, 0, 0, 0, pid, 0, 0]);
         assert!(should_accept_peer(&token));
     }

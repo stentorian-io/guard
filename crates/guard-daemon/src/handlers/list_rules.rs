@@ -1,19 +1,19 @@
 //! crates/guard-daemon/src/handlers/list_rules.rs
 //!
-//! v0.7 — ListRules handler (stt-guard status rules).
+//! v0.7 — `ListRules` handler (stt-guard status rules).
 //!
-//! Reads user rules from the SQLite store and returns them as wire-friendly
-//! RuleRow records. CLI is a dumb client.
+//! Reads user rules from the `SQLite` store and returns them as wire-friendly
+//! `RuleRow` records. CLI is a dumb client.
 
 use guard_core::{AllowlistEntry, MatchType, RuleKind};
 use guard_ipc::{ListRules, ListRulesReply, RuleRow};
 
 use crate::rule_store::{RuleStore, StoredRule};
 
-/// v0.7 — handle ListRules.
+/// v0.7 — handle `ListRules`.
 ///
 /// Sources merged into the reply:
-///   1. User rules — SQLite `rules` table via `RuleStore::all_rules_with_source`,
+///   1. User rules — `SQLite` `rules` table via `RuleStore::all_rules_with_source`,
 ///      emitted with `source = "user"`.
 ///   2. Built-in / curated rules (when `req.include_builtins == true`, `--all`):
 ///      sourced from the in-memory `curated: Arc<Vec<AllowlistEntry>>` on
@@ -47,7 +47,7 @@ pub fn handle_list_rules(
     ListRulesReply::ok(rows)
 }
 
-/// Convert the SQL-row tuple into a wire RuleRow. Defines the string
+/// Convert the SQL-row tuple into a wire `RuleRow`. Defines the string
 /// discriminator vocabulary the CLI/tests depend on.
 fn rule_row_from_storage(row: StoredRule) -> RuleRow {
     RuleRow {
@@ -59,9 +59,9 @@ fn rule_row_from_storage(row: StoredRule) -> RuleRow {
     }
 }
 
-/// Map a curated AllowlistEntry to the wire shape with `source = "builtin"`
+/// Map a curated `AllowlistEntry` to the wire shape with `source = "builtin"`
 /// (or `source = "builtin (disabled)"` when overridden).
-/// Match-type strings mirror the InsertUserRule discriminator vocabulary
+/// Match-type strings mirror the `InsertUserRule` discriminator vocabulary
 /// (per `RuleStore::insert_user_rule` validation: "exact" | "suffix" | "ip").
 fn curated_to_rule_row(e: &AllowlistEntry, disabled: bool) -> RuleRow {
     let kind = match e.kind {

@@ -7,8 +7,8 @@
 //! thread and the SIGINT handler). The blocking `read_frame` syscall in
 //! `next_prompt` no longer holds any lock that the SIGINT handler needs to
 //! call `cancel`, so the cancel arm can run while the render thread is parked
-//! waiting on a daemon-side PromptRequest. Mirrors the daemon-side
-//! prompt_channel handler pattern (`crates/guard-daemon/src/handlers/prompt_channel.rs`).
+//! waiting on a daemon-side `PromptRequest`. Mirrors the daemon-side
+//! `prompt_channel` handler pattern (`crates/guard-daemon/src/handlers/prompt_channel.rs`).
 
 use std::collections::HashSet;
 use std::io::{Read, Write};
@@ -30,9 +30,8 @@ use crate::ipc_client::TAG_PROMPT_CHANNEL_INIT;
 /// Channel-internal frame (CLI → daemon direction).
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "frame_kind", rename_all = "snake_case")]
-#[allow(clippy::large_enum_variant)]
 pub enum ClientChannelFrame {
-    Response(PromptResponse),
+    Response(Box<PromptResponse>),
     Cancel(PromptCancel),
 }
 
@@ -43,7 +42,7 @@ pub struct InflightPrompts(pub Arc<Mutex<HashSet<String>>>);
 
 /// Reader half handed out by `PromptChannel::take_reader`. Owned exclusively
 /// by the render thread; never shared, never locked. Holds the inflight
-/// registry so it can record prompt_ids as they arrive — symmetric with the
+/// registry so it can record `prompt_ids` as they arrive — symmetric with the
 /// writer half's removal on answer/cancel.
 pub struct PromptReader {
     stream: UnixStream,
@@ -52,9 +51,9 @@ pub struct PromptReader {
 
 /// Owning handle returned by `PromptChannel::open`. After construction, the
 /// caller takes the reader out via `take_reader` and stores the remaining
-/// `PromptChannel` (the writer half) inside the SharedChannel mutex used by
+/// `PromptChannel` (the writer half) inside the `SharedChannel` mutex used by
 /// the SIGINT handler. The writer half ALSO supports `answer` for the render
-/// thread; the render thread acquires the outer SharedChannel mutex briefly
+/// thread; the render thread acquires the outer `SharedChannel` mutex briefly
 /// to send the user's response, but never while the read half is parked.
 pub struct PromptChannel {
     /// Reader is `take`-d once into a `PromptReader` and moved to the render
@@ -74,7 +73,12 @@ pub struct PromptChannel {
 
 impl PromptChannel {
     /// Open a long-lived prompt channel tied to `run_uuid`.
-    /// Called immediately after PrepareSnapshot on V3 + is_tty=true.
+    /// Called immediately after `PrepareSnapshot` on V3 + `is_tty=true`.
+    ///
+    /// # Errors
+    ///
+    /// Returns IPC connection, tag echo, frame write, frame read, or daemon
+    /// rejection errors.
     pub fn open(sock: &Path, run_uuid: &str) -> Result<Self, CliError> {
         let mut stream = crate::ipc_client::connect_with_timeout(sock)?;
         stream
@@ -125,17 +129,19 @@ impl PromptChannel {
     }
 
     /// Returns a clone of the shared in-flight prompt-id registry. The SIGINT
-    /// handler takes a snapshot of this set on Ctrl-C and sends a PromptCancel
+    /// handler takes a snapshot of this set on Ctrl-C and sends a `PromptCancel`
     /// frame for each.
+    #[must_use]
     pub fn inflight_handle(&self) -> InflightPrompts {
         self.inflight.clone()
     }
 
     /// CR-02: take the reader half out of the channel so the render thread can
-    /// drive blocking reads WITHOUT holding the SharedChannel mutex. After
+    /// drive blocking reads WITHOUT holding the `SharedChannel` mutex. After
     /// this call the channel still holds the writer half (used by `answer`
     /// from the render thread and `cancel` from the SIGINT handler).
     /// Returns None if the reader has already been taken.
+    #[must_use]
     pub fn take_reader(&mut self) -> Option<PromptReader> {
         let stream = self.reader.take()?;
         Some(PromptReader {
@@ -144,13 +150,18 @@ impl PromptChannel {
         })
     }
 
-    /// Block until the daemon sends a PromptRequest on the channel.
-    /// Records the prompt_id in the in-flight registry.
+    /// Block until the daemon sends a `PromptRequest` on the channel.
+    /// Records the `prompt_id` in the in-flight registry.
     ///
     /// Pre-CR-02 callers can still use this when they own the channel
     /// exclusively (single-thread tests). Production callers should
     /// `take_reader()` once and call `PromptReader::next_prompt` from the
-    /// render thread without holding the SharedChannel lock.
+    /// render thread without holding the `SharedChannel` lock.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the reader was already taken or the prompt frame
+    /// cannot be read from the daemon.
     pub fn next_prompt(&mut self) -> Result<PromptRequest, CliError> {
         let stream = self.reader.as_mut().ok_or_else(|| {
             CliError::Other("PromptChannel::next_prompt called after take_reader".into())
@@ -163,19 +174,31 @@ impl PromptChannel {
         Ok(req)
     }
 
-    /// Send the user's response back to the daemon. Removes the prompt_id from in-flight.
+    /// Send the user's response back to the daemon. Removes the `prompt_id` from in-flight.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the response frame cannot be written to the prompt
+    /// channel.
     pub fn answer(&mut self, resp: PromptResponse) -> Result<(), CliError> {
         let prompt_id = resp.prompt_id.clone();
-        let result =
-            guard_ipc::frame::write_frame(&mut self.writer, &ClientChannelFrame::Response(resp))
-                .map_err(|e| CliError::DaemonUnreachable(format!("write response: {e}")));
+        let result = guard_ipc::frame::write_frame(
+            &mut self.writer,
+            &ClientChannelFrame::Response(Box::new(resp)),
+        )
+        .map_err(|e| CliError::DaemonUnreachable(format!("write response: {e}")));
         if let Ok(mut g) = self.inflight.0.lock() {
             g.remove(&prompt_id);
         }
         result
     }
 
-    /// Send a PromptCancel for the given prompt_id (used by SIGINT handler).
+    /// Send a `PromptCancel` for the given `prompt_id` (used by SIGINT handler).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the cancel frame cannot be written to the prompt
+    /// channel.
     pub fn cancel(&mut self, prompt_id: &str) -> Result<(), CliError> {
         let frame = ClientChannelFrame::Cancel(PromptCancel {
             schema_version: IPC_SCHEMA_V3,
@@ -193,6 +216,10 @@ impl PromptChannel {
 impl PromptReader {
     /// Clone the underlying socket so the orchestrator can interrupt a blocked
     /// `next_prompt` during run teardown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the prompt reader socket cannot be cloned.
     pub fn shutdown_handle(&self) -> Result<UnixStream, CliError> {
         self.stream
             .try_clone()
@@ -203,11 +230,15 @@ impl PromptReader {
         let _ = stream.shutdown(Shutdown::Both);
     }
 
-    /// Block until the daemon sends a PromptRequest. CR-02: this is the
+    /// Block until the daemon sends a `PromptRequest`. CR-02: this is the
     /// production read entry point — the render thread owns the `PromptReader`
-    /// and calls this without holding the SharedChannel mutex, so a concurrent
-    /// SIGINT handler can acquire the SharedChannel mutex to call `cancel` on
+    /// and calls this without holding the `SharedChannel` mutex, so a concurrent
+    /// SIGINT handler can acquire the `SharedChannel` mutex to call `cancel` on
     /// the writer half.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the prompt frame cannot be read from the daemon.
     pub fn next_prompt(&mut self) -> Result<PromptRequest, CliError> {
         let req: PromptRequest = guard_ipc::frame::read_frame(&mut self.stream)
             .map_err(|e| CliError::DaemonUnreachable(format!("read PromptRequest: {e}")))?;

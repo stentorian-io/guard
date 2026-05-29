@@ -1,4 +1,4 @@
-//! v0.3 — InstallArtifactStore CRUD tests.
+//! v0.3 — `InstallArtifactStore` CRUD tests.
 
 use guard_daemon::install_artifacts::{InstallArtifactStore, read_via_db};
 use guard_daemon::rule_store::RuleStore;

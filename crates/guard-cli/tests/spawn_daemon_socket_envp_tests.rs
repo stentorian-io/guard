@@ -1,6 +1,6 @@
-//! Verifies that `spawn_wrapped` does NOT propagate STT_GUARD_DAEMON_SOCKET
+//! Verifies that `spawn_wrapped` does NOT propagate `STT_GUARD_DAEMON_SOCKET`
 //! into the child's environment (the hook derives the socket path from
-//! well_known_state_dir() instead).
+//! `well_known_state_dir()` instead).
 
 use std::ffi::OsStr;
 use std::io::Read;
@@ -75,7 +75,7 @@ fn spawn_wrapped_does_not_set_daemon_socket_env_var() {
     assert!(pid > 0);
 
     let mut status: libc::c_int = 0;
-    unsafe { libc::waitpid(pid, &mut status, 0) };
+    unsafe { libc::waitpid(pid, &raw mut status, 0) };
     assert!(
         libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
         "helper test process must exit successfully, status={status}"

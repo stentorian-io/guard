@@ -8,6 +8,11 @@ use crate::CliError;
 use crate::denial_log;
 use crate::install::launchagent;
 
+/// Print denied destinations for a run.
+///
+/// # Errors
+///
+/// Returns an error when the forensic log cannot be read.
 pub fn run(run_uuid: &str) -> Result<i32, CliError> {
     let log_path = launchagent::logs_dir().join(guard_core::paths::LOG_FILENAME);
     let blocks = denial_log::filter_block_destinations(&log_path, run_uuid)?;

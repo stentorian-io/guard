@@ -60,7 +60,7 @@ fn forget_removes_entry() {
 }
 
 #[test]
-#[ignore] // Slow test — sleeps 6 seconds; run with `cargo test -- --include-ignored`
+#[ignore = "slow test sleeps 6 seconds; run with `cargo test -- --include-ignored`"]
 fn gc_expired_clears_old_entries() {
     let d = PromptDedup::new();
     let now = Instant::now();

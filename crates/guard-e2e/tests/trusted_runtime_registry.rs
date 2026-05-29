@@ -9,10 +9,11 @@ use guard_hook::scanner::{BinaryTier, classify_path_with_registry};
 use guard_hook::trusted_runtime::TrustedRuntimeRegistry;
 use sha2::{Digest, Sha256};
 use std::ffi::CString;
+use std::fmt::Write as _;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 
-const MH_MAGIC_64: u32 = 0xfeedfacf;
+const MH_MAGIC_64: u32 = 0xfeed_facf;
 const LC_SEGMENT_64: u32 = 0x19;
 
 #[cfg(target_arch = "aarch64")]
@@ -24,18 +25,29 @@ const NATIVE_CPU_TYPE: u32 = 0x0100_0007;
 fn trusted_runtime_hash_promotes_syscall_binary_to_t1() {
     let data = thin_macho_with_syscall_bytes();
     let hash = Sha256::digest(&data);
+    let mut hash_hex = String::with_capacity(hash.len() * 2);
+    for byte in hash {
+        write!(&mut hash_hex, "{byte:02x}").expect("write hash hex");
+    }
     let registry_yaml = format!(
-        "runtimes:\n  - sha256: \"{}\"\n    name: guard-e2e-runtime\n    version: \"0.0.0\"\n    source: e2e\n",
-        hash.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        "runtimes:\n  - sha256: \"{hash_hex}\"\n    name: guard-e2e-runtime\n    version: \"0.0.0\"\n    source: e2e\n"
     );
     let registry = TrustedRuntimeRegistry::parse(&registry_yaml);
     let file = write_temp(&data);
     let path = CString::new(file.path().as_os_str().as_bytes()).expect("path cstring");
 
     assert_eq!(
-        classify_path_with_registry(path.as_ptr(), &registry),
+        classify_test_path_with_registry(&path, &registry),
         BinaryTier::T1TrustedRuntime
     );
+}
+
+fn classify_test_path_with_registry(
+    path: &CString,
+    registry: &TrustedRuntimeRegistry,
+) -> BinaryTier {
+    // SAFETY: `CString` provides a valid NUL-terminated path pointer.
+    unsafe { classify_path_with_registry(path.as_ptr(), registry) }
 }
 
 fn thin_macho_with_syscall_bytes() -> Vec<u8> {
@@ -44,9 +56,9 @@ fn thin_macho_with_syscall_bytes() -> Vec<u8> {
     } else {
         &[0xaa, 0x0f, 0x05]
     };
-    let fileoff = 0x100u64;
-    let filesize = payload.len() as u64;
-    let mut data = vec![0u8; fileoff as usize + payload.len()];
+    let fileoff = 0x100usize;
+    let filesize = u64::try_from(payload.len()).expect("payload fits u64");
+    let mut data = vec![0u8; fileoff + payload.len()];
     data[0..4].copy_from_slice(&MH_MAGIC_64.to_le_bytes());
     data[4..8].copy_from_slice(&NATIVE_CPU_TYPE.to_le_bytes());
     data[16..20].copy_from_slice(&1u32.to_le_bytes());
@@ -56,9 +68,13 @@ fn thin_macho_with_syscall_bytes() -> Vec<u8> {
     data[pos..pos + 4].copy_from_slice(&LC_SEGMENT_64.to_le_bytes());
     data[pos + 4..pos + 8].copy_from_slice(&72u32.to_le_bytes());
     data[pos + 8..pos + 14].copy_from_slice(b"__TEXT");
-    data[pos + 40..pos + 48].copy_from_slice(&fileoff.to_le_bytes());
+    data[pos + 40..pos + 48].copy_from_slice(
+        &u64::try_from(fileoff)
+            .expect("file offset fits u64")
+            .to_le_bytes(),
+    );
     data[pos + 48..pos + 56].copy_from_slice(&filesize.to_le_bytes());
-    data[fileoff as usize..].copy_from_slice(payload);
+    data[fileoff..].copy_from_slice(payload);
     data
 }
 

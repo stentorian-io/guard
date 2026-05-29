@@ -1,8 +1,12 @@
 use guard_hook::cache::{CAPACITY, Cache};
 
-/// Verify insert + lookup round-trip with the exact 16-byte AF_INET sockaddr
+fn cache_test_key(index: usize) -> u8 {
+    u8::try_from(index).expect("cache test index fits in one byte")
+}
+
+/// Verify insert + lookup round-trip with the exact 16-byte `AF_INET` sockaddr
 /// wire layout produced by the daemon's `sockaddr_to_wire` (plan 02-06a):
-///   [0]=sa_len(16), [1]=AF_INET(2), [2..4]=port(443, BE), [4..8]=IP(1.2.3.4), [8..16]=zeroes.
+///   [0]=`sa_len(16)`, [1]=`AF_INET(2)`, [2..4]=port(443, BE), [4..8]=IP(1.2.3.4), [8..16]=zeroes.
 /// This pins the key shape that the Resolve-IPC populator uses in plan 02-08.
 #[test]
 fn cache_insert_lookup_roundtrip_with_resolve_sized_sockaddr() {
@@ -49,14 +53,14 @@ fn lru_evicts_oldest_after_capacity() {
     let mut c = Cache::new();
     // Fill to capacity with distinct keys.
     for i in 0..CAPACITY {
-        let key = vec![i as u8];
+        let key = vec![cache_test_key(i)];
         let host = format!("host{i}.example.com");
         c.insert(&key, host.as_bytes());
     }
     // All present.
     for i in 0..CAPACITY {
         assert!(
-            c.lookup(&[i as u8]).is_some(),
+            c.lookup(&[cache_test_key(i)]).is_some(),
             "entry {i} should be present"
         );
     }
@@ -71,7 +75,7 @@ fn lru_evicts_oldest_after_capacity() {
         let key = if i == CAPACITY {
             b"NEW".to_vec()
         } else {
-            vec![i as u8]
+            vec![cache_test_key(i)]
         };
         if c.lookup(&key).is_some() {
             count += 1;
@@ -84,7 +88,7 @@ fn lru_evicts_oldest_after_capacity() {
 fn lookup_bumps_to_most_recently_used() {
     let mut c = Cache::new();
     for i in 0..CAPACITY {
-        c.insert(&[i as u8], format!("h{i}").as_bytes());
+        c.insert(&[cache_test_key(i)], format!("h{i}").as_bytes());
     }
     // Touch entry 0 — it becomes MRU.
     c.lookup(&[0u8]);

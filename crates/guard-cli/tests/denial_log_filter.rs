@@ -1,4 +1,4 @@
-//! v0.3 — denial_log block-destination filter unit tests.
+//! v0.3 — `denial_log` block-destination filter unit tests.
 //!
 //! v0.7 — the parser moved from `approve` to `denial_log`; file renamed from
 //! `approve_from_log_filter.rs` to `denial_log_filter.rs` so the test path

@@ -113,7 +113,7 @@ impl Drop for CfGuard {
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::*;
+    use super::{CS_OPS_STATUS, CSOPS_STATUS, OsError, SYS_CSOPS};
 
     pub fn csops_status(pid: libc::pid_t) -> Result<u32, OsError> {
         let mut flags: u32 = 0;
@@ -122,7 +122,7 @@ mod imp {
                 SYS_CSOPS,
                 pid as libc::c_int,
                 CS_OPS_STATUS as libc::c_uint,
-                &mut flags as *mut u32 as *mut libc::c_void,
+                (&raw mut flags).cast::<libc::c_void>(),
                 std::mem::size_of::<u32>() as libc::size_t,
             )
         };
@@ -136,7 +136,7 @@ mod imp {
 
 #[cfg(not(target_os = "macos"))]
 mod imp {
-    use super::*;
+    use super::{CSOPS_STATUS, OsError};
 
     pub fn csops_status(_pid: libc::pid_t) -> Result<u32, OsError> {
         Err(OsError::unsupported(CSOPS_STATUS))
@@ -144,12 +144,18 @@ mod imp {
 }
 
 /// Query code-signing flags for `pid` via the OS code-signing status API.
+///
+/// # Errors
+///
+/// Returns an OS error when the platform call fails or the capability is
+/// unsupported.
 pub fn csops_status(pid: libc::pid_t) -> Result<u32, OsError> {
     imp::csops_status(pid)
 }
 
-/// True if the process at `pid` will strip DYLD_INSERT_LIBRARIES on exec.
+/// True if the process at `pid` will strip `DYLD_INSERT_LIBRARIES` on exec.
 /// Conservative on syscall failure or unsupported targets.
+#[must_use]
 pub fn is_hardened_runtime(pid: libc::pid_t) -> bool {
     match csops_status(pid) {
         Ok(flags) => has_hardened_bits(flags),
@@ -159,6 +165,7 @@ pub fn is_hardened_runtime(pid: libc::pid_t) -> bool {
 
 /// Pure helper: the set of bits, any of which indicate the binary will strip
 /// DYLD env vars on exec into a child.
+#[must_use]
 pub fn has_hardened_bits(flags: u32) -> bool {
     (flags & CS_RESTRICT) != 0
         || (flags & CS_RUNTIME) != 0
@@ -171,6 +178,7 @@ pub fn has_hardened_bits(flags: u32) -> bool {
 /// Returns `CodesignVerdict::Valid` if the signature checks out. This function
 /// does not make policy decisions.
 #[cfg(target_os = "macos")]
+#[must_use]
 pub fn verify_peer_signature(token: &AuditToken) -> CodesignVerdict {
     unsafe {
         let key = CFStringCreateWithCString(
@@ -183,11 +191,11 @@ pub fn verify_peer_signature(token: &AuditToken) -> CodesignVerdict {
         }
         let _key_guard = CfGuard(key);
 
-        let token_data = CFDataCreate(
-            std::ptr::null(),
-            token.val.as_ptr() as *const u8,
-            std::mem::size_of_val(&token.val) as isize,
-        );
+        let Ok(token_len) = isize::try_from(std::mem::size_of_val(&token.val)) else {
+            return CodesignVerdict::CfError("audit token length does not fit CFIndex");
+        };
+
+        let token_data = CFDataCreate(std::ptr::null(), token.val.as_ptr().cast::<u8>(), token_len);
         if token_data.is_null() {
             return CodesignVerdict::CfError("CFDataCreate failed");
         }
@@ -200,8 +208,8 @@ pub fn verify_peer_signature(token: &AuditToken) -> CodesignVerdict {
             keys.as_ptr(),
             values.as_ptr(),
             1,
-            &kCFTypeDictionaryKeyCallBacks as *const c_void,
-            &kCFTypeDictionaryValueCallBacks as *const c_void,
+            &raw const kCFTypeDictionaryKeyCallBacks,
+            &raw const kCFTypeDictionaryValueCallBacks,
         );
         if dict.is_null() {
             return CodesignVerdict::CfError("CFDictionaryCreate failed");
@@ -209,7 +217,7 @@ pub fn verify_peer_signature(token: &AuditToken) -> CodesignVerdict {
         let _dict_guard = CfGuard(dict);
 
         let mut code_ref: SecCodeRef = std::ptr::null();
-        let status = SecCodeCopyGuestWithAttributes(std::ptr::null(), dict, 0, &mut code_ref);
+        let status = SecCodeCopyGuestWithAttributes(std::ptr::null(), dict, 0, &raw mut code_ref);
         if status != ERR_SEC_SUCCESS || code_ref.is_null() {
             return CodesignVerdict::LookupFailed(status);
         }
@@ -225,6 +233,7 @@ pub fn verify_peer_signature(token: &AuditToken) -> CodesignVerdict {
 }
 
 #[cfg(not(target_os = "macos"))]
+#[must_use]
 pub fn verify_peer_signature(_token: &AuditToken) -> CodesignVerdict {
     CodesignVerdict::Unsupported
 }
@@ -262,7 +271,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn verify_own_process_returns_known_verdict() {
-        let pid = unsafe { libc::getpid() } as u32;
+        let pid = u32::try_from(unsafe { libc::getpid() }).expect("self pid is positive");
         let token = AuditToken::synthetic([0, 0, 0, 0, 0, pid, 0, 0]);
         let verdict = verify_peer_signature(&token);
         match verdict {

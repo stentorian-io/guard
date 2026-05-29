@@ -11,16 +11,31 @@ use guard_core::{
     SnapshotSignatureV1,
 };
 
+/// Sign a persistent rule payload with the configured production or test signer.
+///
+/// # Errors
+///
+/// Returns an error when payload signing fails.
 pub fn sign_rule_payload(payload: &RuleSignaturePayloadV1) -> Result<RuleSignatureV1, CliError> {
     sign_rule_payload_impl(payload)
 }
 
+/// Sign a snapshot payload with the configured production or test signer.
+///
+/// # Errors
+///
+/// Returns an error when payload signing fails.
 pub fn sign_snapshot_payload(
     payload: &SnapshotSignaturePayloadV1,
 ) -> Result<SnapshotSignatureV1, CliError> {
     sign_snapshot_payload_impl(payload)
 }
 
+/// Sign a management action payload with the configured production or test signer.
+///
+/// # Errors
+///
+/// Returns an error when payload signing fails.
 pub fn sign_management_action_payload(
     payload: &ManagementActionPayloadV1,
 ) -> Result<RuleSignatureV1, CliError> {

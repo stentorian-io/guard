@@ -4,12 +4,13 @@
 
 use std::process::Command;
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn hot_path_microbench_compiles_and_runs() {
-    let cargo = std::env::var_os("CARGO")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("cargo"));
+    let cargo = std::env::var_os("CARGO").map_or_else(
+        || std::path::PathBuf::from("cargo"),
+        std::path::PathBuf::from,
+    );
     let mut cmd = Command::new(cargo);
     cmd.args([
         "bench",

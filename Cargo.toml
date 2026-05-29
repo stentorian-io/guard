@@ -24,6 +24,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/stentorian-io/guard"
 authors = ["Stentorian Guard contributors"]
 
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+
 [workspace.dependencies]
 # Core (production runtime)
 libc = "0.2.186"

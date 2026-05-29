@@ -3,15 +3,15 @@
 //!
 //! This test drives the full review interaction via PTY:
 //!   1. `stt-guard wrap --learn node connect_evil.js` connects to discord.com
-//!      (DefaultDeny -> allowed + staged in learn mode).
-//!   2. After node exits, the CLI calls BaselineCommit IPC and renders the
+//!      (`DefaultDeny` -> allowed + staged in learn mode).
+//!   2. After node exits, the CLI calls `BaselineCommit` IPC and renders the
 //!      review menu: "discord.com -- [a]llow / [d]eny / [s]kip / [q]uit > "
 //!   3. The test sends "a\n" (allow) for the staged host.
 //!   4. Assert: the review summary line appears with "1 allow".
 //!   5. Assert: exit 0.
 //!
 //! Differential companion: `learn_mode_curated_deny.rs` verifies that
-//! BuiltinDeny hosts are NOT staged (no review prompt appears).
+//! `BuiltinDeny` hosts are NOT staged (no review prompt appears).
 //!
 //! Requires PTY + non-hardened node + daemon + network + working getaddrinfo
 //! interpose. See `learn_mode_default_deny_passthrough.rs` for the interpose
@@ -36,8 +36,7 @@ fn host_resolves_outside_guard() -> bool {
     use std::net::ToSocketAddrs;
     format!("{HOST}:{PORT}")
         .to_socket_addrs()
-        .map(|i| i.count() > 0)
-        .unwrap_or(false)
+        .is_ok_and(|i| i.count() > 0)
 }
 
 #[cfg(target_os = "macos")]
@@ -119,7 +118,6 @@ fn learn_review_allow_stages_user_rule() {
     // and the review interaction should complete cleanly.
     assert!(
         status.success(),
-        "expected exit 0 from learn-mode run; got: {:?}\nPTY output:\n{buf}",
-        status
+        "expected exit 0 from learn-mode run; got: {status:?}\nPTY output:\n{buf}"
     );
 }

@@ -5,12 +5,12 @@
 //! given run; refactor target of the v0.1 `approve.rs::run_approve_from_log`.
 //!
 //! Behavior:
-//!   - non-TTY stdin → exit 64 (EX_USAGE) with stderr message.
+//!   - non-TTY stdin → exit 64 (`EX_USAGE`) with stderr message.
 //!   - when no `<run_uuid>` is given, use
 //!     `denial_log::most_recent_run_with_denials`.
 //!   - per-host options are (a)/(d)/(s)/(q); single-letter,
 //!     case-insensitive; bare Enter defaults to 's' (skip).
-//!   - BOTH allow AND deny rules go to machine-wide SQLite
+//!   - BOTH allow AND deny rules go to machine-wide `SQLite`
 //!     via `insert_user_rule_request` (no project flag here).
 //!   - host caps come from `denial_log` constants —
 //!     bounded memory regardless of log size.
@@ -23,6 +23,12 @@ use crate::install::launchagent;
 use crate::ipc_client;
 use crate::tty;
 
+/// Review denied destinations interactively and create follow-up rules.
+///
+/// # Errors
+///
+/// Returns an error when the forensic log cannot be read, terminal input fails,
+/// or rule insertion fails.
 pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
     // TTY-required gate. Refuse to run from a non-interactive
     // stdin so a CI pipeline can't accidentally answer prompts and
@@ -40,13 +46,14 @@ pub fn run(sock: &Path, run_uuid: Option<String>) -> Result<i32, CliError> {
     // Default uuid = most recent run with denials.
     let uuid = match run_uuid {
         Some(u) => u,
-        None => match denial_log::most_recent_run_with_denials(&log_path)? {
-            Some(u) => u,
-            None => {
+        None => {
+            if let Some(u) = denial_log::most_recent_run_with_denials(&log_path)? {
+                u
+            } else {
                 println!("No runs with denials found in {}.", log_path.display());
                 return Ok(0);
             }
-        },
+        }
     };
 
     let blocks = denial_log::filter_block_destinations(&log_path, &uuid)?;

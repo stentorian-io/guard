@@ -1,13 +1,13 @@
 //! crates/guard-daemon/src/handlers/insert_user_rule.rs
 //!
-//! v0.3 — InsertUserRule handler (stt-guard approve).
+//! v0.3 — `InsertUserRule` handler (stt-guard approve).
 //!
 //! Validates kind/match_type/non-empty-reason/non-empty-pattern before calling
-//! RuleStore::insert_user_rule. Returns InsertUserRuleReply::Ok { rule_id } on
-//! success or InsertUserRuleReply::Err { message } on validation/storage failure.
+//! `RuleStore::insert_user_rule`. Returns `InsertUserRuleReply::Ok` { `rule_id` } on
+//! success or `InsertUserRuleReply::Err` { message } on validation/storage failure.
 //!
 //! Tampering mitigation: validation happens HERE before any SQL call.
-//! RuleStore::insert_user_rule uses parameterized queries; debug_asserts
+//! `RuleStore::insert_user_rule` uses parameterized queries; `debug_asserts`
 //! provide defense-in-depth at the store boundary.
 
 use guard_core::{RuleSignaturePayloadV1, RuleSignaturePolicy, verify_rule_signature};

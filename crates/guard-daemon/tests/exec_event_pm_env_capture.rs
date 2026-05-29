@@ -1,8 +1,8 @@
-//! v0.3 — Smoke test — extract_pm_env's output composes with
-//! ProcessTree's set_pm_env_snapshot API.
+//! v0.3 — Smoke test — `extract_pm_env`'s output composes with
+//! `ProcessTree`'s `set_pm_env_snapshot` API.
 //!
 //! The composition's correctness on a populated node is exercised in e2e tests
-//! (the dylib's real ExecEvent V3 → daemon record_exec → set_pm_env_snapshot
+//! (the dylib's real `ExecEvent` V3 → daemon `record_exec` → `set_pm_env_snapshot`
 //! round-trip).
 
 use guard_daemon::env_capture::extract_pm_env;

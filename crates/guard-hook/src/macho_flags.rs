@@ -1,9 +1,9 @@
 //! Mach-O code-signing analysis for hardened-runtime exec blocking.
 //!
 //! Determines whether a target binary will shed the DYLD interpose library.
-//! macOS strips DYLD_INSERT_LIBRARIES for:
+//! macOS strips `DYLD_INSERT_LIBRARIES` for:
 //!   - Platform binaries (Apple system binaries with Platform identifier > 0)
-//!   - Binaries with CS_RESTRICT or CS_RUNTIME in CodeDirectory flags
+//!   - Binaries with `CS_RESTRICT` or `CS_RUNTIME` in `CodeDirectory` flags
 //!   - setuid/setgid binaries
 //!
 //! This module reads the binary's Mach-O headers on disk to check these
@@ -11,16 +11,16 @@
 
 use crate::raw_syscall;
 
-const MH_MAGIC_64: u32 = 0xfeedfacf;
-const FAT_MAGIC: u32 = 0xcafebabe;
-const FAT_CIGAM: u32 = 0xbebafeca;
-const FAT_MAGIC_64: u32 = 0xcafebabf;
-const FAT_CIGAM_64: u32 = 0xbfbafeca;
+const MH_MAGIC_64: u32 = 0xfeed_facf;
+const FAT_MAGIC: u32 = 0xcafe_babe;
+const FAT_CIGAM: u32 = 0xbeba_feca;
+const FAT_MAGIC_64: u32 = 0xcafe_babf;
+const FAT_CIGAM_64: u32 = 0xbfba_feca;
 
 const LC_CODE_SIGNATURE: u32 = 0x1d;
 
-const CSMAGIC_EMBEDDED_SIGNATURE: u32 = 0xfade0cc0;
-const CSMAGIC_CODEDIRECTORY: u32 = 0xfade0c02;
+const CSMAGIC_EMBEDDED_SIGNATURE: u32 = 0xfade_0cc0;
+const CSMAGIC_CODEDIRECTORY: u32 = 0xfade_0c02;
 
 pub const CS_RUNTIME: u32 = 0x0001_0000;
 const CS_RESTRICT: u32 = 0x0000_0800;
@@ -31,6 +31,7 @@ const NATIVE_CPU_TYPE: u32 = 0x0100_000c; // CPU_TYPE_ARM64
 const NATIVE_CPU_TYPE: u32 = 0x0100_0007; // CPU_TYPE_X86_64
 
 const MAX_READ: usize = 64 * 1024;
+const MH_RESTRICT: u32 = 0x80;
 
 #[derive(Debug, Clone, Copy)]
 pub struct CodeSignInfo {
@@ -39,12 +40,19 @@ pub struct CodeSignInfo {
 }
 
 impl CodeSignInfo {
+    #[must_use]
     pub fn will_shed_dylib(&self) -> bool {
         self.platform > 0 || self.flags & CS_RUNTIME != 0 || self.flags & CS_RESTRICT != 0
     }
 }
 
-pub fn check_binary(path: *const libc::c_char) -> Option<CodeSignInfo> {
+#[must_use]
+/// Check code-signing flags for a Mach-O binary path.
+///
+/// # Safety
+///
+/// `path` must either be null or point to a valid NUL-terminated C string.
+pub unsafe fn check_binary(path: *const libc::c_char) -> Option<CodeSignInfo> {
     if path.is_null() {
         return None;
     }
@@ -57,12 +65,18 @@ pub fn check_binary(path: *const libc::c_char) -> Option<CodeSignInfo> {
     result
 }
 
-pub fn is_setuid(path: *const libc::c_char) -> bool {
+#[must_use]
+/// Check whether a path names a setuid or setgid file.
+///
+/// # Safety
+///
+/// `path` must either be null or point to a valid NUL-terminated C string.
+pub unsafe fn is_setuid(path: *const libc::c_char) -> bool {
     if path.is_null() {
         return false;
     }
     let mut stat_buf: libc::stat = unsafe { core::mem::zeroed() };
-    let rc = unsafe { libc::stat(path, &mut stat_buf) };
+    let rc = unsafe { libc::stat(path, &raw mut stat_buf) };
     if rc != 0 {
         return false;
     }
@@ -75,23 +89,30 @@ pub enum ShedReason {
     CodeSign,
 }
 
-pub fn will_shed_dylib(path: *const libc::c_char) -> Option<ShedReason> {
-    if is_setuid(path) {
+#[must_use]
+/// Determine why executing a binary would shed the injected dylib.
+///
+/// # Safety
+///
+/// `path` must either be null or point to a valid NUL-terminated C string.
+pub unsafe fn will_shed_dylib(path: *const libc::c_char) -> Option<ShedReason> {
+    if unsafe { is_setuid(path) } {
         return Some(ShedReason::Setuid);
     }
-    match check_binary(path) {
+    match unsafe { check_binary(path) } {
         Some(info) if info.will_shed_dylib() => Some(ShedReason::CodeSign),
         _ => None,
     }
 }
 
 fn check_fd(fd: i32) -> Option<CodeSignInfo> {
-    let mut buf = [0u8; MAX_READ];
-    let n = unsafe { raw_syscall::raw_read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+    let mut buf = vec![0u8; MAX_READ];
+    let n =
+        unsafe { raw_syscall::raw_read(fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
     if n < 4 {
         return None;
     }
-    let len = n as usize;
+    let len = usize::try_from(n).ok()?;
     let magic = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
 
     match magic {
@@ -113,7 +134,7 @@ fn check_fat32(header: &[u8], fd: i32) -> Option<CodeSignInfo> {
         return None;
     }
     let nfat = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
-    let nfat = nfat.min(16) as usize;
+    let nfat = usize::try_from(nfat.min(16)).ok()?;
 
     for i in 0..nfat {
         let off = 8 + i * 20;
@@ -133,7 +154,7 @@ fn check_fat32(header: &[u8], fd: i32) -> Option<CodeSignInfo> {
             header[off + 11],
         ]);
         if cputype == NATIVE_CPU_TYPE {
-            return check_macho_at_offset(fd, slice_offset as u64);
+            return check_macho_at_offset(fd, u64::from(slice_offset));
         }
     }
     None
@@ -144,7 +165,7 @@ fn check_fat64(header: &[u8], fd: i32) -> Option<CodeSignInfo> {
         return None;
     }
     let nfat = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
-    let nfat = nfat.min(16) as usize;
+    let nfat = usize::try_from(nfat.min(16)).ok()?;
 
     for i in 0..nfat {
         let off = 8 + i * 32;
@@ -175,16 +196,19 @@ fn check_fat64(header: &[u8], fd: i32) -> Option<CodeSignInfo> {
 }
 
 fn check_macho_at_offset(fd: i32, offset: u64) -> Option<CodeSignInfo> {
-    let seeked = unsafe { libc::lseek(fd, offset as libc::off_t, libc::SEEK_SET) };
+    let offset = libc::off_t::try_from(offset).ok()?;
+    let seeked = unsafe { libc::lseek(fd, offset, libc::SEEK_SET) };
     if seeked < 0 {
         return None;
     }
-    let mut buf = [0u8; MAX_READ];
-    let n = unsafe { raw_syscall::raw_read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+    let mut buf = vec![0u8; MAX_READ];
+    let n =
+        unsafe { raw_syscall::raw_read(fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
     if n < 4 {
         return None;
     }
-    check_macho64(&buf[..n as usize], fd, offset)
+    let len = usize::try_from(n).ok()?;
+    check_macho64(&buf[..len], fd, u64::try_from(offset).ok()?)
 }
 
 fn check_macho64(data: &[u8], fd: i32, base_offset: u64) -> Option<CodeSignInfo> {
@@ -195,14 +219,11 @@ fn check_macho64(data: &[u8], fd: i32, base_offset: u64) -> Option<CodeSignInfo>
     if magic != MH_MAGIC_64 {
         return None;
     }
-    // mach_header_64.flags is at offset 24 (bytes 24..28)
     let mh_flags = u32::from_le_bytes([data[24], data[25], data[26], data[27]]);
-    // MH_RESTRICT = 0x80 — used by old-style restricted binaries
-    const MH_RESTRICT: u32 = 0x80;
     let mh_restricted = mh_flags & MH_RESTRICT != 0;
 
-    let ncmds = u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
-    let ncmds = ncmds.min(256);
+    let ncmds = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+    let ncmds = usize::try_from(ncmds.min(256)).ok()?;
 
     let mut pos = 32; // sizeof(mach_header_64)
 
@@ -212,8 +233,8 @@ fn check_macho64(data: &[u8], fd: i32, base_offset: u64) -> Option<CodeSignInfo>
         }
         let cmd = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
         let cmdsize =
-            u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]])
-                as usize;
+            u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]]);
+        let cmdsize = usize::try_from(cmdsize).ok()?;
         if cmdsize < 8 {
             break;
         }
@@ -224,7 +245,7 @@ fn check_macho64(data: &[u8], fd: i32, base_offset: u64) -> Option<CodeSignInfo>
             }
             let dataoff =
                 u32::from_le_bytes([data[pos + 8], data[pos + 9], data[pos + 10], data[pos + 11]]);
-            if let Some(mut info) = read_code_signature(fd, base_offset + dataoff as u64) {
+            if let Some(mut info) = read_code_signature(fd, base_offset + u64::from(dataoff)) {
                 if mh_restricted {
                     info.flags |= CS_RESTRICT;
                 }
@@ -252,23 +273,25 @@ fn check_macho64(data: &[u8], fd: i32, base_offset: u64) -> Option<CodeSignInfo>
 }
 
 fn read_code_signature(fd: i32, abs_offset: u64) -> Option<CodeSignInfo> {
-    let seeked = unsafe { libc::lseek(fd, abs_offset as libc::off_t, libc::SEEK_SET) };
+    let abs_offset = libc::off_t::try_from(abs_offset).ok()?;
+    let seeked = unsafe { libc::lseek(fd, abs_offset, libc::SEEK_SET) };
     if seeked < 0 {
         return None;
     }
     let mut buf = [0u8; 8192];
-    let n = unsafe { raw_syscall::raw_read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+    let n =
+        unsafe { raw_syscall::raw_read(fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
     if n < 12 {
         return None;
     }
-    let len = n as usize;
+    let len = usize::try_from(n).ok()?;
 
     let magic = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
     if magic != CSMAGIC_EMBEDDED_SIGNATURE {
         return None;
     }
-    let count = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]) as usize;
-    let count = count.min(32);
+    let count = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
+    let count = usize::try_from(count.min(32)).ok()?;
 
     for i in 0..count {
         let idx_off = 12 + i * 8;
@@ -280,7 +303,8 @@ fn read_code_signature(fd: i32, abs_offset: u64) -> Option<CodeSignInfo> {
             buf[idx_off + 5],
             buf[idx_off + 6],
             buf[idx_off + 7],
-        ]) as usize;
+        ]);
+        let blob_offset = usize::try_from(blob_offset).ok()?;
         if blob_offset + 44 > len {
             continue;
         }

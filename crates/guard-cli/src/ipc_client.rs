@@ -1,7 +1,7 @@
 //! Connect to the daemon socket, send messages, await Replies.
 //!
 //! ISS-08 remediation: bounded read/write timeouts around Unix-domain IPC.
-//! AF_UNIX connect failures are local and immediate on Darwin for the daemon
+//! `AF_UNIX` connect failures are local and immediate on Darwin for the daemon
 //! states we care about (missing socket, refused dead socket, permission
 //! denied). `socket2::connect_timeout` is not reliable for this macOS Unix
 //! socket path, so connect uses `UnixStream::connect` directly.
@@ -47,11 +47,15 @@ fn max_frame_bytes_for_tag(tag: u8) -> u32 {
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// PrepareSnapshot's read timeout is generous to accommodate snapshot
+/// `PrepareSnapshot`'s read timeout is generous to accommodate snapshot
 /// generation on large rule sets.
 const PREPARE_SNAPSHOT_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Connect to the daemon socket and configure bounded read/write timeouts.
+///
+/// # Errors
+///
+/// Returns an error when the daemon socket cannot be opened.
 pub(crate) fn connect_with_timeout(sock: &Path) -> Result<UnixStream, CliError> {
     let stream = UnixStream::connect(sock)
         .map_err(|e| CliError::DaemonUnreachable(format!("connect({}): {e}", sock.display())))?;
@@ -61,7 +65,7 @@ pub(crate) fn connect_with_timeout(sock: &Path) -> Result<UnixStream, CliError> 
 }
 
 /// ISS-08 remediation: connect-only liveness probe sent BEFORE spawning the
-/// wrapped child. If the daemon is unreachable, the CLI exits 70 (EX_SOFTWARE)
+/// wrapped child. If the daemon is unreachable, the CLI exits 70 (`EX_SOFTWARE`)
 /// without having forked an unprotected child — keeping T-01-08-06's promise.
 ///
 /// Why connect-only (no frame sent):
@@ -76,6 +80,10 @@ pub(crate) fn connect_with_timeout(sock: &Path) -> Result<UnixStream, CliError> 
 ///
 /// The stream is dropped immediately on success; the daemon's `accept()` sees
 /// a connect+immediate-close, which is the documented benign liveness path.
+///
+/// # Errors
+///
+/// Returns an error when the daemon socket cannot be reached.
 pub fn probe_daemon_alive(sock: &Path) -> Result<(), CliError> {
     let _stream = connect_with_timeout(sock)?;
     // Stream dropped here; the daemon will see EOF on its first read_frame
@@ -83,12 +91,22 @@ pub fn probe_daemon_alive(sock: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
+/// Register the current root process with the daemon.
+///
+/// # Errors
+///
+/// Returns an error when IPC fails or the daemon rejects the registration.
 pub fn register_root_with_daemon(sock: &Path, token: AuditToken) -> Result<(), CliError> {
     let mut stream = connect_with_timeout(sock)?;
     let msg = RegisterRoot::new(token);
-    send_register_root(&mut stream, msg)
+    send_register_root(&mut stream, &msg)
 }
 
+/// Register the current root process and run UUID with the daemon.
+///
+/// # Errors
+///
+/// Returns an error when IPC fails or the daemon rejects the registration.
 pub fn register_root_for_run_with_daemon(
     sock: &Path,
     token: AuditToken,
@@ -96,9 +114,15 @@ pub fn register_root_for_run_with_daemon(
 ) -> Result<(), CliError> {
     let mut stream = connect_with_timeout(sock)?;
     let msg = RegisterRoot::new_for_run(token, run_uuid);
-    send_register_root(&mut stream, msg)
+    send_register_root(&mut stream, &msg)
 }
 
+/// Register the current root process, run UUID, and captured package-manager
+/// environment with the daemon.
+///
+/// # Errors
+///
+/// Returns an error when IPC fails or the daemon rejects the registration.
 pub fn register_root_for_run_with_pm_env_with_daemon(
     sock: &Path,
     token: AuditToken,
@@ -107,14 +131,14 @@ pub fn register_root_for_run_with_pm_env_with_daemon(
 ) -> Result<(), CliError> {
     let mut stream = connect_with_timeout(sock)?;
     let msg = RegisterRoot::new_for_run_with_pm_env(token, run_uuid, pm_env);
-    send_register_root(&mut stream, msg)
+    send_register_root(&mut stream, &msg)
 }
 
 fn send_register_root(
     stream: &mut std::os::unix::net::UnixStream,
-    msg: RegisterRoot,
+    msg: &RegisterRoot,
 ) -> Result<(), CliError> {
-    write_frame(stream, &msg)?;
+    write_frame(stream, msg)?;
     let reply: Reply = read_frame(stream)?;
     match reply {
         Reply::Ack { .. } => Ok(()),
@@ -142,7 +166,7 @@ where
 /// timeout for the reply. Used by `prepare_snapshot_v3` so the CLI
 /// doesn't trip its default 5s read timeout while the daemon is in the
 /// middle of a 60s/120s `fetch_feeds_blocking` call (which would
-/// surface "DaemonUnreachable" instead of a genuine fetch error).
+/// surface "`DaemonUnreachable`" instead of a genuine fetch error).
 fn send_tagged_request_with_read_timeout<Req, ReplyT>(
     sock: &Path,
     tag: u8,
@@ -178,11 +202,16 @@ where
     Ok(reply)
 }
 
-/// Send `PrepareSnapshot { cwd }` BEFORE posix_spawn so the daemon merges
-/// curated YAML + SQLite rules, writes a per-run snapshot to
+/// Send `PrepareSnapshot { cwd }` BEFORE `posix_spawn` so the daemon merges
+/// curated YAML + `SQLite` rules, writes a per-run snapshot to
 /// `${state_dir}/runs/{uuid}.cbor`, and returns the manifest path. The CLI
 /// then sets that manifest path as `STT_GUARD_SNAPSHOT_MANIFEST` in the
 /// wrapped child's envp so the dylib loads the per-run policy.
+///
+/// # Errors
+///
+/// Returns an error when snapshot input retrieval, local snapshot building,
+/// signing, or daemon publication fails.
 pub fn prepare_snapshot(sock: &Path, cwd: &Path) -> Result<(PathBuf, String), CliError> {
     let outcome = prepare_snapshot_v3(sock, cwd, false, false)?;
     Ok((outcome.manifest_path, outcome.run_uuid))
@@ -194,7 +223,12 @@ pub struct PrepareSnapshotOutcome {
     pub run_uuid: String,
 }
 
-/// V3 PrepareSnapshot with is_tty + learn_mode.
+/// V3 `PrepareSnapshot` with `is_tty` + `learn_mode`.
+///
+/// # Errors
+///
+/// Returns an error when snapshot input retrieval, local snapshot building,
+/// signing, or daemon publication fails.
 pub fn prepare_snapshot_v3(
     sock: &Path,
     cwd: &Path,
@@ -259,6 +293,10 @@ pub fn prepare_snapshot_v3(
 }
 
 /// v0.3 tag 0x09: request daemon status.
+///
+/// # Errors
+///
+/// Returns an error when daemon IPC fails or the status reply cannot be decoded.
 pub fn status_request(sock: &Path) -> Result<guard_ipc::StatusReply, CliError> {
     let req = guard_ipc::Status::new();
     send_tagged_request(sock, TAG_STATUS, &req)
@@ -266,6 +304,11 @@ pub fn status_request(sock: &Path) -> Result<guard_ipc::StatusReply, CliError> {
 
 /// v0.3 tag 0x0B: insert a user rule into the daemon's rule store.
 /// Requires biometric authentication (Touch ID / password) before sending.
+///
+/// # Errors
+///
+/// Returns an error when authentication, signing, IPC, or daemon insertion
+/// fails.
 pub fn insert_user_rule_request(
     sock: &Path,
     kind: &str,
@@ -276,6 +319,12 @@ pub fn insert_user_rule_request(
     insert_user_rule_request_with_origin(sock, kind, match_type, pattern, reason, "manual", None)
 }
 
+/// Insert a user rule with explicit origin metadata.
+///
+/// # Errors
+///
+/// Returns an error when authentication, signing, IPC, or daemon insertion
+/// fails.
 pub fn insert_user_rule_request_with_origin(
     sock: &Path,
     kind: &str,
@@ -323,6 +372,10 @@ pub fn insert_user_rule_request_with_origin(
 }
 
 /// v0.3 tag 0x0C: read install artifacts from the daemon.
+///
+/// # Errors
+///
+/// Returns an error when daemon IPC fails or the daemon returns an error reply.
 pub fn read_install_artifacts_request(sock: &Path) -> Result<Vec<InstallArtifact>, CliError> {
     let req = ReadInstallArtifacts::new();
     let reply: ReadInstallArtifactsReply =
@@ -335,7 +388,7 @@ pub fn read_install_artifacts_request(sock: &Path) -> Result<Vec<InstallArtifact
     }
 }
 
-/// Clear install_artifacts rows for the given
+/// Clear `install_artifacts` rows for the given
 /// kinds. Invoked by `uninstall::components::remove_*` helpers after their
 /// on-disk teardown so the daemon's view of installed artifacts matches
 /// reality. Errors are surfaced as `CliError::Other`; callers typically
@@ -344,6 +397,10 @@ pub fn read_install_artifacts_request(sock: &Path) -> Result<Vec<InstallArtifact
 ///
 /// Returns the row count removed by the daemon (sum of per-kind delete
 /// results).
+///
+/// # Errors
+///
+/// Returns an error when daemon IPC fails or the daemon returns an error reply.
 pub fn delete_install_artifacts_request(sock: &Path, kinds: Vec<String>) -> Result<u64, CliError> {
     let req = DeleteInstallArtifacts::new(kinds);
     let reply: DeleteInstallArtifactsReply =
@@ -357,6 +414,10 @@ pub fn delete_install_artifacts_request(sock: &Path, kinds: Vec<String>) -> Resu
 }
 
 /// List user rules (and optionally builtins) from the daemon.
+///
+/// # Errors
+///
+/// Returns an error when daemon IPC fails or the daemon returns an error reply.
 pub fn list_rules_request(sock: &Path, include_builtins: bool) -> Result<Vec<RuleRow>, CliError> {
     let req = ListRules::new(include_builtins);
     let reply: ListRulesReply = send_tagged_request(sock, TAG_LIST_RULES, &req)?;
@@ -370,6 +431,10 @@ pub fn list_rules_request(sock: &Path, include_builtins: bool) -> Result<Vec<Rul
 
 /// Disable a curated (built-in) rule by pattern.
 /// Requires biometric authentication (Touch ID / password).
+///
+/// # Errors
+///
+/// Returns an error when authentication, signing, IPC, or daemon update fails.
 pub fn disable_curated_rule_request(
     sock: &Path,
     pattern: &str,
@@ -401,6 +466,10 @@ pub fn disable_curated_rule_request(
 
 /// Re-enable a previously disabled curated rule by pattern.
 /// Requires biometric authentication (Touch ID / password).
+///
+/// # Errors
+///
+/// Returns an error when authentication, signing, IPC, or daemon update fails.
 pub fn enable_curated_rule_request(sock: &Path, pattern: &str) -> Result<bool, CliError> {
     let bio_reason = format!("Stentorian Guard: re-enable curated rule for {pattern}");
     if !crate::biometric::authenticate(&bio_reason) {
@@ -428,6 +497,10 @@ pub fn enable_curated_rule_request(sock: &Path, pattern: &str) -> Result<bool, C
 
 /// Commit baseline staging for a learn-mode run. Returns the proposed rules
 /// accumulated during the run.
+///
+/// # Errors
+///
+/// Returns an error when daemon IPC fails or the daemon rejects the commit.
 pub fn baseline_commit_request(sock: &Path, run_uuid: &str) -> Result<Vec<ProposedRule>, CliError> {
     let req = BaselineCommit {
         schema_version: guard_ipc::IPC_SCHEMA_V3,
@@ -443,8 +516,9 @@ pub fn baseline_commit_request(sock: &Path, run_uuid: &str) -> Result<Vec<Propos
 }
 
 fn unix_ms_now() -> i64 {
-    std::time::SystemTime::now()
+    let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis() as i64
+        .as_millis();
+    i64::try_from(millis).unwrap_or(i64::MAX)
 }

@@ -1,9 +1,9 @@
-//! Test binary for M003-S01-T06: exercises send() and write()-to-socket
-//! coverage. It also keeps a manual libc syscall(SYS_CONNECT) bypass probe
+//! Test binary for M003-S01-T06: exercises `send()` and write()-to-socket
+//! coverage. It also keeps a manual libc `syscall(SYS_CONNECT)` bypass probe
 //! for validating the documented deferred gap.
 //!
-//! Usage: expanded_hooks_probe <mode>
-//!   mode = "send" | "write_socket" | "syscall_connect" | "write_file" | "write_pipe"
+//! Usage: `expanded_hooks_probe` <mode>
+//!   mode = "send" | "`write_socket`" | "`syscall_connect`" | "`write_file`" | "`write_pipe`"
 //!
 //! Exit codes:
 //!   0 — operation completed (allowed or non-network)
@@ -25,6 +25,22 @@ fn main() {
 #[cfg(target_os = "macos")]
 mod macos_probe {
     use std::io::Write as _;
+
+    const SYS_CONNECT: libc::c_int = 98;
+
+    fn sockaddr_in_len() -> libc::socklen_t {
+        libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_in>())
+            .expect("sockaddr_in size fits socklen_t")
+    }
+
+    fn sockaddr_in_len_u8() -> u8 {
+        u8::try_from(std::mem::size_of::<libc::sockaddr_in>())
+            .expect("sockaddr_in size fits sin_len")
+    }
+
+    fn af_inet_u8() -> u8 {
+        u8::try_from(libc::AF_INET).expect("AF_INET fits sa_family_t")
+    }
 
     pub fn main() {
         let args: Vec<String> = std::env::args().collect();
@@ -53,7 +69,7 @@ mod macos_probe {
         }
     }
 
-    /// Test send() on a connected socket to a non-allowed host.
+    /// Test `send()` on a connected socket to a non-allowed host.
     fn test_send(host: &str, port: u16) {
         // First, connect to the host (this should be denied by Stentorian Guard).
         let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
@@ -66,8 +82,8 @@ mod macos_probe {
         let ret = unsafe {
             libc::connect(
                 fd,
-                &addr as *const _ as *const libc::sockaddr,
-                std::mem::size_of::<libc::sockaddr_in>() as u32,
+                (&raw const addr).cast::<libc::sockaddr>(),
+                sockaddr_in_len(),
             )
         };
         if ret < 0 {
@@ -88,7 +104,7 @@ mod macos_probe {
 
         // If connect succeeded, try send().
         let data = b"GET / HTTP/1.0\r\n\r\n";
-        let ret = unsafe { libc::send(fd, data.as_ptr() as *const libc::c_void, data.len(), 0) };
+        let ret = unsafe { libc::send(fd, data.as_ptr().cast::<libc::c_void>(), data.len(), 0) };
         if ret < 0 {
             let errno = unsafe { *libc::__error() };
             println!("SEND-FAILED errno={errno}");
@@ -105,7 +121,7 @@ mod macos_probe {
         std::process::exit(0);
     }
 
-    /// Test write() on a connected socket to a non-allowed host.
+    /// Test `write()` on a connected socket to a non-allowed host.
     fn test_write_socket(host: &str, port: u16) {
         let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
         if fd < 0 {
@@ -117,8 +133,8 @@ mod macos_probe {
         let ret = unsafe {
             libc::connect(
                 fd,
-                &addr as *const _ as *const libc::sockaddr,
-                std::mem::size_of::<libc::sockaddr_in>() as u32,
+                (&raw const addr).cast::<libc::sockaddr>(),
+                sockaddr_in_len(),
             )
         };
         if ret < 0 {
@@ -139,7 +155,7 @@ mod macos_probe {
 
         // write() on the connected socket.
         let data = b"GET / HTTP/1.0\r\n\r\n";
-        let ret = unsafe { libc::write(fd, data.as_ptr() as *const libc::c_void, data.len()) };
+        let ret = unsafe { libc::write(fd, data.as_ptr().cast::<libc::c_void>(), data.len()) };
         if ret < 0 {
             let errno = unsafe { *libc::__error() };
             println!("WRITE-FAILED errno={errno}");
@@ -156,7 +172,7 @@ mod macos_probe {
         std::process::exit(0);
     }
 
-    /// Test syscall(SYS_CONNECT, ...) to bypass function-level hooks.
+    /// Test `syscall(SYS_CONNECT`, ...) to bypass function-level hooks.
     fn test_syscall_connect(host: &str, port: u16) {
         let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
         if fd < 0 {
@@ -167,13 +183,12 @@ mod macos_probe {
         let addr = resolve_host(host, port);
         // Use libc::syscall(SYS_CONNECT, ...) — this is the documented deferred
         // bypass for libc syscall() interposition.
-        const SYS_CONNECT: libc::c_int = 98;
         let ret = unsafe {
             libc::syscall(
                 SYS_CONNECT,
                 fd,
-                &addr as *const _ as *const libc::sockaddr,
-                std::mem::size_of::<libc::sockaddr_in>() as u32,
+                (&raw const addr).cast::<libc::sockaddr>(),
+                sockaddr_in_len(),
             )
         };
         if ret < 0 {
@@ -199,7 +214,7 @@ mod macos_probe {
         std::process::exit(0);
     }
 
-    /// Test write() to a regular file — must NOT be affected by the hook.
+    /// Test `write()` to a regular file — must NOT be affected by the hook.
     fn test_write_file() {
         let path = std::env::temp_dir().join("guard_write_test.tmp");
         let mut f = std::fs::File::create(&path).expect("create temp file");
@@ -216,7 +231,7 @@ mod macos_probe {
         }
     }
 
-    /// Test write() to a pipe — must NOT be affected by the hook.
+    /// Test `write()` to a pipe — must NOT be affected by the hook.
     fn test_write_pipe() {
         let mut fds = [0i32; 2];
         let ret = unsafe { libc::pipe(fds.as_mut_ptr()) };
@@ -226,7 +241,7 @@ mod macos_probe {
         }
         let data = b"pipe-test-data";
         let written =
-            unsafe { libc::write(fds[1], data.as_ptr() as *const libc::c_void, data.len()) };
+            unsafe { libc::write(fds[1], data.as_ptr().cast::<libc::c_void>(), data.len()) };
         unsafe {
             libc::close(fds[1]);
         }
@@ -239,11 +254,12 @@ mod macos_probe {
             std::process::exit(3);
         }
         let mut buf = [0u8; 64];
-        let read = unsafe { libc::read(fds[0], buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+        let read =
+            unsafe { libc::read(fds[0], buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
         unsafe {
             libc::close(fds[0]);
         }
-        if read == written && &buf[..read as usize] == data {
+        if read == written && &buf[..read.cast_unsigned()] == data {
             println!("WRITE-PIPE-OK");
             std::process::exit(0);
         } else {
@@ -255,27 +271,27 @@ mod macos_probe {
     fn resolve_host(host: &str, port: u16) -> libc::sockaddr_in {
         use std::net::ToSocketAddrs;
         let addr_str = format!("{host}:{port}");
-        let addrs = match addr_str.to_socket_addrs() {
-            Ok(iter) => iter,
-            Err(_) => {
-                println!("DNS-DENIED");
-                std::process::exit(2);
-            }
-        };
-        let socket_addr = addrs.into_iter().find(|a| a.is_ipv4()).unwrap_or_else(|| {
-            println!("DNS-DENIED-NO-IPV4");
+        let Ok(addrs) = addr_str.to_socket_addrs() else {
+            println!("DNS-DENIED");
             std::process::exit(2);
-        });
+        };
+        let socket_addr = addrs
+            .into_iter()
+            .find(std::net::SocketAddr::is_ipv4)
+            .unwrap_or_else(|| {
+                println!("DNS-DENIED-NO-IPV4");
+                std::process::exit(2);
+            });
         match socket_addr {
             std::net::SocketAddr::V4(v4) => {
                 let mut sin: libc::sockaddr_in = unsafe { std::mem::zeroed() };
-                sin.sin_len = std::mem::size_of::<libc::sockaddr_in>() as u8;
-                sin.sin_family = libc::AF_INET as u8;
+                sin.sin_len = sockaddr_in_len_u8();
+                sin.sin_family = af_inet_u8();
                 sin.sin_port = port.to_be();
                 sin.sin_addr.s_addr = u32::from_ne_bytes(v4.ip().octets());
                 sin
             }
-            _ => unreachable!(),
+            std::net::SocketAddr::V6(_) => unreachable!(),
         }
     }
 }

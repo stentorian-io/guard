@@ -12,7 +12,7 @@ fn main() {
 
     let mut files: Vec<_> = std::fs::read_dir(&data_dir)
         .unwrap_or_else(|e| panic!("read_dir {}: {e}", data_dir.display()))
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| {
             let path = e.path();
             path.is_file()
@@ -24,7 +24,7 @@ fn main() {
                     .is_some_and(is_network_policy_data_file)
         })
         .collect();
-    files.sort_by_key(|e| e.file_name());
+    files.sort_by_key(std::fs::DirEntry::file_name);
 
     let mut combined = String::from("entries:\n");
     for entry in files {

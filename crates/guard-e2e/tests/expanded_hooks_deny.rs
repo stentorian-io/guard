@@ -1,7 +1,7 @@
-//! M003-S01-T06: verify that exfiltration via send() and write()-to-socket
+//! M003-S01-T06: verify that exfiltration via `send()` and write()-to-socket
 //! is blocked by the expanded hook surface.
 //!
-//! Also verifies that write() to regular files and pipes is NOT affected
+//! Also verifies that `write()` to regular files and pipes is NOT affected
 //! (no false positives from the write/writev interpose).
 //!
 //! Each sub-test invokes the `expanded_hooks_probe` binary under Stentorian Guard
@@ -17,8 +17,7 @@ fn deny_target_resolves() -> bool {
     use std::net::ToSocketAddrs;
     format!("{DENY_HOST}:{DENY_PORT}")
         .to_socket_addrs()
-        .map(|i| i.count() > 0)
-        .unwrap_or(false)
+        .is_ok_and(|i| i.count() > 0)
 }
 
 fn probe_bin() -> std::path::PathBuf {
@@ -50,8 +49,8 @@ fn run_probe(harness: &DaemonHarness, mode: &str) -> std::process::Output {
         .expect("run stt-guard with expanded_hooks_probe")
 }
 
-/// send() on a connected socket to a non-allowed host is denied at connect time.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+/// `send()` on a connected socket to a non-allowed host is denied at connect time.
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn send_to_non_allowed_host_denied() {
     if !deny_target_resolves() {
@@ -81,8 +80,8 @@ fn send_to_non_allowed_host_denied() {
     );
 }
 
-/// write() on a connected socket to a non-allowed host is denied at connect time.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+/// `write()` on a connected socket to a non-allowed host is denied at connect time.
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn write_socket_to_non_allowed_host_denied() {
     if !deny_target_resolves() {
@@ -113,8 +112,8 @@ fn write_socket_to_non_allowed_host_denied() {
 // unstable. Unknown native binaries containing raw syscall instruction bytes
 // are handled by exec-time T3 fail-closed classification instead.
 
-/// write() to a regular file must NOT be affected by the hook.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+/// `write()` to a regular file must NOT be affected by the hook.
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn write_file_not_affected() {
     let harness = DaemonHarness::start().expect("start daemon");
@@ -132,8 +131,8 @@ fn write_file_not_affected() {
     );
 }
 
-/// write() to a pipe must NOT be affected by the hook.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+/// `write()` to a pipe must NOT be affected by the hook.
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn write_pipe_not_affected() {
     let harness = DaemonHarness::start().expect("start daemon");

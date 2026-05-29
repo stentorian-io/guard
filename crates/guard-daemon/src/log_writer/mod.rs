@@ -4,9 +4,9 @@
 //!
 //! - Bounded mpsc input (`crossbeam_channel::bounded(4096)`) — drop-tolerant on full queue
 //! - Dedicated writer thread named `stt-guard-daemon-log-writer`
-//! - Size-rotation at SIZE_THRESHOLD with atomic rename + detached gzip (Pitfall 5)
+//! - Size-rotation at `SIZE_THRESHOLD` with atomic rename + detached gzip (Pitfall 5)
 //! - Retention pruning enforced after each rotation (7 archives + 256 MiB cap)
-//! - Atomic counters expose blocks_today / allows_today / gaps_today for StatusReply
+//! - Atomic counters expose `blocks_today` / `allows_today` / `gaps_today` for `StatusReply`
 
 pub mod enrichment;
 pub mod jsonl_row;
@@ -23,6 +23,7 @@ pub use package_context::infer_package_context;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,9 +41,10 @@ pub struct LogWriter {
 }
 
 impl LogWriter {
-    /// Create a no-op LogWriter whose channel is immediately disconnected.
-    /// Used by DaemonState::new (the v0.2 compat constructor) and in tests
+    /// Create a no-op `LogWriter` whose channel is immediately disconnected.
+    /// Used by `DaemonState::new` (the v0.2 compat constructor) and in tests
     /// where a live writer thread is undesirable.
+    #[must_use]
     pub fn noop() -> Self {
         let (tx, _rx) = bounded::<LogRow>(1);
         // Drop _rx immediately — the sender will see Disconnected on any send,
@@ -57,12 +59,16 @@ impl LogWriter {
 
     /// Spawn the dedicated writer thread.
     /// Caller passes the active Stentorian Guard log path (e.g. `~/Library/Logs/Stentorian Guard/stt-guard.log`).
+    ///
+    /// # Errors
+    ///
+    /// Returns filesystem or thread-spawn errors while creating the log
+    /// directory, opening the active log, or starting the writer thread.
     pub fn spawn(log_path: PathBuf) -> io::Result<Self> {
         if let Some(parent) = log_path.parent() {
             std::fs::create_dir_all(parent)?;
             // System logs are user-facing via `stt-guard status logs`; user
             // mode logs remain private to the user.
-            use std::os::unix::fs::PermissionsExt;
             let mode = if parent == std::path::Path::new(guard_core::paths::SYSTEM_LOG_DIR) {
                 0o711
             } else {
@@ -138,6 +144,7 @@ impl LogWriter {
         }
     }
 
+    #[must_use]
     pub fn counters_snapshot(&self) -> (u64, u64, u64) {
         (
             self.blocks_today.load(Ordering::Relaxed),
@@ -160,7 +167,6 @@ fn open_active(path: &std::path::Path) -> io::Result<File> {
         .open(path)?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
     }
     Ok(file)
@@ -171,7 +177,7 @@ fn open_active(path: &std::path::Path) -> io::Result<File> {
 /// is attacker-controlled garbage and gets truncated.
 const MAX_DEST_HOST_LEN: usize = 256;
 
-/// WR-05: truncate any oversized fields in a LogRow before enqueuing. Keeps
+/// WR-05: truncate any oversized fields in a `LogRow` before enqueuing. Keeps
 /// individual JSONL entries bounded so a hostile package emitting multi-KiB
 /// hostnames cannot blow up downstream consumers (e.g. `stt-guard approve
 /// --from-log`).
@@ -185,8 +191,7 @@ fn clamp_row(row: LogRow) -> LogRow {
             clamp_decision(&mut d);
             LogRow::Allow(d)
         }
-        // Gap rows have no dest_host field.
-        other => other,
+        LogRow::Gap(gap) => LogRow::Gap(gap),
     }
 }
 

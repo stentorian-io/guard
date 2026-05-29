@@ -241,7 +241,7 @@ fn hook_dylib_env_override_takes_precedence() {
 // ---- --learn end-to-end fail-clear behavior ----------------------------------
 
 /// Binary-invocation check: `stt-guard wrap --learn echo hi` with stdin redirected
-/// from /dev/null (non-TTY) must exit 64 (EX_USAGE) with stderr mentioning
+/// from /dev/null (non-TTY) must exit 64 (`EX_USAGE`) with stderr mentioning
 /// "interactive terminal".
 #[test]
 fn non_tty_learn_returns_exit_64() {
@@ -354,7 +354,7 @@ fn status_rejects_removed_flags() {
         vec!["stt-guard", "status", "denials", "abc", "--json"],
     ] {
         let r = Cli::try_parse_from(&args);
-        assert!(r.is_err(), "removed flag must be rejected: {:?}", args);
+        assert!(r.is_err(), "removed flag must be rejected: {args:?}");
     }
 }
 
@@ -365,7 +365,8 @@ fn audit_token_for_self_pid_succeeds() {
     let pid = unsafe { libc::getpid() };
     let token = guard_cli::audit_token::audit_token_for_pid(pid).expect("audit_token_for_pid");
     assert_eq!(
-        token.val[5] as libc::pid_t, pid,
+        libc::pid_t::try_from(token.val[5]).expect("audit token pid fits libc pid"),
+        pid,
         "token.val[5] should equal pid"
     );
 }

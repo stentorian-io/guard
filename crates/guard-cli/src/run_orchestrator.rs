@@ -1,7 +1,7 @@
 //! crates/guard-cli/src/run_orchestrator.rs
 //!
 //! Wrap-mode end-to-end orchestrator:
-//! V3 PrepareSnapshot + prompt channel + spawn + wait.
+//! V3 `PrepareSnapshot` + prompt channel + spawn + wait.
 //! SIGINT handler is registered here.
 
 use std::ffi::OsString;
@@ -12,10 +12,22 @@ use std::sync::{Arc, Mutex};
 
 use crate::CliError;
 
+/// Run the wrapped command under a freshly prepared per-run snapshot.
+///
+/// # Errors
+///
+/// Returns errors from current-directory lookup, snapshot preparation, command
+/// spawning, audit-token lookup, daemon IPC, SIGINT handler installation,
+/// prompt-reader shutdown setup, render-thread spawning, or child waiting.
+///
+/// # Panics
+///
+/// Panics if the prompt-channel mutex is poisoned while installing the prompt
+/// channel before the child is spawned.
 pub fn run(
     sock: &Path,
     state_dir: &Path,
-    command: Vec<OsString>,
+    command: &[OsString],
     learn_mode: bool,
 ) -> Result<i32, CliError> {
     let cwd = std::env::current_dir().map_err(|e| CliError::Other(format!("cwd: {e}")))?;
@@ -54,7 +66,7 @@ pub fn run(
 
     // Spawn the wrapped child; capture pgid for SIGINT propagation.
     let (mut child, pgid) =
-        crate::spawn::spawn_wrapped_with_pgid(&command, &manifest_path, state_dir, &run_uuid)?;
+        crate::spawn::spawn_wrapped_with_pgid(command, &manifest_path, state_dir, &run_uuid)?;
 
     // Restore the RegisterRoot delegation that was lost in the v0.3
     // refactor (commit d020752 — extracted run_orchestrator from main.rs and
@@ -73,7 +85,8 @@ pub fn run(
     // the CLI's own kernel-sourced token, wire-claimed token is the child's.
     // The daemon trusts the wire token after verify_wire_pid_same_uid (WR-08).
     // See ipc_server.rs handle_legacy_register comment block.
-    let child_pid = child.id() as libc::pid_t;
+    let child_pid = libc::pid_t::try_from(child.id())
+        .map_err(|_| CliError::Other(format!("child pid {} does not fit pid_t", child.id())))?;
     let token = crate::audit_token::audit_token_for_pid(child_pid)
         .map_err(|e| CliError::DaemonUnreachable(format!("audit_token: {e}")))?;
     let root_pm_env = capture_pm_env_from_current_env();
@@ -104,7 +117,7 @@ pub fn run(
     let stop_flag = Arc::new(AtomicBool::new(false));
     let render_shutdown = prompt_reader
         .as_ref()
-        .map(|reader| reader.shutdown_handle())
+        .map(super::prompt_channel::PromptReader::shutdown_handle)
         .transpose()?;
     let render_handle = if let Some(reader) = prompt_reader.take() {
         let shared = Arc::clone(&shared_channel);
@@ -113,7 +126,7 @@ pub fn run(
         Some(
             std::thread::Builder::new()
                 .name("guard-prompt-render".into())
-                .spawn(move || render_loop(reader, shared, stop, render_run_uuid))
+                .spawn(move || render_loop(reader, &shared, &stop, &render_run_uuid))
                 .map_err(|e| CliError::Other(format!("render thread: {e}")))?,
         )
     } else {
@@ -258,20 +271,19 @@ fn capture_pm_env_from_current_env() -> Vec<(String, String)> {
 
 fn render_loop(
     mut reader: crate::prompt_channel::PromptReader,
-    shared_channel: crate::sigint_handler::SharedChannel,
-    stop: Arc<AtomicBool>,
-    run_uuid: String,
+    shared_channel: &crate::sigint_handler::SharedChannel,
+    stop: &AtomicBool,
+    run_uuid: &str,
 ) {
     while !stop.load(Ordering::SeqCst) {
         // CR-02: blocking read happens on the exclusively-owned reader half;
         // we DO NOT hold the SharedChannel lock while parked here. The SIGINT
         // handler can therefore acquire the SharedChannel lock to call cancel
         // on the writer half while we're still parked.
-        let req = match reader.next_prompt() {
-            Ok(r) => r,
-            Err(_) => break, // EOF / disconnect / channel teardown
+        let Ok(req) = reader.next_prompt() else {
+            break; // EOF / disconnect / channel teardown
         };
-        match crate::prompt_render::render_and_choose(&req, &run_uuid) {
+        match crate::prompt_render::render_and_choose(&req, run_uuid) {
             Ok(resp) => {
                 if let Ok(mut g) = shared_channel.lock() {
                     if let Some(c) = g.as_mut() {

@@ -13,17 +13,17 @@
 //! WARNING fix (v0.2 review): the previous comment claimed any byte in
 //! 0x00..=0x01 ∪ 0x09..=0xff was "legacy length-prefix high byte" — but a
 //! valid legacy frame has only 0x00 in the high byte (0x01 already implies
-//! a 16+ MiB body, far above MAX_FRAME_BYTES). The dispatcher now treats:
+//! a 16+ MiB body, far above `MAX_FRAME_BYTES`). The dispatcher now treats:
 //! - 0x02..=0x17            → tagged v0.2/v0.3/v0.4/v0.5/v0.7/v1.0 message
-//!   (0x0E = ListRules, 0x11 = DeleteInstallArtifacts, v0.7;
+//!   (0x0E = `ListRules`, 0x11 = `DeleteInstallArtifacts`, v0.7;
 //!   0x07/0x0F/0x10 formerly TrustPolicy/ListTrust/IsTrusted — removed)
-//!   (0x12 = DenyNotify, v0.3)
-//!   (0x13 = ExecBlocked, v0.4 M003-S02)
-//!   (0x14 = PersistenceWrite, v0.4 M003-S04)
+//!   (0x12 = `DenyNotify`, v0.3)
+//!   (0x13 = `ExecBlocked`, v0.4 M003-S02)
+//!   (0x14 = `PersistenceWrite`, v0.4 M003-S04)
 //!   (0x15 = Ping, v0.5 M004-S01)
-//!   (0x16 = DisableCuratedRule, v1.0)
-//!   (0x17 = EnableCuratedRule, v1.0)
-//!   - 0x00                   → legacy RegisterRoot (v0.1)
+//!   (0x16 = `DisableCuratedRule`, v1.0)
+//!   (0x17 = `EnableCuratedRule`, v1.0)
+//!   - 0x00                   → legacy `RegisterRoot` (v0.1)
 //!   - everything else        → protocol violation (rejected immediately)
 //!
 //! This catches scribble traffic and stops downstream code from spending
@@ -71,6 +71,7 @@ pub enum MessageTag {
 }
 
 impl MessageTag {
+    #[must_use]
     pub fn from_byte(b: u8) -> Option<Self> {
         match b {
             0x02 => Some(Self::PrepareSnapshot),
@@ -105,6 +106,7 @@ impl MessageTag {
         }
     }
 
+    #[must_use]
     pub fn as_byte(self) -> u8 {
         self as u8
     }
@@ -125,8 +127,8 @@ pub enum DispatchError {
 pub enum FrameKind {
     /// v0.1 legacy: caller should treat the already-peeked byte as the
     /// FIRST byte of a 4-byte length prefix (always 0x00 in valid legacy
-    /// frames per MAX_FRAME_BYTES = 64 KiB) and read the rest of the frame
-    /// as length-prefixed CBOR (RegisterRoot).
+    /// frames per `MAX_FRAME_BYTES` = 64 KiB) and read the rest of the frame
+    /// as length-prefixed CBOR (`RegisterRoot`).
     LegacyUntagged { first_length_byte: u8 },
     /// v0.2+: caller should read a length-prefixed CBOR body of this type.
     Tagged(MessageTag),
@@ -140,6 +142,11 @@ pub enum FrameKind {
 /// violation (invalid length prefix or unknown tag). Rejecting at this
 /// stage prevents the legacy handler from spending three more
 /// `read_exact(1)` syscalls on garbage frames before failing.
+///
+/// # Errors
+///
+/// Returns an I/O error when the first byte cannot be read, or a dispatch
+/// error when the first byte is not a recognized frame prefix.
 pub fn classify_frame(stream: &mut UnixStream) -> Result<FrameKind, DispatchError> {
     let mut first = [0u8; 1];
     stream.read_exact(&mut first)?;

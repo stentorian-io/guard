@@ -9,7 +9,7 @@ use std::ffi::c_void;
 #[test]
 fn is_nw_object_returns_false_for_null() {
     assert!(
-        !is_nw_object(std::ptr::null_mut()),
+        !unsafe { is_nw_object(std::ptr::null_mut()) },
         "null pointer must NOT be classified as NW object",
     );
 }
@@ -29,17 +29,17 @@ fn is_nw_object_returns_false_for_random_buffer() {
     // `#[ignore]`.)
     let buf: Box<[u8; 64]> = Box::new([0u8; 64]);
     let leaked: &'static mut [u8; 64] = Box::leak(buf);
-    let p = leaked.as_mut_ptr() as *mut c_void;
+    let p = leaked.as_mut_ptr().cast::<c_void>();
     // Most platforms either return NULL from object_getClassName on
     // a non-objc pointer or a class name that doesn't start with `OS_nw_`.
     // The is_nw_object gate's whole purpose is to handle this safely.
-    let _ = is_nw_object(p); // primary assertion: didn't crash.
+    let _ = unsafe { is_nw_object(p) }; // primary assertion: didn't crash.
     // (Don't free `leaked` — we leaked it intentionally.)
 }
 
-/// Sanity that is_nw_object is exported for non-test crate code (i.e. the
+/// Sanity that `is_nw_object` is exported for non-test crate code (i.e. the
 /// `nw_connection_start` shadow can call it).
 #[test]
 fn is_nw_object_is_exported() {
-    let _f: fn(*mut c_void) -> bool = is_nw_object;
+    let _: unsafe fn(*mut c_void) -> bool = is_nw_object;
 }

@@ -1,7 +1,7 @@
 //! Sandboxed HOME helper for v0.5 validation tests.
 //!
 //! Per CONTEXT D-02 triple-defense (3): every v0.5 test sets HOME to a
-//! tempdir with empty .ssh/, .aws/, .npmrc and uses Command::new(...).env_clear()
+//! tempdir with empty .ssh/, .aws/, .npmrc and uses `Command::new(...).env_clear()`
 //! so no real secrets exist on the test process or its descendants. Even a
 //! complete Stentorian Guard enforcement failure would find nothing to exfiltrate.
 //!
@@ -18,6 +18,7 @@ pub struct SandboxHome {
 
 impl SandboxHome {
     /// Convenience accessor for tests that want a borrowed Path.
+    #[must_use]
     pub fn path(&self) -> &Path {
         self.home.path()
     }
@@ -31,6 +32,11 @@ impl SandboxHome {
 ///
 /// Caller is responsible for using `.env_clear()` on every `Command::new(...)`
 /// so no real `HOME`/`SSH_*`/`AWS_*`/`NPM_*` vars leak into the wrapped process.
+///
+/// # Errors
+///
+/// Returns filesystem errors from tempdir creation, directory creation, or
+/// writing the empty `.npmrc` fixture.
 pub fn create() -> io::Result<SandboxHome> {
     let home = tempfile::tempdir()?;
     let path = home.path();

@@ -8,6 +8,9 @@ repository.workspace = true
 authors.workspace = true
 description = "Stentorian Guard domain types: ProcessIdentity, allowlist matcher, snapshot codec."
 
+[lints]
+workspace = true
+
 [features]
 test-signer = []
 

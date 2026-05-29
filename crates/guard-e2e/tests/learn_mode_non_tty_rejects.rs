@@ -1,4 +1,4 @@
-//! Learn-mode TTY gate: `--learn` without a TTY exits 64 (EX_USAGE).
+//! Learn-mode TTY gate: `--learn` without a TTY exits 64 (`EX_USAGE`).
 //!
 //! `--learn` requires an interactive terminal because the end-of-run review
 //! presents staged hosts for the developer to allow/deny. Without a TTY the

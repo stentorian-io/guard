@@ -8,6 +8,9 @@ repository.workspace = true
 authors.workspace = true
 description = "Stentorian Guard OS-specific primitives behind explicit capability APIs."
 
+[lints]
+workspace = true
+
 [dependencies]
 guard-core = { workspace = true }
 libc = { workspace = true }

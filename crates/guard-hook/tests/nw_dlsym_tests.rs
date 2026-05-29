@@ -22,12 +22,12 @@ use std::ffi::c_void;
 const NW_PATH: &[u8] = b"/System/Library/Frameworks/Network.framework/Network\0";
 
 fn dlopen_nw() -> Option<*mut c_void> {
-    let h = unsafe { libc::dlopen(NW_PATH.as_ptr() as *const _, libc::RTLD_LAZY) };
+    let h = unsafe { libc::dlopen(NW_PATH.as_ptr().cast(), libc::RTLD_LAZY) };
     if h.is_null() { None } else { Some(h) }
 }
 
 fn dlsym_nw(handle: *mut c_void, name_z: &[u8]) -> *mut c_void {
-    unsafe { libc::dlsym(handle, name_z.as_ptr() as *const _) }
+    unsafe { libc::dlsym(handle, name_z.as_ptr().cast()) }
 }
 
 #[test]

@@ -14,10 +14,10 @@
 //! be loopback (so a real listener can accept) — but Tier 0a fires for loopback
 //! BEFORE the cache-miss Resolve-IPC path, so Resolve-IPC never runs for that
 //! destination. Earlier designs considered:
-//!   - STT_GUARD_TEST_RESOLVE_OVERRIDE env-var on the daemon — abandoned because
+//!   - `STT_GUARD_TEST_RESOLVE_OVERRIDE` env-var on the daemon — abandoned because
 //!     handlers/resolve.rs is FROZEN per must-have #8.
 //!   - Wall-clock timing against an unrouteable IP — too flaky across CI runners.
-//!     The unit-level test in resolve_client_tests.rs is the chosen hermetic vehicle.
+//!     The unit-level test in `resolve_client_tests.rs` is the chosen hermetic vehicle.
 //!     This file covers the empirical opt-in confirmation path.
 
 #[cfg_attr(
@@ -83,8 +83,7 @@ fn pip_install_real_registry_succeeds_under_guard_run() {
     assert!(
         !stderr.contains("Verdict::Deny"),
         "pypi.org must NOT be denied under stt-guard wrap (ENF-07 closure)\n\
-         stderr: {}",
-        stderr
+         stderr: {stderr}"
     );
 }
 
@@ -144,16 +143,13 @@ fn curl_get_real_registry_succeeds_under_guard_run() {
     let http_code: u16 = stdout.trim().parse().unwrap_or(0);
     assert!(
         (200..400).contains(&http_code),
-        "expected HTTP 2xx/3xx from registry.npmjs.org; got {}\n\
-         stderr: {}",
-        http_code,
-        stderr
+        "expected HTTP 2xx/3xx from registry.npmjs.org; got {http_code}\n\
+         stderr: {stderr}"
     );
 
     assert!(
         !stderr.contains("Verdict::Deny"),
         "registry.npmjs.org must NOT be denied under stt-guard wrap (ENF-07 closure)\n\
-         stderr: {}",
-        stderr
+         stderr: {stderr}"
     );
 }

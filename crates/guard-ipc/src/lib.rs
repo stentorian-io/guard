@@ -1,11 +1,11 @@
 //! Stentorian Guard IPC: length-prefixed CBOR framing + Unix socket transport with
 //! macOS-native peer audit-token authentication.
 //!
-//! v0.1 protocol: a single request-reply (CLI sends RegisterRoot; daemon
-//! sends Reply::Ack or Reply::Err).
+//! v0.1 protocol: a single request-reply (CLI sends `RegisterRoot`; daemon
+//! sends `Reply::Ack` or `Reply::Err`).
 //!
-//! v0.2 adds new message types under IPC_SCHEMA_V2 — RegisterRoot/Reply
-//! are FROZEN at IPC_SCHEMA_V1.
+//! v0.2 adds new message types under `IPC_SCHEMA_V2` — RegisterRoot/Reply
+//! are FROZEN at `IPC_SCHEMA_V1`.
 
 pub mod error;
 pub mod frame;

@@ -22,6 +22,7 @@ pub struct SnapshotBuildInput {
     pub lockfile_entries: Vec<AllowlistEntry>,
 }
 
+#[must_use]
 pub fn build_snapshot(input: SnapshotBuildInput) -> Snapshot {
     let SnapshotBuildInput {
         run_uuid,
@@ -52,6 +53,11 @@ pub fn build_snapshot(input: SnapshotBuildInput) -> Snapshot {
     }
 }
 
+/// Build and encode a signed-policy snapshot.
+///
+/// # Errors
+///
+/// Returns `crate::Error::Codec` if snapshot CBOR encoding fails.
 pub fn build_snapshot_bytes(input: SnapshotBuildInput) -> Result<Vec<u8>, crate::Error> {
     build_snapshot(input).encode()
 }

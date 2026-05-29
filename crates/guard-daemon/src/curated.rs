@@ -3,8 +3,8 @@
 //! Source: `crates/guard-core/data/{trusted-registry,malicious,suspicious}-*.yaml`
 //! (in-tree YAML assembled and converted to JSON by build.rs at compile time).
 //! Loaded once at daemon startup. Entries are tagged with the appropriate
-//! RuleTier (BuiltinDeny for kind:deny, CuratedAllow for kind:allow) and the
-//! daemon merges them with project/user rules at PrepareSnapshot time.
+//! `RuleTier` (`BuiltinDeny` for kind:deny, `CuratedAllow` for kind:allow) and the
+//! daemon merges them with project/user rules at `PrepareSnapshot` time.
 
 use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier};
 use serde::Deserialize;
@@ -53,6 +53,10 @@ struct RawEntry {
 }
 
 /// Load the build-time-embedded JSON (converted from YAML by build.rs).
+///
+/// # Errors
+///
+/// Returns an error when the embedded rule data cannot be parsed or contains invalid patterns.
 pub fn load_curated() -> Result<Vec<AllowlistEntry>, CuratedError> {
     parse_entries(CURATED_JSON)
 }
@@ -64,6 +68,10 @@ fn parse_entries(json: &str) -> Result<Vec<AllowlistEntry>, CuratedError> {
 }
 
 /// Pure YAML parser — available only in tests for adversarial fixtures.
+///
+/// # Errors
+///
+/// Returns an error when the YAML cannot be parsed or contains invalid patterns.
 #[cfg(any(test, feature = "test-yaml"))]
 pub fn parse_yaml(yaml: &str) -> Result<Vec<AllowlistEntry>, CuratedError> {
     let file: EntriesFile =

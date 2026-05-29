@@ -8,6 +8,11 @@ use std::io::Write;
 use crate::CliError;
 use crate::install::launchagent::logs_dir;
 
+/// Dump the active forensic log to stdout.
+///
+/// # Errors
+///
+/// Returns an error when the log file exists but cannot be opened.
 pub fn run_logs() -> Result<i32, CliError> {
     let active = logs_dir().join(guard_core::paths::LOG_FILENAME);
     run_dump(&active)

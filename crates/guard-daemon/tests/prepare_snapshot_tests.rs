@@ -1,7 +1,7 @@
 use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier, SCHEMA_V2};
 #[cfg(feature = "test-signer")]
 use guard_daemon::gap_detector::GapDetector;
-use guard_daemon::handlers::prepare_snapshot::handle_prepare_snapshot;
+use guard_daemon::handlers::prepare_snapshot::{PrepareSnapshotArgs, handle_prepare_snapshot};
 #[cfg(feature = "test-signer")]
 use guard_daemon::handlers::prepare_snapshot::{
     handle_prepare_snapshot_inputs_full, handle_publish_signed_snapshot_full,
@@ -120,16 +120,16 @@ fn prepare_snapshot_writes_per_run_files_and_returns_ok() {
     let curated = vec![allow("registry.npmjs.org", RuleTier::CuratedAllow)];
 
     let cwd = tmp.path().to_path_buf();
-    let reply = handle_prepare_snapshot(
-        &cwd,
-        &curated,
-        &rs,
-        &pt,
-        &state_dir,
-        guard_core::RuleSignaturePolicy::AllowTestSimulator,
-        false,
-        false,
-    );
+    let reply = handle_prepare_snapshot(PrepareSnapshotArgs {
+        cwd: &cwd,
+        curated: &curated,
+        rule_store: &rs,
+        process_tree: &pt,
+        state_dir: &state_dir,
+        rule_signature_policy: guard_core::RuleSignaturePolicy::AllowTestSimulator,
+        is_tty: false,
+        baseline_mode: false,
+    });
 
     match reply {
         guard_ipc::SnapshotReply::Ok {
@@ -174,16 +174,16 @@ fn prepare_snapshot_includes_curated_entries_sorted_by_tier() {
             reason: "npm registry".into(),
         },
     ];
-    let reply = handle_prepare_snapshot(
-        tmp.path(),
-        &curated,
-        &rs,
-        &pt,
-        &state_dir,
-        guard_core::RuleSignaturePolicy::AllowTestSimulator,
-        false,
-        false,
-    );
+    let reply = handle_prepare_snapshot(PrepareSnapshotArgs {
+        cwd: tmp.path(),
+        curated: &curated,
+        rule_store: &rs,
+        process_tree: &pt,
+        state_dir: &state_dir,
+        rule_signature_policy: guard_core::RuleSignaturePolicy::AllowTestSimulator,
+        is_tty: false,
+        baseline_mode: false,
+    });
     match reply {
         guard_ipc::SnapshotReply::Ok { run_uuid, .. } => {
             let snap_path = guard_daemon::state_dir::run_snapshot_path(&state_dir, &run_uuid);
@@ -211,16 +211,16 @@ fn prepare_snapshot_includes_verified_signed_user_rule() {
     let pt = Arc::new(ProcessTree::new());
     let curated = Vec::new();
 
-    let reply = handle_prepare_snapshot(
-        tmp.path(),
-        &curated,
-        &rs,
-        &pt,
-        &state_dir,
-        guard_core::RuleSignaturePolicy::AllowTestSimulator,
-        false,
-        false,
-    );
+    let reply = handle_prepare_snapshot(PrepareSnapshotArgs {
+        cwd: tmp.path(),
+        curated: &curated,
+        rule_store: &rs,
+        process_tree: &pt,
+        state_dir: &state_dir,
+        rule_signature_policy: guard_core::RuleSignaturePolicy::AllowTestSimulator,
+        is_tty: false,
+        baseline_mode: false,
+    });
     match reply {
         guard_ipc::SnapshotReply::Ok { run_uuid, .. } => {
             let snap_path = guard_daemon::state_dir::run_snapshot_path(&state_dir, &run_uuid);
@@ -261,16 +261,16 @@ fn prepare_snapshot_fails_closed_on_tampered_user_rule() {
     let pt = Arc::new(ProcessTree::new());
     let curated = Vec::new();
 
-    let reply = handle_prepare_snapshot(
-        tmp.path(),
-        &curated,
-        &rs,
-        &pt,
-        &state_dir,
-        guard_core::RuleSignaturePolicy::AllowTestSimulator,
-        false,
-        false,
-    );
+    let reply = handle_prepare_snapshot(PrepareSnapshotArgs {
+        cwd: tmp.path(),
+        curated: &curated,
+        rule_store: &rs,
+        process_tree: &pt,
+        state_dir: &state_dir,
+        rule_signature_policy: guard_core::RuleSignaturePolicy::AllowTestSimulator,
+        is_tty: false,
+        baseline_mode: false,
+    });
     assert!(matches!(
         reply,
         guard_ipc::SnapshotReply::Err { message, .. }

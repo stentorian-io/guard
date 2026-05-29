@@ -1,5 +1,5 @@
 //! End-to-end transport tests using `socketpair(AF_UNIX, SOCK_STREAM)` —
-//! the same primitive the Wave 0 spike verified for LOCAL_PEERTOKEN.
+//! the same primitive the Wave 0 spike verified for `LOCAL_PEERTOKEN`.
 
 use guard_ipc::frame::{read_frame, write_frame};
 #[cfg(target_os = "macos")]
@@ -43,7 +43,7 @@ fn reply_ack_traverses_back() {
     assert!(matches!(r, Reply::Ack { .. }));
 }
 
-/// Darwin LOCAL_PEERTOKEN over a socketpair returns a token whose val[5] (pid)
+/// Darwin `LOCAL_PEERTOKEN` over a socketpair returns a token whose val[5] (pid)
 /// equals the test process's pid (since both ends of the pair are this process).
 /// Mirrors the spike's A1 check at the wire layer.
 #[cfg(target_os = "macos")]
@@ -51,7 +51,7 @@ fn reply_ack_traverses_back() {
 fn peer_audit_token_returns_self_pid_over_socketpair() {
     let (a, _b) = make_pair();
     let token = peer_audit_token(&a).expect("peer_audit_token");
-    let my_pid = unsafe { libc::getpid() } as u32;
+    let my_pid = u32::try_from(unsafe { libc::getpid() }).expect("self pid is positive");
     assert_eq!(
         token.val[5], my_pid,
         "LOCAL_PEERTOKEN val[5] should be peer pid (== self pid for socketpair)"
@@ -66,6 +66,6 @@ fn peer_identity_yields_verified() {
     let key = id
         .as_policy_key()
         .expect("Verified should yield policy key");
-    let my_pid = unsafe { libc::getpid() } as u32;
+    let my_pid = u32::try_from(unsafe { libc::getpid() }).expect("self pid is positive");
     assert_eq!(key.val[5], my_pid);
 }

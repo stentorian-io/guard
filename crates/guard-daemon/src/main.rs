@@ -16,7 +16,7 @@ use guard_daemon::state_dir::{
     db_path, default_state_dir, ensure_runs_dir, ensure_state_dir, ready_path, socket_path,
 };
 use guard_daemon::tracked::ProcessTree;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::info;
 
@@ -29,7 +29,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Run the daemon: publish snapshot, bind socket, accept RegisterRoot.
+    /// Run the daemon: publish snapshot, bind socket, accept `RegisterRoot`.
     Serve {
         #[arg(long, hide = true)]
         state_dir: Option<PathBuf>,
@@ -50,7 +50,7 @@ fn main() -> std::io::Result<()> {
         .init();
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Serve { state_dir } => serve(state_dir.unwrap_or_else(default_state_dir)),
+        Cmd::Serve { state_dir } => serve(&state_dir.unwrap_or_else(default_state_dir)),
     }
 }
 
@@ -66,9 +66,9 @@ fn rule_signature_policy() -> guard_core::RuleSignaturePolicy {
     guard_core::RuleSignaturePolicy::Production
 }
 
-fn serve(state_dir: PathBuf) -> std::io::Result<()> {
-    ensure_state_dir(&state_dir)?;
-    ensure_runs_dir(&state_dir)?;
+fn serve(state_dir: &Path) -> std::io::Result<()> {
+    ensure_state_dir(state_dir)?;
+    ensure_runs_dir(state_dir)?;
 
     // Load curated YAML once at startup. PrepareSnapshot reuses this slice on
     // every per-run snapshot publish; no repeated parse cost.
@@ -77,7 +77,7 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     let curated = Arc::new(curated);
 
     // Open the SQLite rule store (creates if missing; runs migrations).
-    let rule_store = RuleStore::open(&db_path(&state_dir))
+    let rule_store = RuleStore::open(&db_path(state_dir))
         .map_err(|e| std::io::Error::other(format!("open rule_store: {e}")))?;
     let rule_store = Arc::new(rule_store);
 
@@ -93,8 +93,8 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         u64::from_ne_bytes(buf)
     };
     let snap = Snapshot::v2_default();
-    let pub_ = publish(&state_dir, &snap, nonce)?;
-    manifest::write(&state_dir, &pub_)?;
+    let pub_ = publish(state_dir, &snap, nonce)?;
+    manifest::write(state_dir, &pub_)?;
     info!(
         snapshot = %pub_.path.display(),
         digest = %pub_.digest_hex,
@@ -102,12 +102,12 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     );
 
     // v0.3: log directory + writer.
-    let log_dir = guard_core::paths::log_dir_for_state(&state_dir);
+    let log_dir = guard_core::paths::log_dir_for_state(state_dir);
     std::fs::create_dir_all(&log_dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = if guard_core::paths::is_system_install(&state_dir) {
+        let mode = if guard_core::paths::is_system_install(state_dir) {
             0o711
         } else {
             0o700
@@ -122,7 +122,7 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     // v0.3: install_artifacts store opens against the same stt-guard.db
     // that RuleStore already migrated above.
     let install_artifact_store = Arc::new(
-        InstallArtifactStore::open(&db_path(&state_dir))
+        InstallArtifactStore::open(&db_path(state_dir))
             .map_err(|e| std::io::Error::other(format!("open install_artifact_store: {e}")))?,
     );
 
@@ -138,7 +138,7 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
         gap_detector,
         rule_store,
         curated,
-        state_dir: state_dir.clone(),
+        state_dir: state_dir.to_path_buf(),
         install_artifact_store,
         log_writer,
         prompt_dedup,
@@ -157,7 +157,7 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     // The handle is intentionally dropped — the GC thread runs as long as the
     // daemon process; on daemon exit the OS reaps the thread.
     let _gc_handle =
-        guard_daemon::snapshot_gc::spawn_gc_thread(state_dir.clone(), process_tree.clone());
+        guard_daemon::snapshot_gc::spawn_gc_thread(state_dir.to_path_buf(), process_tree.clone());
     info!(
         interval_secs = guard_daemon::snapshot_gc::GC_INTERVAL_SECS,
         "gc sweeper spawned"
@@ -172,15 +172,15 @@ fn serve(state_dir: PathBuf) -> std::io::Result<()> {
     // TODO: wire gap_detector -> log_writer + recent_gaps when the gap fires.
     //   - hardened-runtime gap (csops): extends gap_detector closure
     //   - env-not-propagated gap (TREE-06): extends EnvNotPropagatedGap handler
-    let server = IpcServer::bind(&socket_path(&state_dir), state)?;
+    let server = IpcServer::bind(&socket_path(state_dir), state)?;
     let pid = unsafe { libc::getpid() };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    std::fs::write(ready_path(&state_dir), format!("{pid} {now}\n"))?;
+    std::fs::write(ready_path(state_dir), format!("{pid} {now}\n"))?;
     info!(
-        socket = %socket_path(&state_dir).display(),
+        socket = %socket_path(state_dir).display(),
         "daemon ready"
     );
 

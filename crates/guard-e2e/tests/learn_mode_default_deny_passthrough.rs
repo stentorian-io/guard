@@ -1,20 +1,20 @@
-//! Learn-mode passthrough: DefaultDeny hosts are allowed and staged.
+//! Learn-mode passthrough: `DefaultDeny` hosts are allowed and staged.
 //!
-//! In normal mode `discord.com` triggers DefaultDeny (not in any allowlist).
+//! In normal mode `discord.com` triggers `DefaultDeny` (not in any allowlist).
 //! In `--learn` mode the hook allows the connection through, stages the host
 //! for end-of-run review, and the wrapped process connects successfully.
 //!
 //! Uses `connect_evil.js` with `STT_GUARD_TEST_DENY_HOST=discord.com` which
 //! calls `net.connect()`. Node performs its own internal DNS resolution
-//! (libuv thread-pool getaddrinfo), then calls connect() with the resolved
+//! (libuv thread-pool getaddrinfo), then calls `connect()` with the resolved
 //! IP. The hook's getaddrinfo interpose proxies through the daemon which
-//! stages the host in learn mode. The subsequent connect() is then allowed.
+//! stages the host in learn mode. The subsequent `connect()` is then allowed.
 //!
 //! After the wrapped process exits, the CLI presents the learn review prompt
 //! for staged hosts. The test sends 's' (skip) and asserts exit 0.
 //!
 //! Differential companion: `learn_mode_curated_deny.rs` verifies that
-//! BuiltinDeny still blocks in learn mode.
+//! `BuiltinDeny` still blocks in learn mode.
 //!
 //! Requires PTY + non-hardened node + daemon + network + working getaddrinfo
 //! interpose. The getaddrinfo interpose depends on DYLD injection working for
@@ -39,8 +39,7 @@ fn host_resolves_outside_guard() -> bool {
     use std::net::ToSocketAddrs;
     format!("{HOST}:{PORT}")
         .to_socket_addrs()
-        .map(|i| i.count() > 0)
-        .unwrap_or(false)
+        .is_ok_and(|i| i.count() > 0)
 }
 
 #[cfg(target_os = "macos")]
@@ -125,7 +124,6 @@ fn learn_mode_allows_default_deny_host() {
     assert!(
         status.success(),
         "expected exit 0 from learn-mode run (DefaultDeny should be allowed \
-         through in learn mode); got: {:?}\nPTY output:\n{buf}",
-        status
+         through in learn mode); got: {status:?}\nPTY output:\n{buf}"
     );
 }

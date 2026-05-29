@@ -1,4 +1,4 @@
-//! Constructor-time snapshot loader tests using a tempdir as a fake state_dir.
+//! Constructor-time snapshot loader tests using a tempdir as a fake `state_dir`.
 //!
 //! These tests run with the test process's HOME pointed at the tempdir so the
 //! `well_known_state_dir()` path validator accepts paths under the tempdir.
@@ -12,8 +12,8 @@ use std::sync::Mutex;
 /// Tests that mutate process env must be serialized.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-/// RAII guard: captures the prior values of HOME, STT_GUARD_SNAPSHOT_MANIFEST,
-/// and STT_GUARD_STATE_DIR at construction; restores them on Drop — even on
+/// RAII guard: captures the prior values of HOME, `STT_GUARD_SNAPSHOT_MANIFEST`,
+/// and `STT_GUARD_STATE_DIR` at construction; restores them on Drop — even on
 /// test-closure panic.
 struct EnvGuard<'a> {
     _lock: std::sync::MutexGuard<'a, ()>,
@@ -37,7 +37,7 @@ impl<'a> EnvGuard<'a> {
     }
 }
 
-impl<'a> Drop for EnvGuard<'a> {
+impl Drop for EnvGuard<'_> {
     fn drop(&mut self) {
         unsafe {
             match self.prev_home.take() {
@@ -192,7 +192,7 @@ fn fail_closed_when_manifest_path_outside_state_dir() {
         let r = load_from_env();
         match r {
             Err(LoadError::PathOutsideStateDir { .. }) => {}
-            other => panic!("expected PathOutsideStateDir, got {:?}", other),
+            other => panic!("expected PathOutsideStateDir, got {other:?}"),
         }
     });
 }

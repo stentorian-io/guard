@@ -50,6 +50,7 @@ pub const SECRET_SUBSTRING_PATTERNS: &[&str] =
 
 /// Returns true if `key` is on the denylist or contains a credential-like
 /// substring pattern.
+#[must_use]
 pub fn is_secret_key(key: &str) -> bool {
     if SECRET_DENYLIST.iter().any(|d| d.eq_ignore_ascii_case(key)) {
         return true;
@@ -65,6 +66,7 @@ pub fn is_secret_key(key: &str) -> bool {
 }
 
 /// Returns true if `key` starts with any prefix in the allowlist.
+#[must_use]
 pub fn is_pm_env_key(key: &str) -> bool {
     PM_ENV_PREFIXES.iter().any(|p| key.starts_with(p))
 }
@@ -72,6 +74,7 @@ pub fn is_pm_env_key(key: &str) -> bool {
 pub const MAX_VALUE_BYTES: usize = 512;
 
 /// Truncate a value to `MAX_VALUE_BYTES` respecting UTF-8 char boundaries.
+#[must_use]
 pub fn truncate_value(value: &str) -> &str {
     if value.len() <= MAX_VALUE_BYTES {
         return value;

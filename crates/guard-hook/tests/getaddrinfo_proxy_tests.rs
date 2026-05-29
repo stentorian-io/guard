@@ -1,4 +1,4 @@
-//! M005-S01: guard_getaddrinfo daemon-proxied DNS tests.
+//! M005-S01: `guard_getaddrinfo` daemon-proxied DNS tests.
 //!
 //! Verifies that getaddrinfo interpose correctly proxies through the daemon:
 //! - Resolve IPC round-trip with a stub daemon
@@ -78,7 +78,7 @@ unsafe extern "C" {
 
 // ---- Test 1: getaddrinfo returns addresses from stub daemon ----
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn getaddrinfo_proxy_returns_v4_address() {
     let _lock = SOCKET_TEST_LOCK.lock().unwrap();
@@ -101,7 +101,7 @@ fn getaddrinfo_proxy_returns_v4_address() {
             node.as_ptr(),
             service.as_ptr(),
             std::ptr::null(),
-            &mut result,
+            &raw mut result,
         )
     };
     _clear_daemon_socket_for_test();
@@ -113,14 +113,15 @@ fn getaddrinfo_proxy_returns_v4_address() {
     let ai = unsafe { &*result };
     assert_eq!(ai.ai_family, libc::AF_INET);
     assert_eq!(
-        ai.ai_addrlen as usize,
+        usize::try_from(ai.ai_addrlen).unwrap_or(0),
         std::mem::size_of::<libc::sockaddr_in>()
     );
     assert!(!ai.ai_addr.is_null());
 
     // Verify the sockaddr contents.
-    let sin = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in) };
-    assert_eq!(sin.sin_family, libc::AF_INET as libc::sa_family_t);
+    let sin = unsafe { std::ptr::read_unaligned(ai.ai_addr.cast::<libc::sockaddr_in>()) };
+    let af_inet = libc::sa_family_t::try_from(libc::AF_INET).unwrap_or(0);
+    assert_eq!(sin.sin_family, af_inet);
     assert_eq!(u16::from_be(sin.sin_port), 443);
     let ip_bytes = sin.sin_addr.s_addr.to_ne_bytes();
     assert_eq!(ip_bytes, [1, 2, 3, 4]);
@@ -134,7 +135,7 @@ fn getaddrinfo_proxy_returns_v4_address() {
 
 // ---- Test 2: getaddrinfo with mixed v4+v6 addresses ----
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn getaddrinfo_proxy_returns_mixed_v4_v6() {
     let _lock = SOCKET_TEST_LOCK.lock().unwrap();
@@ -154,7 +155,7 @@ fn getaddrinfo_proxy_returns_mixed_v4_v6() {
             node.as_ptr(),
             service.as_ptr(),
             std::ptr::null(),
-            &mut result,
+            &raw mut result,
         )
     };
     _clear_daemon_socket_for_test();
@@ -181,7 +182,7 @@ fn getaddrinfo_proxy_returns_mixed_v4_v6() {
 
 // ---- Test 3: hint_family filters addresses ----
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn getaddrinfo_proxy_respects_hint_family() {
     let _lock = SOCKET_TEST_LOCK.lock().unwrap();
@@ -206,7 +207,14 @@ fn getaddrinfo_proxy_respects_hint_family() {
     };
     let mut result: *mut libc::addrinfo = std::ptr::null_mut();
 
-    let rc = unsafe { guard_getaddrinfo(node.as_ptr(), service.as_ptr(), &hints, &mut result) };
+    let rc = unsafe {
+        guard_getaddrinfo(
+            node.as_ptr(),
+            service.as_ptr(),
+            &raw const hints,
+            &raw mut result,
+        )
+    };
     _clear_daemon_socket_for_test();
 
     assert_eq!(rc, 0);
@@ -222,7 +230,7 @@ fn getaddrinfo_proxy_respects_hint_family() {
 
 // ---- Test 4: no daemon → EAI_AGAIN ----
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn getaddrinfo_proxy_returns_eai_again_when_no_daemon() {
     let _lock = SOCKET_TEST_LOCK.lock().unwrap();
@@ -237,7 +245,7 @@ fn getaddrinfo_proxy_returns_eai_again_when_no_daemon() {
             node.as_ptr(),
             std::ptr::null(),
             std::ptr::null(),
-            &mut result,
+            &raw mut result,
         )
     };
 
@@ -247,7 +255,7 @@ fn getaddrinfo_proxy_returns_eai_again_when_no_daemon() {
 
 // ---- Test 5: deny → EAI_FAIL ----
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn getaddrinfo_proxy_returns_eai_fail_on_deny() {
     let _lock = SOCKET_TEST_LOCK.lock().unwrap();
@@ -265,7 +273,7 @@ fn getaddrinfo_proxy_returns_eai_fail_on_deny() {
             node.as_ptr(),
             service.as_ptr(),
             std::ptr::null(),
-            &mut result,
+            &raw mut result,
         )
     };
     _clear_daemon_socket_for_test();
@@ -276,7 +284,7 @@ fn getaddrinfo_proxy_returns_eai_fail_on_deny() {
 
 // ---- Test 6: FAIL_CLOSED → EAI_FAIL (S04: fail-closed consistency) ----
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn getaddrinfo_returns_eai_fail_when_fail_closed() {
     let _lock = SOCKET_TEST_LOCK.lock().unwrap();
@@ -294,7 +302,7 @@ fn getaddrinfo_returns_eai_fail_when_fail_closed() {
             node.as_ptr(),
             service.as_ptr(),
             std::ptr::null(),
-            &mut result,
+            &raw mut result,
         )
     };
     _clear_daemon_socket_for_test();
@@ -306,7 +314,7 @@ fn getaddrinfo_returns_eai_fail_when_fail_closed() {
 
 // ---- Test 7: null node → EAI_AGAIN (can't proxy wildcard lookups) ----
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn getaddrinfo_proxy_returns_eai_again_for_null_node() {
     let _lock = SOCKET_TEST_LOCK.lock().unwrap();
@@ -322,7 +330,7 @@ fn getaddrinfo_proxy_returns_eai_again_for_null_node() {
             std::ptr::null(),
             std::ptr::null(),
             std::ptr::null(),
-            &mut result,
+            &raw mut result,
         )
     };
     _clear_daemon_socket_for_test();

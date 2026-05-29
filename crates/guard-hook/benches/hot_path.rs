@@ -1,7 +1,7 @@
 //! MATCHER-ONLY microbench against `guard_core::evaluate_rule`.
 //!
 //! NOT load-bearing for the D-03 / VAL-03 < 100µs hot-path budget — this file
-//! exercises only the rule-matching tier of the hot path (CuratedAllow Exact /
+//! exercises only the rule-matching tier of the hot path (`CuratedAllow` Exact /
 //! Suffix / Ip walks via `evaluate_rule`). It does NOT exercise:
 //!  * `with_cache(...)` mutex acquisition (the actual per-call locking cost),
 //!  * `decide_for_sockaddr` sockaddr-decode + cache-lookup,
@@ -50,13 +50,13 @@ fn misleading_micro_bench(c: &mut Criterion) {
         entry(RuleKind::Allow, MatchType::Exact, "localhost"),
     ];
     c.bench_function("misleading-microbench/match exact hit npmjs", |b| {
-        b.iter(|| walk(black_box(&entries), black_box(b"registry.npmjs.org")))
+        b.iter(|| walk(black_box(&entries), black_box(b"registry.npmjs.org")));
     });
     c.bench_function("misleading-microbench/match suffix hit example.com", |b| {
-        b.iter(|| walk(black_box(&entries), black_box(b"foo.bar.example.com")))
+        b.iter(|| walk(black_box(&entries), black_box(b"foo.bar.example.com")));
     });
     c.bench_function("misleading-microbench/match miss evil.example.org", |b| {
-        b.iter(|| walk(black_box(&entries), black_box(b"evil.example.org")))
+        b.iter(|| walk(black_box(&entries), black_box(b"evil.example.org")));
     });
 }
 

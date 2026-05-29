@@ -1,28 +1,10 @@
 //! Stentorian Guard hook cdylib (stt-guard-hook.dylib).
 //!
-//! Loaded via DYLD_INSERT_LIBRARIES; intercepts libc outbound calls (D-08).
+//! Loaded via `DYLD_INSERT_LIBRARIES`; intercepts libc outbound calls (D-08).
 //! v0.1 layers Network.framework on top by adding `replace_nw` and modifying
 //! the constructor to dlsym Network.framework symbols.
 //!
 //! Hot-path discipline (D-03): NO heap allocation on intercepted-call paths.
-
-#![allow(unused_unsafe)]
-// This crate is a DYLD interpose dylib: every `pub unsafe extern "C" fn` is a
-// C-ABI shadow whose safety semantics ARE the underlying C function's contract
-// (caller-supplied pointers must point to valid C strings / sockaddrs / etc.).
-// Adding boilerplate `# Safety` sections on each shadow would duplicate the
-// upstream POSIX/Darwin man pages without adding information. The interpose
-// crate-wide intent is "C-ABI passthrough; semantics inherited from libc/Darwin".
-#![allow(clippy::missing_safety_doc)]
-// `pub fn copy_cstr_to_buf(p: *const c_char, ...)` is intentionally a SAFE
-// function over a raw pointer: it null-checks the pointer and bounded-copies
-// up to `buf.len()` bytes, dereferencing only when `p` is non-null. Callers
-// from the exec hooks (also FFI) depend on the safe-API ergonomics. The lint
-// is overly conservative for this defensive-copy helper.
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
-// Pre-existing v0.1 patterns flagged once v0.2 added clippy to
-// guard-hook's verification gate.
-#![allow(clippy::needless_lifetimes, clippy::unnecessary_cast, dead_code)]
 
 pub mod cache;
 pub mod env_scrub; // M004-S04: scrub STT_GUARD_*/DYLD_INSERT_LIBRARIES from environ
@@ -56,17 +38,21 @@ use log_buffer::LOG_RING;
 pub static FAIL_CLOSED: &AtomicBool = &snapshot::FAIL_CLOSED;
 
 /// Process-global mutable allowlist entries — populated at ctor time, immutable thereafter.
-/// Wrapped in OnceLock so the hot path only sees a fully-initialized value.
+/// Wrapped in `OnceLock` so the hot path only sees a fully-initialized value.
 pub static ALLOWLIST: std::sync::OnceLock<Vec<guard_core::AllowlistEntry>> =
     std::sync::OnceLock::new();
 
 /// Test-only helper: call `replace_libc::decide_for_sockaddr` with a temporary ALLOWLIST
-/// override so integration tests can verify the full Resolve-IPC → cache → evaluate_policy
+/// override so integration tests can verify the full Resolve-IPC → cache → `evaluate_policy`
 /// chain without running the ctor or needing a real snapshot.
 ///
-/// `_` prefix signals test-seam convention (not for production use).
 /// Exposed as pub because integration tests in `tests/` cannot see crate-private items.
-pub fn _test_decide_for_sockaddr(
+///
+/// # Safety
+///
+/// `addr` must be null or point to a valid sockaddr of at least `addrlen`
+/// bytes.
+pub unsafe fn test_decide_for_sockaddr(
     entries: Vec<guard_core::AllowlistEntry>,
     addr: *const libc::sockaddr,
     addrlen: libc::socklen_t,
@@ -79,7 +65,7 @@ pub fn _test_decide_for_sockaddr(
     snapshot::FAIL_CLOSED.store(false, core::sync::atomic::Ordering::Release);
     // SAFETY: caller provides a valid sockaddr pointer with matching addrlen.
     let (verdict, _source) =
-        unsafe { crate::replace_libc::_decide_for_sockaddr_pub(addr, addrlen) };
+        unsafe { crate::replace_libc::decide_for_sockaddr_for_test(addr, addrlen) };
     verdict
 }
 
@@ -127,7 +113,7 @@ unsafe fn guard_hook_init() {
         }
         Err(e) => {
             snapshot::FAIL_CLOSED.store(true, Ordering::Release);
-            let line = format!("[guard-hook] FAIL_CLOSED — snapshot load failed: {:?}", e);
+            let line = format!("[guard-hook] FAIL_CLOSED — snapshot load failed: {e:?}");
             LOG_RING.append(line.as_bytes());
         }
     }
@@ -138,7 +124,7 @@ unsafe fn guard_hook_init() {
         let state_dir = crate::snapshot::well_known_state_dir();
         if let Err(e) = crate::self_check::verify(&state_dir) {
             snapshot::FAIL_CLOSED.store(true, Ordering::Release);
-            let line = format!("[guard-hook] FAIL_CLOSED — self-check failed: {:?}", e);
+            let line = format!("[guard-hook] FAIL_CLOSED — self-check failed: {e:?}");
             LOG_RING.append(line.as_bytes());
         }
     }
@@ -160,8 +146,8 @@ unsafe fn guard_hook_init() {
         // Daemon's authoritative parent identity remains kernel peer-auth
         // (ENF-08); the wire fields are advisory.
         // SAFETY: getpid()/getppid() are async-signal-safe and always succeed.
-        let pid = unsafe { libc::getpid() } as u32;
-        let ppid = unsafe { libc::getppid() } as u32;
+        let pid = u32::try_from(unsafe { libc::getpid() }).unwrap_or(0);
+        let ppid = u32::try_from(unsafe { libc::getppid() }).unwrap_or(0);
         let mut tok_val = [0u32; 8];
         tok_val[5] = pid;
         tok_val[6] = ppid;
@@ -211,15 +197,15 @@ unsafe fn guard_hook_init() {
     env_scrub::SCRUB_ACTIVE.store(true, Ordering::Release);
 }
 
-/// Write a marker file to the path given by STT_GUARD_TEST_MARKER if the env var is set.
+/// Write a marker file to the path given by `STT_GUARD_TEST_MARKER` if the env var is set.
 ///
-/// This is a test-only hook. Production processes never set STT_GUARD_TEST_MARKER.
+/// This is a test-only hook. Production processes never set `STT_GUARD_TEST_MARKER`.
 /// The file is written during the dylib constructor so its existence proves the ctor ran,
-/// which is the cheapest reliable evidence that DYLD_INSERT_LIBRARIES loaded our dylib.
+/// which is the cheapest reliable evidence that `DYLD_INSERT_LIBRARIES` loaded our dylib.
 ///
 /// # Safety
-/// Called from the dylib constructor (single-threaded, pre-main). libc::getenv is
-/// safe here because no concurrent setenv can occur before main() starts.
+/// Called from the dylib constructor (single-threaded, pre-main). `libc::getenv` is
+/// safe here because no concurrent setenv can occur before `main()` starts.
 unsafe fn write_test_marker_if_set() {
     use std::ffi::CStr;
     // Use libc::getenv to stay allocation-free until we know the env var is set.

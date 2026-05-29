@@ -2,13 +2,13 @@
 //!
 //! Calls `libc::posix_spawn` directly with an explicit envp containing both:
 //!   - benign PM env vars (`npm_package_name`, `npm_lifecycle_event`,
-//!     `CARGO_PKG_NAME`) that MUST be captured into ProcessNode.pm_env_snapshot
+//!     `CARGO_PKG_NAME`) that MUST be captured into `ProcessNode.pm_env_snapshot`
 //!   - decoy denylisted secret env vars (`NPM_TOKEN`, `CARGO_REGISTRY_TOKEN`,
 //!     `npm_config_authToken`) that MUST be filtered out by the dylib's
 //!     defense-in-depth `pm_env_filter` BEFORE the IPC frame is sent.
 //!
-//! Inherits STT_GUARD_DAEMON_SOCKET / STT_GUARD_SNAPSHOT_MANIFEST /
-//! DYLD_INSERT_LIBRARIES from the wrapped `stt-guard wrap` invocation so the
+//! Inherits `STT_GUARD_DAEMON_SOCKET` / `STT_GUARD_SNAPSHOT_MANIFEST` /
+//! `DYLD_INSERT_LIBRARIES` from the wrapped `stt-guard wrap` invocation so the
 //! child still loads the dylib and can talk to the daemon. Plus the
 //! `STT_GUARD_E2E_PROBE` env vars are prepended explicitly into the spawned
 //! envp so the test-side filter has known input.
@@ -68,10 +68,8 @@ fn main() {
         .iter()
         .map(|(k, v)| CString::new(format!("{k}={v}")).expect("envp cstring"))
         .collect();
-    let mut envp_ptrs: Vec<*mut libc::c_char> = env_cstrings
-        .iter()
-        .map(|c| c.as_ptr() as *mut libc::c_char)
-        .collect();
+    let mut envp_ptrs: Vec<*mut libc::c_char> =
+        env_cstrings.iter().map(|c| c.as_ptr().cast_mut()).collect();
     envp_ptrs.push(ptr::null_mut());
 
     // 2. Build argv: /bin/sh -c 'true'. The inner /bin/sh is hardened (Apple
@@ -84,21 +82,21 @@ fn main() {
     let arg0 = CString::new("/bin/sh").expect("cstring arg0");
     let arg1 = CString::new("-c").expect("cstring -c");
     let arg2 = CString::new("true").expect("cstring true");
-    let argv: [*mut libc::c_char; 4] = [
-        arg0.as_ptr() as *mut libc::c_char,
-        arg1.as_ptr() as *mut libc::c_char,
-        arg2.as_ptr() as *mut libc::c_char,
+    let command_argv: [*mut libc::c_char; 4] = [
+        arg0.as_ptr().cast_mut(),
+        arg1.as_ptr().cast_mut(),
+        arg2.as_ptr().cast_mut(),
         ptr::null_mut(),
     ];
 
     let mut pid: libc::pid_t = 0;
     let rc = unsafe {
         libc::posix_spawn(
-            &mut pid as *mut libc::pid_t,
+            &raw mut pid,
             path.as_ptr(),
             ptr::null(),
             ptr::null(),
-            argv.as_ptr(),
+            command_argv.as_ptr(),
             envp_ptrs.as_ptr(),
         )
     };
@@ -110,7 +108,7 @@ fn main() {
     // Reap the child so the daemon's tree GC sees a clean exit.
     let mut status: libc::c_int = 0;
     unsafe {
-        libc::waitpid(pid, &mut status, 0);
+        libc::waitpid(pid, &raw mut status, 0);
     }
     let exit_code = libc::WEXITSTATUS(status);
     println!("pm_env_posix_spawn: child pid={pid} exit={exit_code}");

@@ -1,12 +1,12 @@
 //! Process-tree supervisor (TREE-03/04/05/06).
 //!
-//! v0.1 used `TrackedRoots` (HashSet of AuditToken) for the simple
+//! v0.1 used `TrackedRoots` (`HashSet` of `AuditToken`) for the simple
 //! "is this process a tracked root?" question. v0.2 grows into a full
-//! tree: nodes are keyed by AuditToken (NOT pid — TREE-05 reparenting
+//! tree: nodes are keyed by `AuditToken` (NOT pid — TREE-05 reparenting
 //! requires a stable identity), each carries a parent link + a copied
 //! `tracked_root` field set at fork time and immutable thereafter.
 //!
-//! Migration: ipc_server.rs (Task 4) is updated to call `insert_root`
+//! Migration: `ipc_server.rs` (Task 4) is updated to call `insert_root`
 //! instead of `insert`. The v0.1 `TrackedRoots` type is removed.
 
 use crossbeam_channel::Sender;
@@ -22,7 +22,7 @@ pub struct ProcessNode {
     /// None for tracked-roots; Some(parent) for children.
     pub parent_audit_token: Option<AuditToken>,
     /// The original `stt-guard wrap` root this node descends from. Set at fork
-    /// time (or insert_root for the root itself) and NEVER changed afterwards
+    /// time (or `insert_root` for the root itself) and NEVER changed afterwards
     /// — TREE-05: surviving reparenting means surviving ppid changes; the
     /// `tracked_root` field is the immutable view of "which stt-guard wrap does
     /// this process belong to."
@@ -30,29 +30,29 @@ pub struct ProcessNode {
     pub run_uuid: String,
     pub binary_path: String,
     pub coverage_gap: Option<CoverageGap>,
-    /// v0.3: PM env subset captured from ExecEvent V3.
-    /// None until an ExecEvent V3 with non-empty pm_env arrives for this node.
+    /// v0.3: PM env subset captured from `ExecEvent` V3.
+    /// None until an `ExecEvent` V3 with non-empty `pm_env` arrives for this node.
     pub pm_env_snapshot: Option<Vec<(String, String)>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoverageGap {
-    /// csops pre-check was hardened AND DylibLoaded never arrived.
+    /// csops pre-check was hardened AND `DylibLoaded` never arrived.
     ConfirmedHardened {
         binary_path: String,
         detected_at_ms: u64,
     },
-    /// csops pre-check was NOT hardened but DylibLoaded never arrived — DYLD
-    /// env var was lost (e.g. via `setsid`+ explicit env-clearing posix_spawn).
+    /// csops pre-check was NOT hardened but `DylibLoaded` never arrived — DYLD
+    /// env var was lost (e.g. via `setsid`+ explicit env-clearing `posix_spawn`).
     UnknownInjectionFailure {
         binary_path: String,
         detected_at_ms: u64,
     },
-    /// TREE-06: parent's posix_spawn was called with envp missing one or
-    /// more of {DYLD_INSERT_LIBRARIES, STT_GUARD_DAEMON_SOCKET,
-    /// STT_GUARD_SNAPSHOT_MANIFEST}. The child cannot inherit dylib
-    /// injection. Detected by the dylib's posix_spawn shadow PRE-SPAWN.
-    /// Recorded on the PARENT's ProcessNode (gap-closure 02-09).
+    /// TREE-06: parent's `posix_spawn` was called with envp missing one or
+    /// more of {`DYLD_INSERT_LIBRARIES`, `STT_GUARD_DAEMON_SOCKET`,
+    /// `STT_GUARD_SNAPSHOT_MANIFEST`}. The child cannot inherit dylib
+    /// injection. Detected by the dylib's `posix_spawn` shadow PRE-SPAWN.
+    /// Recorded on the PARENT's `ProcessNode` (gap-closure 02-09).
     EnvNotPropagated {
         binary_path: String,
         detected_at_ms: u64,
@@ -77,9 +77,9 @@ pub struct RunRecord {
 pub struct ProcessTree {
     nodes: RwLock<HashMap<AuditToken, ProcessNode>>,
     runs: RwLock<HashMap<String, RunRecord>>,
-    /// v0.3: long-lived prompt-channel senders keyed by run_uuid.
-    /// Sender<PromptRequest> does not implement Clone cleanly into RunRecord
-    /// (it would require RunRecord to become non-Clone), so it lives in a
+    /// v0.3: long-lived prompt-channel senders keyed by `run_uuid`.
+    /// Sender<PromptRequest> does not implement Clone cleanly into `RunRecord`
+    /// (it would require `RunRecord` to become non-Clone), so it lives in a
     /// parallel registry — per RESEARCH.md guidance.
     prompt_channels: RwLock<HashMap<String, Sender<PromptRequest>>>,
 }
@@ -93,6 +93,7 @@ pub enum TreeError {
 }
 
 impl ProcessTree {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -106,7 +107,10 @@ impl ProcessTree {
     ) -> bool {
         // WARNING-03: tolerate poison so a worker panic in one handler does
         // not poison the daemon-wide process tree forever.
-        let mut g = self.nodes.write().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .nodes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if g.contains_key(&audit_token) {
             return false;
         }
@@ -123,6 +127,11 @@ impl ProcessTree {
         true
     }
 
+    /// Record a fork edge from a tracked parent to a child.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ParentNotFound` when the parent token is not tracked.
     pub fn record_fork(
         &self,
         parent_audit_token: AuditToken,
@@ -130,7 +139,10 @@ impl ProcessTree {
     ) -> Result<(), TreeError> {
         // WARNING-03: tolerate poison so a worker panic in one handler does
         // not poison the daemon-wide process tree forever.
-        let mut g = self.nodes.write().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .nodes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let parent = g
             .get(&parent_audit_token)
             .ok_or(TreeError::ParentNotFound)?
@@ -151,6 +163,11 @@ impl ProcessTree {
         Ok(())
     }
 
+    /// Record the binary path for a tracked exec.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NodeNotFound` when the process token is not tracked.
     pub fn record_exec(
         &self,
         audit_token: AuditToken,
@@ -158,12 +175,20 @@ impl ProcessTree {
     ) -> Result<(), TreeError> {
         // WARNING-03: tolerate poison so a worker panic in one handler does
         // not poison the daemon-wide process tree forever.
-        let mut g = self.nodes.write().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .nodes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let node = g.get_mut(&audit_token).ok_or(TreeError::NodeNotFound)?;
         node.binary_path = binary_path;
         Ok(())
     }
 
+    /// Mark a tracked process with a coverage gap.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NodeNotFound` when the process token is not tracked.
     pub fn set_coverage_gap(
         &self,
         audit_token: AuditToken,
@@ -171,7 +196,10 @@ impl ProcessTree {
     ) -> Result<(), TreeError> {
         // WARNING-03: tolerate poison so a worker panic in one handler does
         // not poison the daemon-wide process tree forever.
-        let mut g = self.nodes.write().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .nodes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let node = g.get_mut(&audit_token).ok_or(TreeError::NodeNotFound)?;
         node.coverage_gap = Some(gap);
         Ok(())
@@ -180,17 +208,20 @@ impl ProcessTree {
     pub fn get_node(&self, audit_token: &AuditToken) -> Option<ProcessNode> {
         self.nodes
             .read()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(audit_token)
             .cloned()
     }
 
     // --- v0.3: pm_env snapshot ---
 
-    /// Store the filtered PM env snapshot on a ProcessNode identified by audit_token.
-    /// No-op if the audit_token is not in the tree (untracked peer race — safe to ignore).
+    /// Store the filtered PM env snapshot on a `ProcessNode` identified by `audit_token`.
+    /// No-op if the `audit_token` is not in the tree (untracked peer race — safe to ignore).
     pub fn set_pm_env_snapshot(&self, audit_token: &AuditToken, pm_env: Vec<(String, String)>) {
-        let mut g = self.nodes.write().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .nodes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(node) = g.get_mut(audit_token) {
             node.pm_env_snapshot = Some(pm_env);
         }
@@ -198,19 +229,25 @@ impl ProcessTree {
 
     // --- v0.3: run field setters ---
 
-    /// Update is_tty on a RunRecord identified by run_uuid.
-    /// No-op if the run_uuid is not in the map.
+    /// Update `is_tty` on a `RunRecord` identified by `run_uuid`.
+    /// No-op if the `run_uuid` is not in the map.
     pub fn set_run_is_tty(&self, run_uuid: &str, is_tty: bool) {
-        let mut g = self.runs.write().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .runs
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(rec) = g.get_mut(run_uuid) {
             rec.is_tty = is_tty;
         }
     }
 
-    /// Update baseline_mode on a RunRecord identified by run_uuid.
-    /// No-op if the run_uuid is not in the map.
+    /// Update `baseline_mode` on a `RunRecord` identified by `run_uuid`.
+    /// No-op if the `run_uuid` is not in the map.
     pub fn set_run_baseline_mode(&self, run_uuid: &str, baseline_mode: bool) {
-        let mut g = self.runs.write().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .runs
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(rec) = g.get_mut(run_uuid) {
             rec.baseline_mode = baseline_mode;
         }
@@ -220,123 +257,149 @@ impl ProcessTree {
     /// wrapped child and obtained its kernel audit token.
     pub fn bind_run_root(&self, run_uuid: &str, tracked_root: AuditToken) {
         {
-            let mut runs = self.runs.write().unwrap_or_else(|p| p.into_inner());
+            let mut runs = self
+                .runs
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(rec) = runs.get_mut(run_uuid) {
                 rec.tracked_root = tracked_root;
             }
         }
-        let mut nodes = self.nodes.write().unwrap_or_else(|p| p.into_inner());
+        let mut nodes = self
+            .nodes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(node) = nodes.get_mut(&tracked_root) {
             node.run_uuid = run_uuid.to_string();
             node.tracked_root = tracked_root;
         }
     }
 
-    /// Return all active RunRecords (used by StatusReply handler).
+    /// Return all active `RunRecords` (used by `StatusReply` handler).
     pub fn list_runs(&self) -> Vec<RunRecord> {
-        let g = self.runs.read().unwrap_or_else(|p| p.into_inner());
+        let g = self
+            .runs
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         g.values().cloned().collect()
     }
 
     // --- v0.3: prompt-channel registry ---
 
-    /// Register a long-lived prompt-channel Sender for the given run_uuid.
-    /// Called by the PromptChannelInit handler.
+    /// Register a long-lived prompt-channel Sender for the given `run_uuid`.
+    /// Called by the `PromptChannelInit` handler.
     pub fn set_prompt_channel(&self, run_uuid: &str, sender: Sender<PromptRequest>) {
         let mut g = self
             .prompt_channels
             .write()
-            .unwrap_or_else(|p| p.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         g.insert(run_uuid.to_string(), sender);
     }
 
-    /// Remove and return the prompt-channel Sender for the given run_uuid.
+    /// Remove and return the prompt-channel Sender for the given `run_uuid`.
     /// Called when the prompt channel connection closes or the run ends.
     pub fn take_prompt_channel(&self, run_uuid: &str) -> Option<Sender<PromptRequest>> {
         let mut g = self
             .prompt_channels
             .write()
-            .unwrap_or_else(|p| p.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         g.remove(run_uuid)
     }
 
-    /// Clone and return the prompt-channel Sender for the given run_uuid.
+    /// Clone and return the prompt-channel Sender for the given `run_uuid`.
     /// Returns None if no channel is registered for this run.
     /// Sender is cheap to clone (Arc internals).
     pub fn get_prompt_channel(&self, run_uuid: &str) -> Option<Sender<PromptRequest>> {
         let g = self
             .prompt_channels
             .read()
-            .unwrap_or_else(|p| p.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         g.get(run_uuid).cloned()
     }
 
     /// Return the number of active long-lived prompt channels.
-    /// Used by ipc_server.rs's R-05 cap gate.
+    /// Used by `ipc_server.rs`'s R-05 cap gate.
     pub fn prompt_channels_len(&self) -> usize {
         let g = self
             .prompt_channels
             .read()
-            .unwrap_or_else(|p| p.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         g.len()
     }
 
     pub fn is_tracked(&self, audit_token: &AuditToken) -> bool {
         self.nodes
             .read()
-            .expect("process_tree nodes read")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains_key(audit_token)
     }
 
     pub fn is_tracked_root(&self, audit_token: &AuditToken) -> bool {
-        let g = self.nodes.read().expect("process_tree nodes read");
+        let g = self
+            .nodes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         g.get(audit_token)
-            .map(|n| n.parent_audit_token.is_none() && n.tracked_root == *audit_token)
-            .unwrap_or(false)
+            .is_some_and(|n| n.parent_audit_token.is_none() && n.tracked_root == *audit_token)
     }
 
     pub fn nodes_len(&self) -> usize {
-        self.nodes.read().unwrap_or_else(|p| p.into_inner()).len()
+        self.nodes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 
-    /// Return the first node whose audit_token has val[5] == pid.
+    /// Return the first node whose `audit_token` has val[5] == pid.
     /// Used by unit tests that need to find a node by pid without knowing
     /// the full 8-field kernel audit token.
     pub fn find_node_by_pid(&self, pid: u32) -> Option<ProcessNode> {
-        let g = self.nodes.read().unwrap_or_else(|p| p.into_inner());
+        let g = self
+            .nodes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         g.values().find(|n| n.audit_token.val[5] == pid).cloned()
     }
 
     // --- run records ---
 
     pub fn insert_run(&self, run: RunRecord) {
-        let mut g = self.runs.write().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .runs
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         g.insert(run.run_uuid.clone(), run);
     }
 
     pub fn remove_run(&self, run_uuid: &str) -> Option<RunRecord> {
         self.runs
             .write()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(run_uuid)
     }
 
     pub fn get_run(&self, run_uuid: &str) -> Option<RunRecord> {
         self.runs
             .read()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(run_uuid)
             .cloned()
     }
 
     pub fn runs_len(&self) -> usize {
-        self.runs.read().unwrap_or_else(|p| p.into_inner()).len()
+        self.runs
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 
     /// Return (pid, pidversion) pairs for all tracked nodes.
     /// Used by the persistence watcher for process attribution.
     pub fn list_tracked_pids(&self) -> Vec<(u32, u32)> {
-        let g = self.nodes.read().unwrap_or_else(|p| p.into_inner());
+        let g = self
+            .nodes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         g.values()
             .map(|n| (n.audit_token.val[5], n.audit_token.val[7]))
             .collect()

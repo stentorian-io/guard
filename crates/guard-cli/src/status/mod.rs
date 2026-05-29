@@ -36,6 +36,11 @@ fn read_watchdog_health(state_dir: &Path) -> Option<WatchdogHealth> {
     serde_json::from_str(&content).ok()
 }
 
+/// Query and render daemon status.
+///
+/// # Errors
+///
+/// Returns an error when the daemon status request fails.
 pub fn run_status(sock: &Path, state_dir: &Path) -> Result<i32, CliError> {
     let reply = crate::ipc_client::status_request(sock)?;
 
@@ -44,22 +49,14 @@ pub fn run_status(sock: &Path, state_dir: &Path) -> Result<i32, CliError> {
             eprintln!("stt-guard: error — {message}");
             Ok(2)
         }
-        StatusReply::Ok {
-            daemon_state,
-            tracked_roots,
-            recent_gaps,
-            counters,
-            install_info,
-            signing_info,
-            ..
-        } => {
+        StatusReply::Ok(status) => {
             render_verbose(
-                daemon_state,
-                &tracked_roots,
-                &recent_gaps,
-                &counters,
-                install_info.as_ref(),
-                signing_info.as_ref(),
+                status.daemon_state,
+                &status.tracked_roots,
+                &status.recent_gaps,
+                &status.counters,
+                status.install_info.as_ref(),
+                status.signing_info.as_ref(),
             );
             render_risk_exposure(sock);
             if let Some(wd) = read_watchdog_health(state_dir) {
@@ -196,13 +193,11 @@ pub fn render_risk_exposure(sock: &Path) {
 pub fn render_risk_exposure_to<W: std::io::Write>(w: &mut W, sock: &Path) {
     use guard_core::RuleTier;
 
-    let curated = match guard_daemon::curated::load_curated() {
-        Ok(entries) => entries,
-        Err(_) => return,
+    let Ok(curated) = guard_daemon::curated::load_curated() else {
+        return;
     };
-    let user_rules = match crate::ipc_client::list_rules_request(sock, false) {
-        Ok(rules) => rules,
-        Err(_) => return,
+    let Ok(user_rules) = crate::ipc_client::list_rules_request(sock, false) else {
+        return;
     };
 
     let user_allows: Vec<_> = user_rules.iter().filter(|r| r.kind == "allow").collect();
@@ -288,8 +283,7 @@ mod render_tests {
             let first_line = s.lines().next().unwrap_or("");
             assert_eq!(
                 first_line, *expected_first_line,
-                "render_verbose_to({:?}): first line mismatch",
-                state
+                "render_verbose_to({state:?}): first line mismatch"
             );
         }
     }

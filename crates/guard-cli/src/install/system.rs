@@ -46,7 +46,7 @@ pub fn system_state_dir() -> PathBuf {
 /// Print the action plan the user is about to confirm.
 #[cfg(target_os = "linux")]
 pub fn print_plan() {
-    eprintln!("stt-guard init is not available on Linux yet.");
+    eprintln!("stt-guard system install is not available on Linux yet.");
     eprintln!("  • Linux LD_PRELOAD enforcement is available for development builds.");
     eprintln!(
         "  • Hardened production install is blocked on systemd service and hardware-backed signer design."
@@ -56,7 +56,7 @@ pub fn print_plan() {
 /// Print the action plan the user is about to confirm.
 #[cfg(not(target_os = "linux"))]
 pub fn print_plan() {
-    eprintln!("stt-guard init will:");
+    eprintln!("stt-guard system install will:");
     eprintln!("  • Create {SERVICE_USER} service user (no login shell, /var/empty home)");
     eprintln!("  • Copy binaries to {BIN_DIR}/ (root:wheel, 755)");
     eprintln!("  • Copy hook dylib to {BIN_DIR}/ (root:wheel, 644)");
@@ -89,14 +89,14 @@ pub fn run_install() -> Result<(), CliError> {
     register_rule_signer(&enrollment, service_gid)?;
     install_launchdaemon()?;
     start_daemon()?;
-    eprintln!("\nstt-guard: initialisation complete.");
+    eprintln!("\nstt-guard: system install complete.");
     Ok(())
 }
 
 fn require_root() -> Result<(), CliError> {
     if !nix_is_root() {
         return Err(CliError::Other(
-            "stt-guard init requires root. Run: sudo stt-guard init".into(),
+            "stt-guard system install requires root. Run the installer or stt-guard update.".into(),
         ));
     }
     Ok(())

@@ -25,7 +25,7 @@ fn real_main() -> Result<i32, CliError> {
     let cli = Cli::parse();
 
     match cli.cmd {
-        Cmd::Init { yes } => {
+        Cmd::InstallSystem { yes } => {
             guard_cli::install::system::print_plan();
             if !yes {
                 eprintln!();
@@ -38,6 +38,7 @@ fn real_main() -> Result<i32, CliError> {
             guard_cli::install::system::run_install()?;
             Ok(0)
         }
+        Cmd::Update { check, version } => guard_cli::install::update::run_update(check, version),
         Cmd::Wrap { learn, argv } => {
             if learn && !guard_cli::tty::stdin_is_tty() {
                 eprintln!(

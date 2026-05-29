@@ -12,11 +12,11 @@ use std::ffi::OsString;
 Stentorian Guard sandboxes outbound network egress from a command and its children.
 
 USAGE:
-  sudo stt-guard init                         One-time hardened setup where supported
-
   stt-guard wrap <cmd> [args...]              Wrap a command under enforcement
   stt-guard wrap --learn <cmd> [args...]      Record unknown destinations as user rules
                                              (TTY required; fails clear in non-TTY)
+
+  stt-guard update                            Install the latest verified release
 
   stt-guard status [logs|rules|denials|review|persistence|advisory]
                                              Inspect daemon health, rules, denials
@@ -31,14 +31,26 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
-    /// Initialise Stentorian Guard (hardened mode). Requires root.
+    /// Install or repair the hardened system deployment. Requires root.
     ///
     /// Creates the service identity, deploys root-owned binaries, and starts
     /// the daemon through the supported platform service manager.
-    Init {
+    #[command(hide = true)]
+    InstallSystem {
         /// Skip interactive confirmation.
         #[arg(short = 'y', long)]
         yes: bool,
+    },
+
+    /// Download, verify, and install the latest release.
+    Update {
+        /// Check for the latest release without installing it.
+        #[arg(long)]
+        check: bool,
+
+        /// Install a specific release tag or version.
+        #[arg(long)]
+        version: Option<String>,
     },
 
     /// Wrap a command under default-deny network enforcement.

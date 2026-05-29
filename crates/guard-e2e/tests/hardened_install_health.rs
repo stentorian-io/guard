@@ -1,4 +1,4 @@
-//! Privileged e2e coverage for `sudo stt-guard init` and hardened install health.
+//! Privileged e2e coverage for the system installer and hardened install health.
 //!
 //! This test intentionally mutates system install locations and therefore runs
 //! only when `STT_GUARD_E2E_PRIVILEGED_INSTALL=1` is set. The GitHub validation
@@ -50,7 +50,7 @@ mod macos {
         let before = run_cli(&cli, ["status", "logs"]);
         assert!(
             !before.status.success(),
-            "status logs should refuse before init; stdout={} stderr={}",
+            "status logs should refuse before system install; stdout={} stderr={}",
             stdout(&before),
             stderr(&before)
         );
@@ -59,20 +59,24 @@ mod macos {
             "hardened install is missing, corrupted, or incorrectly set up",
         );
 
-        let init = sudo([cli.as_os_str(), OsStr::new("init"), OsStr::new("--yes")]);
-        if !init.status.success() && hardware_signing_unavailable(&stderr(&init)) {
+        let install = sudo([
+            cli.as_os_str(),
+            OsStr::new("install-system"),
+            OsStr::new("--yes"),
+        ]);
+        if !install.status.success() && hardware_signing_unavailable(&stderr(&install)) {
             eprintln!(
                 "SKIP: hosted runner cannot enroll Secure Enclave signing key; stdout={} stderr={}",
-                stdout(&init),
-                stderr(&init)
+                stdout(&install),
+                stderr(&install)
             );
             return;
         }
         assert!(
-            init.status.success(),
-            "init failed; stdout={} stderr={}",
-            stdout(&init),
-            stderr(&init)
+            install.status.success(),
+            "system install failed; stdout={} stderr={}",
+            stdout(&install),
+            stderr(&install)
         );
 
         wait_for_status_ok(&cli);
@@ -313,7 +317,7 @@ mod macos {
             }
             if Instant::now() >= deadline {
                 panic!(
-                    "status did not become healthy after init; stdout={} stderr={}",
+                    "status did not become healthy after system install; stdout={} stderr={}",
                     stdout(&out),
                     stderr(&out)
                 );

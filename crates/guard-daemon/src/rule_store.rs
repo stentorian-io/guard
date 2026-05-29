@@ -292,8 +292,7 @@ impl RuleStore {
                         .to_string(),
                 ),
                 action: Some(
-                    "run sudo stt-guard init on a supported hardware-backed signing platform"
-                        .to_string(),
+                    "run the installer on a supported hardware-backed signing platform".to_string(),
                 ),
             };
         };
@@ -307,7 +306,7 @@ impl RuleStore {
                 trust_root_path,
                 trust_root_ok: false,
                 reason: Some(e.to_string()),
-                action: Some("rerun sudo stt-guard init to repair signer enrollment".to_string()),
+                action: Some("rerun the installer to repair signer enrollment".to_string()),
             };
         }
         let contents = match std::fs::read_to_string(path) {
@@ -321,9 +320,7 @@ impl RuleStore {
                     trust_root_path,
                     trust_root_ok: false,
                     reason: Some(format!("trusted signer manifest unreadable: {e}")),
-                    action: Some(
-                        "rerun sudo stt-guard init to repair signer enrollment".to_string(),
-                    ),
+                    action: Some("rerun the installer to repair signer enrollment".to_string()),
                 };
             }
         };
@@ -345,9 +342,7 @@ impl RuleStore {
                         trust_root_path,
                         trust_root_ok: false,
                         reason: Some(e.to_string()),
-                        action: Some(
-                            "rerun sudo stt-guard init to repair signer enrollment".to_string(),
-                        ),
+                        action: Some("rerun the installer to repair signer enrollment".to_string()),
                     };
                 }
             })
@@ -360,9 +355,7 @@ impl RuleStore {
                 trust_root_path,
                 trust_root_ok: true,
                 reason: Some("trusted signer manifest contains no signer entries".to_string()),
-                action: Some(
-                    "run sudo stt-guard init to enroll a hardware-backed signer".to_string(),
-                ),
+                action: Some("run the installer to enroll a hardware-backed signer".to_string()),
             };
         };
         let db_matches = self
@@ -379,7 +372,7 @@ impl RuleStore {
                 reason: Some(
                     "trusted signer manifest does not match daemon signer cache".to_string(),
                 ),
-                action: Some("rerun sudo stt-guard init to repair signer enrollment".to_string()),
+                action: Some("rerun the installer to repair signer enrollment".to_string()),
             };
         }
         RuleSigningStatus {

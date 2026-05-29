@@ -264,37 +264,6 @@ validation starts:
 
 PRs must pass the full CI suite before merging.
 
-### Self-hosted privileged macOS validation
-
-`.github/workflows/privileged-macos-self-hosted.yml` is a manual workflow for
-running the privileged install-health E2E on a disposable self-hosted macOS
-runner. It is intentionally not attached to `pull_request` because it runs
-checked-out code with passwordless `sudo` and mutates system install locations.
-
-Use a runner with all of these labels:
-
-```text
-self-hosted, macOS, stt-guard-privileged, disposable
-```
-
-The runner environment must set:
-
-```sh
-STT_GUARD_DISPOSABLE_RUNNER=1
-```
-
-The runner user must also have non-interactive sudo for the commands exercised
-by the install-health test. Verify with:
-
-```sh
-sudo -n true
-```
-
-Use this workflow only for trusted branches or maintainer-reviewed PR heads. A
-safe runner should be rebuilt, restored from a clean VM snapshot, or otherwise
-scrubbed after each job so root-owned install artifacts, LaunchDaemon state,
-logs, keychain state, and service-user mutations cannot leak between runs.
-
 For local macOS E2E without mutating the host, use the Tart-backed VM runner:
 
 ```sh
@@ -308,16 +277,10 @@ passwordless sudo inside that clone, copies the repo into the guest, and runs
 the macOS E2E suite including `hardened_install_health` with
 `STT_GUARD_E2E_PRIVILEGED_INSTALL=1`. It fails the run if
 `hardened_install_health` reports an internal `SKIP:` because the local no-skip
-target must prove privileged install health rather than accept a missing
-hardware-backed signing path. Override the base image or credentials with
+target must prove privileged install health rather than accept a missing test
+capability. Override the base image or credentials with
 `STT_GUARD_MACOS_VM_BASE`, `STT_GUARD_MACOS_VM_BASE_NAME`,
 `STT_GUARD_MACOS_VM_USER`, and `STT_GUARD_MACOS_VM_PASSWORD`.
-
-The default Tart macOS base image provides isolated system mutation and
-passwordless sudo after bootstrap, but it may not expose Secure Enclave signing.
-If it fails with `NSOSStatusErrorDomain Code=-34018`, use a disposable physical
-Mac runner or another macOS image/runner that can enroll the hardware-backed
-signer.
 
 ## Troubleshooting
 

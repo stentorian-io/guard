@@ -3,7 +3,7 @@
 # Run macOS E2E validation inside a disposable Tart macOS VM so the host system
 # install is not mutated. This script fails if hardened_install_health reports
 # an internal SKIP, because the local no-skip target must prove privileged
-# install health instead of silently accepting a missing Secure Enclave path.
+# install health instead of silently accepting a missing test capability.
 #
 # Requirements:
 #   brew install cirruslabs/cli/tart hudochenkov/sshpass/sshpass
@@ -11,9 +11,7 @@
 #
 # The guest image must be CI-ready enough to build this workspace: Xcode
 # command-line tools plus network access for Rust/Node bootstrap. The default
-# Cirrus macOS base images use admin/admin credentials, but they may not expose
-# Secure Enclave signing; in that case this script intentionally fails at
-# hardened_install_health rather than calling the run complete.
+# Cirrus macOS base images use admin/admin credentials.
 
 set -euo pipefail
 

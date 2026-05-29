@@ -1,15 +1,15 @@
 //! v0.3 — SIGINT cancels parked prompt.
 //!
 //! Test: SIGINT is sent to the stt-guard wrap process while a prompt is parked.
-//! The SIGINT handler (sigint_handler.rs) calls PromptCancel for
+//! The SIGINT handler (`sigint_handler.rs`) calls `PromptCancel` for
 //! all in-flight prompt IDs, then propagates SIGINT to the wrapped process group.
 //! Expected outcomes:
-//!   - PromptCancel sent → daemon emits a GapRecord with gap_kind="prompt-cancelled"
+//!   - `PromptCancel` sent → daemon emits a `GapRecord` with gap_kind="prompt-cancelled"
 //!   - wrapped node exits (SIGINT propagated to pgid)
 //!   - stt-guard wrap exits reflecting the SIGINT
 //!
 //! Marked #[ignore]: requires PTY + signal-aware test runner + macOS daemon.
-//! Opt-in via: cargo test -p guard-e2e -- --ignored sigint_during_prompt
+//! Opt-in via: cargo test -p guard-e2e -- --ignored `sigint_during_prompt`
 
 #[cfg(target_os = "macos")]
 use std::io::{BufRead, BufReader};
@@ -63,7 +63,8 @@ fn sigint_during_prompt_sends_cancel_and_propagates_to_child() {
     cmd.env("PROBE_CONNECT_AFTER", "0");
 
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
-    let pid = child.process_id().expect("get process id") as i32;
+    let pid =
+        i32::try_from(child.process_id().expect("get process id")).expect("pid fits libc pid");
     let reader = pair.master.try_clone_reader().expect("reader");
     drop(pair.slave);
 
@@ -72,9 +73,10 @@ fn sigint_during_prompt_sends_cancel_and_propagates_to_child() {
     let mut buf = String::new();
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        if Instant::now() > deadline {
-            panic!("prompt never appeared within 15s; buf: {buf}");
-        }
+        assert!(
+            Instant::now() <= deadline,
+            "prompt never appeared within 15s; buf: {buf}"
+        );
         let mut line = String::new();
         match br.read_line(&mut line) {
             Ok(0) | Err(_) => break,

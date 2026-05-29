@@ -1,6 +1,6 @@
 //! Dylib-side PM env capture + filtering.
 //!
-//! Walks the null-terminated envp** array passed to exec/posix_spawn, applies
+//! Walks the null-terminated envp** array passed to `exec/posix_spawn`, applies
 //! the centralized allowlist + secret denylist from `guard_core::env_filter`,
 //! and returns a `Vec<(String, String)>` matching the `ExecEvent::pm_env` wire
 //! shape.
@@ -17,6 +17,7 @@ fn split_env_entry(entry: &str) -> Option<(&str, &str)> {
     Some((&entry[..eq], &entry[eq + 1..]))
 }
 
+#[must_use]
 pub fn filter_one(key: &str, value: &str) -> Option<(String, String)> {
     if env_filter::is_secret_key(key) {
         return None;
@@ -30,7 +31,7 @@ pub fn filter_one(key: &str, value: &str) -> Option<(String, String)> {
     ))
 }
 
-/// Walk the null-terminated envp** passed to exec/posix_spawn, filter to
+/// Walk the null-terminated envp** passed to `exec/posix_spawn`, filter to
 /// PM-relevant keys, drop secrets, and return the pairs in a shape that
 /// `ExecEvent::pm_env` accepts directly.
 ///
@@ -41,9 +42,10 @@ pub fn filter_one(key: &str, value: &str) -> Option<(String, String)> {
 /// # Safety
 /// `envp` must either be null or point to a null-terminated array of pointers,
 /// each pointer either null or pointing to a NUL-terminated C string. This is
-/// the POSIX exec/posix_spawn contract — callers in `replace_exec.rs` and
-/// `replace_fork.rs` receive the array directly from the user (execve, posix_spawn)
+/// the POSIX `exec/posix_spawn` contract — callers in `replace_exec.rs` and
+/// `replace_fork.rs` receive the array directly from the user (execve, `posix_spawn`)
 /// or from the inherited `**environ` symbol.
+#[must_use]
 pub unsafe fn extract_pm_env_from_envp(envp: *const *const c_char) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     if envp.is_null() {
@@ -80,7 +82,7 @@ pub unsafe fn extract_pm_env_from_envp(envp: *const *const c_char) -> Vec<(Strin
     out
 }
 
-/// Convenience wrapper for posix_spawn shadows whose envp is `*const *mut c_char`
+/// Convenience wrapper for `posix_spawn` shadows whose envp is `*const *mut c_char`
 /// instead of `*const *const c_char`. Same contract / semantics.
 ///
 /// # Safety
@@ -89,7 +91,7 @@ pub unsafe fn extract_pm_env_from_envp(envp: *const *const c_char) -> Vec<(Strin
 pub unsafe fn extract_pm_env_from_envp_mut(envp: *const *mut c_char) -> Vec<(String, String)> {
     // Reinterpret as *const *const c_char — the writability of the inner
     // pointer is irrelevant for the read-only walk we perform.
-    unsafe { extract_pm_env_from_envp(envp as *const *const c_char) }
+    unsafe { extract_pm_env_from_envp(envp.cast::<*const c_char>()) }
 }
 
 /// Walk the inherited `**environ` symbol. Used by exec*p / execv / fork+exec
@@ -101,6 +103,7 @@ pub unsafe fn extract_pm_env_from_envp_mut(envp: *const *mut c_char) -> Vec<(Str
 /// the dylib context: the global is set up by dyld before any user code,
 /// and POSIX guarantees it is null-terminated. We treat a null pointer as
 /// "no env" (returns empty Vec).
+#[must_use]
 pub fn extract_pm_env_from_environ() -> Vec<(String, String)> {
     unsafe extern "C" {
         // Apple's libc exposes `environ` (not `__environ`) as the canonical
@@ -147,7 +150,7 @@ mod tests {
     fn admits_npm_package_name() {
         let (_owners, ptrs) = make_envp(&["PATH=/usr/bin", "npm_package_name=lodash", "HOME=/tmp"]);
         let out = unsafe { extract_pm_env_from_envp(ptrs.as_ptr()) };
-        assert_eq!(out.len(), 1, "got: {:?}", out);
+        assert_eq!(out.len(), 1, "got: {out:?}");
         assert_eq!(out[0], ("npm_package_name".into(), "lodash".into()));
     }
 
@@ -203,7 +206,7 @@ mod tests {
     fn drops_unprefixed_keys() {
         let (_owners, ptrs) = make_envp(&["PATH=/usr/bin", "HOME=/tmp", "RANDOM_USER_VAR=value"]);
         let out = unsafe { extract_pm_env_from_envp(ptrs.as_ptr()) };
-        assert!(out.is_empty(), "got: {:?}", out);
+        assert!(out.is_empty(), "got: {out:?}");
     }
 
     #[test]
@@ -225,7 +228,7 @@ mod tests {
         for i in 0..50 {
             entries.push(format!("npm_test_long_key_{i:04}={big_val}"));
         }
-        let entry_refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let entry_refs: Vec<&str> = entries.iter().map(std::string::String::as_str).collect();
         let (_owners, ptrs) = make_envp(&entry_refs);
         let out = unsafe { extract_pm_env_from_envp(ptrs.as_ptr()) };
         let total: usize = out.iter().map(|(k, v)| k.len() + v.len() + 2).sum();

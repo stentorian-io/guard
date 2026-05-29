@@ -24,9 +24,13 @@ pub struct BlockEntry {
     pub source_kind: String,
 }
 
-/// Walk the JSONL log filtering `block` events for a specific run_uuid.
+/// Walk the JSONL log filtering `block` events for a specific `run_uuid`.
 /// Returns deduplicated (host, port) pairs in insertion order.
-/// Errors: file-not-found, > MAX_UNIQUE_BLOCK_HOSTS unique hosts.
+///
+/// # Errors
+///
+/// Returns an error when the log cannot be opened or when the run contains
+/// more than `MAX_UNIQUE_BLOCK_HOSTS` unique blocked destinations.
 pub fn filter_block_destinations(
     log_path: &Path,
     run_uuid: &str,
@@ -45,10 +49,10 @@ pub fn filter_block_destinations(
     let mut seen: std::collections::HashSet<(String, u16)> = std::collections::HashSet::new();
     let mut out = Vec::new();
     for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => continue,
+        let Ok(line) = line else {
+            continue;
         };
+
         if line.trim().is_empty() {
             continue;
         }
@@ -63,7 +67,13 @@ pub fn filter_block_destinations(
             continue;
         }
         let host = v.get("dest_host").and_then(|h| h.as_str()).unwrap_or("");
-        let port = v.get("dest_port").and_then(|p| p.as_u64()).unwrap_or(0) as u16;
+        let port = match v.get("dest_port").and_then(serde_json::Value::as_u64) {
+            Some(port) => match u16::try_from(port) {
+                Ok(port) => port,
+                Err(_) => continue,
+            },
+            None => 0,
+        };
         let source_kind = v
             .get("source_kind")
             .and_then(|s| s.as_str())
@@ -92,15 +102,19 @@ pub fn filter_block_destinations(
     Ok(out)
 }
 
-/// Walk the log and return the run_uuid of the most recent line
+/// Walk the log and return the `run_uuid` of the most recent line
 /// whose event == "block". Returns None if no block events exist.
 /// Implementation: read the file once, accumulate the LAST seen block
-/// run_uuid (later lines overwrite earlier ones). v1 reads the whole
-/// file; MAX_UNIQUE_BLOCK_HOSTS already bounds memory pressure.
+/// `run_uuid` (later lines overwrite earlier ones). v1 reads the whole
+/// file; `MAX_UNIQUE_BLOCK_HOSTS` already bounds memory pressure.
 ///
 /// File-not-found is treated as "no denials yet" (returns Ok(None))
 /// rather than an error — the consumer (`status review`) interprets
 /// this as a benign "fresh install / nothing to review" condition.
+///
+/// # Errors
+///
+/// Returns an error when the log exists but cannot be opened.
 pub fn most_recent_run_with_denials(log_path: &Path) -> Result<Option<String>, CliError> {
     let file = match std::fs::File::open(log_path) {
         Ok(f) => f,
@@ -110,10 +124,10 @@ pub fn most_recent_run_with_denials(log_path: &Path) -> Result<Option<String>, C
     let reader = BufReader::new(file);
     let mut latest: Option<String> = None;
     for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => continue,
+        let Ok(line) = line else {
+            continue;
         };
+
         if line.trim().is_empty() {
             continue;
         }

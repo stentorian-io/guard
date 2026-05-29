@@ -1,4 +1,4 @@
-//! Linux ELF exec-target boundary for LD_PRELOAD enforcement.
+//! Linux ELF exec-target boundary for `LD_PRELOAD` enforcement.
 //!
 //! ELF structural classification is not supported yet. Linux must not reuse
 //! Mach-O clean-unknown decisions, so non-script exec targets fail closed until
@@ -32,6 +32,7 @@ pub enum BlockReason {
 }
 
 impl BlockReason {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::HardenedRuntime => "hardened-runtime",
@@ -55,6 +56,7 @@ pub enum SuspiciousReason {
 }
 
 impl SuspiciousReason {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::SyscallInstruction => "syscall-instruction",
@@ -62,11 +64,23 @@ impl SuspiciousReason {
     }
 }
 
-pub fn classify_path(path: *const libc::c_char) -> BinaryTier {
-    classify_path_with_registry(path, trusted_runtime::registry())
+/// Classify a Linux exec target path.
+///
+/// # Safety
+///
+/// `path` must either be null or point to a valid NUL-terminated C string.
+#[must_use]
+pub unsafe fn classify_path(path: *const libc::c_char) -> BinaryTier {
+    unsafe { classify_path_with_registry(path, trusted_runtime::registry()) }
 }
 
-pub fn classify_path_with_registry(
+/// Classify a Linux exec target path with an explicit trusted runtime registry.
+///
+/// # Safety
+///
+/// `path` must either be null or point to a valid NUL-terminated C string.
+#[must_use]
+pub unsafe fn classify_path_with_registry(
     path: *const libc::c_char,
     _trusted_registry: &TrustedRuntimeRegistry,
 ) -> BinaryTier {
@@ -74,7 +88,7 @@ pub fn classify_path_with_registry(
         return BinaryTier::T0Blocked(BlockReason::UnreadablePath);
     }
 
-    if macho_flags::is_setuid(path) {
+    if unsafe { macho_flags::is_setuid(path) } {
         return BinaryTier::T0Blocked(BlockReason::PrivilegeEscalation);
     }
 
@@ -84,7 +98,7 @@ pub fn classify_path_with_registry(
         return BinaryTier::T0Blocked(BlockReason::UnreadablePath);
     }
 
-    let n = unsafe { libc::read(fd, header.as_mut_ptr() as *mut libc::c_void, header.len()) };
+    let n = unsafe { libc::read(fd, header.as_mut_ptr().cast::<libc::c_void>(), header.len()) };
 
     unsafe {
         libc::close(fd);
@@ -98,7 +112,7 @@ pub fn classify_path_with_registry(
         return BinaryTier::T2AllowedScript;
     }
 
-    if n as usize == header.len() && header == *b"\x7fELF" {
+    if usize::try_from(n).is_ok_and(|read_len| read_len == header.len()) && header == *b"\x7fELF" {
         return BinaryTier::T0Blocked(BlockReason::UnsupportedElf);
     }
 
@@ -107,7 +121,7 @@ pub fn classify_path_with_registry(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{BinaryTier, BlockReason, classify_path};
     use std::ffi::CString;
     use std::io::Write;
     use std::os::unix::ffi::OsStrExt;
@@ -122,12 +136,17 @@ mod tests {
         CString::new(file.path().as_os_str().as_bytes()).expect("path cstring")
     }
 
+    fn classify_test_path(path: &CString) -> BinaryTier {
+        // SAFETY: `CString` provides a valid NUL-terminated path pointer.
+        unsafe { classify_path(path.as_ptr()) }
+    }
+
     #[test]
     fn classify_path_allows_shebang_scripts() {
         let file = write_temp(b"#!/bin/sh\nexit 0\n");
         let path = path_cstring(&file);
 
-        assert_eq!(classify_path(path.as_ptr()), BinaryTier::T2AllowedScript);
+        assert_eq!(classify_test_path(&path), BinaryTier::T2AllowedScript);
     }
 
     #[test]
@@ -136,7 +155,7 @@ mod tests {
         let path = path_cstring(&file);
 
         assert_eq!(
-            classify_path(path.as_ptr()),
+            classify_test_path(&path),
             BinaryTier::T0Blocked(BlockReason::UnsupportedElf)
         );
     }
@@ -144,13 +163,13 @@ mod tests {
     #[test]
     fn classify_path_does_not_allow_clean_macho_on_linux() {
         let mut data = vec![0u8; 0x104];
-        data[0..4].copy_from_slice(&0xfeedfacfu32.to_le_bytes());
+        data[0..4].copy_from_slice(&0xfeed_facfu32.to_le_bytes());
 
         let file = write_temp(&data);
         let path = path_cstring(&file);
 
         assert_eq!(
-            classify_path(path.as_ptr()),
+            classify_test_path(&path),
             BinaryTier::T0Blocked(BlockReason::UnknownFormat)
         );
     }

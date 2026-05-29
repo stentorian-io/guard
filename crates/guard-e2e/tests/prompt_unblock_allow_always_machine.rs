@@ -1,13 +1,13 @@
-//! M005-S05: AllowAlwaysMachine verdict via PTY prompt.
+//! M005-S05: `AllowAlwaysMachine` verdict via PTY prompt.
 //!
-//! Test: sends "2\n" (AllowAlwaysMachine) into the PTY prompt. The daemon
-//! inserts a user rule into the SQLite `rules` table for the destination host.
-//! A JSONL row with source_kind=prompt_allow_machine appears. A subsequent
+//! Test: sends "2\n" (`AllowAlwaysMachine`) into the PTY prompt. The daemon
+//! inserts a user rule into the `SQLite` `rules` table for the destination host.
+//! A JSONL row with `source_kind=prompt_allow_machine` appears. A subsequent
 //! non-TTY run to the same destination succeeds without prompting because the
 //! persistent rule now allows it.
 //!
 //! Marked #[ignore]: requires PTY + non-hardened node + macOS daemon.
-//! Opt-in via: cargo test -p guard-e2e -- --ignored allow_always_machine
+//! Opt-in via: cargo test -p guard-e2e -- --ignored `allow_always_machine`
 
 #[cfg(target_os = "macos")]
 use std::io::{BufRead, BufReader, Write as _};
@@ -70,9 +70,10 @@ fn allow_always_machine_persists_rule_and_allows_next_run() {
     let mut buf = String::new();
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        if Instant::now() > deadline {
-            panic!("prompt never appeared within 15s; buf:\n{buf}");
-        }
+        assert!(
+            Instant::now() <= deadline,
+            "prompt never appeared within 15s; buf:\n{buf}"
+        );
         let mut line = String::new();
         match br.read_line(&mut line) {
             Ok(0) | Err(_) => break,

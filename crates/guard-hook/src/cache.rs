@@ -1,10 +1,10 @@
 //! Per-process bounded LRU getaddrinfo-cache (D-17).
 //!
-//! v0.1 size: 32 entries. NO HashMap — linear-probe + LRU bumping over a
+//! v0.1 size: 32 entries. NO `HashMap` — linear-probe + LRU bumping over a
 //! fixed-size array.
 //!
-//! Key: up to MAX_SOCKADDR_BYTES bytes of canonicalized sockaddr.
-//! Value: up to MAX_HOSTNAME bytes of host name.
+//! Key: up to `MAX_SOCKADDR_BYTES` bytes of canonicalized sockaddr.
+//! Value: up to `MAX_HOSTNAME` bytes of host name.
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
@@ -37,6 +37,7 @@ pub struct Cache {
 }
 
 impl Cache {
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             entries: [Entry::EMPTY; CAPACITY],
@@ -48,7 +49,7 @@ impl Cache {
         self.tick.fetch_add(1, Ordering::Relaxed)
     }
 
-    /// Insert (sockaddr_bytes, hostname). If full, evicts the LRU entry.
+    /// Insert (`sockaddr_bytes`, hostname). If full, evicts the LRU entry.
     pub fn insert(&mut self, sockaddr: &[u8], hostname: &[u8]) {
         if sockaddr.len() > MAX_SOCKADDR_BYTES {
             return;
@@ -60,7 +61,7 @@ impl Cache {
         if let Some(idx) = self.find_idx(sockaddr) {
             let now = self.next_tick();
             let e = &mut self.entries[idx];
-            e.hostname_len = hostname.len() as u16;
+            e.hostname_len = u16::try_from(hostname.len()).unwrap_or(0);
             e.hostname[..hostname.len()].copy_from_slice(hostname);
             e.last_use_tick = now;
             return;
@@ -80,9 +81,9 @@ impl Cache {
         }
         let now = self.next_tick();
         let e = &mut self.entries[target_idx];
-        e.sockaddr_len = sockaddr.len() as u8;
+        e.sockaddr_len = u8::try_from(sockaddr.len()).unwrap_or(0);
         e.sockaddr[..sockaddr.len()].copy_from_slice(sockaddr);
-        e.hostname_len = hostname.len() as u16;
+        e.hostname_len = u16::try_from(hostname.len()).unwrap_or(0);
         e.hostname[..hostname.len()].copy_from_slice(hostname);
         e.last_use_tick = now;
     }

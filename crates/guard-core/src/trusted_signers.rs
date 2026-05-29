@@ -19,6 +19,12 @@ pub enum TrustedSignerManifestError {
     InvalidPublicKeyHex,
 }
 
+/// Parse trusted signer rows from a TSV manifest.
+///
+/// # Errors
+///
+/// Returns `TrustedSignerManifestError` if any non-comment signer row contains
+/// invalid public key hex.
 pub fn parse_trusted_signers(
     contents: &str,
 ) -> Result<Vec<TrustedSigner>, TrustedSignerManifestError> {
@@ -48,12 +54,22 @@ pub fn parse_trusted_signers(
     Ok(signers)
 }
 
+/// Return the first trusted signer in a manifest, if present.
+///
+/// # Errors
+///
+/// Returns `TrustedSignerManifestError` if manifest parsing fails.
 pub fn first_trusted_signer(
     contents: &str,
 ) -> Result<Option<TrustedSigner>, TrustedSignerManifestError> {
     Ok(parse_trusted_signers(contents)?.into_iter().next())
 }
 
+/// Check whether a signer tuple is present in a trusted signer manifest.
+///
+/// # Errors
+///
+/// Returns `TrustedSignerManifestError` if manifest parsing fails.
 pub fn trusted_signer_matches(
     contents: &str,
     public_key_sha256: &str,
@@ -66,11 +82,16 @@ pub fn trusted_signer_matches(
             && signer.signer_kind == signer_kind
             && expected_key_hex
                 .as_deref()
-                .map(|expected| expected == signer.public_key_x963_hex)
-                .unwrap_or(true)
+                .is_none_or(|expected| expected == signer.public_key_x963_hex)
     }))
 }
 
+/// Decode lowercase or uppercase hexadecimal bytes.
+///
+/// # Errors
+///
+/// Returns `TrustedSignerManifestError` if the input length is odd or contains
+/// a non-hexadecimal digit.
 pub fn decode_hex(s: &str) -> Result<Vec<u8>, TrustedSignerManifestError> {
     if s.len() % 2 != 0 {
         return Err(TrustedSignerManifestError::OddLengthPublicKeyHex);

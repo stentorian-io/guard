@@ -17,7 +17,7 @@ fn rotate_does_not_lose_lines_mid_write() {
     while std::time::Instant::now() < deadline {
         let entries: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         for e in &entries {
             let n = e.file_name().to_string_lossy().to_string();

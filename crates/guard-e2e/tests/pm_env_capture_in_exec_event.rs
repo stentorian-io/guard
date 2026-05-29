@@ -4,24 +4,24 @@
 //! NEGATIVE assertion (secrets must not leak); this one focuses on the
 //! POSITIVE assertion (the dylib captured a known number of benign PM env
 //! vars, the V3 wire frame was actually used, and the captured Vec landed on
-//! a ProcessNode).
+//! a `ProcessNode`).
 //!
 //! Asserts on three structured tracing fields emitted by the daemon's
-//! `ipc_server::handle_exec_event_frame` whenever a non-empty pm_env arrives:
+//! `ipc_server::handle_exec_event_frame` whenever a non-empty `pm_env` arrives:
 //!   - `pm_env_captured` event name
 //!   - `schema_version=3` proves the dylib's `send_exec_event_sync` upgraded
-//!     IPC_SCHEMA_V2 → IPC_SCHEMA_V3 (Task 2 contract)
-//!   - `captured=4` proves the four benign npm_*+CARGO_PKG_NAME pairs from
+//!     `IPC_SCHEMA_V2` → `IPC_SCHEMA_V3` (Task 2 contract)
+//!   - `captured=4` proves the four benign npm_*+`CARGO_PKG_NAME` pairs from
 //!     the harness's envp survived BOTH filter layers
 //!   - `wire_pairs=4` proves that the dylib-side filter dropped the three
-//!     decoy denylisted secrets BEFORE the wire (otherwise wire_pairs would
+//!     decoy denylisted secrets BEFORE the wire (otherwise `wire_pairs` would
 //!     be 7 = 4 benign + 3 decoys), confirming defense-in-depth.
 
 use guard_e2e::{DaemonHarness, cargo_target_dir, resolve_cli, resolve_dylib};
 use std::process::Command;
 use std::time::Duration;
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn pm_env_captured_via_v3_exec_event_with_dylib_side_filter() {
     let cli = resolve_cli();

@@ -2,10 +2,10 @@
 //!
 //! v0.3 — package-context inference.
 //!
-//! Walks the existing ProcessTree from a given audit_token along parent links
-//! until finding a ProcessNode with a non-None `pm_env_snapshot` (populated by
-//! v0.2's ExecEvent + v0.3's pm_env extension). Maps the
-//! captured env subset to PackageContext.
+//! Walks the existing `ProcessTree` from a given `audit_token` along parent links
+//! until finding a `ProcessNode` with a non-None `pm_env_snapshot` (populated by
+//! v0.2's `ExecEvent` + v0.3's `pm_env` extension). Maps the
+//! captured env subset to `PackageContext`.
 
 use guard_core::AuditToken;
 use guard_ipc::PackageContext;
@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 use crate::tracked::ProcessTree;
 
 /// Walk parent chain from `audit_token`. Returns Some when the closest ancestor
-/// (or the node itself) has a pm_env_snapshot that produces a non-empty
-/// PackageContext. Returns None on no PM signal — D-56 says "omit the field".
+/// (or the node itself) has a `pm_env_snapshot` that produces a non-empty
+/// `PackageContext`. Returns None on no PM signal — D-56 says "omit the field".
 pub fn infer_package_context(
     process_tree: &ProcessTree,
     audit_token: &AuditToken,
@@ -42,10 +42,10 @@ pub fn infer_package_context(
     }
 }
 
-/// Like `infer_package_context`, but briefly waits for an ExecEvent handler to
-/// attach the package-manager environment snapshot. ExecEvent and Resolve use
+/// Like `infer_package_context`, but briefly waits for an `ExecEvent` handler to
+/// attach the package-manager environment snapshot. `ExecEvent` and Resolve use
 /// separate IPC connections, so a fast lifecycle script can resolve a hostname
-/// before its just-sent ExecEvent has been processed.
+/// before its just-sent `ExecEvent` has been processed.
 pub fn infer_package_context_with_retry(
     process_tree: &ProcessTree,
     audit_token: &AuditToken,
@@ -64,8 +64,9 @@ pub fn infer_package_context_with_retry(
     }
 }
 
-/// Map a captured PM env subset → PackageContext. Returns None if no PM signal
+/// Map a captured PM env subset → `PackageContext`. Returns None if no PM signal
 /// strong enough to determine ecosystem.
+#[must_use]
 pub fn package_context_from_pm_env(
     env: &[(String, String)],
     root_command: &str,

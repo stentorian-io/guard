@@ -22,6 +22,7 @@ pub struct TrustedRuntimeRegistry {
 }
 
 impl TrustedRuntimeRegistry {
+    #[must_use]
     pub fn parse(yaml: &str) -> Self {
         let mut entries = Vec::new();
         let mut pending = TrustedRuntimeFields::default();
@@ -46,14 +47,17 @@ impl TrustedRuntimeRegistry {
         Self { entries }
     }
 
+    #[must_use]
     pub fn get(&self, sha256: &[u8; 32]) -> Option<&TrustedRuntime> {
         self.entries.iter().find(|entry| &entry.sha256 == sha256)
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -114,6 +118,7 @@ fn yaml_scalar(value: &str) -> &str {
     value.trim_matches('"').trim_matches('\'')
 }
 
+#[must_use]
 pub fn parse_sha256_hex(hex: &str) -> Option<[u8; 32]> {
     if hex.len() != 64 {
         return None;

@@ -109,9 +109,10 @@ fn linux_connect_child_helper() {
     let target = std::env::var("STT_GUARD_CONNECT_TARGET").expect("target env");
     let addr = target.parse().expect("target socket addr");
 
-    if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok() {
-        panic!("connect unexpectedly succeeded under fail-closed hook");
-    }
+    assert!(
+        std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err(),
+        "connect unexpectedly succeeded under fail-closed hook"
+    );
 }
 
 #[test]
@@ -119,8 +120,8 @@ fn linux_connect_child_helper() {
 fn linux_execve_child_helper() {
     let target = std::env::var("STT_GUARD_EXEC_TARGET").expect("target env");
     let target = CString::new(target).expect("target CString");
-    let arg0 = CString::new("setuid-script").expect("arg0 CString");
-    let argv = [arg0.as_ptr(), std::ptr::null()];
+    let program_name = CString::new("setuid-script").expect("arg0 CString");
+    let argv = [program_name.as_ptr(), std::ptr::null()];
     let envp = [std::ptr::null()];
 
     let rc = unsafe { libc::execve(target.as_ptr(), argv.as_ptr(), envp.as_ptr()) };

@@ -1,16 +1,19 @@
 //! OS errno access.
 
 #[cfg(target_os = "macos")]
+#[must_use]
 pub fn last_errno() -> i32 {
     unsafe { *libc::__error() }
 }
 
 #[cfg(target_os = "linux")]
+#[must_use]
 pub fn last_errno() -> i32 {
     unsafe { *libc::__errno_location() }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[must_use]
 pub fn last_errno() -> i32 {
     std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
 }

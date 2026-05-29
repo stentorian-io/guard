@@ -1,18 +1,18 @@
 //! POL-06 unit-level regression: curated allow beats feed deny.
 //!
 //! Structural proof — no daemon, no spawn. Confirms that the tier ordering
-//! in evaluate_policy returns CuratedAllow's verdict before the ConfirmedDeny
+//! in `evaluate_policy` returns `CuratedAllow`'s verdict before the `ConfirmedDeny`
 //! tier is examined.
 //!
-//! POL-06 is enforced STRUCTURALLY by the AllowlistEntry type's RuleTier
-//! field: CuratedAllow=1 < ConfirmedDeny=2. The daemon's PrepareSnapshot
+//! POL-06 is enforced STRUCTURALLY by the `AllowlistEntry` type's `RuleTier`
+//! field: CuratedAllow=1 < ConfirmedDeny=2. The daemon's `PrepareSnapshot`
 //! handler sorts entries by tier; the dylib's hot path iterates the
-//! pre-sorted slice and returns at the first match. So a CuratedAllow
+//! pre-sorted slice and returns at the first match. So a `CuratedAllow`
 //! entry encountered first wins.
 //!
 //! These tests live in guard-e2e (not guard-core) because they assert
 //! a CROSS-LAYER invariant: the daemon's tier-sort discipline + the dylib's
-//! evaluate_policy linear scan together implement POL-06. A regression in
+//! `evaluate_policy` linear scan together implement POL-06. A regression in
 //! either layer would surface here.
 
 use guard_core::{

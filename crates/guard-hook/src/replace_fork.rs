@@ -12,7 +12,7 @@
 //! Vfork-stack-safety (T-02-05-01 / Pitfall 4): the CHILD path of vfork shares
 //! the parent's stack until exec/_exit. We must not allocate, take locks, or
 //! do anything that mutates parent stack frames. The vfork child path here
-//! resets IN_HOOK and returns 0 — the IPC is sent from the parent's path.
+//! resets `IN_HOOK` and returns 0 — the IPC is sent from the parent's path.
 
 use crate::exec_policy::{self, ExecDecision};
 use crate::ipc_client::{
@@ -29,14 +29,14 @@ const IPC_TIMEOUT_MS: u64 = 250;
 
 fn report_exec_blocked(path: *const libc::c_char, reason: BlockReason) {
     let mut path_buf = [0u8; 1024];
-    let n = copy_cstr_to_buf(path, &mut path_buf);
+    let n = unsafe { copy_cstr_to_buf(path, &mut path_buf) };
     let token = current_audit_token_wire();
     send_exec_blocked(token, &path_buf[..n], reason.as_str());
 }
 
 fn report_trace_required(path: *const libc::c_char, reason: SuspiciousReason) {
     let mut path_buf = [0u8; 1024];
-    let n = copy_cstr_to_buf(path, &mut path_buf);
+    let n = unsafe { copy_cstr_to_buf(path, &mut path_buf) };
     let line = format!(
         "[guard-hook] T3 fail-closed reason={} path={}",
         reason.as_str(),
@@ -62,8 +62,8 @@ fn is_untracked_peer(err: &IpcClientError) -> bool {
 
 use crate::raw_syscall;
 
-/// RAII guard — same shape as v0.1 InHookGuard in replace_libc.rs. Holds
-/// IN_HOOK=true for the entire shadow scope; releases on drop.
+/// RAII guard — same shape as v0.1 `InHookGuard` in `replace_libc.rs`. Holds
+/// `IN_HOOK=true` for the entire shadow scope; releases on drop.
 struct InHookGuard {
     _priv: (),
 }
@@ -84,12 +84,10 @@ impl Drop for InHookGuard {
     }
 }
 
-#[inline(always)]
 unsafe fn raw_fork() -> libc::pid_t {
     unsafe { raw_syscall::raw_fork() }
 }
 
-#[inline(always)]
 unsafe fn raw_vfork() -> libc::pid_t {
     unsafe { raw_syscall::raw_vfork() }
 }
@@ -97,19 +95,19 @@ unsafe fn raw_vfork() -> libc::pid_t {
 /// Read the child's pidversion via the OS boundary crate.
 ///
 /// TREE-07 fix: the previous implementation read raw offset 28 from
-/// proc_bsdinfo, which is actually `pbi_ruid` (not pidversion — the
-/// proc_bsdinfo struct has no pidversion field). The replacement asks
+/// `proc_bsdinfo`, which is actually `pbi_ruid` (not pidversion — the
+/// `proc_bsdinfo` struct has no pidversion field). The replacement asks
 /// `guard-os` for the platform audit-token capability and avoids duplicating
 /// Mach/proc FFI in the interposer.
 ///
 /// Returns 0 on total failure. The daemon trusts kernel peer-auth
-/// (LOCAL_PEERTOKEN) over wire-claimed values, so zero is benign.
+/// (`LOCAL_PEERTOKEN`) over wire-claimed values, so zero is benign.
 fn child_pidversion(child_pid: libc::pid_t) -> u32 {
     audit_token_for_pid(child_pid).map_or(0, |token| token.val[7])
 }
 
 /// Best-effort current process audit token for use as `parent_audit_token`.
-/// The daemon trusts kernel peer-auth (LOCAL_PEERTOKEN) over wire-claimed
+/// The daemon trusts kernel peer-auth (`LOCAL_PEERTOKEN`) over wire-claimed
 /// values (ENF-08 invariant from v0.1, carried forward by v0.2 handlers).
 ///
 /// BLOCKER-07 fix (v0.2 review): we now populate `val[5] = getpid()` and
@@ -125,19 +123,24 @@ fn child_pidversion(child_pid: libc::pid_t) -> u32 {
 /// at warn level and trusts the kernel — see `ipc_server.rs` ENF-08.
 fn current_audit_token_wire() -> AuditTokenWire {
     // SAFETY: getpid()/getppid() are async-signal-safe and always succeed.
-    let pid = unsafe { libc::getpid() } as u32;
-    let ppid = unsafe { libc::getppid() } as u32;
+    let process_id = u32::try_from(unsafe { libc::getpid() }).unwrap_or(0);
+    let parent_process_id = u32::try_from(unsafe { libc::getppid() }).unwrap_or(0);
     let mut val = [0u32; 8];
-    val[5] = pid;
-    val[6] = ppid;
+    val[5] = process_id;
+    val[6] = parent_process_id;
     AuditTokenWire { val }
 }
 
 #[unsafe(no_mangle)]
+/// Interposed `fork(2)` entrypoint.
+///
+/// # Safety
+///
+/// Must be called with the platform `fork(2)` ABI. The child path must only
+/// perform async-signal-safe operations before returning to the caller.
 pub unsafe extern "C" fn guard_fork() -> libc::pid_t {
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => return unsafe { raw_fork() },
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { raw_fork() };
     };
     let pid = unsafe { raw_fork() };
     if pid < 0 {
@@ -156,7 +159,7 @@ pub unsafe extern "C" fn guard_fork() -> libc::pid_t {
     // process; fail-closed there would self-DoS every fork on the box).
     let pv = child_pidversion(pid);
     let parent = current_audit_token_wire();
-    match send_fork_event_sync(parent, pid as i32, pv, IPC_TIMEOUT_MS) {
+    match send_fork_event_sync(parent, pid, pv, IPC_TIMEOUT_MS) {
         Ok(()) => pid,
         Err(e) if is_untracked_peer(&e) => {
             // BLOCKER-02: not under stt-guard wrap → behave as if Stentorian Guard
@@ -176,10 +179,15 @@ pub unsafe extern "C" fn guard_fork() -> libc::pid_t {
 }
 
 #[unsafe(no_mangle)]
+/// Interposed `vfork(2)` entrypoint.
+///
+/// # Safety
+///
+/// Must be called with the platform `vfork(2)` ABI. The child path must not
+/// mutate parent-owned state before exec or exit.
 pub unsafe extern "C" fn guard_vfork() -> libc::pid_t {
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => return unsafe { raw_vfork() },
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { raw_vfork() };
     };
     let pid = unsafe { raw_vfork() };
     if pid < 0 {
@@ -195,7 +203,7 @@ pub unsafe extern "C" fn guard_vfork() -> libc::pid_t {
     // mirrors `guard_fork`.
     let pv = child_pidversion(pid);
     let parent = current_audit_token_wire();
-    match send_fork_event_sync(parent, pid as i32, pv, IPC_TIMEOUT_MS) {
+    match send_fork_event_sync(parent, pid, pv, IPC_TIMEOUT_MS) {
         Ok(()) => pid,
         Err(e) if is_untracked_peer(&e) => pid,
         Err(_e) => {
@@ -209,6 +217,11 @@ pub unsafe extern "C" fn guard_vfork() -> libc::pid_t {
 }
 
 #[unsafe(no_mangle)]
+/// Interposed `posix_spawn(3)` entrypoint.
+///
+/// # Safety
+///
+/// All pointers must satisfy the platform `posix_spawn(3)` contract.
 pub unsafe extern "C" fn guard_posix_spawn(
     pid_out: *mut libc::pid_t,
     path: *const libc::c_char,
@@ -217,13 +230,10 @@ pub unsafe extern "C" fn guard_posix_spawn(
     argv: *const *mut libc::c_char,
     envp: *const *mut libc::c_char,
 ) -> libc::c_int {
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => {
-            return unsafe { libc::posix_spawn(pid_out, path, file_actions, attrp, argv, envp) };
-        }
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { libc::posix_spawn(pid_out, path, file_actions, attrp, argv, envp) };
     };
-    match exec_policy::check_exec_target(path) {
+    match unsafe { exec_policy::check_exec_target(path) } {
         ExecDecision::Block(reason) => {
             report_exec_blocked(path, reason);
             return libc::EACCES;
@@ -233,7 +243,7 @@ pub unsafe extern "C" fn guard_posix_spawn(
             return libc::ENOTSUP;
         }
         ExecDecision::Allow => {}
-    };
+    }
 
     // TREE-06 (gap-closure 02-09): inspect envp pre-spawn for missing Stentorian Guard
     // env vars. If any are absent, emit a best-effort EnvNotPropagatedGap IPC
@@ -242,11 +252,10 @@ pub unsafe extern "C" fn guard_posix_spawn(
     // TREE-06 is informational, not enforcement.
     if unsafe { crate::envp::should_emit_env_not_propagated_gap(envp) } {
         let mut path_buf = [0u8; 1024];
-        let n = copy_cstr_to_buf(path, &mut path_buf);
+        let n = unsafe { copy_cstr_to_buf(path, &mut path_buf) };
         let detected_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
         let _ = send_env_not_propagated_gap_sync(
             current_audit_token_wire(),
             &path_buf[..n],
@@ -300,7 +309,7 @@ pub unsafe extern "C" fn guard_posix_spawn(
     // only be kept for posix_spawn by adding a new pre-spawn IPC, which
     // is deferred to a follow-up fix (see REVIEW-FIX.md).
     let saved_pv = pv;
-    match send_fork_event_sync(parent, new_pid as i32, pv, IPC_TIMEOUT_MS) {
+    match send_fork_event_sync(parent, new_pid, pv, IPC_TIMEOUT_MS) {
         Ok(()) => {}
         Err(e) if is_untracked_peer(&e) => {
             // Pass-through — Stentorian Guard is loaded but this caller is not
@@ -325,7 +334,7 @@ pub unsafe extern "C" fn guard_posix_spawn(
     // Exec half — best-effort (the spawn already happened; the child is
     // running). Failure is logged but not fail-closed.
     let mut path_buf = [0u8; 1024];
-    let n = copy_cstr_to_buf(path, &mut path_buf);
+    let n = unsafe { copy_cstr_to_buf(path, &mut path_buf) };
     // BLOCKER-07: forward the (pid, ppid) advisory hint via the wire
     // audit-token field so the daemon can reconstruct tree linkage if
     // peer-auth alone doesn't place us. See `current_audit_token_wire`.
@@ -349,6 +358,11 @@ pub unsafe extern "C" fn guard_posix_spawn(
 }
 
 #[unsafe(no_mangle)]
+/// Interposed `posix_spawnp(3)` entrypoint.
+///
+/// # Safety
+///
+/// All pointers must satisfy the platform `posix_spawnp(3)` contract.
 pub unsafe extern "C" fn guard_posix_spawnp(
     pid_out: *mut libc::pid_t,
     path: *const libc::c_char,
@@ -357,13 +371,10 @@ pub unsafe extern "C" fn guard_posix_spawnp(
     argv: *const *mut libc::c_char,
     envp: *const *mut libc::c_char,
 ) -> libc::c_int {
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => {
-            return unsafe { libc::posix_spawnp(pid_out, path, file_actions, attrp, argv, envp) };
-        }
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { libc::posix_spawnp(pid_out, path, file_actions, attrp, argv, envp) };
     };
-    match exec_policy::check_exec_target(path) {
+    match unsafe { exec_policy::check_exec_target(path) } {
         ExecDecision::Block(reason) => {
             report_exec_blocked(path, reason);
             return libc::EACCES;
@@ -373,17 +384,16 @@ pub unsafe extern "C" fn guard_posix_spawnp(
             return libc::ENOTSUP;
         }
         ExecDecision::Allow => {}
-    };
+    }
 
     // TREE-06 (gap-closure 02-09): same pre-spawn envp inspection as
     // guard_posix_spawn. Best-effort — see that function's comment.
     if unsafe { crate::envp::should_emit_env_not_propagated_gap(envp) } {
         let mut path_buf = [0u8; 1024];
-        let n = copy_cstr_to_buf(path, &mut path_buf);
+        let n = unsafe { copy_cstr_to_buf(path, &mut path_buf) };
         let detected_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
         let _ = send_env_not_propagated_gap_sync(
             current_audit_token_wire(),
             &path_buf[..n],
@@ -405,7 +415,7 @@ pub unsafe extern "C" fn guard_posix_spawnp(
     let pv = child_pidversion(new_pid);
     let parent = current_audit_token_wire();
     let saved_pv = pv;
-    match send_fork_event_sync(parent, new_pid as i32, pv, IPC_TIMEOUT_MS) {
+    match send_fork_event_sync(parent, new_pid, pv, IPC_TIMEOUT_MS) {
         Ok(()) => {}
         Err(e) if is_untracked_peer(&e) => {
             return 0;
@@ -424,7 +434,7 @@ pub unsafe extern "C" fn guard_posix_spawnp(
         }
     }
     let mut path_buf = [0u8; 1024];
-    let n = copy_cstr_to_buf(path, &mut path_buf);
+    let n = unsafe { copy_cstr_to_buf(path, &mut path_buf) };
     // BLOCKER-07: forward the (pid, ppid) advisory hint via the wire
     // audit-token field so the daemon can reconstruct tree linkage if
     // peer-auth alone doesn't place us. See `current_audit_token_wire`.

@@ -29,10 +29,12 @@ use std::time::Instant;
 // see their own copy of TEST_SOCKET_OVERRIDE.
 static SOCKET_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn dead_socket_returns_io_error_immediately() {
-    let _lock = SOCKET_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = SOCKET_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let dir = tempfile::tempdir().expect("tempdir");
     let sock_path = dir.path().join("dead_resolver.sock");
@@ -77,10 +79,12 @@ fn dead_socket_returns_io_error_immediately() {
     );
 }
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn dead_socket_full_resolve_walk_completes_under_node_deadline() {
-    let _lock = SOCKET_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = SOCKET_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let dir = tempfile::tempdir().expect("tempdir");
     let sock_path = dir.path().join("dead_resolver.sock");

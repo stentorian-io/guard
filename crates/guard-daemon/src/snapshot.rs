@@ -1,5 +1,5 @@
-//! Snapshot publication: const allowlist → CBOR file with O_EXCL + fsync + rename.
-//! Snapshot publication: const allowlist -> CBOR file with O_EXCL + fsync + rename.
+//! Snapshot publication: const allowlist → CBOR file with `O_EXCL` + fsync + rename.
+//! Snapshot publication: const allowlist -> CBOR file with `O_EXCL` + fsync + rename.
 //!
 //! v0.2 adds `publish_run` for per-run snapshot lifecycle: writes read-only
 //! signed policy artifacts to `${state_dir}/runs/{run-uuid}.cbor` plus a
@@ -13,6 +13,7 @@ use crate::state_dir::{
 };
 use guard_core::Snapshot;
 use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -28,7 +29,11 @@ pub struct PublishedSnapshot {
 /// Write `snap` to `state_dir` with mode 0600 atomically. Returns the absolute
 /// path to the new snapshot file plus the SHA-256 digest of its bytes.
 ///
-/// Order: write tmp (O_EXCL | O_CREAT, mode 0600) → fsync → rename to final.
+/// Order: write tmp (`O_EXCL` | `O_CREAT`, mode 0600) → fsync → rename to final.
+///
+/// # Errors
+///
+/// Returns an error when snapshot encoding, file creation, syncing, or rename fails.
 pub fn publish(
     state_dir: &Path,
     snap: &Snapshot,
@@ -75,6 +80,10 @@ fn hex_lower(bytes: &[u8]) -> String {
 ///   line 1 = absolute snapshot path
 ///   line 2 = "digest=<hex>"
 ///   remaining lines = hardware-backed snapshot signature metadata
+///
+/// # Errors
+///
+/// Returns an error when snapshot encoding, run-directory creation, file writes, syncing, or rename fails.
 pub fn publish_run(
     state_dir: &Path,
     snap: &Snapshot,
@@ -86,6 +95,11 @@ pub fn publish_run(
     publish_run_bytes(state_dir, &bytes, run_uuid, None)
 }
 
+/// Publish already-signed snapshot bytes for one run.
+///
+/// # Errors
+///
+/// Returns an error when run-directory creation, file writes, syncing, or rename fails.
 pub fn publish_run_signed_bytes(
     state_dir: &Path,
     bytes: &[u8],
@@ -143,28 +157,33 @@ fn publish_run_inner(
             .open(&manifest_tmp)?;
         let mut body = format!("{}\ndigest={}\n", final_path.display(), digest_hex);
         if let Some(signature) = signature {
-            body.push_str(&format!("snapshot_signature_scheme={}\n", signature.scheme));
-            body.push_str(&format!("snapshot_signer_kind={}\n", signature.signer_kind));
-            body.push_str(&format!(
-                "snapshot_public_key_sha256={}\n",
+            let _ = writeln!(body, "snapshot_signature_scheme={}", signature.scheme);
+            let _ = writeln!(body, "snapshot_signer_kind={}", signature.signer_kind);
+            let _ = writeln!(
+                body,
+                "snapshot_public_key_sha256={}",
                 signature.public_key_sha256
-            ));
-            body.push_str(&format!(
-                "snapshot_public_key_x963={}\n",
+            );
+            let _ = writeln!(
+                body,
+                "snapshot_public_key_x963={}",
                 hex_lower(&signature.public_key_x963)
-            ));
-            body.push_str(&format!(
-                "snapshot_signature_der={}\n",
+            );
+            let _ = writeln!(
+                body,
+                "snapshot_signature_der={}",
                 hex_lower(&signature.signature_der)
-            ));
-            body.push_str(&format!(
-                "snapshot_signed_payload_sha256={}\n",
+            );
+            let _ = writeln!(
+                body,
+                "snapshot_signed_payload_sha256={}",
                 signature.signed_payload_sha256
-            ));
-            body.push_str(&format!(
-                "snapshot_signature_created_at_unix_ms={}\n",
+            );
+            let _ = writeln!(
+                body,
+                "snapshot_signature_created_at_unix_ms={}",
                 signature.signature_created_at_unix_ms
-            ));
+            );
         }
         f.write_all(body.as_bytes())?;
         f.sync_all()?;

@@ -5,7 +5,7 @@ use std::process::Command;
 
 use guard_e2e::{DaemonHarness, cargo_target_dir, resolve_cli, resolve_dylib};
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn hardened_runtime_exec_is_blocked_before_coverage_gap() {
     let cli = resolve_cli();

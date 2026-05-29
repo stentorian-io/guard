@@ -1,9 +1,9 @@
-//! Integration test: DenyNotify round-trip (D-39).
+//! Integration test: `DenyNotify` round-trip (D-39).
 //!
-//! Sends a DenyNotify tagged frame (tag 0x12) to the daemon and verifies:
-//!   1. DenyNotifyAck::Ok received
-//!   2. JSONL log contains a "block" row with the correct source_kind
-//!   3. LogWriter blocks_today counter incremented
+//! Sends a `DenyNotify` tagged frame (tag 0x12) to the daemon and verifies:
+//!   1. `DenyNotifyAck::Ok` received
+//!   2. JSONL log contains a "block" row with the correct `source_kind`
+//!   3. `LogWriter` `blocks_today` counter incremented
 
 use guard_core::AuditToken;
 use guard_daemon::gap_detector::GapDetector;
@@ -20,8 +20,12 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::thread;
 
+fn current_pid_for_audit_token() -> u32 {
+    u32::try_from(unsafe { libc::getpid() }).expect("pid fits audit token field")
+}
+
 fn register_self_as_tracked(sock: &std::path::Path) {
-    let self_pid = unsafe { libc::getpid() } as u32;
+    let self_pid = current_pid_for_audit_token();
     let self_token = AuditToken {
         val: [0, 0, 0, 0, 0, self_pid, 0, 0],
     };
@@ -69,7 +73,7 @@ fn deny_notify_round_trip_logs_block_row() {
     register_self_as_tracked(&sock);
 
     // Build and send a DenyNotify frame.
-    let self_pid = unsafe { libc::getpid() } as u32;
+    let self_pid = current_pid_for_audit_token();
     let wire_token = AuditTokenWire {
         val: [0, 0, 0, 0, 0, self_pid, 0, 0],
     };
@@ -93,7 +97,7 @@ fn deny_notify_round_trip_logs_block_row() {
         DenyNotifyAck::Ok { schema_version } => {
             assert_eq!(schema_version, IPC_SCHEMA_V4);
         }
-        other => panic!("expected DenyNotifyAck::Ok, got {:?}", other),
+        other @ DenyNotifyAck::Err { .. } => panic!("expected DenyNotifyAck::Ok, got {other:?}"),
     }
 
     // 2. Give the writer thread a moment to flush.
@@ -171,7 +175,9 @@ fn deny_notify_wrong_schema_version_returns_err() {
                 "error message should mention schema_version: {message}"
             );
         }
-        other => panic!("expected DenyNotifyAck::Err, got {:?}", other),
+        other @ DenyNotifyAck::Ok { .. } => {
+            panic!("expected DenyNotifyAck::Err, got {other:?}");
+        }
     }
 }
 
@@ -219,7 +225,9 @@ fn deny_notify_untracked_sender_still_logs() {
     // Should still succeed even for untracked senders.
     match ack {
         DenyNotifyAck::Ok { .. } => {}
-        other => panic!("expected Ok even for untracked sender, got {:?}", other),
+        other @ DenyNotifyAck::Err { .. } => {
+            panic!("expected Ok even for untracked sender, got {other:?}");
+        }
     }
 
     thread::sleep(std::time::Duration::from_millis(100));

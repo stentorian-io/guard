@@ -1,11 +1,11 @@
-//! Daemon-side persistence-path watcher using kqueue EVFILT_VNODE.
+//! Daemon-side persistence-path watcher using kqueue `EVFILT_VNODE`.
 //!
-//! Monitors macOS persistence directories (LaunchAgents, LaunchDaemons,
+//! Monitors macOS persistence directories (`LaunchAgents`, `LaunchDaemons`,
 //! crontabs, periodic scripts, shell profiles) for file writes. When a write
 //! lands during an active `stt-guard wrap` session, the watcher emits a
-//! `gap_kind="persistence-write"` GapRecord to the log writer.
+//! `gap_kind="persistence-write"` `GapRecord` to the log writer.
 //!
-//! This replaces the hook-side open()/openat() interpose that was disabled on
+//! This replaces the hook-side `open()/openat()` interpose that was disabled on
 //! macOS 26+ due to dyld init-order crashes (commit 6db0e25).
 
 use crate::log_writer::{GapRecord, JSONL_SCHEMA_VERSION, LogRow, LogWriter, ProcessCtxLog};
@@ -22,6 +22,10 @@ const THREAD_NAME: &str = guard_core::paths::THREAD_PERSIST_WATCH;
 
 /// Spawn the persistence-watcher thread. Returns the join handle (caller
 /// typically drops it — the thread runs for the daemon's lifetime).
+///
+/// # Errors
+///
+/// Returns an error when the watcher thread cannot be spawned.
 pub fn spawn_watcher(
     process_tree: Arc<ProcessTree>,
     log_writer: LogWriter,
@@ -29,7 +33,7 @@ pub fn spawn_watcher(
     std::thread::Builder::new()
         .name(THREAD_NAME.into())
         .spawn(move || {
-            if let Err(e) = run_watcher(process_tree, log_writer) {
+            if let Err(e) = run_watcher(&process_tree, &log_writer) {
                 error!(error = %e, "persistence watcher exited with error");
             }
         })
@@ -61,14 +65,14 @@ fn persistence_dirs() -> Vec<(PathBuf, &'static str)> {
         }
     }
 
-    let system_la = PathBuf::from("/Library/LaunchAgents");
-    if system_la.is_dir() {
-        dirs.push((system_la, "launch-agent"));
+    let launch_agents_dir = PathBuf::from("/Library/LaunchAgents");
+    if launch_agents_dir.is_dir() {
+        dirs.push((launch_agents_dir, "launch-agent"));
     }
 
-    let system_ld = PathBuf::from("/Library/LaunchDaemons");
-    if system_ld.is_dir() {
-        dirs.push((system_ld, "launch-daemon"));
+    let launch_daemons_dir = PathBuf::from("/Library/LaunchDaemons");
+    if launch_daemons_dir.is_dir() {
+        dirs.push((launch_daemons_dir, "launch-daemon"));
     }
 
     for cron_dir in &["/usr/lib/cron/tabs", "/var/at/tabs"] {
@@ -151,7 +155,7 @@ fn scan_dir(path: &PathBuf) -> HashMap<String, std::time::SystemTime> {
 
 /// Best-effort process attribution: check which tracked PID wrote a file
 /// by looking for a PID that is still alive and was recently active.
-/// Returns (pid, pidversion, binary_path) if a tracked process can be
+/// Returns (pid, pidversion, `binary_path`) if a tracked process can be
 /// identified as the likely writer.
 ///
 /// This is inherently racy — the writing process may have already exited
@@ -161,12 +165,16 @@ fn scan_dir(path: &PathBuf) -> HashMap<String, std::time::SystemTime> {
 fn attribute_write(process_tree: &ProcessTree) -> (u32, u32, String) {
     let pids = process_tree.list_tracked_pids();
     for (pid, pidversion) in &pids {
+        let Some(process_id) = pid_t_from_u32(*pid) else {
+            continue;
+        };
+
         // Verify the process is still alive.
-        let ret = unsafe { libc::kill(*pid as i32, 0) };
+        let ret = unsafe { libc::kill(process_id, 0) };
         if ret != 0 {
             continue;
         }
-        if let Some(binary) = process_path(*pid as libc::pid_t) {
+        if let Some(binary) = process_path(process_id) {
             return (*pid, *pidversion, binary);
         }
         return (*pid, *pidversion, String::new());
@@ -174,7 +182,7 @@ fn attribute_write(process_tree: &ProcessTree) -> (u32, u32, String) {
     (0, 0, String::new())
 }
 
-fn run_watcher(process_tree: Arc<ProcessTree>, log_writer: LogWriter) -> std::io::Result<()> {
+fn run_watcher(process_tree: &Arc<ProcessTree>, log_writer: &LogWriter) -> std::io::Result<()> {
     let dirs = persistence_dirs();
     if dirs.is_empty() {
         info!("no persistence directories found to watch");
@@ -218,24 +226,9 @@ fn run_watcher(process_tree: Arc<ProcessTree>, log_writer: LogWriter) -> std::io
             }
         };
 
-        // On timeout (n==0), try to pick up newly-created directories.
         let event_fds = match event {
             WatchEvent::Timeout => {
-                for (path, category) in persistence_dirs_with_create() {
-                    if fd_to_idx.values().any(|&idx| watched[idx].path == path) {
-                        continue;
-                    }
-                    if let Some(w) = open_watch(&path, category) {
-                        let new_idx = watched.len();
-                        let new_fd = w.fd;
-                        watched.push(w);
-                        fd_to_idx.insert(new_fd, new_idx);
-                        if let Err(err) = watch_set.add(new_fd) {
-                            error!(error = %err, path = %path.display(), "failed to add persistence dir watch");
-                        }
-                        info!(path = %path.display(), "added new persistence dir watch");
-                    }
-                }
+                add_new_persistence_watches(&watch_set, &mut watched, &mut fd_to_idx);
                 continue;
             }
             WatchEvent::Fds(fds) if fds.is_empty() => continue,
@@ -243,82 +236,115 @@ fn run_watcher(process_tree: Arc<ProcessTree>, log_writer: LogWriter) -> std::io
         };
 
         let active_runs = process_tree.list_runs();
-        if active_runs.is_empty() {
-            // No active runs — update baselines silently.
-            for fd in &event_fds {
-                if let Some(&idx) = fd_to_idx.get(fd) {
-                    watched[idx].baseline = scan_dir(&watched[idx].path);
-                }
-            }
-            continue;
-        }
-
-        for fd in &event_fds {
-            let idx = match fd_to_idx.get(fd) {
-                Some(&i) => i,
-                None => continue,
-            };
-
-            let w = &mut watched[idx];
-            let new_scan = scan_dir(&w.path);
-
-            for (name, mtime) in &new_scan {
-                if w.category == "shell-profile" && !is_shell_profile(name) {
-                    continue;
-                }
-
-                let is_new_or_modified = match w.baseline.get(name) {
-                    None => true,
-                    Some(old_mtime) => mtime > old_mtime,
-                };
-
-                if !is_new_or_modified {
-                    continue;
-                }
-
-                let full_path = w.path.join(name);
-                let full_path_str = full_path.to_string_lossy().to_string();
-
-                let (pid, pidversion, binary) = attribute_write(&process_tree);
-
-                let run_uuid = active_runs
-                    .first()
-                    .map(|r| r.run_uuid.clone())
-                    .unwrap_or_default();
-
-                let gap = GapRecord {
-                    schema_version: JSONL_SCHEMA_VERSION,
-                    ts: crate::log_writer::now_rfc3339(),
-                    run_uuid,
-                    gap_kind: "persistence-write",
-                    process: ProcessCtxLog {
-                        pid,
-                        pidversion,
-                        argv: if binary.is_empty() {
-                            vec![]
-                        } else {
-                            vec![binary]
-                        },
-                        cwd: String::new(),
-                    },
-                    binary_path: Some(full_path_str.clone()),
-                };
-
-                info!(
-                    path = %full_path_str,
-                    category = w.category,
-                    pid,
-                    "persistence write detected"
-                );
-
-                log_writer.send(LogRow::Gap(gap));
-            }
-
-            w.baseline = new_scan;
-        }
+        handle_persistence_events(
+            process_tree,
+            log_writer,
+            &mut watched,
+            &fd_to_idx,
+            &event_fds,
+            active_runs.first().map(|run| run.run_uuid.as_str()),
+        );
     }
 
     Ok(())
+}
+
+fn add_new_persistence_watches(
+    watch_set: &WatchSet,
+    watched: &mut Vec<WatchedDir>,
+    fd_to_idx: &mut HashMap<RawFd, usize>,
+) {
+    for (path, category) in persistence_dirs_with_create() {
+        if fd_to_idx.values().any(|&idx| watched[idx].path == path) {
+            continue;
+        }
+        if let Some(watch) = open_watch(&path, category) {
+            let new_idx = watched.len();
+            let new_fd = watch.fd;
+            watched.push(watch);
+            fd_to_idx.insert(new_fd, new_idx);
+            if let Err(err) = watch_set.add(new_fd) {
+                error!(error = %err, path = %path.display(), "failed to add persistence dir watch");
+            }
+            info!(path = %path.display(), "added new persistence dir watch");
+        }
+    }
+}
+
+fn handle_persistence_events(
+    process_tree: &ProcessTree,
+    log_writer: &LogWriter,
+    watched: &mut [WatchedDir],
+    fd_to_idx: &HashMap<RawFd, usize>,
+    event_fds: &[RawFd],
+    active_run_uuid: Option<&str>,
+) {
+    for fd in event_fds {
+        let Some(&idx) = fd_to_idx.get(fd) else {
+            continue;
+        };
+
+        let watch = &mut watched[idx];
+        let new_scan = scan_dir(&watch.path);
+        if let Some(run_uuid) = active_run_uuid {
+            emit_persistence_gaps(process_tree, log_writer, watch, &new_scan, run_uuid);
+        }
+        watch.baseline = new_scan;
+    }
+}
+
+fn emit_persistence_gaps(
+    process_tree: &ProcessTree,
+    log_writer: &LogWriter,
+    watch: &WatchedDir,
+    new_scan: &HashMap<String, std::time::SystemTime>,
+    run_uuid: &str,
+) {
+    for (name, mtime) in new_scan {
+        if watch.category == "shell-profile" && !is_shell_profile(name) {
+            continue;
+        }
+
+        if watch.baseline.get(name).is_some_and(|old| mtime <= old) {
+            continue;
+        }
+
+        let full_path = watch.path.join(name);
+        let full_path_str = full_path.to_string_lossy().to_string();
+        let (pid, pidversion, binary) = attribute_write(process_tree);
+        let argv = if binary.is_empty() {
+            vec![]
+        } else {
+            vec![binary]
+        };
+
+        let gap = GapRecord {
+            schema_version: JSONL_SCHEMA_VERSION,
+            ts: crate::log_writer::now_rfc3339(),
+            run_uuid: run_uuid.to_string(),
+            gap_kind: "persistence-write",
+            process: ProcessCtxLog {
+                pid,
+                pidversion,
+                argv,
+                cwd: String::new(),
+            },
+            binary_path: Some(full_path_str.clone()),
+        };
+
+        info!(
+            path = %full_path_str,
+            category = watch.category,
+            pid,
+            "persistence write detected"
+        );
+
+        log_writer.send(LogRow::Gap(gap));
+    }
+}
+
+fn pid_t_from_u32(pid: u32) -> Option<libc::pid_t> {
+    libc::pid_t::try_from(pid).ok()
 }
 
 fn open_watch(path: &PathBuf, category: &'static str) -> Option<WatchedDir> {

@@ -1,4 +1,4 @@
-//! v0.3 — DeferredResolveTable unit tests.
+//! v0.3 — `DeferredResolveTable` unit tests.
 
 use crossbeam_channel::bounded;
 use guard_daemon::daemon_state::{DeferredEntry, DeferredResolveTable};

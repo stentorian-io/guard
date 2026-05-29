@@ -47,7 +47,21 @@ mod macos {
         cleanup_system_install();
         let _cleanup = Cleanup;
 
-        let before = run_cli(&cli, ["status", "logs"]);
+        assert_pre_install_refuses(&cli);
+        if !install_system_or_skip(&cli) {
+            return;
+        }
+
+        wait_for_status_ok(&cli);
+        assert_wrapped_user_process_loads_system_snapshot_and_enforces_policy(&cli, &target_dir);
+        assert_hook_mode_tampering_detected(&cli);
+        assert_plist_tampering_detected(&cli);
+        assert_watchdog_symlink_detected(&cli, &target_dir);
+        assert_hook_override_ignored(&cli);
+    }
+
+    fn assert_pre_install_refuses(cli: &Path) {
+        let before = run_cli(cli, ["status", "logs"]);
         assert!(
             !before.status.success(),
             "status logs should refuse before system install; stdout={} stderr={}",
@@ -58,7 +72,9 @@ mod macos {
             &stderr(&before),
             "hardened install is missing, corrupted, or incorrectly set up",
         );
+    }
 
+    fn install_system_or_skip(cli: &Path) -> bool {
         let install = sudo([
             cli.as_os_str(),
             OsStr::new("install-system"),
@@ -70,7 +86,7 @@ mod macos {
                 stdout(&install),
                 stderr(&install)
             );
-            return;
+            return false;
         }
         assert!(
             install.status.success(),
@@ -79,34 +95,34 @@ mod macos {
             stderr(&install)
         );
 
-        wait_for_status_ok(&cli);
-        assert_wrapped_user_process_loads_system_snapshot_and_enforces_policy(&cli, &target_dir);
+        true
+    }
 
+    fn assert_hook_mode_tampering_detected(cli: &Path) {
         sudo_ok([
             OsStr::new("chmod"),
             OsStr::new("666"),
             OsStr::new(&format!("{BIN_DIR}/stt-guard-hook.dylib")),
         ]);
-        let bad_mode = run_cli(&cli, ["status", "logs"]);
+        let bad_mode = run_cli(cli, ["status", "logs"]);
         assert_health_failure_contains(&bad_mode, "mode is 0666");
         sudo_ok([
             OsStr::new("chmod"),
             OsStr::new("644"),
             OsStr::new(&format!("{BIN_DIR}/stt-guard-hook.dylib")),
         ]);
-        assert!(run_cli(&cli, ["status", "logs"]).status.success());
+        assert!(run_cli(cli, ["status", "logs"]).status.success());
+    }
 
+    fn assert_plist_tampering_detected(cli: &Path) {
         let backup = tempfile::NamedTempFile::new().expect("plist backup temp file");
         std::fs::copy(PLIST_PATH, backup.path()).expect("backup plist");
         sudo_ok([
             OsStr::new("sh"),
             OsStr::new("-c"),
-            OsStr::new(&format!(
-                "printf '\n<!-- tampered -->\n' >> '{}'",
-                PLIST_PATH
-            )),
+            OsStr::new(&format!("printf '\n<!-- tampered -->\n' >> '{PLIST_PATH}'")),
         ]);
-        let tampered_plist = run_cli(&cli, ["status", "logs"]);
+        let tampered_plist = run_cli(cli, ["status", "logs"]);
         assert_health_failure_contains(
             &tampered_plist,
             "content differs from expected LaunchDaemon definition",
@@ -126,8 +142,10 @@ mod macos {
             OsStr::new("644"),
             OsStr::new(PLIST_PATH),
         ]);
-        assert!(run_cli(&cli, ["status", "logs"]).status.success());
+        assert!(run_cli(cli, ["status", "logs"]).status.success());
+    }
 
+    fn assert_watchdog_symlink_detected(cli: &Path, target_dir: &Path) {
         sudo_ok([
             OsStr::new("rm"),
             OsStr::new("-f"),
@@ -139,7 +157,7 @@ mod macos {
             OsStr::new(&format!("{BIN_DIR}/stt-guard-daemon")),
             OsStr::new(&format!("{BIN_DIR}/stt-guard-watchdog")),
         ]);
-        let symlinked_watchdog = run_cli(&cli, ["status", "logs"]);
+        let symlinked_watchdog = run_cli(cli, ["status", "logs"]);
         assert_health_failure_contains(&symlinked_watchdog, "must not be a symlink");
         sudo_ok([
             OsStr::new("rm"),
@@ -161,13 +179,15 @@ mod macos {
             OsStr::new("755"),
             OsStr::new(&format!("{BIN_DIR}/stt-guard-watchdog")),
         ]);
-        assert!(run_cli(&cli, ["status", "logs"]).status.success());
+        assert!(run_cli(cli, ["status", "logs"]).status.success());
+    }
 
+    fn assert_hook_override_ignored(cli: &Path) {
         let fake_hook = tempfile::NamedTempFile::new().expect("fake hook");
         std::fs::write(fake_hook.path(), b"not a dylib").expect("write fake hook");
-        let env_override = Command::new(&cli)
+        let env_override = Command::new(cli)
             .arg("wrap")
-            .arg(&cli)
+            .arg(cli)
             .arg("--version")
             .current_dir("/tmp")
             .env_clear()
@@ -315,13 +335,12 @@ mod macos {
             if out.status.success() {
                 return;
             }
-            if Instant::now() >= deadline {
-                panic!(
-                    "status did not become healthy after system install; stdout={} stderr={}",
-                    stdout(&out),
-                    stderr(&out)
-                );
-            }
+            assert!(
+                Instant::now() < deadline,
+                "status did not become healthy after system install; stdout={} stderr={}",
+                stdout(&out),
+                stderr(&out)
+            );
             std::thread::sleep(Duration::from_millis(500));
         }
     }

@@ -1,4 +1,4 @@
-//! Stentorian Guard CLI library — exposes spawn / locate / audit_token / ipc_client /
+//! Stentorian Guard CLI library — exposes spawn / locate / `audit_token` / `ipc_client` /
 //! for use by integration tests AND main.rs.
 
 pub mod audit_token;

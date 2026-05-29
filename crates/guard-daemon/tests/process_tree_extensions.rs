@@ -1,4 +1,4 @@
-//! v0.3 — ProcessTree extensions for is_tty/baseline_mode/prompt_channel.
+//! v0.3 — `ProcessTree` extensions for `is_tty/baseline_mode/prompt_channel`.
 
 use crossbeam_channel::bounded;
 use guard_daemon::tracked::ProcessTree;

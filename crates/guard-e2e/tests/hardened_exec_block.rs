@@ -31,7 +31,7 @@ fn run_probe(harness: &DaemonHarness, mode: &str) -> std::process::Output {
 }
 
 /// execve(/usr/bin/curl) must be blocked with EACCES.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn exec_curl_blocked() {
     let harness = DaemonHarness::start().expect("start daemon");
@@ -55,8 +55,8 @@ fn exec_curl_blocked() {
     );
 }
 
-/// posix_spawn(/usr/bin/curl) must be blocked with EACCES.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+/// `posix_spawn(/usr/bin/curl)` must be blocked with EACCES.
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn posix_spawn_curl_blocked() {
     let harness = DaemonHarness::start().expect("start daemon");
@@ -82,7 +82,7 @@ fn posix_spawn_curl_blocked() {
 
 /// execve(/usr/bin/env) must now be blocked because phase 1 treats all
 /// hardened-runtime exec targets as T0.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn exec_env_blocked_as_t0_hardened_runtime() {
     let harness = DaemonHarness::start().expect("start daemon");
@@ -108,7 +108,7 @@ fn exec_env_blocked_as_t0_hardened_runtime() {
 
 /// Fat/universal Mach-O binaries are T0-blocked until multi-slice scanning
 /// lands.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn synthetic_fat_macho_blocked() {
     let harness = DaemonHarness::start().expect("start daemon");
@@ -134,7 +134,7 @@ fn synthetic_fat_macho_blocked() {
 
 /// A native thin Mach-O containing raw syscall bytes is T3. Direct exec-family
 /// calls cannot safely hand tracing to the daemon, so they fail closed.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn synthetic_syscall_macho_exec_fails_closed() {
     let harness = DaemonHarness::start().expect("start daemon");
@@ -158,8 +158,8 @@ fn synthetic_syscall_macho_exec_fails_closed() {
     );
 }
 
-/// T3 posix_spawn fails closed before child creation.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+/// T3 `posix_spawn` fails closed before child creation.
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn synthetic_syscall_macho_posix_spawn_with_attrs_fails_closed() {
     let harness = DaemonHarness::start().expect("start daemon");

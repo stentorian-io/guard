@@ -8,9 +8,7 @@ fn touch(path: &std::path::Path, size: usize) {
 fn retention_count_keeps_newest_seven() {
     let dir = tempfile::tempdir().expect("tempdir");
     for i in 0..10 {
-        let p = dir
-            .path()
-            .join(format!("stt-guard-20260101-{:03}.log.gz", i));
+        let p = dir.path().join(format!("stt-guard-20260101-{i:03}.log.gz"));
         touch(&p, 10);
         // Stagger mtimes by setting them via filetime-equivalent — simplest: sleep briefly.
         std::thread::sleep(std::time::Duration::from_millis(15));
@@ -18,7 +16,7 @@ fn retention_count_keeps_newest_seven() {
     enforce_retention(dir.path()).expect("retention");
     let remaining: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_name().to_string_lossy().ends_with(".log.gz"))
         .collect();
     assert_eq!(remaining.len(), MAX_ARCHIVES);
@@ -37,17 +35,15 @@ fn retention_size_cap_evicts_oldest() {
     // 6 archives, each 50 MiB (well under count cap, but 300 MiB total > 256 MiB cap).
     let big = 50 * 1024 * 1024;
     for i in 0..6 {
-        let p = dir
-            .path()
-            .join(format!("stt-guard-20260102-{:03}.log.gz", i));
+        let p = dir.path().join(format!("stt-guard-20260102-{i:03}.log.gz"));
         touch(&p, big);
         std::thread::sleep(std::time::Duration::from_millis(15));
     }
     enforce_retention(dir.path()).expect("retention");
     let remaining: u64 = std::fs::read_dir(dir.path())
         .unwrap()
-        .filter_map(|e| e.ok())
-        .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+        .filter_map(std::result::Result::ok)
+        .map(|e| e.metadata().map_or(0, |m| m.len()))
         .sum();
     assert!(
         remaining <= MAX_TOTAL_BYTES,

@@ -4,20 +4,20 @@
 //!
 //! In v0.1, the simplest reproducer is `stt-guard wrap echo hello`. echo on
 //! macOS 26 is hardened, but for THIS test we don't need the dylib to fire —
-//! we only need to verify (a) the daemon received a RegisterRoot and (b) the
+//! we only need to verify (a) the daemon received a `RegisterRoot` and (b) the
 //! wrapped command exited 0. The full dylib-injection verification is in
 //! deny.rs (Roadmap criterion #2) which uses Homebrew/nvm node.
 //!
 //! SC1 amendment: `smoke_dylib_loaded` proves that
-//! DYLD_INSERT_LIBRARIES actually loaded our dylib on the success path by
+//! `DYLD_INSERT_LIBRARIES` actually loaded our dylib on the success path by
 //! using a NON-hardened Homebrew node binary (which does not strip DYLD_*
 //! on exec) and checking for a deterministic dylib ctor side-effect — a
-//! marker file written by the ctor when STT_GUARD_TEST_MARKER is set.
+//! marker file written by the ctor when `STT_GUARD_TEST_MARKER` is set.
 
 use guard_e2e::{DaemonHarness, cargo_workspace_root, resolve_cli, resolve_dylib, resolve_node};
 use std::process::Command;
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn guard_run_echo_hello_registers_with_daemon_and_exits_zero() {
     // Ensure the workspace is built (cargo test for the e2e crate triggers
@@ -25,12 +25,11 @@ fn guard_run_echo_hello_registers_with_daemon_and_exits_zero() {
     // The test discovers them via cargo_target_dir().
     let cli = resolve_cli();
     let dylib = resolve_dylib();
-    if !cli.exists() {
-        panic!(
-            "stt-guard CLI not at {}; run `cargo build --workspace` first",
-            cli.display()
-        );
-    }
+    assert!(
+        cli.exists(),
+        "stt-guard CLI not at {}; run `cargo build --workspace` first",
+        cli.display()
+    );
 
     let harness = DaemonHarness::start().expect("start daemon");
 
@@ -70,7 +69,7 @@ fn guard_run_echo_hello_registers_with_daemon_and_exits_zero() {
     drop(harness);
 }
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn guard_run_propagates_child_exit_code() {
     let cli = resolve_cli();
@@ -108,17 +107,17 @@ fn guard_run_propagates_child_exit_code() {
 /// Mechanism: the dylib constructor writes a marker file to the path given by
 /// `STT_GUARD_TEST_MARKER` when that env var is set. The test:
 ///   1. Picks a short tempdir path for the marker file.
-///   2. Wraps a trivial Node script (harness/smoke_node.js — just `process.exit(0)`)
+///   2. Wraps a trivial Node script (`harness/smoke_node.js` — just `process.exit(0)`)
 ///      under `stt-guard wrap` with `STT_GUARD_TEST_MARKER` set.
 ///   3. Asserts: child exits 0 AND marker file exists.
 ///
 /// The existing `guard_run_echo_hello_registers_with_daemon_and_exits_zero`
-/// test uses hardened `/bin/echo` (which strips DYLD_INSERT_LIBRARIES on exec).
+/// test uses hardened `/bin/echo` (which strips `DYLD_INSERT_LIBRARIES` on exec).
 /// That test proves the spawn/IPC/RegisterRoot path. THIS test uses non-hardened
 /// node to prove the dylib-load path — the complementary case.
 ///
-/// Skip condition: STT_GUARD_E2E_NODE not set and Homebrew node not found.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+/// Skip condition: `STT_GUARD_E2E_NODE` not set and Homebrew node not found.
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn smoke_dylib_loaded() {
     let cli = resolve_cli();
@@ -209,8 +208,7 @@ fn smoke_dylib_loaded() {
     let marker_content = std::fs::read_to_string(&marker_path).unwrap_or_default();
     assert_eq!(
         marker_content, "dylib-loaded",
-        "smoke_dylib_loaded: marker file exists but content is unexpected: {:?}",
-        marker_content
+        "smoke_dylib_loaded: marker file exists but content is unexpected: {marker_content:?}"
     );
 
     drop(harness);

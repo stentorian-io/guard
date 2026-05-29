@@ -1,7 +1,7 @@
 //! Tests for `guard_hook::envp::should_emit_env_not_propagated_gap`
 //! (TREE-06 gap-closure 02-09).
 //!
-//! Test 4: should_emit_env_not_propagated_gap returns false when both required
+//! Test 4: `should_emit_env_not_propagated_gap` returns false when both required
 //!   vars are present; true when either is missing; true on null envp.
 //! Test 5: inspector handles arbitrarily-ordered envp; prefix anchoring avoids
 //!   false matches on values that contain the key name as a substring.
@@ -25,16 +25,14 @@ const HOOK_ENV_KEY: &str = "DYLD_INSERT_LIBRARIES";
 const HOOK_ENV_KEY: &str = "LD_PRELOAD";
 
 /// Build a null-terminated envp array from a &[&str] of KEY=value entries.
-/// Returns (the CStrings — must be kept alive, the *mut c_char array).
+/// Returns (the `CStrings` — must be kept alive, the *mut `c_char` array).
 fn make_envp(entries: &[&str]) -> (Vec<CString>, Vec<*mut libc::c_char>) {
     let cstrings: Vec<CString> = entries
         .iter()
         .map(|s| CString::new(*s).expect("CString"))
         .collect();
-    let mut ptrs: Vec<*mut libc::c_char> = cstrings
-        .iter()
-        .map(|cs| cs.as_ptr() as *mut libc::c_char)
-        .collect();
+    let mut ptrs: Vec<*mut libc::c_char> =
+        cstrings.iter().map(|cs| cs.as_ptr().cast_mut()).collect();
     ptrs.push(std::ptr::null_mut()); // null terminator
     (cstrings, ptrs)
 }

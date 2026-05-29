@@ -1,6 +1,6 @@
-//! posix_spawnp wrapper that injects the platform hook variable and
-//! STT_GUARD_SNAPSHOT_MANIFEST into the child's envp. The hook derives the
-//! daemon socket path from STT_GUARD_STATE_DIR at ctor time.
+//! `posix_spawnp` wrapper that injects the platform hook variable and
+//! `STT_GUARD_SNAPSHOT_MANIFEST` into the child's envp. The hook derives the
+//! daemon socket path from `STT_GUARD_STATE_DIR` at ctor time.
 
 use std::ffi::OsString;
 use std::ffi::{CString, OsStr};
@@ -15,6 +15,13 @@ const ENV_DAEMON_SOCKET: &str = "STT_GUARD_DAEMON_SOCKET";
 const ENV_TRUSTED_SIGNERS_MANIFEST: &str = "STT_GUARD_TRUSTED_SIGNERS_MANIFEST";
 const ENV_ALLOW_TEST_SIGNER: &str = "STT_GUARD_ALLOW_TEST_SIGNER";
 
+/// Spawn a process with the guard hook and snapshot manifest injected into its
+/// environment.
+///
+/// # Errors
+///
+/// Returns errors for NUL bytes in paths or arguments, environment construction
+/// failures, or `posix_spawnp` failures.
 pub fn spawn_wrapped(
     program: &Path,
     args: &[&OsStr],
@@ -66,35 +73,30 @@ pub fn spawn_wrapped(
     );
 
     // Build argv[0] = program name.
-    let prog_c = CString::new(program.as_os_str().as_bytes())
+    let program_c = CString::new(program.as_os_str().as_bytes())
         .map_err(|e| std::io::Error::other(format!("program path contains NUL: {e}")))?;
-    let mut argv: Vec<CString> = Vec::with_capacity(args.len() + 1);
-    argv.push(prog_c.clone());
+    let mut command_argv: Vec<CString> = Vec::with_capacity(args.len() + 1);
+    command_argv.push(program_c.clone());
     for a in args {
-        argv.push(
+        command_argv.push(
             CString::new(a.as_bytes())
                 .map_err(|e| std::io::Error::other(format!("argument contains NUL: {e}")))?,
         );
     }
 
     // Build null-terminated pointer arrays for posix_spawnp.
-    let mut argv_ptrs: Vec<*mut libc::c_char> = argv
-        .iter()
-        .map(|c| c.as_ptr() as *mut libc::c_char)
-        .collect();
+    let mut argv_ptrs: Vec<*mut libc::c_char> =
+        command_argv.iter().map(|c| c.as_ptr().cast_mut()).collect();
     argv_ptrs.push(std::ptr::null_mut());
 
-    let mut envp_ptrs: Vec<*mut libc::c_char> = env
-        .iter()
-        .map(|c| c.as_ptr() as *mut libc::c_char)
-        .collect();
+    let mut envp_ptrs: Vec<*mut libc::c_char> = env.iter().map(|c| c.as_ptr().cast_mut()).collect();
     envp_ptrs.push(std::ptr::null_mut());
 
     let mut pid: libc::pid_t = 0;
     let rc = unsafe {
         libc::posix_spawnp(
-            &mut pid,
-            prog_c.as_ptr(),
+            &raw mut pid,
+            program_c.as_ptr(),
             std::ptr::null(), // file_actions: none
             std::ptr::null(), // attrp: none (default attrs)
             argv_ptrs.as_ptr(),
@@ -116,10 +118,16 @@ pub fn spawn_wrapped(
 ///
 /// The child is set as its own process-group leader via `std::os::unix::process::CommandExt::process_group(0)`
 /// which internally calls `setpgid(0,0)` in the child before exec — equivalent to
-/// POSIX_SPAWN_SETPGROUP. The returned pgid is `child.id() as i32`.
+/// `POSIX_SPAWN_SETPGROUP`. The returned pgid is `child.id() as i32`.
 ///
 /// Environment setup mirrors `spawn_wrapped`: inherits current env, strips
-/// managed vars, then adds the platform hook env var and STT_GUARD_SNAPSHOT_MANIFEST.
+/// managed vars, then adds the platform hook env var and `STT_GUARD_SNAPSHOT_MANIFEST`.
+///
+/// # Errors
+///
+/// Returns an error if the command is empty, the hook library cannot be found,
+/// the child cannot be spawned, or the child pid cannot be represented as an
+/// `i32` process group id.
 pub fn spawn_wrapped_with_pgid(
     command: &[OsString],
     manifest_path: &Path,
@@ -169,6 +177,8 @@ pub fn spawn_wrapped_with_pgid(
     cmd.process_group(0);
 
     let child = cmd.spawn().map_err(crate::CliError::Io)?;
-    let pgid = child.id() as i32;
+    let pgid = i32::try_from(child.id()).map_err(|_| {
+        crate::CliError::Other(format!("child pid {} does not fit i32", child.id()))
+    })?;
     Ok((child, pgid))
 }

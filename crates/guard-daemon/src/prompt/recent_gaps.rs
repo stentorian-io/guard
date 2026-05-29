@@ -1,6 +1,6 @@
 //! crates/guard-daemon/src/prompt/recent_gaps.rs
 //!
-//! v0.3 — bounded ring of recent coverage gaps for StatusReply
+//! v0.3 — bounded ring of recent coverage gaps for `StatusReply`
 //! (RESEARCH.md Open Question §9). Capacity 100 newest-wins.
 
 use std::collections::VecDeque;
@@ -16,6 +16,7 @@ pub struct RecentGapsRing {
 }
 
 impl RecentGapsRing {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(VecDeque::with_capacity(CAPACITY)),
@@ -23,7 +24,10 @@ impl RecentGapsRing {
     }
 
     pub fn push(&self, gap: GapInfo) {
-        let mut g = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if g.len() >= CAPACITY {
             g.pop_front();
         }
@@ -32,12 +36,18 @@ impl RecentGapsRing {
 
     /// Returns oldest-to-newest snapshot.
     pub fn snapshot(&self) -> Vec<GapInfo> {
-        let g = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let g = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         g.iter().cloned().collect()
     }
 
     pub fn len(&self) -> usize {
-        let g = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let g = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         g.len()
     }
 

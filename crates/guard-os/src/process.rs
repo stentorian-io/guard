@@ -4,7 +4,7 @@ use crate::OsError;
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::*;
+    use super::OsError;
 
     type MachPortT = u32;
     type KernReturnT = i32;
@@ -31,7 +31,7 @@ mod imp {
     pub fn kernel_pidversion(pid: libc::pid_t) -> Option<u32> {
         unsafe {
             let mut task_port: MachPortT = MACH_PORT_NULL;
-            let kr = task_name_for_pid(mach_task_self(), pid, &mut task_port);
+            let kr = task_name_for_pid(mach_task_self(), pid, &raw mut task_port);
             if kr != KERN_SUCCESS {
                 return None;
             }
@@ -41,7 +41,7 @@ mod imp {
                 task_port,
                 TASK_AUDIT_TOKEN,
                 token_val.as_mut_ptr(),
-                &mut count,
+                &raw mut count,
             );
             mach_port_deallocate(mach_task_self(), task_port);
             if kr2 != KERN_SUCCESS {
@@ -54,12 +54,13 @@ mod imp {
     pub fn process_uid(pid: libc::pid_t) -> Result<u32, OsError> {
         unsafe {
             let mut info: libc::proc_bsdinfo = std::mem::zeroed();
-            let info_size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+            let info_size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdinfo>())
+                .expect("proc_bsdinfo size fits c_int");
             let n = libc::proc_pidinfo(
                 pid,
                 libc::PROC_PIDTBSDINFO,
                 0,
-                &mut info as *mut _ as *mut libc::c_void,
+                (&raw mut info).cast::<libc::c_void>(),
                 info_size,
             );
             if n != info_size {
@@ -75,12 +76,13 @@ mod imp {
     pub fn process_gid(pid: libc::pid_t) -> Result<u32, OsError> {
         unsafe {
             let mut info: libc::proc_bsdinfo = std::mem::zeroed();
-            let info_size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+            let info_size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdinfo>())
+                .expect("proc_bsdinfo size fits c_int");
             let n = libc::proc_pidinfo(
                 pid,
                 libc::PROC_PIDTBSDINFO,
                 0,
-                &mut info as *mut _ as *mut libc::c_void,
+                (&raw mut info).cast::<libc::c_void>(),
                 info_size,
             );
             if n != info_size {
@@ -95,11 +97,12 @@ mod imp {
 
     pub fn process_path(pid: libc::pid_t) -> Option<String> {
         let mut buf = [0u8; libc::MAXPATHLEN as usize];
-        let n = unsafe {
-            libc::proc_pidpath(pid, buf.as_mut_ptr() as *mut libc::c_void, buf.len() as u32)
-        };
+        let buf_len = u32::try_from(buf.len()).expect("MAXPATHLEN fits u32");
+        let n =
+            unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast::<libc::c_void>(), buf_len) };
         if n > 0 {
-            Some(String::from_utf8_lossy(&buf[..n as usize]).to_string())
+            let path_len = usize::try_from(n).expect("positive proc_pidpath length fits usize");
+            Some(String::from_utf8_lossy(&buf[..path_len]).to_string())
         } else {
             None
         }
@@ -108,7 +111,7 @@ mod imp {
 
 #[cfg(not(target_os = "macos"))]
 mod imp {
-    use super::*;
+    use super::OsError;
 
     #[cfg(target_os = "linux")]
     pub fn kernel_pidversion(pid: libc::pid_t) -> Option<u32> {
@@ -170,7 +173,10 @@ mod imp {
 
     #[cfg(target_os = "linux")]
     pub fn starttime_ticks_to_pidversion(starttime_ticks: u64) -> u32 {
-        (starttime_ticks as u32) ^ ((starttime_ticks >> 32) as u32)
+        let bytes = starttime_ticks.to_le_bytes();
+        let low = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let high = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        low ^ high
     }
 
     #[cfg(target_os = "linux")]
@@ -237,7 +243,7 @@ mod imp {
 
     #[cfg(all(test, target_os = "linux"))]
     mod linux_tests {
-        use super::*;
+        use super::{parse_proc_stat_starttime, parse_proc_status_ids};
 
         #[test]
         fn parse_proc_stat_starttime_handles_spaces_in_comm() {
@@ -245,7 +251,7 @@ mod imp {
 
             let starttime = parse_proc_stat_starttime(stat).expect("starttime");
 
-            assert_eq!(starttime, 987654321);
+            assert_eq!(starttime, 987_654_321);
         }
 
         #[test]
@@ -265,21 +271,36 @@ mod imp {
 ///
 /// Returns `None` when the platform has no audit-token pidversion concept or
 /// when the OS refuses the lookup.
+#[must_use]
 pub fn kernel_pidversion(pid: libc::pid_t) -> Option<u32> {
     imp::kernel_pidversion(pid)
 }
 
 /// Return the OS owner uid for a process.
+///
+/// # Errors
+///
+/// Returns an OS error if the process cannot be inspected or the platform does
+/// not support this lookup.
 pub fn process_uid(pid: libc::pid_t) -> Result<u32, OsError> {
     imp::process_uid(pid)
 }
 
 /// Return the OS owner gid for a process.
+///
+/// # Errors
+///
+/// Returns an OS error if the process cannot be inspected or the platform does
+/// not support this lookup.
 pub fn process_gid(pid: libc::pid_t) -> Result<u32, OsError> {
     imp::process_gid(pid)
 }
 
 /// Return Linux procfs starttime ticks for a process.
+///
+/// # Errors
+///
+/// Returns an OS error if procfs cannot be read or the stat payload is malformed.
 #[cfg(target_os = "linux")]
 pub fn process_starttime_ticks(pid: libc::pid_t) -> Result<u64, OsError> {
     imp::process_starttime_ticks(pid)
@@ -287,11 +308,13 @@ pub fn process_starttime_ticks(pid: libc::pid_t) -> Result<u64, OsError> {
 
 /// Fold Linux procfs starttime ticks into the legacy 32-bit pidversion slot.
 #[cfg(target_os = "linux")]
+#[must_use]
 pub fn starttime_ticks_to_pidversion(starttime_ticks: u64) -> u32 {
     imp::starttime_ticks_to_pidversion(starttime_ticks)
 }
 
 /// Return the executable path for a process when the OS exposes one.
+#[must_use]
 pub fn process_path(pid: libc::pid_t) -> Option<String> {
     imp::process_path(pid)
 }

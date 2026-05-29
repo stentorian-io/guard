@@ -773,8 +773,7 @@ fn known_entry(
     let entry_id = entry.id.to_ascii_lowercase();
     let entry_value = entry_id
         .split_once(':')
-        .map(|(_, value)| value)
-        .unwrap_or(&entry_id);
+        .map_or(entry_id.as_str(), |(_, value)| value);
 
     known_ids.contains(&entry_id) || known_aliases.contains(entry_value)
 }

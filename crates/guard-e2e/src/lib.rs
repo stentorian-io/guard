@@ -1,11 +1,11 @@
 //! E2E test harness for v0.1 success criteria.
 //!
 //! Provides:
-//!   - DaemonHarness: spawns stt-guard-daemon serve in a tempdir; waits for ready;
+//!   - `DaemonHarness`: spawns stt-guard-daemon serve in a tempdir; waits for ready;
 //!     stops on Drop.
-//!   - resolve_node(): finds a usable non-hardened node binary; returns Err
+//!   - `resolve_node()`: finds a usable non-hardened node binary; returns Err
 //!     with a clear skip message if none available.
-//!   - resolve_dylib(): the target/debug hook dylib path.
+//!   - `resolve_dylib()`: the target/debug hook dylib path.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -18,19 +18,19 @@ pub struct DaemonHarness {
     pub state_dir: PathBuf,
     pub socket: PathBuf,
     pub manifest: PathBuf,
-    /// The TempDir that owns the home directory (and must be kept alive for
+    /// The `TempDir` that owns the home directory (and must be kept alive for
     /// the lifetime of the harness).
     pub home: tempfile::TempDir,
     pub child: Child,
-    /// A second TempDir under /tmp for the state_dir/socket — kept short to
+    /// A second `TempDir` under /tmp for the `state_dir/socket` — kept short to
     /// stay under macOS's 104-byte Unix socket path limit (ISS-12).
-    _state_tmp: tempfile::TempDir,
+    state_tmp: tempfile::TempDir,
 }
 
 impl DaemonHarness {
     /// Start stt-guard-daemon serve in a fresh tempdir as $HOME, wait for daemon.ready.
     ///
-    /// ISS-07 remediation — STATE_DIR ALIGNMENT CONTRACT:
+    /// ISS-07 remediation — `STATE_DIR` ALIGNMENT CONTRACT:
     /// The daemon receives `--state-dir <state_dir>` explicitly (authoritative).
     /// Tests that subsequently invoke the CLI MUST pass BOTH:
     ///   - `HOME=<harness.home.path()>` so the CLI's `default_state_dir()`
@@ -39,21 +39,31 @@ impl DaemonHarness {
     ///     ensures the CLI uses the harness state dir even if `default_state_dir()`
     ///     changes its derivation rule).
     ///     This dual env-var pattern is the ISS-07 fix: the daemon and CLI use the
-    ///     same state_dir without relying on HOME-derivation alone.
+    ///     same `state_dir` without relying on HOME-derivation alone.
     ///
     /// ISS-12: macOS Unix domain socket paths must be < 104 bytes. The default
     /// `tempfile::tempdir()` creates paths under /var/folders/…/T/ which can
     /// exceed the limit when suffixed with the state-dir + socket file name.
-    /// The fix: create a SHORT tempdir under /tmp for the state_dir/socket
+    /// The fix: create a SHORT tempdir under /tmp for the `state_dir/socket`
     /// (e.g. /tmp/se2e_XXXXXXXX/stt-guard-daemon.sock — around 36 bytes) and a
     /// SEPARATE home dir (which does not need to hold the socket).
+    ///
+    /// # Errors
+    ///
+    /// Returns errors from tempdir creation, signer setup, daemon spawning, or
+    /// readiness waiting.
     pub fn start() -> std::io::Result<Self> {
         Self::start_with_env(&[])
     }
 
     /// Env-aware variant. Pairs in `extra` later in the slice override
     /// earlier ones; `extra` overrides the harness baseline
-    /// (HOME / PATH / RUST_LOG=info).
+    /// (HOME / PATH / `RUST_LOG=info`).
+    ///
+    /// # Errors
+    ///
+    /// Returns errors from harness setup, daemon spawning, or readiness
+    /// waiting.
     pub fn start_with_env(extra: &[(&str, &str)]) -> std::io::Result<Self> {
         Self::start_with_env_and_home_setup(extra, |_| Ok(()))
     }
@@ -62,6 +72,11 @@ impl DaemonHarness {
     /// temp HOME but before spawning the daemon. Useful for creating directories
     /// that the daemon needs to see at startup (e.g. ~/Library/LaunchAgents for
     /// the persistence watcher).
+    ///
+    /// # Errors
+    ///
+    /// Returns errors from tempdir creation, caller setup, signer setup, daemon
+    /// spawning, or readiness waiting.
     pub fn start_with_env_and_home_setup(
         extra: &[(&str, &str)],
         setup: impl FnOnce(&Path) -> std::io::Result<()>,
@@ -77,17 +92,21 @@ impl DaemonHarness {
             .tempdir_in("/tmp")?;
         let state_dir = state_tmp.path().to_path_buf();
 
+        #[cfg(feature = "test-signer")]
         setup_test_signer(&state_dir)?;
+
+        #[cfg(not(feature = "test-signer"))]
+        setup_test_signer(&state_dir);
 
         let (socket, manifest, child) = spawn_daemon_into(&state_dir, home.path(), extra)?;
 
         Ok(Self {
+            state_dir,
             socket,
             manifest,
-            state_dir,
             home,
             child,
-            _state_tmp: state_tmp,
+            state_tmp,
         })
     }
 
@@ -97,7 +116,7 @@ impl DaemonHarness {
     /// the call returns whatever is available right now.
     ///
     /// Used by e2e tests that need to make HARD assertions on the daemon's log
-    /// output (e.g. TREE-06 gap markers in env_not_propagated.rs).
+    /// output (e.g. TREE-06 gap markers in `env_not_propagated.rs`).
     ///
     /// Repeated calls return cumulative stderr produced since the process was
     /// started (the OS pipe buffer grows until drained; this drains everything
@@ -106,10 +125,10 @@ impl DaemonHarness {
         use std::io::Read;
         use std::os::fd::AsRawFd;
 
-        let stderr = match self.child.stderr.as_mut() {
-            Some(s) => s,
-            None => return String::new(),
+        let Some(stderr) = self.child.stderr.as_mut() else {
+            return String::new();
         };
+
         let fd = stderr.as_raw_fd();
         // Set O_NONBLOCK so we don't hang waiting for EOF.
         unsafe {
@@ -138,14 +157,17 @@ impl DaemonHarness {
 impl Drop for DaemonHarness {
     fn drop(&mut self) {
         // Send SIGTERM, wait briefly, SIGKILL if still alive.
-        let pid = self.child.id() as libc::pid_t;
+        let Ok(pid) = libc::pid_t::try_from(self.child.id()) else {
+            return;
+        };
+
         unsafe {
             libc::kill(pid, libc::SIGTERM);
         }
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             match self.child.try_wait() {
-                Ok(Some(_)) => return,
+                Ok(Some(_)) | Err(_) => return,
                 Ok(None) => {
                     if Instant::now() > deadline {
                         unsafe {
@@ -156,7 +178,6 @@ impl Drop for DaemonHarness {
                     }
                     std::thread::sleep(Duration::from_millis(50));
                 }
-                Err(_) => return,
             }
         }
     }
@@ -166,7 +187,7 @@ impl Drop for DaemonHarness {
 /// `target/<profile>` from there.
 ///
 /// Strategy:
-///   1. Walk up from CARGO_MANIFEST_DIR looking for `Cargo.lock` (anchors the
+///   1. Walk up from `CARGO_MANIFEST_DIR` looking for `Cargo.lock` (anchors the
 ///      workspace root deterministically — `Cargo.lock` lives ONLY at the
 ///      workspace root).
 ///   2. Honor `CARGO_TARGET_DIR` env var if set (cargo respects it for build
@@ -174,6 +195,12 @@ impl Drop for DaemonHarness {
 ///   3. Otherwise default to `<workspace_root>/target`.
 ///   4. Pick the profile from the test binary path: if `current_exe()` lives
 ///      under `.../release/`, use `release`; otherwise `debug`.
+///
+/// # Panics
+///
+/// Panics when no `Cargo.lock` can be found walking upward from the crate
+/// manifest directory.
+#[must_use]
 pub fn cargo_workspace_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut cur: &Path = &manifest_dir;
@@ -192,6 +219,11 @@ pub fn cargo_workspace_root() -> PathBuf {
     }
 }
 
+/// # Panics
+///
+/// Panics when the current test binary path cannot be resolved or the derived
+/// Cargo target directory does not exist.
+#[must_use]
 pub fn cargo_target_dir() -> PathBuf {
     // Prefer CARGO_TARGET_DIR (cargo's documented override) if set.
     let target_root = match std::env::var_os("CARGO_TARGET_DIR") {
@@ -208,21 +240,24 @@ pub fn cargo_target_dir() -> PathBuf {
         "debug"
     };
     let dir = target_root.join(profile);
-    if !dir.exists() {
-        panic!(
-            "cargo target dir {} does not exist — run `cargo build --workspace` \
-             (or `cargo build --workspace --release` for release tests) before \
-             running e2e tests (ISS-11)",
-            dir.display()
-        );
-    }
+    assert!(
+        dir.exists(),
+        "cargo target dir {} does not exist — run `cargo build --workspace` \
+         (or `cargo build --workspace --release` for release tests) before \
+         running e2e tests (ISS-11)",
+        dir.display()
+    );
     dir
 }
 
-/// Find a usable non-hardened node binary. Returns Err(skip_message) if none
+/// Find a usable non-hardened node binary. Returns `Err(skip_message)` if none
 /// can be found. On macOS, nvm node v18.17.0 has `hardened_indicators=1` per
 /// spike A2, but Homebrew node (ad-hoc signed) does not. This function
 /// prefers Homebrew node to avoid that pitfall.
+///
+/// # Errors
+///
+/// Returns a skip message when no usable `node` binary can be found.
 pub fn resolve_node() -> Result<PathBuf, String> {
     // Prefer Homebrew node (non-hardened, ad-hoc signed) over nvm node.
     let homebrew_node = PathBuf::from("/opt/homebrew/bin/node");
@@ -233,10 +268,8 @@ pub fn resolve_node() -> Result<PathBuf, String> {
         .unwrap_or_default()
         .to_string_lossy()
         .split(':')
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>()
     {
-        let cand = Path::new(&dir).join("node");
+        let cand = Path::new(dir).join("node");
         if cand.is_file() {
             return Ok(cand);
         }
@@ -248,6 +281,12 @@ pub fn resolve_node() -> Result<PathBuf, String> {
 ///
 /// Panics with an actionable message if the hook library hasn't been built yet.
 /// E2E tests require `cargo build --workspace` before `cargo test -p guard-e2e`.
+///
+/// # Panics
+///
+/// Panics when no built hook library exists in the derived Cargo target
+/// directory.
+#[must_use]
 pub fn resolve_dylib() -> PathBuf {
     let target = cargo_target_dir();
 
@@ -316,42 +355,53 @@ fn platform_staged_hook_name() -> &'static str {
 }
 
 fn platform_hook_filename_matches(name: &str) -> bool {
-    name.contains("hook") && platform_hook_extension_matches(name)
+    name.contains("hook") && platform_hook_extension_matches(Path::new(name))
 }
 
 #[cfg(target_os = "macos")]
-fn platform_hook_extension_matches(name: &str) -> bool {
-    name.ends_with(".dylib")
+fn platform_hook_extension_matches(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension == "dylib")
 }
 
 #[cfg(target_os = "linux")]
-fn platform_hook_extension_matches(name: &str) -> bool {
-    name.ends_with(".so")
+fn platform_hook_extension_matches(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension == "so")
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn platform_hook_extension_matches(name: &str) -> bool {
-    name.contains("hook")
+fn platform_hook_extension_matches(path: &Path) -> bool {
+    path.to_string_lossy().contains("hook")
 }
 
 /// Path to the stt-guard CLI binary.
 ///
 /// Panics with an actionable message if the CLI hasn't been built yet.
+///
+/// # Panics
+///
+/// Panics when the CLI binary does not exist in the derived Cargo target
+/// directory.
+#[must_use]
 pub fn resolve_cli() -> PathBuf {
     let p = cargo_target_dir().join("stt-guard");
-    if !p.exists() {
-        panic!(
-            "stt-guard binary not found at {} — \
-             run `cargo build --workspace` before running E2E tests",
-            p.display()
-        );
-    }
+    assert!(
+        p.exists(),
+        "stt-guard binary not found at {} — \
+         run `cargo build --workspace` before running E2E tests",
+        p.display()
+    );
     p
 }
 
 /// Read PTY output until `needle` appears, EOF is reached, or `timeout`
 /// expires. PTY output may use carriage returns without newlines, so callers
 /// must not block on `BufRead::read_line` when enforcing prompt deadlines.
+///
+/// # Errors
+///
+/// Returns a message if the reader thread cannot start, the needle is not seen
+/// before the deadline, EOF occurs first, or the reader disconnects.
 pub fn read_pty_until(
     mut reader: Box<dyn std::io::Read + Send>,
     needle: &str,
@@ -393,8 +443,7 @@ pub fn read_pty_until(
         let now = Instant::now();
         if now >= deadline {
             return Err(format!(
-                "PTY output did not contain {needle:?} within {:?}; buffer:\n{buf}",
-                timeout,
+                "PTY output did not contain {needle:?} within {timeout:?}; buffer:\n{buf}",
             ));
         }
         let remaining = deadline.saturating_duration_since(now);
@@ -402,7 +451,7 @@ pub fn read_pty_until(
         match rx.recv_timeout(wait) {
             Ok(Some(text)) => buf.push_str(&text),
             Ok(None) => {
-                return Err(format!("PTY reached EOF before {needle:?}; buffer:\n{buf}",));
+                return Err(format!("PTY reached EOF before {needle:?}; buffer:\n{buf}"));
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -414,18 +463,23 @@ pub fn read_pty_until(
     }
 }
 
-/// Path to the persistence_write_probe helper binary.
+/// Path to the `persistence_write_probe` helper binary.
 ///
 /// Panics with an actionable message if the probe hasn't been built yet.
+///
+/// # Panics
+///
+/// Panics when the probe binary does not exist in the derived Cargo target
+/// directory.
+#[must_use]
 pub fn resolve_probe() -> PathBuf {
     let p = cargo_target_dir().join("persistence_write_probe");
-    if !p.exists() {
-        panic!(
-            "persistence_write_probe not found at {} — \
-             run `cargo build --workspace` before running E2E tests",
-            p.display()
-        );
-    }
+    assert!(
+        p.exists(),
+        "persistence_write_probe not found at {} — \
+         run `cargo build --workspace` before running E2E tests",
+        p.display()
+    );
     p
 }
 
@@ -480,9 +534,7 @@ fn hex_lower(bytes: &[u8]) -> String {
 }
 
 #[cfg(not(feature = "test-signer"))]
-fn setup_test_signer(_state_dir: &Path) -> std::io::Result<()> {
-    Ok(())
-}
+fn setup_test_signer(_state_dir: &Path) {}
 
 fn spawn_daemon_into(
     state_dir: &Path,
@@ -543,29 +595,36 @@ fn spawn_daemon_into(
     Ok((socket, manifest, child))
 }
 
-/// A daemon that has been gracefully stopped while preserving its state_dir
+/// A daemon that has been gracefully stopped while preserving its `state_dir`
 /// and home tempdirs for restart. See `DaemonHarness::stop_preserving_state`.
 pub struct StoppedHarness {
     pub state_dir: PathBuf,
     pub home: tempfile::TempDir,
-    _state_tmp: tempfile::TempDir, // owns state_dir lifetime across restart
+    state_tmp: tempfile::TempDir, // owns state_dir lifetime across restart
 }
 
 impl DaemonHarness {
     /// Stop the daemon (SIGTERM, wait up to 2s, SIGKILL fallback) WITHOUT
-    /// dropping the state_dir or home tempdirs. Returns a StoppedHarness that
+    /// dropping the `state_dir` or home tempdirs. Returns a `StoppedHarness` that
     /// holds the dirs alive; call `restart_with_env(...)` to spawn a fresh
     /// daemon over the same state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the child pid cannot be represented as `pid_t`.
     pub fn stop_preserving_state(mut self) -> std::io::Result<StoppedHarness> {
         // Mirror the SIGTERM->wait->SIGKILL chain from Drop.
-        let pid = self.child.id() as libc::pid_t;
+        let pid = libc::pid_t::try_from(self.child.id()).map_err(|_| {
+            std::io::Error::other(format!("child pid {} does not fit pid_t", self.child.id()))
+        })?;
+
         unsafe {
             libc::kill(pid, libc::SIGTERM);
         }
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             match self.child.try_wait() {
-                Ok(Some(_)) => break,
+                Ok(Some(_)) | Err(_) => break,
                 Ok(None) => {
                     if Instant::now() > deadline {
                         unsafe {
@@ -576,10 +635,9 @@ impl DaemonHarness {
                     }
                     std::thread::sleep(Duration::from_millis(50));
                 }
-                Err(_) => break,
             }
         }
-        // We need to move state_dir + home + _state_tmp out of `self` while
+        // We need to move state_dir + home + state_tmp out of `self` while
         // preventing `DaemonHarness::Drop` from running (its child has been
         // waited above; running Drop would attempt a second wait, which is
         // harmless but redundant — and direct field-by-field move is forbidden
@@ -606,29 +664,37 @@ impl DaemonHarness {
         // reaped + two PathBufs) and self-recoverable on harness reuse.
         let me = std::mem::ManuallyDrop::new(self);
         unsafe {
-            let state_dir = std::ptr::read(&me.state_dir);
-            let home = std::ptr::read(&me.home);
-            let _state_tmp = std::ptr::read(&me._state_tmp);
+            let state_dir = std::ptr::read(&raw const me.state_dir);
+            let home = std::ptr::read(&raw const me.home);
+            let state_tmp = std::ptr::read(&raw const me.state_tmp);
             Ok(StoppedHarness {
                 state_dir,
                 home,
-                _state_tmp,
+                state_tmp,
             })
         }
     }
 }
 
 impl StoppedHarness {
-    /// Spawn a fresh daemon over the preserved state_dir + home. Mirrors
-    /// DaemonHarness::start_with_env spawn semantics (uses the same
+    /// Spawn a fresh daemon over the preserved `state_dir` + home. Mirrors
+    /// `DaemonHarness::start_with_env` spawn semantics (uses the same
     /// `spawn_daemon_into` helper) but skips tempdir creation.
+    ///
+    /// # Errors
+    ///
+    /// Returns errors from signer setup, daemon spawning, or readiness waiting.
     pub fn restart_with_env(self, extra_env: &[(&str, &str)]) -> std::io::Result<DaemonHarness> {
         let StoppedHarness {
             state_dir,
             home,
-            _state_tmp,
+            state_tmp,
         } = self;
+        #[cfg(feature = "test-signer")]
         setup_test_signer(&state_dir)?;
+
+        #[cfg(not(feature = "test-signer"))]
+        setup_test_signer(&state_dir);
 
         let (socket, manifest, child) = spawn_daemon_into(&state_dir, home.path(), extra_env)?;
         Ok(DaemonHarness {
@@ -637,7 +703,7 @@ impl StoppedHarness {
             manifest,
             home,
             child,
-            _state_tmp,
+            state_tmp,
         })
     }
 }
@@ -646,7 +712,7 @@ impl StoppedHarness {
 mod tests {
     use super::*;
 
-    #[cfg_attr(not(target_os = "macos"), ignore)]
+    #[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
     #[test]
     fn stop_preserving_state_roundtrip() {
         let h = DaemonHarness::start().expect("start");

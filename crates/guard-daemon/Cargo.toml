@@ -8,6 +8,9 @@ repository.workspace = true
 authors.workspace = true
 description = "stt-guard-daemon — user-level LaunchAgent that publishes snapshot, accepts RegisterRoot."
 
+[lints]
+workspace = true
+
 [lib]
 name = "guard_daemon"
 path = "src/lib.rs"

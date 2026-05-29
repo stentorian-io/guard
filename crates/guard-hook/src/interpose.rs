@@ -18,25 +18,30 @@ pub static REAL_SYSCALL: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut(
 ///
 /// IMPORTANT NOTE (v0.1 deviation, Rule 1 - Bug):
 ///
-/// When stt-guard-hook.dylib is injected via DYLD_INSERT_LIBRARIES, dyld applies the
+/// When stt-guard-hook.dylib is injected via `DYLD_INSERT_LIBRARIES`, dyld applies the
 /// __DATA,__interpose records GLOBALLY — including patching the exported symbol table
 /// entries of ALL loaded images (libSystem included). This means that after interposing:
 ///
-///   - dlsym(RTLD_NEXT, "connect") returns guard_connect (not libSystem's connect)
-///   - dlsym(libSystem_handle, "connect") also returns guard_connect
-///   - libc::connect as *const c_void resolves to guard_connect via the GOT
+///   - `dlsym(RTLD_NEXT`, "connect") returns `guard_connect` (not libSystem's connect)
+///   - `dlsym(libSystem_handle`, "connect") also returns `guard_connect`
+///   - `libc::connect` as *const `c_void` resolves to `guard_connect` via the GOT
 ///
-/// All three approaches create an infinite recursion loop because REAL_CONNECT
-/// points back to guard_connect itself.
+/// All three approaches create an infinite recursion loop because `REAL_CONNECT`
+/// points back to `guard_connect` itself.
 ///
 /// THE FIX (v0.1): Use direct kernel syscalls instead of function pointers.
-/// The hot-path replacement functions (guard_connect, guard_sendto, etc.)
+/// The hot-path replacement functions (`guard_connect`, `guard_sendto`, etc.)
 /// call raw inline-assembly syscall wrappers in their allow/reentrancy paths.
-/// This avoids both dyld interpose recursion and libc::syscall recursion.
+/// This avoids both dyld interpose recursion and `libc::syscall` recursion.
 ///
-/// These AtomicPtrs remain for compatibility with probe_self_test and future versions
+/// These `AtomicPtrs` remain for compatibility with `probe_self_test` and future versions
 /// that may find a way to store the real function pointers (e.g., Mach-O TEXT parsing).
 /// They are NOT used in the hot path in v0.1.
+///
+/// # Safety
+///
+/// Must run during hook initialization before concurrent callers can depend on
+/// the captured pointers for diagnostics.
 pub unsafe fn capture_originals() {
     // NOTE: The values stored here will all equal our replacement functions
     // (guard_connect etc.) due to dyld's global interpose patching. They are
@@ -82,12 +87,16 @@ pub unsafe fn capture_originals() {
     crate::log_buffer::LOG_RING.append(b"[guard-hook] capture_originals: raw-syscall mode (v0.1)");
 }
 
-/// Mark the page containing the AtomicPtrs read-only (T-01-06-04 mitigation).
+/// Mark the page containing the `AtomicPtrs` read-only (T-01-06-04 mitigation).
 /// Best-effort: if mprotect fails, log and continue.
 pub fn lock_originals_page() {
     unsafe {
-        let addr = &REAL_CONNECT as *const _ as *mut libc::c_void;
-        let page_size = libc::sysconf(libc::_SC_PAGESIZE) as usize;
+        let addr = &raw const REAL_CONNECT as *mut libc::c_void;
+        let raw_page_size = libc::sysconf(libc::_SC_PAGESIZE);
+        let Ok(page_size) = usize::try_from(raw_page_size) else {
+            return;
+        };
+
         let aligned = (addr as usize / page_size) * page_size;
         let r = libc::mprotect(aligned as *mut libc::c_void, page_size, libc::PROT_READ);
         if r != 0 {
@@ -112,9 +121,8 @@ pub fn lock_originals_page() {
 // interpose table. So coverage is preserved transitively.
 // ============================================================================
 
-#[allow(dead_code)]
 #[cfg(target_os = "macos")]
-struct SyncPtr2(*const c_void);
+pub struct SyncPtr2(pub *const c_void);
 #[cfg(target_os = "macos")]
 unsafe impl Sync for SyncPtr2 {}
 
@@ -207,7 +215,7 @@ static STT_GUARD_INTERPOSE_GETENV: [SyncPtr2; 2] = [
 /// linker has chosen as the active `connect` symbol for this image. If it
 /// equals `&guard_connect` (our replacement), our interpose is active.
 ///
-/// On probe failure: set FAIL_CLOSED = true, log a clear line, return.
+/// On probe failure: set `FAIL_CLOSED` = true, log a clear line, return.
 #[cfg(target_os = "macos")]
 pub fn probe_self_test() {
     use core::ffi::c_void;

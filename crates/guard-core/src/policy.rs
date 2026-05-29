@@ -34,6 +34,7 @@ impl SourceKind {
         }
     }
 
+    #[must_use]
     pub fn as_label(&self) -> &'static str {
         match self {
             SourceKind::HardRule("loopback") => "loopback",
@@ -57,11 +58,13 @@ impl SourceKind {
 // ============================================================================
 
 /// Hostname-based loopback test. Matches `localhost` and `localhost6`.
+#[must_use]
 pub fn is_loopback_host(host: &[u8]) -> bool {
     host == b"localhost" || host == b"localhost6"
 }
 
-/// IP-string loopback test. Matches IPv4 127.0.0.0/8 (textually) and IPv6 ::1.
+/// IP-string loopback test. Matches IPv4 127.0.0.0/8 (textually) and IPv6 `::1`.
+#[must_use]
 pub fn is_loopback_ip(ip: &[u8]) -> bool {
     if ip == b"::1" {
         return true;
@@ -71,7 +74,7 @@ pub fn is_loopback_ip(ip: &[u8]) -> bool {
 }
 
 /// Cloud-metadata host test. AWS/Azure/GCP all use 169.254.169.254 (IPv4)
-/// or fe80::a9fe:a9fe (IPv6 link-local) — D-25b.
+/// or `fe80::a9fe:a9fe` (IPv6 link-local) — D-25b.
 ///
 /// WARNING-05 fix (v0.2 review): the previous implementation byte-compared
 /// against `b"fe80::a9fe:a9fe"` only. The IPv6 link-local form has many
@@ -85,6 +88,7 @@ pub fn is_loopback_ip(ip: &[u8]) -> bool {
 /// origin and flags. To make the hard rule fire regardless of textual form,
 /// parse the input as an `Ipv6Addr` (rejecting any zone-id suffix first) and
 /// compare the resulting 16-byte address to the IMDS magic constant.
+#[must_use]
 pub fn is_cloud_metadata_host(host: &[u8]) -> bool {
     // IPv4 fast path: byte-compare. The IPv4 textual form has a single
     // canonical representation per `inet_ntop` Darwin behaviour.
@@ -97,9 +101,8 @@ pub fn is_cloud_metadata_host(host: &[u8]) -> bool {
     }
     // IPv6 path: strip optional zone-id (`%foo`), parse as Ipv6Addr, compare
     // to the canonical link-local IMDS address fe80::a9fe:a9fe.
-    let s = match core::str::from_utf8(host) {
-        Ok(s) => s,
-        Err(_) => return false,
+    let Ok(s) = core::str::from_utf8(host) else {
+        return false;
     };
     let s = match s.split_once('%') {
         Some((addr, _zone)) => addr,
@@ -116,6 +119,7 @@ pub fn is_cloud_metadata_host(host: &[u8]) -> bool {
     false
 }
 
+#[must_use]
 pub fn is_cloud_metadata_ip(ip: &[u8]) -> bool {
     is_cloud_metadata_host(ip)
 }
@@ -131,12 +135,13 @@ pub fn is_cloud_metadata_ip(ip: &[u8]) -> bool {
 ///   - `ip`:   Some(ascii bytes) of the destination IP if known
 ///   - `resolved_via_getaddrinfo`: true if the dylib's per-process getaddrinfo
 ///     cache shows that the IP was resolved earlier in this process
-///   - `entries`: pre-sorted by RuleTier (the daemon sorts at snapshot-write
+///   - `entries`: pre-sorted by `RuleTier` (the daemon sorts at snapshot-write
 ///     time; the dylib mmaps already-sorted bytes)
 ///
 /// The function iterates `entries` linearly and returns at the first match.
 /// Because entries are sorted by tier, the first match is the highest-priority
 /// match — implementing RESEARCH.md §5's five-tier precedence stack.
+#[must_use]
 pub fn evaluate_policy(
     host: &[u8],
     ip: Option<&[u8]>,
@@ -202,8 +207,9 @@ fn verdict_for(entry: &AllowlistEntry) -> (Verdict, SourceKind) {
     (v, SourceKind::from_tier(entry.tier))
 }
 
-/// Check if a UserAllow entry exists for the given host. Used on the deny
+/// Check if a `UserAllow` entry exists for the given host. Used on the deny
 /// path (not hot path) to detect "previously approved, now suspended" cases.
+#[must_use]
 pub fn has_user_allow(host: &[u8], entries: &[AllowlistEntry]) -> bool {
     entries
         .iter()

@@ -1,6 +1,6 @@
 //! stt-guard-watchdog: polls the daemon's Unix socket at 500ms intervals
 //! and logs liveness state. On 2 consecutive missed pings, escalates:
-//! SIGTERM → 200ms grace → SIGKILL. Designed to be run as a LaunchAgent
+//! SIGTERM → 200ms grace → SIGKILL. Designed to be run as a `LaunchAgent`
 //! alongside the daemon; launchd KeepAlive=true then restarts the daemon.
 
 use clap::Parser;
@@ -54,14 +54,6 @@ fn read_daemon_pid(state_dir: &std::path::Path) -> Option<u32> {
     pid_str.parse().ok()
 }
 
-#[allow(dead_code)]
-fn read_daemon_start_epoch(state_dir: &std::path::Path) -> Option<u64> {
-    let content = std::fs::read_to_string(ready_path(state_dir)).ok()?;
-    let mut parts = content.split_whitespace();
-    parts.next()?; // skip pid
-    parts.next()?.parse().ok()
-}
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct WatchdogState {
     restart_count: u32,
@@ -92,7 +84,11 @@ impl WatchdogState {
 }
 
 fn kill_escalation(pid: u32) {
-    let raw_pid = pid as i32;
+    let Ok(raw_pid) = libc::pid_t::try_from(pid) else {
+        warn!(pid, "watchdog pid does not fit platform pid_t");
+        return;
+    };
+
     info!(pid, "sending SIGTERM");
     if unsafe { libc::kill(raw_pid, libc::SIGTERM) } != 0 {
         debug!(pid, "SIGTERM failed (process already gone?)");
@@ -117,14 +113,14 @@ pub enum LivenessState {
 }
 
 fn ping_daemon(sock: &std::path::Path) -> LivenessState {
-    let addr = match SockAddr::unix(sock) {
-        Ok(a) => a,
-        Err(_) => return LivenessState::Unreachable,
+    let Ok(addr) = SockAddr::unix(sock) else {
+        return LivenessState::Unreachable;
     };
-    let socket = match Socket::new(Domain::UNIX, Type::STREAM, None) {
-        Ok(s) => s,
-        Err(_) => return LivenessState::Unreachable,
+
+    let Ok(socket) = Socket::new(Domain::UNIX, Type::STREAM, None) else {
+        return LivenessState::Unreachable;
     };
+
     if socket.connect_timeout(&addr, CONNECT_TIMEOUT).is_err() {
         return LivenessState::Unreachable;
     }
@@ -191,7 +187,8 @@ fn main() {
         match liveness {
             LivenessState::Alive { pid, uptime_secs } => {
                 if last_state == LivenessState::Unreachable {
-                    let latency_ms = kill_triggered_at.map(|t| t.elapsed().as_millis() as u64);
+                    let latency_ms = kill_triggered_at
+                        .map(|t| u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX));
                     if let Some(ms) = latency_ms {
                         info!(
                             pid,
@@ -246,7 +243,7 @@ fn main() {
 
         let elapsed = start.elapsed();
         if elapsed < POLL_INTERVAL {
-            std::thread::sleep(POLL_INTERVAL - elapsed);
+            std::thread::sleep(POLL_INTERVAL.checked_sub(elapsed).unwrap());
         }
     }
 

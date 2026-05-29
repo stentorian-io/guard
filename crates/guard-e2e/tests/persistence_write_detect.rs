@@ -16,7 +16,7 @@ use std::process::Command;
 
 /// Writing to ~/Library/LaunchAgents/ under stt-guard wrap produces a
 /// persistence-write gap record in the daemon log.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn persistence_write_to_launch_agents_detected() {
     let harness = DaemonHarness::start_with_env_and_home_setup(&[], |home| {
@@ -72,7 +72,7 @@ fn persistence_write_to_launch_agents_detected() {
     );
 }
 
-/// Poll the JSONL log for a gap record with the given gap_kind.
+/// Poll the JSONL log for a gap record with the given `gap_kind`.
 /// Returns true if found within `timeout_secs`.
 fn wait_for_gap_record(log_path: &Path, gap_kind: &str, timeout_secs: u64) -> bool {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);

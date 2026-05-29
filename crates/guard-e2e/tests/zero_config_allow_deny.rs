@@ -16,13 +16,13 @@
 //!
 //! Pragmatic redesign (plan §action option 3):
 //!
-//!   - addr_a = 127.0.0.1:port_a with a real local listener — exercises the
+//!   - `addr_a` = `127.0.0.1:port_a` with a real local listener — exercises the
 //!     allow path under stt-guard (loopback hard-rule allow). Under no-stt-guard,
 //!     also succeeds (kernel allows the connect).
-//!   - addr_b = 192.0.2.1:80 (RFC 5737 TEST-NET-1, unrouted) — exercises the
-//!     dylib's libc connect() hook against a non-loopback IP that has no
+//!   - `addr_b` = 192.0.2.1:80 (RFC 5737 TEST-NET-1, unrouted) — exercises the
+//!     dylib's libc `connect()` hook against a non-loopback IP that has no
 //!     prior getaddrinfo cache entry. The current v0.2 hot path
-//!     (replace_libc.rs) uses `match_hostname_compat` which returns Deny
+//!     (`replace_libc.rs`) uses `match_hostname_compat` which returns Deny
 //!     when no entry matches — so under stt-guard the connect is fast-denied
 //!     (sub-microsecond). Under no-stt-guard, the connect attempt to TEST-NET-1
 //!     times out at the 500ms probe deadline (no route exists).
@@ -35,27 +35,33 @@
 //! the two regimes on macOS without flakiness.
 //!
 //! ROADMAP success criteria coverage:
-//!   #2 (allowlisted destination succeeds): assertion that addr_a's success
+//!   #2 (allowlisted destination succeeds): assertion that `addr_a`'s success
 //!      bit (bit 0) is set under stt-guard.
 //!   #3 (non-allowlisted destination denied): assertion that the probe's
 //!      total runtime under stt-guard is < 200ms — proves stt-guard denied B
 //!      fast at the dylib layer rather than letting it reach the network
 //!      where it would time out.
 
-#![cfg_attr(not(target_os = "macos"), allow(unused))]
-
+#[cfg(target_os = "macos")]
 use guard_e2e::{DaemonHarness, cargo_target_dir, resolve_cli, resolve_dylib};
+#[cfg(target_os = "macos")]
 use std::net::TcpListener;
+#[cfg(target_os = "macos")]
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
 use std::process::Command;
+#[cfg(target_os = "macos")]
 use std::thread;
+#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 
-/// Path to the cargo-built zero_config_probe binary.
+/// Path to the cargo-built `zero_config_probe` binary.
+#[cfg(target_os = "macos")]
 fn probe_binary() -> PathBuf {
     cargo_target_dir().join("zero_config_probe")
 }
 
+#[cfg(target_os = "macos")]
 fn spawn_accept_thread(listener: TcpListener) {
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
@@ -65,7 +71,7 @@ fn spawn_accept_thread(listener: TcpListener) {
     });
 }
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg(target_os = "macos")]
 #[test]
 fn e2e_zero_config_allow_deny() {
     let probe = probe_binary();
@@ -142,8 +148,7 @@ fn e2e_zero_config_allow_deny() {
     let stderr = String::from_utf8_lossy(&out.stderr);
 
     eprintln!(
-        "zero_config_allow_deny: exit={exit_code} elapsed={:?}\nstdout: {stdout}\nstderr: {stderr}",
-        elapsed
+        "zero_config_allow_deny: exit={exit_code} elapsed={elapsed:?}\nstdout: {stdout}\nstderr: {stderr}"
     );
 
     // ROADMAP #2: addr_a (allowlisted via loopback hard-rule) MUST succeed.
@@ -170,9 +175,8 @@ fn e2e_zero_config_allow_deny() {
     // ceiling has comfortable margin against CI jitter.
     assert!(
         elapsed < Duration::from_millis(1500),
-        "ROADMAP #3 sanity: probe under stt-guard took {:?} (>1500ms) — \
+        "ROADMAP #3 sanity: probe under stt-guard took {elapsed:?} (>1500ms) — \
          stt-guard may not be denying addr_b at the dylib hot path \
-         (raw-IP cache-miss deny path)",
-        elapsed
+         (raw-IP cache-miss deny path)"
     );
 }

@@ -1,6 +1,6 @@
 //! crates/guard-daemon/src/prompt/suggested_rules.rs
 //!
-//! v0.3 — host-pattern -> SuggestedRule generator.
+//! v0.3 — host-pattern -> `SuggestedRule` generator.
 
 use guard_ipc::SuggestedRule;
 
@@ -18,6 +18,7 @@ const SHARED_CDN_SLDS: &[&str] = &[
     "azurewebsites.net",
 ];
 
+#[must_use]
 pub fn generate_suggested_rules(host: &str) -> Vec<SuggestedRule> {
     let mut out = Vec::new();
     // Always: exact-host.

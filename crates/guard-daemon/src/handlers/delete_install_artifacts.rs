@@ -1,8 +1,8 @@
 //! crates/guard-daemon/src/handlers/delete_install_artifacts.rs
 //!
-//! v0.7 — DeleteInstallArtifacts handler (WARNING-5 fix).
+//! v0.7 — `DeleteInstallArtifacts` handler (WARNING-5 fix).
 //! Per-target removal IPC: the CLI calls this AFTER filesystem teardown
-//! so the install_artifacts table no longer references files that no
+//! so the `install_artifacts` table no longer references files that no
 //! longer exist.
 
 use guard_ipc::{DeleteInstallArtifacts, DeleteInstallArtifactsReply};

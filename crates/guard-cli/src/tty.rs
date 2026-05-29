@@ -5,12 +5,15 @@
 //! and `trust_policy.rs` were removed in this version.
 use std::io::IsTerminal;
 
+#[must_use]
 pub fn stdin_is_tty() -> bool {
     std::io::stdin().is_terminal()
 }
+#[must_use]
 pub fn stdout_is_tty() -> bool {
     std::io::stdout().is_terminal()
 }
+#[must_use]
 pub fn stderr_is_tty() -> bool {
     std::io::stderr().is_terminal()
 }
@@ -20,6 +23,10 @@ pub fn stderr_is_tty() -> bool {
 /// is rejected to prevent accidental destructive auto-agree).
 /// Returns true for "y" / "yes" (case-insensitive); false for any other
 /// input including bare Enter.
+///
+/// # Errors
+///
+/// Returns an error when stdin is not a terminal or when terminal I/O fails.
 pub fn confirm(prompt: &str) -> Result<bool, crate::CliError> {
     use std::io::{BufRead, Write};
     if !std::io::stdin().is_terminal() {

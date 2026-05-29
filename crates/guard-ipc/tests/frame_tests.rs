@@ -21,7 +21,7 @@ fn register_root_roundtrip_through_framing() {
 #[test]
 fn audit_token_8_u32_preserved_exactly() {
     let original =
-        guard_core::AuditToken::synthetic([0xAAAAAAAA, 0, 0, 0, 0, 0xBBBBBBBB, 0, 0xCCCCCCCC]);
+        guard_core::AuditToken::synthetic([0xAAAA_AAAA, 0, 0, 0, 0, 0xBBBB_BBBB, 0, 0xCCCC_CCCC]);
     let wire = AuditTokenWire::from(original);
     let back: guard_core::AuditToken = wire.into();
     assert_eq!(original.val, back.val);
@@ -41,7 +41,7 @@ fn oversized_length_rejected() {
             assert_eq!(got, oversized);
             assert_eq!(max, MAX_FRAME_BYTES);
         }
-        other => panic!("expected FrameTooLarge, got {:?}", other),
+        other => panic!("expected FrameTooLarge, got {other:?}"),
     }
 }
 
@@ -54,8 +54,7 @@ fn garbage_cbor_after_valid_prefix_returns_codec_error() {
     let result: Result<RegisterRoot, _> = read_frame(&mut cursor);
     assert!(
         matches!(result, Err(IpcError::Codec(_))),
-        "expected Codec, got {:?}",
-        result
+        "expected Codec, got {result:?}"
     );
 }
 
@@ -68,8 +67,7 @@ fn truncated_payload_returns_io_error() {
     let result: Result<RegisterRoot, _> = read_frame(&mut cursor);
     assert!(
         matches!(result, Err(IpcError::Io(_))),
-        "expected Io, got {:?}",
-        result
+        "expected Io, got {result:?}"
     );
 }
 

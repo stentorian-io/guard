@@ -10,11 +10,13 @@ pub use guard_os::system::macos_major_version;
 ///
 /// `path` and `home` are raw byte slices (no NUL terminator).
 /// Zero-allocation: all comparisons are bytewise on the stack.
+#[must_use]
 pub fn classify_persistence_path(path: &[u8], home: &[u8]) -> Option<&'static str> {
     classify_persistence_path_with_version(path, home, macos_major_version())
 }
 
 /// Version-parameterized classifier for testing.
+#[must_use]
 pub fn classify_persistence_path_with_version(
     path: &[u8],
     home: &[u8],

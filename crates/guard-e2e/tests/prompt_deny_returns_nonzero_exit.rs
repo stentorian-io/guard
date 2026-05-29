@@ -1,9 +1,9 @@
 //! Wrapped command exit code is non-zero when the user picks "deny" at the
 //! prompt.
 //!
-//! Uses node + prompt_probe.js (non-hardened) so DYLD injection works.
-//! This complements prompt_unblock_deny.rs (which only asserts the JSONL
-//! source_kind=prompt_deny row).
+//! Uses node + `prompt_probe.js` (non-hardened) so DYLD injection works.
+//! This complements `prompt_unblock_deny.rs` (which only asserts the JSONL
+//! `source_kind=prompt_deny` row).
 
 #[cfg(target_os = "macos")]
 use std::io::{BufRead, BufReader, Write as _};

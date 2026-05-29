@@ -2,7 +2,7 @@
 //!
 //! At ctor time, the hook computes SHA-256 of its own dylib file and compares
 //! it against the expected hash stored in `state_dir/hook.sha256`. If the hash
-//! doesn't match, FAIL_CLOSED is set.
+//! doesn't match, `FAIL_CLOSED` is set.
 //!
 //! The expected hash file is written at install time by the CLI.
 
@@ -31,7 +31,7 @@ fn dylib_path() -> Option<PathBuf> {
     let ret = unsafe {
         libc::dladdr(
             guard_hook_self_check_anchor as *const extern "C" fn() as *mut libc::c_void,
-            &mut info,
+            &raw mut info,
         )
     };
     if ret == 0 || info.dli_fname.is_null() {
@@ -45,6 +45,12 @@ fn dylib_path() -> Option<PathBuf> {
 /// Returns Ok(()) if verification passes or if no hash file exists (graceful
 /// degradation for installations that predate M004-S03).
 /// Returns Err on tamper detection.
+///
+/// # Errors
+///
+/// Returns an error when the hash file is malformed, this dylib's path cannot
+/// be discovered, the dylib cannot be opened safely, I/O fails, or the digest
+/// does not match.
 pub fn verify(state_dir: &Path) -> Result<(), SelfCheckError> {
     let hash_path = state_dir.join(HASH_FILENAME);
     if !hash_path.exists() {

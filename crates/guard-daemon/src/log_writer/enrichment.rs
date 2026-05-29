@@ -1,18 +1,21 @@
 //! Feed-based enrichment. Extracts advisory metadata from matching
-//! AllowlistEntry reason fields (build-time-embedded IOCs carry the
+//! `AllowlistEntry` reason fields (build-time-embedded IOCs carry the
 //! advisory ID in the reason string, e.g. "MAL-2025-3008 supply-chain IOC (FEED)").
 
 use guard_core::{AllowlistEntry, RuleTier};
 use guard_ipc::{IntelMatch, PackageContext};
 
+#[must_use]
 pub fn enrich(_pkg: &PackageContext) -> Vec<IntelMatch> {
     Vec::new()
 }
 
+#[must_use]
 pub fn enrich_for_host(_host: &str) -> Vec<IntelMatch> {
     Vec::new()
 }
 
+#[must_use]
 pub fn enrich_from_entries(host: &[u8], entries: &[AllowlistEntry]) -> Vec<IntelMatch> {
     let mut out = Vec::new();
     for entry in entries {

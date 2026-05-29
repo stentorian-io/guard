@@ -21,9 +21,9 @@ use guard_ipc::{AuditTokenWire, SOCKADDR_WIRE_LEN};
 use guard_os::errno::set_errno;
 use libc::{AF_INET, AF_INET6, msghdr, size_t, sockaddr, socklen_t, ssize_t};
 
-/// Maximum number of Resolve-IPC round-trips per connect() invocation.
-/// Bounds worst-case latency at MAX_RESOLVE_ATTEMPTS * RESOLVE_TIMEOUT_MS = 400ms.
-/// gap-closure 02-08: bounds Resolve-IPC slow-loris DoS budget (T-02-08-02).
+/// Maximum number of Resolve-IPC round-trips per `connect()` invocation.
+/// Bounds worst-case latency at `MAX_RESOLVE_ATTEMPTS` * `RESOLVE_TIMEOUT_MS` = 400ms.
+/// gap-closure 02-08: bounds Resolve-IPC slow-loris `DoS` budget (T-02-08-02).
 const MAX_RESOLVE_ATTEMPTS: usize = 4;
 
 /// Per-Resolve-IPC timeout in milliseconds. One-time cost per (host, port) pair;
@@ -40,7 +40,7 @@ const RESOLVE_TIMEOUT_MS: u64 = 100;
 /// for `169.254.169.254` / `fe80::a9fe:a9fe`, the raw-IP cache-miss hard rule
 /// (D-25c / ALLOW-08), AND the loopback hard rule (D-25a) are now ALL
 /// enforced on the libc connect/sendto/sendmsg/connectx path — even when a
-/// a user-approved AllowlistEntry tries to allow IMDS. The tier-walk
+/// a user-approved `AllowlistEntry` tries to allow IMDS. The tier-walk
 /// also produces correct `SourceKind` attribution for the daemon's block-log
 /// (v0.3 surfacing).
 ///
@@ -72,7 +72,7 @@ struct InHookGuard {
 impl InHookGuard {
     /// Try to enter the hook. Returns None if already in a hook on this
     /// thread (reentrancy detected — caller must pass through immediately).
-    /// Returns Some(guard) when we successfully set IN_HOOK=true.
+    /// Returns Some(guard) when we successfully set `IN_HOOK=true`.
     #[inline]
     fn enter() -> Option<Self> {
         if IN_HOOK.with(|c| c.replace(true)) {
@@ -91,13 +91,12 @@ impl Drop for InHookGuard {
 }
 
 use crate::raw_syscall;
+use crate::raw_syscall::ConnectxArgs;
 
-#[inline(always)]
 unsafe fn raw_connect(s: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
     unsafe { raw_syscall::raw_connect(s, addr, addrlen) }
 }
 
-#[inline(always)]
 unsafe fn raw_sendto(
     s: c_int,
     buf: *const c_void,
@@ -109,7 +108,6 @@ unsafe fn raw_sendto(
     unsafe { raw_syscall::raw_sendto(s, buf, len, flags, to, tolen) }
 }
 
-#[inline(always)]
 unsafe fn raw_sendmsg(s: c_int, msg: *const msghdr, flags: c_int) -> ssize_t {
     unsafe { raw_syscall::raw_sendmsg(s, msg, flags) }
 }
@@ -136,7 +134,7 @@ fn entries_or_deny() -> Option<&'static [AllowlistEntry]> {
     if FAIL_CLOSED.load(Ordering::Acquire) {
         return None;
     }
-    ALLOWLIST.get().map(|v| v.as_slice())
+    ALLOWLIST.get().map(std::vec::Vec::as_slice)
 }
 
 /// Sockaddr → opaque bytes for cache key. Includes full sockaddr length.
@@ -147,13 +145,13 @@ fn sockaddr_bytes(
     if addr.is_null() {
         return None;
     }
-    let len = addrlen as usize;
+    let len = usize::try_from(addrlen).ok()?;
     if len == 0 || len > MAX_SOCKADDR_BYTES {
         return None;
     }
     let mut buf = [0u8; MAX_SOCKADDR_BYTES];
     unsafe {
-        core::ptr::copy_nonoverlapping(addr as *const u8, buf.as_mut_ptr(), len);
+        core::ptr::copy_nonoverlapping(addr.cast::<u8>(), buf.as_mut_ptr(), len);
     }
     Some((buf, len))
 }
@@ -164,7 +162,7 @@ fn sockaddr_bytes(
 /// of the key because `getaddrinfo` is typically called with service=NULL
 /// (port 0) while `connect` uses the real port (e.g., 443). Including port
 /// in the key causes every lookup to miss. Zeroing bytes [2..4] (the port
-/// field in both sockaddr_in and sockaddr_in6) normalizes the key.
+/// field in both `sockaddr_in` and `sockaddr_in6`) normalizes the key.
 fn cache_key(sa: &[u8], sa_len: usize) -> ([u8; MAX_SOCKADDR_BYTES], usize) {
     let mut key = [0u8; MAX_SOCKADDR_BYTES];
     let n = sa_len.min(MAX_SOCKADDR_BYTES);
@@ -180,6 +178,12 @@ fn cache_key(sa: &[u8], sa_len: usize) -> ([u8; MAX_SOCKADDR_BYTES], usize) {
 
 #[cfg_attr(target_os = "macos", unsafe(no_mangle))]
 #[cfg_attr(target_os = "linux", unsafe(export_name = "connect"))]
+/// Interposed `connect(2)` entrypoint.
+///
+/// # Safety
+///
+/// `addr` and `addrlen` must satisfy the platform `connect(2)` contract.
+#[must_use]
 pub unsafe extern "C" fn guard_connect(
     s: c_int,
     addr: *const sockaddr,
@@ -187,9 +191,8 @@ pub unsafe extern "C" fn guard_connect(
 ) -> c_int {
     // BL-04: RAII guard — IN_HOOK cleared when _guard drops (see
     // reentrancy.rs for the canonical rationale).
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => return unsafe { raw_connect(s, addr, addrlen) },
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { raw_connect(s, addr, addrlen) };
     };
     let (verdict, source) = decide_for_sockaddr(addr, addrlen);
     if matches!(verdict, Verdict::Deny) {
@@ -239,20 +242,26 @@ unsafe extern "C" fn guard_connectx(
     len: *mut size_t,
     connid: *mut c_int, // connid_t *
 ) -> c_int {
+    let raw_args = || ConnectxArgs {
+        socket: s,
+        endpoints,
+        associd,
+        flags,
+        iov,
+        iovcnt,
+        len,
+        connid,
+    };
+
     // BL-04: RAII guard — see reentrancy.rs for the canonical rationale.
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => {
-            return unsafe {
-                raw_syscall::raw_connectx(s, endpoints, associd, flags, iov, iovcnt, len, connid)
-            };
-        }
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { raw_syscall::raw_connectx(&raw_args()) };
     };
 
     let (verdict, source) = if endpoints.is_null() {
         (Verdict::Deny, SourceKind::HardRule("null-endpoints"))
     } else {
-        let ep = unsafe { &*(endpoints as *const SaEndpoints) };
+        let ep = unsafe { &*endpoints.cast::<SaEndpoints>() };
         decide_for_sockaddr(ep.sae_dstaddr, ep.sae_dstaddrlen)
     };
 
@@ -260,15 +269,15 @@ unsafe extern "C" fn guard_connectx(
         let msg = format!("[guard-hook] DENY connectx ({})", source.as_label());
         LOG_RING.append(msg.as_bytes());
         if !endpoints.is_null() {
-            let ep = unsafe { &*(endpoints as *const SaEndpoints) };
+            let ep = unsafe { &*endpoints.cast::<SaEndpoints>() };
             unsafe {
-                notify_deny_for_sockaddr(ep.sae_dstaddr, ep.sae_dstaddrlen, "connectx", source)
+                notify_deny_for_sockaddr(ep.sae_dstaddr, ep.sae_dstaddrlen, "connectx", source);
             };
         }
         set_errno(libc::EHOSTUNREACH);
         return -1;
     }
-    unsafe { raw_syscall::raw_connectx(s, endpoints, associd, flags, iov, iovcnt, len, connid) }
+    unsafe { raw_syscall::raw_connectx(&raw_args()) }
     // _guard drops here: IN_HOOK cleared after real syscall returns
 }
 
@@ -304,19 +313,21 @@ unsafe extern "C" fn guard_connectx(
 const GETADDRINFO_RESOLVE_TIMEOUT_MS: u64 = 30_000;
 
 #[unsafe(no_mangle)]
+/// Interposed `getaddrinfo(3)` entrypoint backed by daemon-side resolution.
+///
+/// # Safety
+///
+/// All pointers must satisfy the platform `getaddrinfo(3)` contract.
 pub unsafe extern "C" fn guard_getaddrinfo(
     node: *const c_char,
     service: *const c_char,
     hints: *const libc::addrinfo,
     res: *mut *mut libc::addrinfo,
 ) -> c_int {
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => {
-            // Reentrancy: should not happen (IPC uses AF_UNIX, not DNS), but
-            // if it does, return EAI_AGAIN to signal transient failure.
-            return libc::EAI_AGAIN;
-        }
+    let Some(_guard) = InHookGuard::enter() else {
+        // Reentrancy: should not happen (IPC uses AF_UNIX, not DNS), but
+        // if it does, return EAI_AGAIN to signal transient failure.
+        return libc::EAI_AGAIN;
     };
 
     // Null output pointer: undefined behavior in POSIX, but be defensive.
@@ -373,8 +384,7 @@ pub unsafe extern "C" fn guard_getaddrinfo(
     let addrs = match send_resolve_sync(host, port, GETADDRINFO_RESOLVE_TIMEOUT_MS) {
         Ok(a) if !a.is_empty() => a,
         Ok(_) => return libc::EAI_NONAME,
-        Err(IpcClientError::NotConfigured) => return libc::EAI_AGAIN,
-        Err(IpcClientError::Timeout) => return libc::EAI_AGAIN,
+        Err(IpcClientError::NotConfigured | IpcClientError::Timeout) => return libc::EAI_AGAIN,
         Err(IpcClientError::DaemonRejected(ref reason)) => {
             // DaemonRejected covers both ResolveReply::Deny and
             // ResolveReply::Err. For Deny (policy block), EAI_FAIL is
@@ -395,72 +405,35 @@ pub unsafe extern "C" fn guard_getaddrinfo(
         (h.ai_family, h.ai_socktype, h.ai_protocol)
     };
 
-    // Build the addrinfo linked list from wire addresses.
-    // Each node is a single malloc allocation containing the addrinfo struct
-    // followed by the sockaddr. guard_freeaddrinfo walks and frees them.
+    let head = match unsafe {
+        build_addrinfo_chain(host, &addrs, hint_family, hint_socktype, hint_protocol)
+    } {
+        Ok(head) => head,
+        Err(code) => return code,
+    };
+
+    unsafe { *res = head };
+    LOG_RING.append(b"[guard-hook] getaddrinfo proxied via daemon");
+    0
+}
+
+unsafe fn build_addrinfo_chain(
+    host: &str,
+    addrs: &[[u8; SOCKADDR_WIRE_LEN]],
+    hint_family: c_int,
+    hint_socktype: c_int,
+    hint_protocol: c_int,
+) -> Result<*mut libc::addrinfo, c_int> {
     let mut head: *mut libc::addrinfo = core::ptr::null_mut();
     let mut tail: *mut libc::addrinfo = core::ptr::null_mut();
 
-    for wire in &addrs {
-        // wire layout: [0]=sa_len, [1]=sa_family, [2..4]=port, rest=addr
-        let sa_family = wire[1] as i32;
-        let sa_len = wire[0] as usize;
-
-        // Respect hint_family filter.
-        if hint_family != 0 && hint_family != sa_family {
+    for wire in addrs {
+        let Some(ai_ptr) = (unsafe {
+            addrinfo_node_for_wire(host, wire, hint_family, hint_socktype, hint_protocol, head)?
+        }) else {
             continue;
-        }
-
-        // Determine sockaddr size for this address family.
-        let sockaddr_size = match sa_family {
-            AF_INET => core::mem::size_of::<libc::sockaddr_in>(),
-            AF_INET6 => core::mem::size_of::<libc::sockaddr_in6>(),
-            _ => continue,
         };
 
-        // Populate the DNS cache with this address → hostname mapping.
-        let ck_len = sa_len.min(SOCKADDR_WIRE_LEN);
-        let (ck, ck_n) = cache_key(wire, ck_len);
-        with_cache(|c| c.insert(&ck[..ck_n], host.as_bytes()));
-
-        // Allocate addrinfo + embedded sockaddr in a single block.
-        let ai_size = core::mem::size_of::<libc::addrinfo>();
-        let total_size = ai_size + sockaddr_size;
-        let ptr = unsafe { libc::malloc(total_size) } as *mut u8;
-        if ptr.is_null() {
-            // OOM: free what we've built so far and return EAI_MEMORY.
-            unsafe { free_addrinfo_chain(head) };
-            return libc::EAI_MEMORY;
-        }
-        unsafe { core::ptr::write_bytes(ptr, 0, total_size) };
-
-        let ai_ptr = ptr as *mut libc::addrinfo;
-        let sa_ptr = unsafe { ptr.add(ai_size) } as *mut libc::sockaddr;
-
-        // Copy wire bytes into the sockaddr.
-        let copy_len = sockaddr_size.min(SOCKADDR_WIRE_LEN);
-        unsafe { core::ptr::copy_nonoverlapping(wire.as_ptr(), sa_ptr as *mut u8, copy_len) };
-
-        // Fill the addrinfo fields.
-        unsafe {
-            (*ai_ptr).ai_family = sa_family;
-            (*ai_ptr).ai_socktype = if hint_socktype != 0 {
-                hint_socktype
-            } else {
-                libc::SOCK_STREAM
-            };
-            (*ai_ptr).ai_protocol = if hint_protocol != 0 {
-                hint_protocol
-            } else {
-                libc::IPPROTO_TCP
-            };
-            (*ai_ptr).ai_addrlen = sockaddr_size as socklen_t;
-            (*ai_ptr).ai_addr = sa_ptr;
-            (*ai_ptr).ai_canonname = core::ptr::null_mut();
-            (*ai_ptr).ai_next = core::ptr::null_mut();
-        }
-
-        // Append to the linked list.
         if head.is_null() {
             head = ai_ptr;
             tail = ai_ptr;
@@ -471,30 +444,101 @@ pub unsafe extern "C" fn guard_getaddrinfo(
     }
 
     if head.is_null() {
-        return libc::EAI_NONAME;
+        Err(libc::EAI_NONAME)
+    } else {
+        Ok(head)
     }
-
-    unsafe { *res = head };
-    LOG_RING.append(b"[guard-hook] getaddrinfo proxied via daemon");
-    0
 }
 
-/// Free an addrinfo linked list allocated by guard_getaddrinfo.
-/// Each node was allocated as a single malloc block (addrinfo + sockaddr),
-/// so a single free per node suffices.
+unsafe fn addrinfo_node_for_wire(
+    host: &str,
+    wire: &[u8; SOCKADDR_WIRE_LEN],
+    hint_family: c_int,
+    hint_socktype: c_int,
+    hint_protocol: c_int,
+    head: *mut libc::addrinfo,
+) -> Result<Option<*mut libc::addrinfo>, c_int> {
+    let sa_family = i32::from(wire[1]);
+    if hint_family != 0 && hint_family != sa_family {
+        return Ok(None);
+    }
+
+    let sockaddr_size = match sa_family {
+        AF_INET => core::mem::size_of::<libc::sockaddr_in>(),
+        AF_INET6 => core::mem::size_of::<libc::sockaddr_in6>(),
+        _ => return Ok(None),
+    };
+
+    let ck_len = usize::from(wire[0]).min(SOCKADDR_WIRE_LEN);
+    let (ck, ck_n) = cache_key(wire, ck_len);
+    with_cache(|c| c.insert(&ck[..ck_n], host.as_bytes()));
+
+    let ai_ptr = unsafe { libc::malloc(core::mem::size_of::<libc::addrinfo>()) };
+    if ai_ptr.is_null() {
+        unsafe { free_addrinfo_chain(head) };
+        return Err(libc::EAI_MEMORY);
+    }
+
+    let sa_ptr = unsafe { libc::malloc(sockaddr_size) };
+    if sa_ptr.is_null() {
+        unsafe {
+            libc::free(ai_ptr);
+            free_addrinfo_chain(head);
+        }
+        return Err(libc::EAI_MEMORY);
+    }
+
+    let ai_ptr = ai_ptr.cast::<libc::addrinfo>();
+    let sa_ptr = sa_ptr.cast::<libc::sockaddr>();
+    unsafe { core::ptr::write_bytes(ai_ptr, 0, 1) };
+    unsafe { core::ptr::write_bytes(sa_ptr.cast::<u8>(), 0, sockaddr_size) };
+    let copy_len = sockaddr_size.min(SOCKADDR_WIRE_LEN);
+    unsafe { core::ptr::copy_nonoverlapping(wire.as_ptr(), sa_ptr.cast::<u8>(), copy_len) };
+
+    unsafe {
+        (*ai_ptr).ai_family = sa_family;
+        (*ai_ptr).ai_socktype = if hint_socktype != 0 {
+            hint_socktype
+        } else {
+            libc::SOCK_STREAM
+        };
+        (*ai_ptr).ai_protocol = if hint_protocol != 0 {
+            hint_protocol
+        } else {
+            libc::IPPROTO_TCP
+        };
+        (*ai_ptr).ai_addrlen = socklen_t::try_from(sockaddr_size).unwrap_or(socklen_t::MAX);
+        (*ai_ptr).ai_addr = sa_ptr;
+    }
+
+    Ok(Some(ai_ptr))
+}
+
+/// Free an addrinfo linked list allocated by `guard_getaddrinfo`.
+/// Each node owns its addrinfo allocation and a separate sockaddr allocation.
 unsafe fn free_addrinfo_chain(mut p: *mut libc::addrinfo) {
     while !p.is_null() {
         let next = unsafe { (*p).ai_next };
-        unsafe { libc::free(p as *mut c_void) };
+        let ai_addr = unsafe { (*p).ai_addr };
+        if !ai_addr.is_null() {
+            unsafe { libc::free(ai_addr.cast::<c_void>()) };
+        }
+        unsafe { libc::free(p.cast::<c_void>()) };
         p = next;
     }
 }
 
 /// Interposed freeaddrinfo — frees addrinfo lists from both
-/// guard_getaddrinfo (our malloc'd nodes) and real getaddrinfo (system
+/// `guard_getaddrinfo` (our malloc'd nodes) and real getaddrinfo (system
 /// nodes). Since we never call real getaddrinfo, all lists come from us
 /// and are safe to free with our chain walker.
 #[unsafe(no_mangle)]
+/// Interposed `freeaddrinfo(3)` entrypoint.
+///
+/// # Safety
+///
+/// `res` must either be null or point to an addrinfo chain allocated by
+/// `guard_getaddrinfo`.
 pub unsafe extern "C" fn guard_freeaddrinfo(res: *mut libc::addrinfo) {
     unsafe { free_addrinfo_chain(res) };
 }
@@ -502,6 +546,11 @@ pub unsafe extern "C" fn guard_freeaddrinfo(res: *mut libc::addrinfo) {
 // ---- sendto ----
 
 #[unsafe(no_mangle)]
+/// Interposed `sendto(2)` entrypoint.
+///
+/// # Safety
+///
+/// All pointers and lengths must satisfy the platform `sendto(2)` contract.
 unsafe extern "C" fn guard_sendto(
     s: c_int,
     buf: *const c_void,
@@ -511,9 +560,8 @@ unsafe extern "C" fn guard_sendto(
     tolen: socklen_t,
 ) -> ssize_t {
     // BL-04: RAII guard — see reentrancy.rs for the canonical rationale.
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => return unsafe { raw_sendto(s, buf, len, flags, to, tolen) },
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { raw_sendto(s, buf, len, flags, to, tolen) };
     };
     // v0.1 policy for sendto:
     // - to null or tolen=0 → Allow (connected socket send; the destination
@@ -539,11 +587,15 @@ unsafe extern "C" fn guard_sendto(
 // ---- sendmsg ----
 
 #[unsafe(no_mangle)]
+/// Interposed `sendmsg(2)` entrypoint.
+///
+/// # Safety
+///
+/// `msg` must satisfy the platform `sendmsg(2)` contract.
 unsafe extern "C" fn guard_sendmsg(s: c_int, msg: *const msghdr, flags: c_int) -> ssize_t {
     // BL-04: RAII guard — see reentrancy.rs for the canonical rationale.
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => return unsafe { raw_sendmsg(s, msg, flags) },
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { raw_sendmsg(s, msg, flags) };
     };
     // v0.1 policy for sendmsg:
     // - null msg → Deny (invalid call).
@@ -587,12 +639,13 @@ unsafe extern "C" fn guard_sendmsg(s: c_int, msg: *const msghdr, flags: c_int) -
 
 // ---- shared decision path for connect/sendto/sendmsg ----
 
-/// Public re-export for test-seam use from lib.rs's _test_decide_for_sockaddr.
+/// Public re-export for test-seam use from lib.rs's _`test_decide_for_sockaddr`.
 /// `_` prefix signals test-seam convention.
 ///
 /// # Safety
 /// Same as `decide_for_sockaddr` — `addr` must be null or point to a valid sockaddr.
-pub unsafe fn _decide_for_sockaddr_pub(
+#[must_use]
+pub unsafe fn decide_for_sockaddr_for_test(
     addr: *const sockaddr,
     addrlen: socklen_t,
 ) -> (Verdict, SourceKind) {
@@ -600,8 +653,8 @@ pub unsafe fn _decide_for_sockaddr_pub(
 }
 
 /// D-39: fire-and-forget deny notification to the daemon for forensic logging.
-/// Extracts dest_host (from getaddrinfo cache), dest_ip, and dest_port from
-/// the sockaddr and sends a DenyNotify IPC with a 50ms timeout.
+/// Extracts `dest_host` (from getaddrinfo cache), `dest_ip`, and `dest_port` from
+/// the sockaddr and sends a `DenyNotify` IPC with a 50ms timeout.
 ///
 /// # Safety
 /// `addr` must be null or point to a valid sockaddr of at least `addrlen` bytes.
@@ -615,19 +668,19 @@ unsafe fn notify_deny_for_sockaddr(
         return;
     }
 
-    let pid = unsafe { libc::getpid() } as u32;
-    let ppid = unsafe { libc::getppid() } as u32;
+    let process_id = u32::try_from(unsafe { libc::getpid() }).unwrap_or(0);
+    let parent_process_id = u32::try_from(unsafe { libc::getppid() }).unwrap_or(0);
     let mut token_val = [0u32; 8];
-    token_val[5] = pid;
-    token_val[6] = ppid;
+    token_val[5] = process_id;
+    token_val[6] = parent_process_id;
     let audit_token = AuditTokenWire { val: token_val };
 
     let mut ip_buf = [0u8; 64];
     let ip_str = unsafe { ip_to_str(addr, addrlen, &mut ip_buf) };
     let ip_opt = ip_str.and_then(|b| core::str::from_utf8(b).ok());
 
-    let port = if !addr.is_null() && addrlen as usize >= 4 {
-        let sa_bytes = addr as *const u8;
+    let port = if !addr.is_null() && usize::try_from(addrlen).is_ok_and(|len| len >= 4) {
+        let sa_bytes = addr.cast::<u8>();
         u16::from_be_bytes(unsafe { [*sa_bytes.add(2), *sa_bytes.add(3)] })
     } else {
         0
@@ -635,12 +688,9 @@ unsafe fn notify_deny_for_sockaddr(
 
     let sk_label = source_kind.as_label();
 
-    let (sa_buf, sa_n) = match sockaddr_bytes(addr, addrlen) {
-        Some(v) => v,
-        None => {
-            send_deny_notify(audit_token, None, port, ip_opt, source_surface, sk_label);
-            return;
-        }
+    let Some((sa_buf, sa_n)) = sockaddr_bytes(addr, addrlen) else {
+        send_deny_notify(audit_token, None, port, ip_opt, source_surface, sk_label);
+        return;
     };
     let (ck, ck_n) = cache_key(&sa_buf, sa_n);
     let host_opt = with_cache(|c| {
@@ -670,20 +720,21 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, S
     // They are local IPC — not network egress. Denying them breaks Node's
     // internal libuv event loop (it uses a Unix socketpair for signaling),
     // the daemon's own socket, and any other local IPC. (Rule 1 auto-fix.)
-    if !addr.is_null() && addrlen as usize >= core::mem::size_of::<libc::sa_family_t>() {
+    if !addr.is_null()
+        && usize::try_from(addrlen)
+            .is_ok_and(|len| len >= core::mem::size_of::<libc::sa_family_t>())
+    {
         let family = unsafe { (*addr).sa_family };
-        if family as i32 == libc::AF_UNIX {
+        if i32::from(family) == libc::AF_UNIX {
             return (Verdict::Allow, SourceKind::HardRule("unix-socket"));
         }
     }
 
-    let entries = match entries_or_deny() {
-        Some(e) => e,
-        None => return (Verdict::Deny, SourceKind::HardRule("fail-closed")),
+    let Some(entries) = entries_or_deny() else {
+        return (Verdict::Deny, SourceKind::HardRule("fail-closed"));
     };
-    let (sa_buf, sa_n) = match sockaddr_bytes(addr, addrlen) {
-        Some(v) => v,
-        None => return (Verdict::Deny, SourceKind::HardRule("bad-sockaddr")),
+    let Some((sa_buf, sa_n)) = sockaddr_bytes(addr, addrlen) else {
+        return (Verdict::Deny, SourceKind::HardRule("bad-sockaddr"));
     };
     // Look up the hostname in the per-process getaddrinfo cache. A cache hit
     // means the sockaddr was previously resolved via getaddrinfo for THIS
@@ -724,7 +775,7 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, S
     //   (e) daemon socket IS configured (daemon_socket_path().is_some())
     let host = if host.is_none() && daemon_socket_path().is_some() {
         // Determine the address family from the raw sockaddr bytes.
-        let af = if sa_n >= 2 { sa_buf[1] as i32 } else { 0 };
+        let af = if sa_n >= 2 { i32::from(sa_buf[1]) } else { 0 };
         let is_inet = af == AF_INET || af == AF_INET6;
 
         let not_loopback = ip_slice.is_none_or(|ip| !is_loopback_ip(ip));
@@ -752,30 +803,23 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, S
                 })
                 .take(MAX_RESOLVE_ATTEMPTS)
             {
-                match send_resolve_sync(&entry.pattern, port, RESOLVE_TIMEOUT_MS) {
-                    Ok(addrs) => {
-                        // Compare each returned sockaddr wire buffer against
-                        // sa_buf, ignoring port (bytes [2..4]). The daemon
-                        // resolves with the connect-time port but the wire
-                        // may differ in edge cases; the address family + IP
-                        // are the meaningful identity.
-                        for wire_addr in &addrs {
-                            let cmp_len = sa_n.min(SOCKADDR_WIRE_LEN);
-                            let (wk, _) = cache_key(wire_addr, cmp_len);
-                            if wk[..cmp_len] == ck[..cmp_len] {
-                                with_cache(|c| c.insert(&ck[..ck_n], entry.pattern.as_bytes()));
-                                let mut hbuf = [0u8; MAX_HOSTNAME];
-                                let hlen = entry.pattern.len().min(MAX_HOSTNAME);
-                                hbuf[..hlen].copy_from_slice(&entry.pattern.as_bytes()[..hlen]);
-                                host_from_resolve = Some((hbuf, hlen));
-                                break 'resolve_walk;
-                            }
+                if let Ok(addrs) = send_resolve_sync(&entry.pattern, port, RESOLVE_TIMEOUT_MS) {
+                    // Compare each returned sockaddr wire buffer against
+                    // sa_buf, ignoring port (bytes [2..4]). The daemon
+                    // resolves with the connect-time port but the wire
+                    // may differ in edge cases; the address family + IP
+                    // are the meaningful identity.
+                    for wire_addr in &addrs {
+                        let cmp_len = sa_n.min(SOCKADDR_WIRE_LEN);
+                        let (wk, _) = cache_key(wire_addr, cmp_len);
+                        if wk[..cmp_len] == ck[..cmp_len] {
+                            with_cache(|c| c.insert(&ck[..ck_n], entry.pattern.as_bytes()));
+                            let mut hbuf = [0u8; MAX_HOSTNAME];
+                            let hlen = entry.pattern.len().min(MAX_HOSTNAME);
+                            hbuf[..hlen].copy_from_slice(&entry.pattern.as_bytes()[..hlen]);
+                            host_from_resolve = Some((hbuf, hlen));
+                            break 'resolve_walk;
                         }
-                    }
-                    Err(_) => {
-                        // Resolve failed for this entry — skip and try the next.
-                        // Do NOT fail-closed on a per-entry error; the next entry might match.
-                        continue;
                     }
                 }
             }
@@ -810,22 +854,25 @@ unsafe extern "C" {
     -> *const c_char;
 }
 
-unsafe fn ip_to_str<'a>(
+unsafe fn ip_to_str(
     addr: *const sockaddr,
     addrlen: socklen_t,
-    buf: &'a mut [u8; 64],
-) -> Option<&'a [u8]> {
-    if addrlen as usize >= core::mem::size_of::<libc::sa_family_t>() {
+    buf: &mut [u8; 64],
+) -> Option<&[u8]> {
+    if usize::try_from(addrlen).is_ok_and(|len| len >= core::mem::size_of::<libc::sa_family_t>()) {
         let family = unsafe { (*addr).sa_family };
-        match family as i32 {
-            libc::AF_INET if addrlen as usize >= core::mem::size_of::<libc::sockaddr_in>() => {
-                let sin = unsafe { &*(addr as *const libc::sockaddr_in) };
+        match i32::from(family) {
+            libc::AF_INET
+                if usize::try_from(addrlen)
+                    .is_ok_and(|len| len >= core::mem::size_of::<libc::sockaddr_in>()) =>
+            {
+                let sin = unsafe { core::ptr::read_unaligned(addr.cast::<libc::sockaddr_in>()) };
                 let r = unsafe {
                     inet_ntop(
                         libc::AF_INET,
-                        &sin.sin_addr as *const _ as *const c_void,
-                        buf.as_mut_ptr() as *mut c_char,
-                        buf.len() as socklen_t,
+                        (&raw const sin.sin_addr).cast::<c_void>(),
+                        buf.as_mut_ptr().cast::<c_char>(),
+                        socklen_t::try_from(buf.len()).unwrap_or(socklen_t::MAX),
                     )
                 };
                 if !r.is_null() {
@@ -836,14 +883,17 @@ unsafe fn ip_to_str<'a>(
                     return Some(&buf[..n]);
                 }
             }
-            libc::AF_INET6 if addrlen as usize >= core::mem::size_of::<libc::sockaddr_in6>() => {
-                let sin6 = unsafe { &*(addr as *const libc::sockaddr_in6) };
+            libc::AF_INET6
+                if usize::try_from(addrlen)
+                    .is_ok_and(|len| len >= core::mem::size_of::<libc::sockaddr_in6>()) =>
+            {
+                let sin6 = unsafe { core::ptr::read_unaligned(addr.cast::<libc::sockaddr_in6>()) };
                 let r = unsafe {
                     inet_ntop(
                         libc::AF_INET6,
-                        &sin6.sin6_addr as *const _ as *const c_void,
-                        buf.as_mut_ptr() as *mut c_char,
-                        buf.len() as socklen_t,
+                        (&raw const sin6.sin6_addr).cast::<c_void>(),
+                        buf.as_mut_ptr().cast::<c_char>(),
+                        socklen_t::try_from(buf.len()).unwrap_or(socklen_t::MAX),
                     )
                 };
                 if !r.is_null() {
@@ -863,6 +913,11 @@ unsafe fn ip_to_str<'a>(
 // ---- write ----
 
 #[unsafe(no_mangle)]
+/// Interposed `write(2)` entrypoint.
+///
+/// # Safety
+///
+/// `buf` and `count` must satisfy the platform `write(2)` contract.
 pub unsafe extern "C" fn guard_write(fd: c_int, buf: *const c_void, count: size_t) -> ssize_t {
     // Fast path: non-socket fds pass through with ~1 bitmap lookup overhead.
     if !crate::fd_class::is_connected_socket(fd) {
@@ -876,6 +931,11 @@ pub unsafe extern "C" fn guard_write(fd: c_int, buf: *const c_void, count: size_
 // ---- writev ----
 
 #[unsafe(no_mangle)]
+/// Interposed `writev(2)` entrypoint.
+///
+/// # Safety
+///
+/// `iov` and `iovcnt` must satisfy the platform `writev(2)` contract.
 pub unsafe extern "C" fn guard_writev(
     fd: c_int,
     iov: *const libc::iovec,
@@ -890,6 +950,11 @@ pub unsafe extern "C" fn guard_writev(
 // ---- send ----
 
 #[unsafe(no_mangle)]
+/// Interposed `send(2)` entrypoint.
+///
+/// # Safety
+///
+/// `buf` and `len` must satisfy the platform `send(2)` contract.
 pub unsafe extern "C" fn guard_send(
     s: c_int,
     buf: *const c_void,
@@ -897,9 +962,8 @@ pub unsafe extern "C" fn guard_send(
     flags: c_int,
 ) -> ssize_t {
     // BL-04: RAII guard — see reentrancy.rs for the canonical rationale.
-    let _guard = match InHookGuard::enter() {
-        Some(g) => g,
-        None => return unsafe { raw_syscall::raw_send(s, buf, len, flags) },
+    let Some(_guard) = InHookGuard::enter() else {
+        return unsafe { raw_syscall::raw_send(s, buf, len, flags) };
     };
     // send() operates on a connected socket — the destination was already
     // permitted at connect() time. Pass through unconditionally.
@@ -925,9 +989,8 @@ pub unsafe extern "C" fn guard_send(
 // is a read-only data structure consumed by dyld at load time; it is never
 // written after the linker places it, so Sync is sound here.
 
-#[allow(dead_code)]
 #[cfg(target_os = "macos")]
-struct SyncPtr(*const c_void);
+pub struct SyncPtr(pub *const c_void);
 #[cfg(target_os = "macos")]
 unsafe impl Sync for SyncPtr {}
 

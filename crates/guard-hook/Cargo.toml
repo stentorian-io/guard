@@ -8,6 +8,9 @@ repository.workspace = true
 authors.workspace = true
 description = "DYLD interpose hook dylib (stt-guard-hook.dylib) for outbound network enforcement."
 
+[lints]
+workspace = true
+
 [lib]
 crate-type = ["cdylib", "rlib"]   # rlib so integration tests can link
 

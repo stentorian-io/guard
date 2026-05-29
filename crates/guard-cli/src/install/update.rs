@@ -17,6 +17,12 @@ const GITHUB_API_LATEST_RELEASE: &str =
     "https://api.github.com/repos/stentorian-io/guard/releases/latest";
 const GITHUB_RELEASE_BASE: &str = "https://github.com/stentorian-io/guard/releases/download";
 
+/// Check for or apply a release update.
+///
+/// # Errors
+///
+/// Returns an error when release lookup, download, checksum verification,
+/// extraction, or installer execution fails.
 pub fn run_update(check: bool, version: Option<String>) -> Result<i32, CliError> {
     let target = release_target()?;
     let selected_release = selected_release(version)?;

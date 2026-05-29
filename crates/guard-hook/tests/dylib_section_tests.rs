@@ -2,20 +2,20 @@
 //! matches the expected number of records × 16 bytes.
 //!
 //! v0.1 had 4 records (connect, connectx, sendto, sendmsg). v0.2 added 7 more
-//! (fork, vfork, posix_spawn, posix_spawnp, execve, execvp, execv) —
+//! (fork, vfork, `posix_spawn`, `posix_spawnp`, execve, execvp, execv) —
 //! execl/execlp/execle are intentionally OMITTED (variadic ABI; coverage is
 //! preserved transitively via execve). M003-S01 added 3 more (send, write, writev).
 //! M004-S04 added 1 more (getenv) for anti-detection hardening.
 //! M005-S01 added 2 more (getaddrinfo, freeaddrinfo) for daemon-proxied DNS.
-//! open/openat interpose disabled (dispatch_once reentrancy crash on macOS 26+).
-//! libc syscall() interpose deferred (aarch64 C varargs ABI, Rust c_variadic unstable).
+//! open/openat interpose disabled (`dispatch_once` reentrancy crash on macOS 26+).
+//! libc `syscall()` interpose deferred (aarch64 C varargs ABI, Rust `c_variadic` unstable).
 //! Total: 17 records.
 
 use std::process::Command;
 
 /// Total number of __DATA,__interpose records the release dylib must expose.
 /// v0.1 = 4 (connect, connectx, sendto, sendmsg).
-/// v0.2 = +7 (fork, vfork, posix_spawn, posix_spawnp, execve, execvp, execv).
+/// v0.2 = +7 (fork, vfork, `posix_spawn`, `posix_spawnp`, execve, execvp, execv).
 /// M003-S01 = +3 (send, write, writev).
 /// M004-S04 = +1 (getenv).
 /// M005-S01 = +2 (getaddrinfo, freeaddrinfo).
@@ -45,11 +45,16 @@ fn release_dylib_has_expected_interpose_records() {
             .find(|path| {
                 path.file_name()
                     .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.ends_with(".dylib") && name.contains("hook"))
+                    .is_some_and(|name| {
+                        std::path::Path::new(name)
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("dylib"))
+                            && name.contains("hook")
+                    })
             })
             .expect("expected a hook dylib in target/release")
     };
-    assert!(dylib.exists(), "expected dylib at {:?}", dylib);
+    assert!(dylib.exists(), "expected dylib at {dylib:?}");
 
     let otool = Command::new("otool")
         .args(["-l", dylib.to_str().unwrap()])

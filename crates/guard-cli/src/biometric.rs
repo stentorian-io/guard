@@ -1,6 +1,6 @@
-//! Touch ID / password gating via macOS LocalAuthentication framework.
+//! Touch ID / password gating via macOS `LocalAuthentication` framework.
 //!
-//! Shells out to a minimal Swift script that calls LAContext. This avoids
+//! Shells out to a minimal Swift script that calls `LAContext`. This avoids
 //! Objective-C block FFI complexity while using the native system auth UI
 //! (Touch ID with password fallback on all Macs).
 //!
@@ -11,7 +11,7 @@
 use std::process::Command;
 
 #[cfg(not(feature = "test-signer"))]
-const SWIFT_AUTH_SCRIPT: &str = r#"
+const SWIFT_AUTH_SCRIPT: &str = r"
 import LocalAuthentication
 import Foundation
 let ctx = LAContext()
@@ -23,7 +23,7 @@ ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: CommandLine.argu
 }
 sem.wait()
 exit(ok ? 0 : 1)
-"#;
+";
 
 /// Prompt the user for Touch ID or password authentication.
 /// Returns `true` if authentication succeeded, `false` otherwise.

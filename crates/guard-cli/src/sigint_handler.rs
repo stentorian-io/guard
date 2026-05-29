@@ -3,8 +3,8 @@
 //! v0.3 — SIGINT handler.
 //!
 //! On Ctrl-C during `stt-guard wrap`:
-//!   1. Snapshot in-flight prompt_ids from the shared InflightPrompts registry.
-//!   2. Send PromptCancel for each over the live prompt channel (so the daemon
+//!   1. Snapshot in-flight `prompt_ids` from the shared `InflightPrompts` registry.
+//!   2. Send `PromptCancel` for each over the live prompt channel (so the daemon
 //!      unblocks parked Resolve handlers with Deny).
 //!   3. Propagate SIGINT to the wrapped command's process group via killpg.
 
@@ -29,6 +29,11 @@ pub struct SigIntHandle {
 
 pub type SharedChannel = Arc<Mutex<Option<PromptChannel>>>;
 
+/// Install the `SIGINT` forwarding and prompt-cancel handler.
+///
+/// # Errors
+///
+/// Returns an error when signal registration or handler thread creation fails.
 pub fn install(
     inflight: InflightPrompts,
     channel: SharedChannel,

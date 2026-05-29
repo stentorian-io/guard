@@ -2,13 +2,13 @@
 //!
 //! Two variants, exposed via `start_or_hosts(...)`:
 //!
-//!   1. **HostsRewriter** — rewrites `/etc/hosts` to point sink hostnames at
+//!   1. **`HostsRewriter`** — rewrites `/etc/hosts` to point sink hostnames at
 //!      127.0.0.1. Works for ALL ports without binding any (vendored
 //!      preinstall.sh fires curls to whatever port the sanitized script
 //!      specifies). Requires passwordless sudo (macos-14 GHA runner has it
 //!      per RESEARCH §Pitfall 6). RAII Drop restores original /etc/hosts.
 //!
-//!   2. **SinkListener** — fallback when sudo is unavailable. Binds a TCP
+//!   2. **`SinkListener`** — fallback when sudo is unavailable. Binds a TCP
 //!      listener on 127.0.0.1:<port> and accepts-and-discards. Per RESEARCH
 //!      §Security V-Information-Disclosure: 127.0.0.1 ONLY (never 0.0.0.0)
 //!      and every accepted connection is logged for forensic review.
@@ -41,12 +41,17 @@ impl HostsRewriter {
     /// Append `127.0.0.1 <host>` lines for every entry in `hosts`. Uses
     /// `sudo tee /etc/hosts` (passwordless on macos-14 GHA per Pitfall 6).
     ///
+    /// # Errors
+    ///
+    /// Returns errors from reading `/etc/hosts`, spawning `sudo tee`, writing
+    /// the replacement content, or waiting for the helper process.
+    ///
     /// CR-01: fail closed on /etc/hosts read errors. The previous
     /// `unwrap_or_default()` defaulted to an empty `Vec<u8>` on read error,
     /// which would later be written back via `sudo tee /etc/hosts` on
     /// `restore()` / `Drop`, wiping the developer's real hosts file. Callers
     /// (e.g. `start_or_hosts`) already treat `Err` as "fall back to
-    /// SinkListener", so propagating the error is the correct safe path.
+    /// `SinkListener`", so propagating the error is the correct safe path.
     pub fn new(hosts: &[&str]) -> io::Result<Self> {
         let original = std::fs::read("/etc/hosts")?;
         let mut new_content = original.clone();
@@ -68,6 +73,11 @@ impl HostsRewriter {
     /// /etc/hosts. Even though `new()` now propagates the read error, this
     /// guard catches future regressions (e.g. someone constructing
     /// `HostsRewriter` from another path with a different invariant).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the saved hosts buffer is empty or the `sudo tee`
+    /// restore process fails.
     pub fn restore(&self) -> io::Result<()> {
         if self.restored.swap(true, Ordering::SeqCst) {
             return Ok(());
@@ -115,7 +125,7 @@ impl Drop for HostsRewriter {
 /// WR-04: cap the accepted-peer log to a forensic-useful count. Without this
 /// cap, a fail-open scenario (dylib silently allows the connect) plus a
 /// connection-storm (npm install retry loop hitting the sink) can grow the
-/// vector to MiBs over a single test process's lifetime.
+/// vector to `MiBs` over a single test process's lifetime.
 const MAX_ACCEPTED_LOG: usize = 256;
 
 /// RAII localhost listener. Bind a TCP socket on 127.0.0.1:<port> and
@@ -131,6 +141,11 @@ impl SinkListener {
     /// Bind and start the accept thread. Pass `port = 0` for an ephemeral port
     /// (read it back via `.addr.port()`). Per the security gate, binds 127.0.0.1
     /// only — NEVER 0.0.0.0.
+    ///
+    /// # Errors
+    ///
+    /// Returns socket bind, address lookup, or nonblocking configuration
+    /// errors from the TCP listener setup.
     pub fn start(port: u16) -> io::Result<Self> {
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))?;
         let addr = listener.local_addr()?;
@@ -192,6 +207,7 @@ impl SinkListener {
     }
 
     /// Snapshot of accepted-from peer addresses for forensic assertions.
+    #[must_use]
     pub fn accepted_peers(&self) -> Vec<SocketAddr> {
         self.accepted.lock().map(|g| g.clone()).unwrap_or_default()
     }
@@ -223,6 +239,11 @@ pub enum SinkGuard {
 ///
 /// Hosts are 127.0.0.1-redirected; listener accepts-and-discards. Either
 /// way, no real C2 server is reachable.
+///
+/// # Errors
+///
+/// Returns listener setup errors when `/etc/hosts` rewriting fails and the
+/// fallback listener cannot be started.
 pub fn start_or_hosts(hosts: &[&str], fallback_port: u16) -> io::Result<SinkGuard> {
     match HostsRewriter::new(hosts) {
         Ok(r) => Ok(SinkGuard::Hosts(r)),

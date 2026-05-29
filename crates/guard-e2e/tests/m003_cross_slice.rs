@@ -13,7 +13,7 @@ use std::time::Duration;
 
 /// File writes to non-persistence paths are unaffected by the open/openat
 /// hook — no false positives from the persistence monitoring.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn open_hook_no_false_positive_on_normal_files() {
     let harness = DaemonHarness::start().expect("start daemon");
@@ -48,11 +48,11 @@ fn open_hook_no_false_positive_on_normal_files() {
     );
 }
 
-/// Lockfile registry extraction produces CuratedAllow entries in the snapshot.
+/// Lockfile registry extraction produces `CuratedAllow` entries in the snapshot.
 /// We create a fake package-lock.json with a private registry, run stt-guard
 /// with cwd pointing to that directory, and verify the snapshot contains the
 /// registry host.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn lockfile_registries_appear_in_snapshot() {
     let harness = DaemonHarness::start().expect("start daemon");
@@ -108,7 +108,7 @@ fn lockfile_registries_appear_in_snapshot() {
 
     let found_snapshot = std::fs::read_dir(&runs_dir)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "cbor"))
         .any(|e| {
             let data = std::fs::read(e.path()).unwrap_or_default();
@@ -125,7 +125,7 @@ fn lockfile_registries_appear_in_snapshot() {
 
 /// Multiple lockfile formats: Cargo.lock in the project root is discovered
 /// and its registries appear in the snapshot.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn cargo_lockfile_registries_in_snapshot() {
     let harness = DaemonHarness::start().expect("start daemon");
@@ -167,7 +167,7 @@ source = "sparse+https://cargo.corp.example.com/index/"
     if runs_dir.exists() {
         let has_cargo_host = std::fs::read_dir(&runs_dir)
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| e.path().extension().is_some_and(|ext| ext == "cbor"))
             .any(|e| {
                 let data = std::fs::read(e.path()).unwrap_or_default();
@@ -184,7 +184,7 @@ source = "sparse+https://cargo.corp.example.com/index/"
 /// Persistence write detection and the open hook coexist: a wrapped process
 /// writing to ~/Library/LaunchAgents/ succeeds (monitored not blocked) and
 /// the persistence-write gap record appears in the JSONL log.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn persistence_write_detected_in_log() {
     let mut harness = DaemonHarness::start().expect("start daemon");
@@ -240,7 +240,7 @@ fn persistence_write_detected_in_log() {
 
 /// Persistence CLI: `stt-guard status persistence --json` exits cleanly after
 /// persistence-write events have been recorded.
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn status_persistence_shows_events() {
     let mut harness = DaemonHarness::start().expect("start daemon");

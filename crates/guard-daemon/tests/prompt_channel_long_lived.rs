@@ -7,13 +7,13 @@ use guard_ipc::{IPC_SCHEMA_V3, PromptCancel, PromptResponse, PromptVerdict};
 
 #[test]
 fn channel_frame_round_trip() {
-    let r = ClientChannelFrame::Response(PromptResponse {
+    let r = ClientChannelFrame::Response(Box::new(PromptResponse {
         schema_version: IPC_SCHEMA_V3,
         prompt_id: "p1".into(),
         verdict: PromptVerdict::AllowOnce,
         rule_pattern: None,
         signed_rule: None,
-    });
+    }));
     let mut bytes = Vec::new();
     ciborium::into_writer(&r, &mut bytes).unwrap();
     let decoded: ClientChannelFrame = ciborium::from_reader(bytes.as_slice()).unwrap();

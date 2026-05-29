@@ -1,8 +1,8 @@
 //! crates/guard-daemon/src/handlers/enable_curated_rule.rs
 //!
-//! v1.0 — EnableCuratedRule handler (stt-guard rules enable).
+//! v1.0 — `EnableCuratedRule` handler (stt-guard rules enable).
 //!
-//! Removes the override row from curated_overrides, re-enabling the
+//! Removes the override row from `curated_overrides`, re-enabling the
 //! curated rule for future snapshots.
 
 use guard_ipc::{EnableCuratedRule, EnableCuratedRuleReply};

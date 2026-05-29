@@ -1,15 +1,15 @@
 //! v0.1 milestone audit BLOCKER #1 closure (LOG-02 + VAL-01) — dylib-side
-//! pm_env capture lands AND obvious secrets never cross the IPC wire.
+//! `pm_env` capture lands AND obvious secrets never cross the IPC wire.
 //!
 //! Originally `#[ignore]`'d during plan 03-14 because the dylib half of the
-//! pm_env capture pipeline was missing. quick-260508-et9 wired it in: the
-//! exec/posix_spawn shadows now walk envp at exec time and pass the filtered
+//! `pm_env` capture pipeline was missing. quick-260508-et9 wired it in: the
+//! `exec/posix_spawn` shadows now walk envp at exec time and pass the filtered
 //! `Vec<(String,String)>` into `send_exec_event_sync`.
 //!
 //! Two assertions:
 //!   1. POSITIVE: an info-level tracing line `pm_env_captured` appears in the
-//!      daemon's stderr — proves the V3 ExecEvent reached the handler with a
-//!      non-empty pm_env field, which only happens when the dylib's
+//!      daemon's stderr — proves the V3 `ExecEvent` reached the handler with a
+//!      non-empty `pm_env` field, which only happens when the dylib's
 //!      `pm_env_filter::extract_pm_env_from_envp_mut` admitted entries from
 //!      our explicit envp.
 //!   2. NEGATIVE: decoy denylisted secret values NEVER appear anywhere in the
@@ -22,7 +22,7 @@
 //! `libc::posix_spawn` directly with an explicit envp containing both benign
 //! PM env vars (must be captured) and decoy secrets (must be filtered out).
 //! Wrapping a Rust binary we control avoids depending on whether the system
-//! `node` binary triggers any internal posix_spawn during a `node -e ""`
+//! `node` binary triggers any internal `posix_spawn` during a `node -e ""`
 //! invocation.
 
 use guard_e2e::{DaemonHarness, cargo_target_dir, resolve_cli, resolve_dylib};
@@ -31,7 +31,7 @@ use std::time::Duration;
 
 const TRACING_MARKER: &str = "pm_env_captured";
 
-#[cfg_attr(not(target_os = "macos"), ignore)]
+#[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
 fn cargo_registry_token_never_leaks_to_log() {
     let cli = resolve_cli();

@@ -1,14 +1,14 @@
 //! v0.3: 32 concurrent stt-guard wrap invocations don't
 //! starve the daemon's worker pool.
 //!
-//! Each `stt-guard wrap -- /bin/sleep 3` causes the CLI to call PrepareSnapshot
-//! IPC and open a prompt channel (if is_tty). With stdin=null (non-TTY), the
+//! Each `stt-guard wrap -- /bin/sleep 3` causes the CLI to call `PrepareSnapshot`
+//! IPC and open a prompt channel (if `is_tty`). With stdin=null (non-TTY), the
 //! orchestrator skips the prompt channel open but still dispatches through the
 //! daemon worker pool. 32 concurrent dispatches must not exhaust the 16-thread
-//! pool (ACCEPT_QUEUE_DEPTH=64 ensures no connection is dropped).
+//! pool (`ACCEPT_QUEUE_DEPTH=64` ensures no connection is dropped).
 //!
 //! Marked #[ignore]: resource-intensive (32 /bin/sleep children × 3s).
-//! Opt-in via: cargo test -p guard-e2e -- --ignored thirty_two_concurrent
+//! Opt-in via: cargo test -p guard-e2e -- --ignored `thirty_two_concurrent`
 
 #[cfg(target_os = "macos")]
 #[test]

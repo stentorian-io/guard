@@ -1,5 +1,5 @@
-//! End-to-end test: spin up a daemon (in this test process via IpcServer),
-//! call register_root_with_daemon, assert Ack received.
+//! End-to-end test: spin up a daemon (in this test process via `IpcServer`),
+//! call `register_root_with_daemon`, assert Ack received.
 //!
 //! Also tests envp construction shape (without actually spawning, since that
 //! requires a real wrapped target binary).
@@ -48,7 +48,7 @@ fn register_root_with_daemon_round_trips_ack() {
     // When the connecting process sends its own pid in the wire token, the
     // daemon stores the kernel-sourced peer token (not the wire-claimed synthetic).
     // Use self_pid to trigger the self-registration path.
-    let self_pid = unsafe { libc::getpid() } as u32;
+    let self_pid = u32::try_from(unsafe { libc::getpid() }).expect("pid fits audit token field");
     let self_token = AuditToken::synthetic([0, 0, 0, 0, 0, self_pid, 0, 0]);
     let r = register_root_with_daemon(&sock, self_token);
     assert!(
@@ -85,7 +85,7 @@ fn register_root_returns_daemon_unreachable_when_socket_missing() {
     let r = register_root_with_daemon(&bogus_sock, dummy);
     match r {
         Err(guard_cli::CliError::DaemonUnreachable(_)) => {}
-        other => panic!("expected DaemonUnreachable, got {:?}", other),
+        other => panic!("expected DaemonUnreachable, got {other:?}"),
     }
 }
 
@@ -124,7 +124,7 @@ fn probe_daemon_alive_succeeds_against_live_socket() {
     );
 }
 
-/// Connect-only probe against a missing socket returns DaemonUnreachable
+/// Connect-only probe against a missing socket returns `DaemonUnreachable`
 /// (proving T-01-08-06: CLI exits 70 BEFORE spawning an unprotected child).
 #[test]
 fn probe_daemon_alive_fails_when_socket_missing() {
@@ -133,12 +133,12 @@ fn probe_daemon_alive_fails_when_socket_missing() {
     let r = probe_daemon_alive(&bogus_sock);
     match r {
         Err(guard_cli::CliError::DaemonUnreachable(_)) => {}
-        other => panic!("expected DaemonUnreachable, got {:?}", other),
+        other => panic!("expected DaemonUnreachable, got {other:?}"),
     }
 }
 
 /// Smoke test the envp construction shape by spawning `/bin/echo`.
-/// We only assert that posix_spawnp returns a valid pid and the child exits
+/// We only assert that `posix_spawnp` returns a valid pid and the child exits
 /// 0 — we do NOT assert the dylib was loaded (it won't be, for hardened echo).
 ///
 /// The full "dylib loaded into the child" e2e is in plan 09 against Homebrew node.
@@ -152,13 +152,13 @@ fn spawn_wrapped_against_echo_returns_valid_pid() {
             .expect("spawn_wrapped");
     assert!(pid > 0);
     let mut status: libc::c_int = 0;
-    unsafe { libc::waitpid(pid, &mut status, 0) };
+    unsafe { libc::waitpid(pid, &raw mut status, 0) };
 }
 
 /// ISS-10 remediation: confirm `audit_token_for_pid` succeeds against a real
-/// posix_spawn'd child. This exercises the primary path (task_name_for_pid +
-/// task_info(TASK_AUDIT_TOKEN)) — and if Apple has tightened access on the
-/// running OS, exercises the proc_pidinfo fallback. Either way the function
+/// `posix_spawn`'d child. This exercises the primary path (`task_name_for_pid` +
+/// `task_info(TASK_AUDIT_TOKEN)`) — and if Apple has tightened access on the
+/// running OS, exercises the `proc_pidinfo` fallback. Either way the function
 /// must return Ok.
 #[test]
 fn audit_token_for_pid_succeeds_against_spawned_child() {
@@ -176,10 +176,11 @@ fn audit_token_for_pid_succeeds_against_spawned_child() {
     // val[5] must equal the pid regardless of which path (primary or fallback)
     // produced the token.
     assert_eq!(
-        token.val[5] as libc::pid_t, pid,
+        libc::pid_t::try_from(token.val[5]).expect("audit token pid fits libc pid"),
+        pid,
         "token.val[5] must equal pid; primary or fallback path"
     );
     // Reap to avoid zombie.
     let mut status: libc::c_int = 0;
-    unsafe { libc::waitpid(pid, &mut status, 0) };
+    unsafe { libc::waitpid(pid, &raw mut status, 0) };
 }

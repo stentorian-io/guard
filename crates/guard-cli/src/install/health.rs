@@ -20,16 +20,19 @@ pub struct InstallHealth {
 }
 
 impl InstallHealth {
+    #[must_use]
     pub fn healthy() -> Self {
         Self {
             problems: Vec::new(),
         }
     }
 
+    #[must_use]
     pub fn is_healthy(&self) -> bool {
         self.problems.is_empty()
     }
 
+    #[must_use]
     pub fn problems(&self) -> &[String] {
         &self.problems
     }
@@ -38,6 +41,7 @@ impl InstallHealth {
         self.problems.push(problem.into());
     }
 
+    #[must_use]
     pub fn error_message(&self) -> String {
         if self.is_healthy() {
             return "Stentorian Guard install is healthy".to_string();
@@ -62,6 +66,7 @@ enum ExpectedKind {
 }
 
 /// Check the full hardened install layout.
+#[must_use]
 pub fn check_installation() -> InstallHealth {
     let mut health = InstallHealth::healthy();
 
@@ -242,8 +247,8 @@ fn check_path(
     health: &mut InstallHealth,
     path: &Path,
     expected_kind: ExpectedKind,
-    expected_uid: u32,
-    expected_gid: u32,
+    expected_owner_uid: u32,
+    expected_group_gid: u32,
     expected_mode: u32,
 ) {
     match fs::symlink_metadata(path) {
@@ -252,8 +257,8 @@ fn check_path(
             path,
             &metadata,
             expected_kind,
-            expected_uid,
-            expected_gid,
+            expected_owner_uid,
+            expected_group_gid,
             expected_mode,
         ),
         Err(err) => health.push(format!("{} missing or unreadable: {err}", path.display())),
@@ -265,8 +270,8 @@ fn check_metadata(
     path: &Path,
     metadata: &Metadata,
     expected_kind: ExpectedKind,
-    expected_uid: u32,
-    expected_gid: u32,
+    expected_owner_uid: u32,
+    expected_group_gid: u32,
     expected_mode: u32,
 ) {
     let file_type = metadata.file_type();
@@ -274,7 +279,7 @@ fn check_metadata(
         health.push(format!("{} must not be a symlink", path.display()));
         return;
     }
-    if is_special_file_type(&file_type) {
+    if is_special_file_type(file_type) {
         health.push(format!("{} must not be a special file", path.display()));
         return;
     }
@@ -288,20 +293,20 @@ fn check_metadata(
         _ => {}
     }
 
-    if metadata.uid() != expected_uid {
+    if metadata.uid() != expected_owner_uid {
         health.push(format!(
             "{} owner uid is {}, expected {}",
             path.display(),
             metadata.uid(),
-            expected_uid
+            expected_owner_uid
         ));
     }
-    if metadata.gid() != expected_gid {
+    if metadata.gid() != expected_group_gid {
         health.push(format!(
             "{} group gid is {}, expected {}",
             path.display(),
             metadata.gid(),
-            expected_gid
+            expected_group_gid
         ));
     }
     let mode = metadata.mode() & 0o7777;
@@ -315,13 +320,14 @@ fn check_metadata(
     }
 }
 
-fn is_special_file_type(file_type: &FileType) -> bool {
+fn is_special_file_type(file_type: FileType) -> bool {
     file_type.is_block_device()
         || file_type.is_char_device()
         || file_type.is_fifo()
         || file_type.is_socket()
 }
 
+#[must_use]
 pub fn expected_launchdaemon_plist() -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>

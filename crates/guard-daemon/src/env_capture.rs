@@ -4,11 +4,12 @@
 //!
 //! Delegates filtering logic to `guard_core::env_filter` (single source of
 //! truth). Per-value truncation at 512 bytes; total wire-size cap at
-//! guard_ipc::ExecEvent::MAX_PM_ENV_BYTES (4 KiB).
+//! `guard_ipc::ExecEvent::MAX_PM_ENV_BYTES` (4 KiB).
 
 use guard_core::env_filter;
 use guard_ipc::ExecEvent;
 
+#[must_use]
 pub fn extract_pm_env(env: &[(String, String)]) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     let mut total = 0usize;

@@ -1,9 +1,9 @@
-//! Snapshot CBOR codec — v0.2 (SCHEMA_V2).
+//! Snapshot CBOR codec — v0.2 (`SCHEMA_V2`).
 //!
-//! schema_version is the FIRST field of the CBOR map.
-//! v0.2 readers REJECT anything other than SCHEMA_V2 (fail-closed). v0.1
-//! SCHEMA_V1 const + v1_default() are RETAINED as a compat-test fixture only;
-//! production code paths must use SCHEMA_V2 + v2_default().
+//! `schema_version` is the FIRST field of the CBOR map.
+//! v0.2 readers REJECT anything other than `SCHEMA_V2` (fail-closed). v0.1
+//! `SCHEMA_V1` const + `v1_default()` are RETAINED as a compat-test fixture only;
+//! production code paths must use `SCHEMA_V2` + `v2_default()`.
 
 use crate::allowlist::{AllowlistEntry, MatchType, RuleKind, RuleTier};
 use crate::error::Error;
@@ -14,10 +14,10 @@ pub const SCHEMA_V2: u16 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Snapshot {
-    /// MUST be the first field. Decoder verifies == SCHEMA_V2 (fail-closed otherwise).
+    /// MUST be the first field. Decoder verifies == `SCHEMA_V2` (fail-closed otherwise).
     pub schema_version: u16,
     pub generated_at_unix_ms: i64,
-    /// Pre-sorted by RuleTier at write time (daemon). The dylib iterates this
+    /// Pre-sorted by `RuleTier` at write time (daemon). The dylib iterates this
     /// Vec linearly and returns at the FIRST matching entry.
     pub entries: Vec<AllowlistEntry>,
     /// Per-`stt-guard wrap` snapshot: Some(uuid) for runs/{uuid}.cbor; None for the
@@ -27,7 +27,8 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// v0.1 minimal allowlist — KEPT for backward-compat test fixtures only.
-    /// Production code must use v2_default(). decode() rejects this snapshot.
+    /// Production code must use `v2_default()`. `decode()` rejects this snapshot.
+    #[must_use]
     pub fn v1_default() -> Self {
         Self {
             schema_version: SCHEMA_V1,
@@ -40,6 +41,7 @@ impl Snapshot {
     /// v0.2 minimal allowlist — used by tests and as the daemon's startup
     /// fallback before any `stt-guard wrap` invocation. Real curated content is
     /// loaded from `crates/guard-core/data/{trusted-registry,malicious,suspicious}-*.yaml`.
+    #[must_use]
     pub fn v2_default() -> Self {
         Self {
             schema_version: SCHEMA_V2,
@@ -71,6 +73,11 @@ impl Snapshot {
         }
     }
 
+    /// Encode this snapshot as CBOR.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Codec` if CBOR serialization fails.
     pub fn encode(&self) -> Result<Vec<u8>, Error> {
         let mut buf = Vec::with_capacity(512);
         ciborium::ser::into_writer(self, &mut buf).map_err(|e| Error::Codec(e.to_string()))?;
@@ -78,6 +85,11 @@ impl Snapshot {
     }
 
     /// Decode a snapshot from CBOR bytes. Fails closed on schema version mismatch.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Codec` when CBOR decoding fails, or
+    /// `Error::SchemaVersionMismatch` when the snapshot is not `SCHEMA_V2`.
     pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
         let s: Snapshot =
             ciborium::de::from_reader(bytes).map_err(|e| Error::Codec(e.to_string()))?;

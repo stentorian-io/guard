@@ -1,4 +1,4 @@
-//! Smoke test: handle_status returns StatusReply::Ok with daemon-computed daemon_state.
+//! Smoke test: `handle_status` returns `StatusReply::Ok` with daemon-computed `daemon_state`.
 
 #[test]
 fn handle_status_signature_compiles() {

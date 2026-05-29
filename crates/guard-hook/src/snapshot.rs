@@ -1,7 +1,7 @@
-//! Snapshot loader: read manifest from env, verify path under state_dir,
-//! verify SHA-256 digest and snapshot signature, mmap, parse schema_version.
+//! Snapshot loader: read manifest from env, verify path under `state_dir`,
+//! verify SHA-256 digest and snapshot signature, mmap, parse `schema_version`.
 //!
-//! On ANY error: fail-closed (returns Err; lib.rs sets FAIL_CLOSED = true).
+//! On ANY error: fail-closed (returns Err; lib.rs sets `FAIL_CLOSED` = true).
 
 use core::sync::atomic::AtomicBool;
 use memmap2::Mmap;
@@ -51,7 +51,7 @@ struct ManifestSnapshotSignature {
 }
 
 pub struct LoadedSnapshot {
-    pub _mmap: Mmap, // borrowed by entries; keep alive
+    mmap: Mmap, // borrowed by entries; keep alive
     pub entries: Vec<guard_core::AllowlistEntry>,
     pub schema_version: u16,
     pub snapshot_path: PathBuf,
@@ -63,17 +63,19 @@ impl std::fmt::Debug for LoadedSnapshot {
             .field("schema_version", &self.schema_version)
             .field("snapshot_path", &self.snapshot_path)
             .field("entries_len", &self.entries.len())
+            .field("mmap_len", &self.mmap.len())
             .finish()
     }
 }
 
-/// v0.1 well-known state_dir for path validation.
+/// v0.1 well-known `state_dir` for path validation.
 ///
-/// ISS-07/ISS-12 remediation: honor STT_GUARD_STATE_DIR env var override if set.
+/// ISS-07/ISS-12 remediation: honor `STT_GUARD_STATE_DIR` env var override if set.
 /// This lets the e2e test harness use a short /tmp-based state dir (required to
-/// keep the Unix socket path under macOS's 104-byte SUN_LEN limit) while the
-/// dylib still validates the manifest path correctly. When STT_GUARD_STATE_DIR is
+/// keep the Unix socket path under macOS's 104-byte `SUN_LEN` limit) while the
+/// dylib still validates the manifest path correctly. When `STT_GUARD_STATE_DIR` is
 /// not set, fall back to HOME-derivation (the production default).
+#[must_use]
 pub fn well_known_state_dir() -> PathBuf {
     // Check STT_GUARD_STATE_DIR override first (using libc getenv to stay
     // allocation-free on the ctor path).
@@ -83,14 +85,18 @@ pub fn well_known_state_dir() -> PathBuf {
             return PathBuf::from(s);
         }
     }
-    let home = std::env::var_os("HOME").expect("HOME environment variable must be set");
-    PathBuf::from(home).join(format!(
-        "Library/Application Support/{}",
-        guard_core::paths::APP_NAME,
-    ))
+    std::env::var_os("HOME").map_or_else(
+        || PathBuf::from("/__stt_guard_missing_home__"),
+        |home| {
+            PathBuf::from(home).join(format!(
+                "Library/Application Support/{}",
+                guard_core::paths::APP_NAME,
+            ))
+        },
+    )
 }
 
-/// Read STT_GUARD_SNAPSHOT_MANIFEST via libc::getenv to avoid std::env::var
+/// Read `STT_GUARD_SNAPSHOT_MANIFEST` via `libc::getenv` to avoid `std::env::var`
 /// allocation in ctor (Pitfall 4). Returns None if unset.
 unsafe fn getenv_libc(name: &CStr) -> Option<String> {
     let p = unsafe { libc::getenv(name.as_ptr()) };
@@ -101,6 +107,13 @@ unsafe fn getenv_libc(name: &CStr) -> Option<String> {
     Some(s.to_string_lossy().into_owned())
 }
 
+/// Load and verify the snapshot named by `STT_GUARD_SNAPSHOT_MANIFEST`.
+///
+/// # Errors
+///
+/// Returns a fail-closed load error when the manifest is missing, outside the
+/// state directory, malformed, unsigned, signed by an untrusted key, or when
+/// snapshot I/O, digest validation, decoding, or schema validation fails.
 pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
     let manifest_env =
         unsafe { getenv_libc(c"STT_GUARD_SNAPSHOT_MANIFEST") }.ok_or(LoadError::EnvUnset)?;
@@ -136,44 +149,7 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
     if manifest_digest.len() != 64 || !manifest_digest.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(LoadError::ManifestParseFailed);
     }
-    let mut signature_scheme: Option<String> = None;
-    let mut signer_kind: Option<String> = None;
-    let mut public_key_sha256: Option<String> = None;
-    let mut public_key_x963: Option<Vec<u8>> = None;
-    let mut signature_der: Option<Vec<u8>> = None;
-    let mut signed_payload_sha256: Option<String> = None;
-    let mut signature_created_at_unix_ms: Option<i64> = None;
-    for line in lines {
-        if let Some(value) = line.strip_prefix("snapshot_signature_scheme=") {
-            signature_scheme = Some(value.to_string());
-        } else if let Some(value) = line.strip_prefix("snapshot_signer_kind=") {
-            signer_kind = Some(value.to_string());
-        } else if let Some(value) = line.strip_prefix("snapshot_public_key_sha256=") {
-            public_key_sha256 = Some(value.to_string());
-        } else if let Some(value) = line.strip_prefix("snapshot_public_key_x963=") {
-            public_key_x963 = Some(decode_hex(value).map_err(|_| LoadError::ManifestParseFailed)?);
-        } else if let Some(value) = line.strip_prefix("snapshot_signature_der=") {
-            signature_der = Some(decode_hex(value).map_err(|_| LoadError::ManifestParseFailed)?);
-        } else if let Some(value) = line.strip_prefix("snapshot_signed_payload_sha256=") {
-            signed_payload_sha256 = Some(value.to_string());
-        } else if let Some(value) = line.strip_prefix("snapshot_signature_created_at_unix_ms=") {
-            signature_created_at_unix_ms = Some(
-                value
-                    .parse::<i64>()
-                    .map_err(|_| LoadError::ManifestParseFailed)?,
-            );
-        }
-    }
-    let manifest_signature = ManifestSnapshotSignature {
-        scheme: signature_scheme.ok_or(LoadError::SnapshotSignatureMissing)?,
-        signer_kind: signer_kind.ok_or(LoadError::SnapshotSignatureMissing)?,
-        public_key_sha256: public_key_sha256.ok_or(LoadError::SnapshotSignatureMissing)?,
-        public_key_x963: public_key_x963.ok_or(LoadError::SnapshotSignatureMissing)?,
-        signature_der: signature_der.ok_or(LoadError::SnapshotSignatureMissing)?,
-        signed_payload_sha256: signed_payload_sha256.ok_or(LoadError::SnapshotSignatureMissing)?,
-        signature_created_at_unix_ms: signature_created_at_unix_ms
-            .ok_or(LoadError::SnapshotSignatureMissing)?,
-    };
+    let manifest_signature = parse_manifest_signature(lines)?;
 
     // Validate snapshot path also under state_dir.
     let snapshot_path = Path::new(snapshot_path_str)
@@ -208,7 +184,8 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
 
     // Read bytes via the existing fd (NOT std::fs::read which re-opens by path).
     // The file cursor is consumed; we seek back to the start before mmap.
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    let capacity = usize::try_from(meta.len()).unwrap_or(0);
+    let mut bytes = Vec::with_capacity(capacity);
     snap_file.read_to_end(&mut bytes).map_err(LoadError::Io)?;
     let computed = format!("{:x}", Sha256::digest(&bytes));
     if computed != manifest_digest {
@@ -237,10 +214,55 @@ pub fn load_from_env() -> Result<LoadedSnapshot, LoadError> {
     let mmap = unsafe { Mmap::map(&snap_file).map_err(LoadError::Io)? };
 
     Ok(LoadedSnapshot {
-        _mmap: mmap,
+        mmap,
         entries: snap.entries,
         schema_version: snap.schema_version,
         snapshot_path,
+    })
+}
+
+fn parse_manifest_signature<'a>(
+    lines: impl Iterator<Item = &'a str>,
+) -> Result<ManifestSnapshotSignature, LoadError> {
+    let mut signature_scheme: Option<String> = None;
+    let mut signer_kind: Option<String> = None;
+    let mut public_key_sha256: Option<String> = None;
+    let mut public_key_x963: Option<Vec<u8>> = None;
+    let mut signature_der: Option<Vec<u8>> = None;
+    let mut signed_payload_sha256: Option<String> = None;
+    let mut signature_created_at_unix_ms: Option<i64> = None;
+
+    for line in lines {
+        if let Some(value) = line.strip_prefix("snapshot_signature_scheme=") {
+            signature_scheme = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("snapshot_signer_kind=") {
+            signer_kind = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("snapshot_public_key_sha256=") {
+            public_key_sha256 = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("snapshot_public_key_x963=") {
+            public_key_x963 = Some(decode_hex(value).map_err(|()| LoadError::ManifestParseFailed)?);
+        } else if let Some(value) = line.strip_prefix("snapshot_signature_der=") {
+            signature_der = Some(decode_hex(value).map_err(|()| LoadError::ManifestParseFailed)?);
+        } else if let Some(value) = line.strip_prefix("snapshot_signed_payload_sha256=") {
+            signed_payload_sha256 = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("snapshot_signature_created_at_unix_ms=") {
+            signature_created_at_unix_ms = Some(
+                value
+                    .parse::<i64>()
+                    .map_err(|_| LoadError::ManifestParseFailed)?,
+            );
+        }
+    }
+
+    Ok(ManifestSnapshotSignature {
+        scheme: signature_scheme.ok_or(LoadError::SnapshotSignatureMissing)?,
+        signer_kind: signer_kind.ok_or(LoadError::SnapshotSignatureMissing)?,
+        public_key_sha256: public_key_sha256.ok_or(LoadError::SnapshotSignatureMissing)?,
+        public_key_x963: public_key_x963.ok_or(LoadError::SnapshotSignatureMissing)?,
+        signature_der: signature_der.ok_or(LoadError::SnapshotSignatureMissing)?,
+        signed_payload_sha256: signed_payload_sha256.ok_or(LoadError::SnapshotSignatureMissing)?,
+        signature_created_at_unix_ms: signature_created_at_unix_ms
+            .ok_or(LoadError::SnapshotSignatureMissing)?,
     })
 }
 
@@ -360,14 +382,4 @@ fn hex_value(b: u8) -> Result<u8, ()> {
         b'A'..=b'F' => Ok(b - b'A' + 10),
         _ => Err(()),
     }
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8] = b"0123456789abcdef";
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push(HEX[(b >> 4) as usize] as char);
-        s.push(HEX[(b & 0xf) as usize] as char);
-    }
-    s
 }

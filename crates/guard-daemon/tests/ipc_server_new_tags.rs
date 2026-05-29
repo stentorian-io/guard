@@ -1,7 +1,7 @@
-//! v0.3 — smoke test that ipc_server dispatches new tags 0x09..0x0D.
+//! v0.3 — smoke test that `ipc_server` dispatches new tags 0x09..0x0D.
 //!
-//! Tag bytes 0x09..0x0D were added in v0.3 (MessageTag enum).
-//! This test verifies they resolve correctly via MessageTag::from_byte.
+//! Tag bytes 0x09..0x0D were added in v0.3 (`MessageTag` enum).
+//! This test verifies they resolve correctly via `MessageTag::from_byte`.
 
 use guard_daemon::ipc_dispatch::MessageTag;
 

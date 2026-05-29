@@ -21,7 +21,7 @@ fn main() {
         std::process::exit(2);
     }
     let msg = b"persistence payload\n";
-    let written = unsafe { libc::write(fd, msg.as_ptr() as *const libc::c_void, msg.len()) };
+    let written = unsafe { libc::write(fd, msg.as_ptr().cast::<libc::c_void>(), msg.len()) };
     unsafe { libc::close(fd) };
 
     if written < 0 {

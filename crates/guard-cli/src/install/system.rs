@@ -61,10 +61,27 @@ pub fn system_state_dir() -> PathBuf {
 /// Print the action plan the user is about to confirm.
 #[cfg(target_os = "linux")]
 pub fn print_plan() {
-    eprintln!("stt-guard system install is not available on Linux yet.");
-    eprintln!("  • Linux LD_PRELOAD enforcement is available for development builds.");
+    eprintln!("stt-guard Linux system install is not enabled yet.");
+    eprintln!("The production layout is defined for:");
     eprintln!(
-        "  • Hardened production install is blocked on systemd service and hardware-backed signer design."
+        "  • {} service user (no login shell, {STATE_DIR} home)",
+        paths::SERVICE_USER
+    );
+    eprintln!(
+        "  • root-owned binaries and hook library under {}/",
+        paths::SYSTEM_BIN_DIR
+    );
+    eprintln!("  • service-owned state directory at {STATE_DIR}/");
+    eprintln!(
+        "  • service-owned log directory at {}/",
+        paths::SYSTEM_LOG_DIR
+    );
+    eprintln!(
+        "  • systemd daemon unit at {}",
+        paths::SYSTEMD_DAEMON_UNIT_PATH
+    );
+    eprintln!(
+        "Activation is blocked until Linux hardware-backed signer enrollment is implemented."
     );
 }
 
@@ -93,7 +110,7 @@ pub fn print_plan() {
 pub fn run_install() -> Result<(), CliError> {
     Err(CliError::Other(
         "Linux hardened install is not implemented yet. \
-         Use a development build with STT_GUARD_STATE_DIR, or wait for the systemd and hardware-backed signer design."
+         The systemd layout and health checks are defined, but production activation is blocked on hardware-backed signer enrollment."
             .into(),
     ))
 }

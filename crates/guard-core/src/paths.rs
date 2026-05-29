@@ -28,7 +28,7 @@ pub const SYSTEM_LOG_DIR: &str = "/var/log/stt-guard";
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub const SYSTEM_LOG_DIR: &str = "/var/log/stt-guard";
 
-/// Binary install directory (root:wheel 755).
+/// Binary install directory (root-owned 755).
 pub const SYSTEM_BIN_DIR: &str = "/usr/local/libexec/stt-guard";
 
 // ---------------------------------------------------------------------------
@@ -84,6 +84,13 @@ pub const SYSTEM_HOOK_PATH: &str = "/usr/local/libexec/stt-guard/stt-guard-hook"
 
 pub const PLIST_LABEL: &str = "io.stentorian.guard.daemon";
 pub const PLIST_PATH: &str = "/Library/LaunchDaemons/io.stentorian.guard.daemon.plist";
+
+// ---------------------------------------------------------------------------
+// systemd
+// ---------------------------------------------------------------------------
+
+pub const SYSTEMD_DAEMON_UNIT: &str = "stt-guard-daemon.service";
+pub const SYSTEMD_DAEMON_UNIT_PATH: &str = "/etc/systemd/system/stt-guard-daemon.service";
 
 // ---------------------------------------------------------------------------
 // Service user (hardened install)

@@ -34,7 +34,7 @@ automation, but they are not automatically supported or trusted.
 | macOS | 13 Ventura, 14 Sonoma, 15 Sequoia, 26 Tahoe | Supported | Primary macOS support set. |
 | macOS | 12 Monterey | Best effort | Kept visible for compatibility drift. |
 | macOS | 11 Big Sur | Historical tracking | Not a current support target. |
-| Linux runtime path | Ubuntu, `glibc`, `x86_64` | Development-only smoke validation | Not production install support. |
+| Linux runtime path | Ubuntu, `glibc`, `x86_64` | Development-only smoke validation | Production systemd install design is tracked in issue [#70](https://github.com/stentorian-io/guard/issues/70), but activation is still blocked on hardware-backed signing and validation. |
 | Linux kernel series | 7.0, 6.18, 6.19, 6.17, 6.16, 6.15, 6.14, 6.13, 6.12, 6.6, 6.1, 5.15, 5.10 | Tracked, not validated | Used to keep Linux planning connected to upstream drift. |
 | Linux libc and architecture | `aarch64`, `musl` | Tracked, not validated | Linux coverage issue tracks validation work. |
 | Windows | None | Not planned | No supported Windows enforcement path. |
@@ -111,11 +111,14 @@ releases may be detected automatically, but new trusted hashes must still land
 through a reviewed change.
 
 Linux entries represent Ubuntu `glibc` `x86_64` smoke coverage plus tracked
-review work for `aarch64`, `musl`, and kernel series, not full Linux runtime
-enforcement or production install support. Linux ELF exec-target scanning is
-compiled as an explicit unsupported fail-closed boundary until ELF
-classification is implemented. Privileged system mutation stays in the existing
-CI/E2E path where it is explicit.
+review work for `aarch64`, `musl`, and kernel series. The production Linux
+install layout is defined as a systemd-managed root-owned deployment under
+`/usr/local/libexec/stt-guard`, `/var/lib/stt-guard`, and `/var/log/stt-guard`,
+but it is not activated until hardware-backed signer enrollment and install
+health validation are complete. Linux ELF exec-target scanning is compiled as an
+explicit unsupported fail-closed boundary until ELF classification is
+implemented. Privileged system mutation stays in the existing CI/E2E path where
+it is explicit.
 
 ## Local Use
 

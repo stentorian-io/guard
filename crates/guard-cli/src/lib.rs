@@ -2,6 +2,7 @@
 //! for use by integration tests AND main.rs.
 
 pub mod audit_token;
+pub mod banner;
 pub mod biometric;
 pub mod cli;
 pub mod denial_log;

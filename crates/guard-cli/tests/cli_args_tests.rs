@@ -167,6 +167,40 @@ fn bare_guard_no_args_is_parse_error() {
 }
 
 #[test]
+fn bare_guard_binary_prints_banner_and_help() {
+    use std::process::Command;
+
+    let stt_guard = env!("CARGO_BIN_EXE_stt-guard");
+
+    let output = Command::new(stt_guard)
+        .env("COLUMNS", "120")
+        .output()
+        .expect("run bare stt-guard");
+
+    assert!(output.status.success(), "bare stt-guard must exit 0");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(
+        stdout.starts_with("                                                  _>==F~7^r-"),
+        "stdout must center banner within terminal width"
+    );
+    assert!(
+        stdout.contains("_>==F~7^r-"),
+        "stdout must include svg-rendered logo"
+    );
+    assert!(
+        stdout.contains("⢠⡎  ⢸"),
+        "stdout must include screenshot-rendered title"
+    );
+    assert!(
+        stdout.contains("Default-deny outbound network enforcement for shell commands"),
+        "stdout must include centered subtitle"
+    );
+    assert!(stdout.contains("Usage: stt-guard <COMMAND>"));
+    assert!(stdout.contains("Commands:"));
+}
+
+#[test]
 fn wrap_without_command_is_parse_error() {
     let r = Cli::try_parse_from(["stt-guard", "wrap"]);
     assert!(

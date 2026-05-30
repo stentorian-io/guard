@@ -1,15 +1,13 @@
-<p align="center">
-  <!-- TODO: Replace with actual logo image -->
+<div align="center">
+  <img src="docs/assets/logo.svg" alt="Stentorian Guard logo" width="120">
   <h1 align="center">Stentorian Guard</h1>
-  <p align="center">
-    <strong>Installing dependencies shouldn't feel like Russian Roulette</strong>
-  </p>
+  <h4 align="center">When a compromised dependency tries to phone home, Guard severs the line.</h4>
   <p align="center">
     <a href="https://github.com/stentorian-io/guard/releases/latest"><img src="https://img.shields.io/github/v/release/stentorian-io/guard?label=release" alt="Latest release"></a>
     <a href="https://github.com/stentorian-io/guard/actions/workflows/ci.yml"><img src="https://github.com/stentorian-io/guard/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
     <a href="#license"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License"></a>
   </p>
-</p>
+</div>
 
 ---
 

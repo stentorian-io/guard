@@ -22,6 +22,11 @@ fn main() {
 }
 
 fn real_main() -> Result<i32, CliError> {
+    if std::env::args_os().len() == 1 {
+        guard_cli::banner::print_bare_invocation()?;
+        return Ok(0);
+    }
+
     let cli = Cli::parse();
 
     match cli.cmd {

@@ -14,7 +14,7 @@
 - kind: deny
   match: exact
   pattern: 0wn.sh
-  reason: "MAL-2025-905 supply-chain IOC (FEED)"
+  reason: "MAL-2025-985 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -44,7 +44,7 @@
 - kind: deny
   match: ip
   pattern: 119.8.26.163
-  reason: "MAL-2023-8351 supply-chain IOC (FEED)"
+  reason: "MAL-2023-8352 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -79,7 +79,7 @@
 - kind: deny
   match: ip
   pattern: 144.126.142.148
-  reason: "MAL-2026-3396 supply-chain IOC (FEED)"
+  reason: "MAL-2026-3408 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -94,7 +94,7 @@
 - kind: deny
   match: ip
   pattern: 147.45.124.42
-  reason: "MAL-2025-192953 supply-chain IOC (FEED)"
+  reason: "MAL-2025-192931 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -104,12 +104,12 @@
 - kind: deny
   match: ip
   pattern: 161.97.81.147
-  reason: "MAL-2026-2818 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2819 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 178.128.27.205
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -119,12 +119,12 @@
 - kind: deny
   match: ip
   pattern: 178.20.47.231
-  reason: "MAL-2026-823 supply-chain IOC (FEED)"
+  reason: "MAL-2026-850 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 178.208.187.105
-  reason: "MAL-2025-191714 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191715 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -159,22 +159,22 @@
 - kind: deny
   match: ip
   pattern: 185.246.113.53
-  reason: "MAL-2026-3243 supply-chain IOC (FEED)"
+  reason: "MAL-2026-3251 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 185.254.198.245
-  reason: "MAL-2025-5124 supply-chain IOC (FEED)"
+  reason: "MAL-2025-5119 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 185.62.56.25
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 185.62.57.60
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -189,7 +189,7 @@
 - kind: deny
   match: ip
   pattern: 194.163.191.205
-  reason: "MAL-2024-10049 supply-chain IOC (FEED)"
+  reason: "MAL-2024-10115 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -214,7 +214,7 @@
 - kind: deny
   match: ip
   pattern: 198.199.83.132
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -224,17 +224,17 @@
 - kind: deny
   match: exact
   pattern: 1r.vc
-  reason: "MAL-2026-1224 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2106 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: 1wy3rk316x8qqy4fyxtvcs4kkbq2es2h.oastify.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 200.58.107.25
-  reason: "MAL-2025-47453 supply-chain IOC (FEED)"
+  reason: "MAL-2025-47452 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -244,7 +244,7 @@
 - kind: deny
   match: ip
   pattern: 212.80.7.213
-  reason: "MAL-2025-191798 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191718 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -264,17 +264,17 @@
 - kind: deny
   match: ip
   pattern: 23.227.203.99
-  reason: "MAL-2026-54 supply-chain IOC (FEED)"
+  reason: "MAL-2026-53 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: 288utkkrohmp0nr8znflcp88nztrhg.oastify.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 35.170.187.220
-  reason: "MAL-2025-191766 supply-chain IOC (FEED)"
+  reason: "MAL-2025-1986 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -304,7 +304,7 @@
 - kind: deny
   match: exact
   pattern: 3zoz.duckdns.org
-  reason: "MAL-2025-192658 supply-chain IOC (FEED)"
+  reason: "MAL-2026-639 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -314,7 +314,7 @@
 - kind: deny
   match: exact
   pattern: 444ee3d0c982.ngrok-free.app
-  reason: "MAL-2026-652 supply-chain IOC (FEED)"
+  reason: "MAL-2026-653 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -324,7 +324,7 @@
 - kind: deny
   match: ip
   pattern: 45.142.115.225
-  reason: "MAL-2025-988 supply-chain IOC (FEED)"
+  reason: "MAL-2025-948 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -334,32 +334,32 @@
 - kind: deny
   match: ip
   pattern: 46.225.21.180
-  reason: "MAL-2026-3377 supply-chain IOC (FEED)"
+  reason: "MAL-2026-3375 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: 4or5o5yn5lqzenk4.b.requestbin.net
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 5.9.104.19
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 51.178.25.148
-  reason: "MAL-2023-8565 supply-chain IOC (FEED)"
+  reason: "MAL-2023-8566 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 51.250.2.204
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 52.148.155.85
-  reason: "MAL-2026-1339 supply-chain IOC (FEED)"
+  reason: "MAL-2026-1340 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -399,7 +399,7 @@
 - kind: deny
   match: ip
   pattern: 65.21.108.160
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -429,22 +429,22 @@
 - kind: deny
   match: exact
   pattern: 6wxd3v84nevku06dcgbqcxrmt.canarytokens.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 77.105.161.164
-  reason: "MAL-2025-191792 supply-chain IOC (FEED)"
+  reason: "MAL-2025-192467 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 77.246.103.245
-  reason: "MAL-2026-825 supply-chain IOC (FEED)"
+  reason: "MAL-2026-847 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
   pattern: 77.91.65.24
-  reason: "MAL-2026-1137 supply-chain IOC (FEED)"
+  reason: "MAL-2026-1143 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -484,7 +484,7 @@
 - kind: deny
   match: ip
   pattern: 87.120.107.132
-  reason: "MAL-2025-192689 supply-chain IOC (FEED)"
+  reason: "MAL-2025-192690 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -509,7 +509,7 @@
 - kind: deny
   match: ip
   pattern: 89.23.98.149
-  reason: "MAL-2025-6613 supply-chain IOC (FEED)"
+  reason: "MAL-2025-6615 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -519,7 +519,7 @@
 - kind: deny
   match: exact
   pattern: 8d7sabfsd2.youkyy.com
-  reason: "MAL-2026-763 supply-chain IOC (FEED)"
+  reason: "MAL-2026-762 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -554,7 +554,7 @@
 - kind: deny
   match: exact
   pattern: acerputas.90shipsnormal.site
-  reason: "MAL-2025-191688 supply-chain IOC (FEED)"
+  reason: "MAL-2025-3450 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -589,7 +589,7 @@
 - kind: deny
   match: exact
   pattern: aliyun-sdk-requests.xyz
-  reason: "MAL-2025-191676 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191672 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -619,7 +619,7 @@
 - kind: deny
   match: exact
   pattern: api.aliyun-sdk-requests.xyz
-  reason: "MAL-2025-191686 supply-chain IOC (FEED)"
+  reason: "MAL-2025-47773 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -629,7 +629,7 @@
 - kind: deny
   match: exact
   pattern: api.diar.ai
-  reason: "MAL-2025-191848 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191726 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -639,7 +639,7 @@
 - kind: deny
   match: exact
   pattern: api.masscan.cloud
-  reason: "MAL-2026-3434 supply-chain IOC (FEED)"
+  reason: "MAL-2026-3432 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -659,12 +659,12 @@
 - kind: deny
   match: exact
   pattern: app.any.run
-  reason: "MAL-2025-191833 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191890 supply-chain IOC (FEED)"
   confidence: suspect
 - kind: deny
   match: exact
   pattern: app.safedep.io
-  reason: "MAL-2026-1230 supply-chain IOC (FEED)"
+  reason: "MAL-2026-1027 supply-chain IOC (FEED)"
   confidence: suspect
 - kind: deny
   match: exact
@@ -674,7 +674,7 @@
 - kind: deny
   match: exact
   pattern: aurevian.cloud
-  reason: "MAL-2025-192430 supply-chain IOC (FEED)"
+  reason: "MAL-2025-192376 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -688,8 +688,13 @@
   confidence: confirmed
 - kind: deny
   match: exact
+  pattern: babelbit.site
+  reason: "MAL-2026-5123 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
   pattern: bachelor-thesis-001.proxy.beeceptor.com
-  reason: "MAL-2026-1436 supply-chain IOC (FEED)"
+  reason: "MAL-2026-1018 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -729,22 +734,27 @@
 - kind: deny
   match: exact
   pattern: bind9-or-callback-server.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: bitensor.xyz
-  reason: "MAL-2026-54 supply-chain IOC (FEED)"
+  reason: "MAL-2026-53 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: blackwolf.obs.cn-north-4.myhuaweicloud.com
-  reason: "MAL-2025-3431 supply-chain IOC (FEED)"
+  reason: "MAL-2025-3430 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: blockatlaspro.com
   reason: "MAL-2024-11579 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: bold-river-456.onrender.com
+  reason: "MAL-2026-5086 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -754,27 +764,27 @@
 - kind: deny
   match: exact
   pattern: bq5m9lnmalh9ktyi9wydockt9kfb32rr.oastify.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: brainwavehub.org
-  reason: "MAL-2026-3127 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2949 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: byted-dast.com
-  reason: "MAL-2024-10355 supply-chain IOC (FEED)"
+  reason: "MAL-2024-10356 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: c7kxnys58daceezcxx0jjstn6ec50vok.oastify.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: cameradriver.pro
-  reason: "MAL-2026-54 supply-chain IOC (FEED)"
+  reason: "MAL-2026-53 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -784,22 +794,22 @@
 - kind: deny
   match: exact
   pattern: cczk46g2vtc0000k68dgggx31deyyyyyb.oast.fun
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: cfrg38n2vtc0000h72xgg8hebweyyyyyb.oast.fun
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: cfswk0m2vtc0000myvg0g8h6jocyyyyyb.oast.fun
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: cfytrzv2vtc00002v400geytd6yyyyyyn.oast.fun
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -819,7 +829,7 @@
 - kind: deny
   match: exact
   pattern: checktimeserver.org
-  reason: "MAL-2025-191676 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191672 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -829,17 +839,17 @@
 - kind: deny
   match: exact
   pattern: chrome-data-receiver.up.railway.app
-  reason: "MAL-2025-6588 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191733 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: chrome-extract.up.railway.app
-  reason: "MAL-2025-6588 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191733 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: ck0r1hp2vtc00007c0zggjocy3ryyyyyb.oast.fun
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -849,7 +859,7 @@
 - kind: deny
   match: exact
   pattern: cleverstack-ext30341.vercel.app
-  reason: "MAL-2026-1262 supply-chain IOC (FEED)"
+  reason: "MAL-2026-1261 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -864,7 +874,7 @@
 - kind: deny
   match: exact
   pattern: coingecko-liard.vercel.app
-  reason: "MAL-2026-2906 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2905 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -879,12 +889,17 @@
 - kind: deny
   match: exact
   pattern: contorosa.space
-  reason: "MAL-2025-3483 supply-chain IOC (FEED)"
+  reason: "MAL-2025-3429 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: cookieshop.cloud
   reason: "MAL-2026-2233 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: corbit.icu
+  reason: "MAL-2026-5123 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -894,7 +909,7 @@
 - kind: deny
   match: exact
   pattern: crypto-api.net
-  reason: "MAL-2024-11517 supply-chain IOC (FEED)"
+  reason: "MAL-2024-11564 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -909,7 +924,7 @@
 - kind: deny
   match: exact
   pattern: cup1qnm56sdo4bdv.b.requestbin.net
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -919,7 +934,7 @@
 - kind: deny
   match: exact
   pattern: d1n0.me
-  reason: "MAL-2025-191710 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191711 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -934,7 +949,7 @@
 - kind: deny
   match: exact
   pattern: dark-resonance-459b.blammervale.workers.dev
-  reason: "MAL-2026-2122 supply-chain IOC (FEED)"
+  reason: "MAL-2026-1544 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -969,12 +984,22 @@
 - kind: deny
   match: exact
   pattern: diar.ai
-  reason: "MAL-2025-191737 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191725 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: disrupt-evasive-sterility.ngrok-free.app
+  reason: "MAL-2026-5152 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: disrupt-evasive-sterility.ngrok-free.dev
+  reason: "MAL-2026-5120 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: dnslog.sbs
-  reason: "MAL-2025-191770 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191720 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -994,12 +1019,12 @@
 - kind: deny
   match: exact
   pattern: dothebest.store
-  reason: "MAL-2025-193012 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191534 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: dry-hall-8967.blammervale.workers.dev
-  reason: "MAL-2026-2122 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2142 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1008,13 +1033,18 @@
   confidence: confirmed
 - kind: deny
   match: exact
+  pattern: duketools.vercel.app
+  reason: "MAL-2026-4820 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
   pattern: edef4.pcloud.com
-  reason: "MAL-2025-6431 supply-chain IOC (FEED)"
+  reason: "MAL-2025-6495 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: efrva6.dnslog.cn
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1034,7 +1064,7 @@
 - kind: deny
   match: exact
   pattern: eo64g38fdes1lxm.m.pipedream.net
-  reason: "MAL-2025-191684 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191691 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1044,7 +1074,7 @@
 - kind: deny
   match: exact
   pattern: eozpdddh3tifjo.m.pipedream.net
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1054,12 +1084,12 @@
 - kind: deny
   match: exact
   pattern: ethscanold.com
-  reason: "MAL-2024-11517 supply-chain IOC (FEED)"
+  reason: "MAL-2024-11564 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: evduuu5l01di1hdn9i5qslhxzo5ft6ju8.oastify.com
-  reason: "MAL-2025-191839 supply-chain IOC (FEED)"
+  reason: "MAL-2025-47782 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1074,22 +1104,22 @@
 - kind: deny
   match: exact
   pattern: fhg62xavat9jzyt6euwxi6sro.canarytokens.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: files.inostage.ru
-  reason: "MAL-2024-9266 supply-chain IOC (FEED)"
+  reason: "MAL-2024-9265 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: files.pythonhosted.ru
-  reason: "MAL-2024-9266 supply-chain IOC (FEED)"
+  reason: "MAL-2024-9265 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: filev2.getsession.org
-  reason: "MAL-2026-3434 supply-chain IOC (FEED)"
+  reason: "MAL-2026-3432 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1119,7 +1149,7 @@
 - kind: deny
   match: exact
   pattern: gifpngstore.com
-  reason: "MAL-2026-3127 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2949 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1129,7 +1159,7 @@
 - kind: deny
   match: exact
   pattern: git-tanstack.com
-  reason: "MAL-2026-3434 supply-chain IOC (FEED)"
+  reason: "MAL-2026-3432 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1139,7 +1169,7 @@
 - kind: deny
   match: exact
   pattern: helixguard.ai
-  reason: "MAL-2025-191533 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191534 supply-chain IOC (FEED)"
   confidence: suspect
 - kind: deny
   match: exact
@@ -1164,17 +1194,17 @@
 - kind: deny
   match: exact
   pattern: ho94479k12fy3mdiwjvzvvo09rfh36.oastify.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: holy-sun-41ff.staraledreamer.workers.dev
-  reason: "MAL-2026-2295 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2489 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: honey.zakura-int.workers.dev
-  reason: "MAL-2025-191700 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191682 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1184,12 +1214,17 @@
 - kind: deny
   match: exact
   pattern: i.1r.vc
-  reason: "MAL-2026-1224 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2106 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: i88za2.pages.dev
   reason: "MAL-2025-191816 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: ideal-octo-spoon.onrender.com
+  reason: "MAL-2026-5086 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1214,7 +1249,7 @@
 - kind: deny
   match: exact
   pattern: jolly-violet-def9.staraledreamer.workers.dev
-  reason: "MAL-2026-2279 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2280 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1229,7 +1264,7 @@
 - kind: deny
   match: exact
   pattern: juvenile-server.vercel.app
-  reason: "MAL-2026-501 supply-chain IOC (FEED)"
+  reason: "MAL-2026-499 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1239,12 +1274,12 @@
 - kind: deny
   match: exact
   pattern: l2g8zu5qwvsj5bewhvvxusdpp.canarytokens.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: litellm.cloud
-  reason: "MAL-2026-2032 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2030 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1259,7 +1294,7 @@
 - kind: deny
   match: exact
   pattern: loguru.guru
-  reason: "MAL-2025-191729 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191784 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1289,7 +1324,7 @@
 - kind: deny
   match: exact
   pattern: marcomayo.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1304,12 +1339,12 @@
 - kind: deny
   match: exact
   pattern: netupdates.info
-  reason: "MAL-2025-2947 supply-chain IOC (FEED)"
+  reason: "MAL-2025-3011 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: nirobtest.xyz
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1319,7 +1354,7 @@
 - kind: deny
   match: exact
   pattern: npm.jpartifacts.com
-  reason: "MAL-2026-1502 supply-chain IOC (FEED)"
+  reason: "MAL-2026-1501 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1334,7 +1369,7 @@
 - kind: deny
   match: exact
   pattern: npmjs.help
-  reason: "MAL-2025-46994 supply-chain IOC (FEED)"
+  reason: "MAL-2025-46991 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1354,7 +1389,7 @@
 - kind: deny
   match: exact
   pattern: npmtesttut.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1369,7 +1404,7 @@
 - kind: deny
   match: exact
   pattern: ok-omega-eight.vercel.app
-  reason: "MAL-2024-10168 supply-chain IOC (FEED)"
+  reason: "MAL-2024-10039 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1389,12 +1424,12 @@
 - kind: deny
   match: exact
   pattern: package.storeartifacts.com
-  reason: "MAL-2026-1326 supply-chain IOC (FEED)"
+  reason: "MAL-2026-1329 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: papiculo.net
-  reason: "MAL-2024-12259 supply-chain IOC (FEED)"
+  reason: "MAL-2024-12230 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1414,7 +1449,7 @@
 - kind: deny
   match: exact
   pattern: platform.safedep.io
-  reason: "MAL-2025-5248 supply-chain IOC (FEED)"
+  reason: "MAL-2025-41421 supply-chain IOC (FEED)"
   confidence: suspect
 - kind: deny
   match: exact
@@ -1439,7 +1474,7 @@
 - kind: deny
   match: exact
   pattern: pub-b63e77578ffe42519de7d1771935f8b0.r2.dev
-  reason: "MAL-2026-3428 supply-chain IOC (FEED)"
+  reason: "MAL-2025-193014 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1459,12 +1494,17 @@
 - kind: deny
   match: exact
   pattern: pythonhosted.ru
-  reason: "MAL-2024-9266 supply-chain IOC (FEED)"
+  reason: "MAL-2024-9265 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: quantumic.digital
   reason: "MAL-2026-1438 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: quiet-sky-123.onrender.com
+  reason: "MAL-2026-5086 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1479,7 +1519,7 @@
 - kind: deny
   match: exact
   pattern: renderkit1.vercel.app
-  reason: "MAL-2026-3212 supply-chain IOC (FEED)"
+  reason: "MAL-2026-3207 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1489,17 +1529,17 @@
 - kind: deny
   match: exact
   pattern: saboreysecretos.com
-  reason: "MAL-2025-3014 supply-chain IOC (FEED)"
+  reason: "MAL-2025-3016 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: safedep.io
-  reason: "MAL-2025-47215 supply-chain IOC (FEED)"
+  reason: "MAL-2025-192568 supply-chain IOC (FEED)"
   confidence: suspect
 - kind: deny
   match: exact
   pattern: searchbox.info
-  reason: "MAL-2025-193012 supply-chain IOC (FEED)"
+  reason: "MAL-2026-1341 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1509,7 +1549,7 @@
 - kind: deny
   match: exact
   pattern: seed1.getsession.org
-  reason: "MAL-2026-3434 supply-chain IOC (FEED)"
+  reason: "MAL-2026-3432 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1519,7 +1559,7 @@
 - kind: deny
   match: exact
   pattern: server-unlock-hack.onrender.com
-  reason: "MAL-2025-191876 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191875 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1534,7 +1574,7 @@
 - kind: deny
   match: exact
   pattern: sfxeur.com
-  reason: "MAL-2025-191770 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191720 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1554,7 +1594,7 @@
 - kind: deny
   match: exact
   pattern: sl4x0.xyz
-  reason: "MAL-2025-4240 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191845 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1574,7 +1614,7 @@
 - kind: deny
   match: exact
   pattern: spring-math-9df3.aledreamsaledreams2.workers.dev
-  reason: "MAL-2026-2542 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2494 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1609,7 +1649,7 @@
 - kind: deny
   match: exact
   pattern: sync.geeker.indevs.in
-  reason: "MAL-2026-2400 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2327 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1634,7 +1674,7 @@
 - kind: deny
   match: exact
   pattern: tronapipy.sbs
-  reason: "MAL-2025-41717 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191911 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1644,17 +1684,17 @@
 - kind: deny
   match: exact
   pattern: u3yjt7ui4aa5egu44kdrpys1psvjj97y.oastify.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: u61eou88vswlvti2yihx8ktyrpxfl4.oastify.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: unld4fepiyjq4ywsrj7mmpaz3q9hx9ly.oastify.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1664,12 +1704,12 @@
 - kind: deny
   match: exact
   pattern: updatedappython.com
-  reason: "MAL-2026-898 supply-chain IOC (FEED)"
+  reason: "MAL-2026-927 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: updatenet.work
-  reason: "MAL-2025-193012 supply-chain IOC (FEED)"
+  reason: "MAL-2026-1341 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1679,12 +1719,12 @@
 - kind: deny
   match: exact
   pattern: us-central1-zawya-83b19.cloudfunctions.net
-  reason: "MAL-2025-191765 supply-chain IOC (FEED)"
+  reason: "MAL-2025-47784 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: uzx39o3nimx3qp8s14uu6kfjhan1brzg.oastify.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1694,12 +1734,17 @@
 - kind: deny
   match: exact
   pattern: v95b8bj2eirzfyr4nzj762ved5jw71vq.oastify.com
-  reason: "MAL-2025-191839 supply-chain IOC (FEED)"
+  reason: "MAL-2025-47782 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: vectordbengine.blob.core.windows.net
+  reason: "MAL-2026-4814 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: vell-production.up.railway.app
-  reason: "MAL-2025-6588 supply-chain IOC (FEED)"
+  reason: "MAL-2025-191733 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1729,17 +1774,17 @@
 - kind: deny
   match: exact
   pattern: wonderchristmas.store
-  reason: "MAL-2025-2947 supply-chain IOC (FEED)"
+  reason: "MAL-2025-3011 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: www.indece.com
-  reason: "MAL-2026-2885 supply-chain IOC (FEED)"
+  reason: "MAL-2026-2740 supply-chain IOC (FEED)"
   confidence: suspect
 - kind: deny
   match: exact
   pattern: x.com
-  reason: "MAL-2026-4275 supply-chain IOC (FEED)"
+  reason: "MAL-2026-4277 supply-chain IOC (FEED)"
   confidence: suspect
 - kind: deny
   match: exact
@@ -1754,17 +1799,17 @@
 - kind: deny
   match: exact
   pattern: xz0dyd944kh150h6d199w4lg379yx0lp.oastify.com
-  reason: "MAL-2025-191839 supply-chain IOC (FEED)"
+  reason: "MAL-2025-47782 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: yhj0choyrutnbvpcjuesxpph58bzztni.oastify.com
-  reason: "MAL-2021-1 supply-chain IOC (FEED)"
+  reason: "MAL-2021-4 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
   pattern: yl4zicglte.execute-api.us-east-1.amazonaws.com
-  reason: "MAL-2024-12224 supply-chain IOC (FEED)"
+  reason: "MAL-2024-12219 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1774,7 +1819,7 @@
 - kind: deny
   match: exact
   pattern: youkyy.com
-  reason: "MAL-2026-763 supply-chain IOC (FEED)"
+  reason: "MAL-2026-762 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1789,7 +1834,7 @@
 - kind: deny
   match: exact
   pattern: zetolacs-cloud.top
-  reason: "MAL-2025-3483 supply-chain IOC (FEED)"
+  reason: "MAL-2025-3429 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact

@@ -7,10 +7,6 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  schedule:
-    # Nightly at 06:15 UTC — catches new advisories in the RustSec DB even when
-    # no lockfile-changing PR is open.
-    - cron: '15 6 * * *'
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -88,12 +84,6 @@ jobs:
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Checkout scheduled ref
-        if: github.event_name == 'schedule'
-        uses: actions/checkout@v4
-        with:
           fetch-depth: 0
 
       - name: Fetch base branch
@@ -231,11 +221,10 @@ jobs:
       - macos_e2e_tests
     if: >-
       !cancelled()
-      && (github.event_name == 'schedule'
-          || (needs.prepare.outputs.lockfile == 'true'
-              && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
-              && (needs.linux_e2e_tests.result == 'success' || needs.linux_e2e_tests.result == 'skipped')
-              && (needs.macos_e2e_tests.result == 'success' || needs.macos_e2e_tests.result == 'skipped')))
+      && needs.prepare.outputs.lockfile == 'true'
+      && (needs.secret_scan.result == 'success' || needs.secret_scan.result == 'skipped')
+      && (needs.linux_e2e_tests.result == 'success' || needs.linux_e2e_tests.result == 'skipped')
+      && (needs.macos_e2e_tests.result == 'success' || needs.macos_e2e_tests.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

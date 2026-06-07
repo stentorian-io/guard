@@ -10,6 +10,10 @@ version="${1:?usage: ci-package-release-tarballs.sh <version>}"
 for target_dir in artifacts/guard-*; do
   target="${target_dir#artifacts/guard-}"
   cp artifacts/release-meta.json "${target_dir}/release-meta.json"
+  chmod +x \
+    "${target_dir}/stt-guard" \
+    "${target_dir}/stt-guard-daemon" \
+    "${target_dir}/stt-guard-watchdog"
   tarball="artifacts/guard-${version}-${target}.tar.gz"
   tar -C "${target_dir}" \
     -czf "${tarball}" \

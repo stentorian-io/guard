@@ -75,7 +75,7 @@ unsafe fn syscall3(num: i64, a1: u64, a2: u64, a3: u64) -> i64 {
     unsafe {
         core::arch::asm!(
             "syscall",
-            inout("rax") num | 0x2000000 => ret,
+            inout("rax") num | 0x0200_0000 => ret,
             in("rdi") a1,
             in("rsi") a2,
             in("rdx") a3,
@@ -107,7 +107,7 @@ unsafe fn syscall4(num: i64, a1: u64, a2: u64, a3: u64, a4: u64) -> i64 {
     unsafe {
         core::arch::asm!(
             "syscall",
-            inout("rax") num | 0x2000000 => ret,
+            inout("rax") num | 0x0200_0000 => ret,
             in("rdi") a1,
             in("rsi") a2,
             in("rdx") a3,
@@ -141,7 +141,7 @@ unsafe fn syscall5(num: i64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> i64
     unsafe {
         core::arch::asm!(
             "syscall",
-            inout("rax") num | 0x2000000 => ret,
+            inout("rax") num | 0x0200_0000 => ret,
             in("rdi") a1,
             in("rsi") a2,
             in("rdx") a3,
@@ -177,7 +177,7 @@ unsafe fn syscall6(num: i64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u6
     unsafe {
         core::arch::asm!(
             "syscall",
-            inout("rax") num | 0x2000000 => ret,
+            inout("rax") num | 0x0200_0000 => ret,
             in("rdi") a1,
             in("rsi") a2,
             in("rdx") a3,
@@ -209,7 +209,7 @@ unsafe fn syscall0(num: i64) -> i64 {
     unsafe {
         core::arch::asm!(
             "syscall",
-            inout("rax") num | 0x2000000 => ret,
+            inout("rax") num | 0x0200_0000 => ret,
             out("rdi") _,
             out("rcx") _,
             out("r11") _,
@@ -256,7 +256,7 @@ unsafe fn syscall8(num: i64, args: [u64; 8]) -> i64 {
             "mov rax, {num}",
             "syscall",
             "add rsp, 16", // clean up the two pushed args
-            num = in(reg) num | 0x2000000i64,
+            num = in(reg) num | 0x0200_0000_i64,
             in("rdi") args[0],
             in("rsi") args[1],
             in("rdx") args[2],

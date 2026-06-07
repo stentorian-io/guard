@@ -25,9 +25,12 @@ has_test=false
 has_ci=false
 has_doc=false
 has_build=false
+has_user_facing_script=false
 
 while IFS= read -r f; do
   case "$f" in
+    install.sh|uninstall.sh)
+      has_user_facing_script=true ;;
     .github/workflows/*|.github/actions/*)
       has_ci=true ;;
     crates/guard-e2e/tests/*|crates/*/tests/*|*/tests/*)
@@ -51,6 +54,8 @@ done <<< "$STAGED"
 
 infer_type() {
   if $has_src && ! $has_test && ! $has_ci; then
+    echo "feat or fix"
+  elif $has_user_facing_script && ! $has_test && ! $has_ci; then
     echo "feat or fix"
   elif $has_test && ! $has_src; then
     echo "test"
@@ -98,7 +103,7 @@ if [ -n "$CURRENT_TYPE" ]; then
   fi
 
   # feat/fix but only build/config files changed → chore
-  if [[ "$CURRENT_TYPE" =~ ^(feat|fix)$ ]] && $has_build && ! $has_src && ! $has_test && ! $has_ci && ! $has_doc; then
+  if [[ "$CURRENT_TYPE" =~ ^(feat|fix)$ ]] && $has_build && ! $has_src && ! $has_user_facing_script && ! $has_test && ! $has_ci && ! $has_doc; then
     REWRITE="chore"
   fi
 
@@ -140,7 +145,7 @@ if [ "$MSG_SOURCE" != "message" ] || [ -z "$CURRENT_TYPE" ]; then
     echo "# Internal types:  test, refactor, chore, build, ci, docs(readme|llm|bench)"
     echo "#"
     echo "# Rules enforced by commit-msg hook:"
-    echo "#   feat/fix → must change source code (.rs), not just docs/tests/CI"
+    echo "#   feat/fix → must change source code (.rs) or user-facing install scripts"
     echo "#   test     → must change test files"
     echo "#   ci       → should change .github/ files and must not use a scope"
     echo "#   docs     → requires scope: readme, llm, bench, man, help, install"

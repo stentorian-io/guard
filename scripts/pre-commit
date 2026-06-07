@@ -100,7 +100,9 @@ SHELL_FILES=$(git diff --cached --name-only --diff-filter=ACM -- \
   'scripts/pre-push' \
   'scripts/commit-msg' \
   'scripts/prepare-commit-msg' \
-  'scripts/validate-conventional-subject' || true)
+  'scripts/validate-conventional-subject' \
+  'install.sh' \
+  'uninstall.sh' || true)
 if [ -n "$SHELL_FILES" ]; then
   echo "$SHELL_FILES" | xargs bash -n \
     || fail "bash syntax lint failed"

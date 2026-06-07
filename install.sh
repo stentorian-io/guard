@@ -118,6 +118,8 @@ tar -xzf "${tmpdir}/${asset}" -C "$tmpdir"
 
 if [ "$yes" -eq 1 ]; then
   sudo "${tmpdir}/stt-guard" install-system --yes
+elif [ -r /dev/tty ]; then
+  sudo "${tmpdir}/stt-guard" install-system < /dev/tty
 else
   sudo "${tmpdir}/stt-guard" install-system
 fi

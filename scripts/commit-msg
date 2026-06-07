@@ -30,8 +30,8 @@ if grep -qi '^Co-Authored-By:' "$MSG_FILE"; then
 Remove the Co-Authored-By line from your commit message."
 fi
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-bash "$SCRIPT_DIR/validate-conventional-subject" "$MSG" || exit 1
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+bash "$REPO_ROOT/scripts/validate-conventional-subject" "$MSG" || exit 1
 
 # ── Extract type and scope ─────────────────────────────────────────────────
 
@@ -48,9 +48,12 @@ has_test=false
 has_ci=false
 has_doc=false
 has_build=false
+has_user_facing_script=false
 
 while IFS= read -r f; do
   case "$f" in
+    install.sh|uninstall.sh)
+      has_user_facing_script=true ;;
     .github/workflows/*|.github/actions/*)
       has_ci=true ;;
     crates/guard-e2e/tests/*|crates/*/tests/*|*/tests/*)
@@ -74,9 +77,9 @@ done <<< "$STAGED"
 
 case "$TYPE" in
   feat|fix)
-    if ! $has_src; then
-      fail "'${TYPE}' commits must change source code (.rs files).
-Staged files are docs/tests/CI/config only.
+    if ! $has_src && ! $has_user_facing_script; then
+      fail "'${TYPE}' commits must change source code (.rs files) or user-facing install scripts.
+Staged files are docs/tests/CI/config/internal scripts only.
 Suggested types: $(
         $has_test && echo -n 'test, '
         $has_ci && echo -n 'ci, '

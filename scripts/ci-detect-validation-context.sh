@@ -10,6 +10,7 @@ if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
     echo "lockfile=true"
     echo "markdown=false"
     echo "tooling=false"
+    echo "hot_path_benchmark=false"
     echo "base="
     echo "head="
     echo "is_pr=false"
@@ -25,11 +26,18 @@ code=false
 lockfile=false
 markdown=false
 tooling=false
+hot_path_benchmark=false
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   case "$path" in
     *.rs|*/Cargo.toml|Cargo.toml|*/Cargo.lock|Cargo.lock|rust-toolchain.toml|crates/guard-e2e/fixtures/*|crates/guard-e2e/harness/*|crates/guard-core/data/*)
       code=true
+      hot_path_benchmark=true
+      ;;
+  esac
+  case "$path" in
+    scripts/bench-hot-path.sh)
+      hot_path_benchmark=true
       ;;
   esac
   case "$path" in
@@ -57,6 +65,7 @@ head=$(git rev-parse HEAD)
   echo "lockfile=$lockfile"
   echo "markdown=$markdown"
   echo "tooling=$tooling"
+  echo "hot_path_benchmark=$hot_path_benchmark"
   echo "base=$base"
   echo "head=$head"
   echo "is_pr=true"

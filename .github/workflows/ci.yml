@@ -76,6 +76,7 @@ jobs:
       lockfile: ${{ steps.context.outputs.lockfile }}
       markdown: ${{ steps.context.outputs.markdown }}
       tooling: ${{ steps.context.outputs.tooling }}
+      hot_path_benchmark: ${{ steps.context.outputs.hot_path_benchmark }}
       is_pr: ${{ steps.context.outputs.is_pr }}
     steps:
       - name: Checkout PR head
@@ -492,7 +493,7 @@ jobs:
       - lint
     if: >-
       !cancelled()
-      && (needs.prepare.outputs.code == 'true' || needs.prepare.outputs.tooling == 'true')
+      && needs.prepare.outputs.hot_path_benchmark == 'true'
       && needs.lint.result == 'success'
     runs-on: macos-14
     timeout-minutes: 25

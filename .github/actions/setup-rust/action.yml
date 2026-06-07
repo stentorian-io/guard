@@ -24,6 +24,18 @@ runs:
       with:
         targets: ${{ inputs.targets }}
 
+    - name: Install requested Rust targets
+      if: inputs.targets != ''
+      shell: bash
+      env:
+        RUST_TARGETS: ${{ inputs.targets }}
+      run: |
+        set -euo pipefail
+
+        for target in ${RUST_TARGETS//,/ }; do
+          rustup target add "$target"
+        done
+
     - name: Cargo cache
       uses: Swatinem/rust-cache@v2
       with:

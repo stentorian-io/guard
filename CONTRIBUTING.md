@@ -252,8 +252,9 @@ validation starts:
   checks and upload short-lived artifacts.
 - Linux E2E runs after the Linux release build plus unit and integration tests;
   macOS E2E runs after the macOS release build plus unit and integration tests.
-- Dependency CVE audit runs last for lockfile-changing PRs and on the nightly
-  schedule.
+- Dependency CVE audit runs last for lockfile-changing PRs. The dedicated
+  `.github/workflows/cve-audit.yml` workflow runs the scheduled main-branch CVE
+  audit.
 - Platform E2E jobs download the release build artifacts so install-health tests
   exercise the same payload produced by the release-build matrix.
 - `.github/workflows/compatibility-tracker.yml` runs Mondays at 08:00 UTC and

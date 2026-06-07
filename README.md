@@ -4,7 +4,8 @@
   <h4 align="center">When a compromised dependency tries to phone home, Guard severs the line.</h4>
   <p align="center">
     <a href="https://github.com/stentorian-io/guard/releases/latest"><img src="https://img.shields.io/github/v/release/stentorian-io/guard?label=release" alt="Latest release"></a>
-    <a href="https://github.com/stentorian-io/guard/actions/workflows/ci.yml"><img src="https://github.com/stentorian-io/guard/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+    <a href="https://github.com/stentorian-io/guard/actions/workflows/cve-audit.yml"><img src="https://img.shields.io/github/actions/workflow/status/stentorian-io/guard/cve-audit.yml?branch=main&event=schedule&label=CVE%20audit" alt="CVE audit"></a>
+    <a href="https://github.com/stentorian-io/guard/actions/workflows/feed-update.yml"><img src="https://img.shields.io/github/last-commit/stentorian-io/guard/main/crates/guard-core/data/malicious-ossf-packages.yaml?label=IOC%20feed" alt="IOC feed freshness"></a>
     <a href="#license"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License"></a>
   </p>
 </div>
@@ -382,17 +383,19 @@ itself. The weekly compatibility tracker opens human-review issues for new OS,
 runtime, CPU architecture, Rust, LLVM, Xcode, and Linux lifecycle
 entries. Nightly threat-intel updates open PRs for new malicious-package IOCs.
 New releases, runtime hashes, allow rules, deny rules, and support claims are
-only accepted after review, and CI verifies that the checked-in compatibility
-metadata and trusted-runtime registry still match those claims.
+only accepted after review, and the PR validation workflow verifies that the
+checked-in compatibility metadata and trusted-runtime registry still match
+those claims.
 
 ### Threat intelligence
 
 Stentorian Guard ships with threat intelligence sourced from
 [OSV.dev malicious-package advisories](https://osv.dev) (the OSSF Malicious
-Packages dataset). A nightly CI job pulls new advisories, commits them to the
-repository, and the data is baked into the binary at compile time — no runtime
-network fetches, no phone-home. Hand-curated abuse-pattern rules (e.g. shared
-hosting domains commonly used for exfiltration) supplement the automated feed.
+Packages dataset). The nightly IOC feed-update workflow pulls new advisories,
+commits them to the repository, and the data is baked into the binary at
+compile time — no runtime network fetches, no phone-home. Hand-curated
+abuse-pattern rules (e.g. shared hosting domains commonly used for exfiltration)
+supplement the automated feed.
 
 | Signal                      | Action                                       | Source                           |
 | --------------------------- | -------------------------------------------- | -------------------------------- |

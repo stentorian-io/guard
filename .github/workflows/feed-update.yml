@@ -12,6 +12,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  statuses: write
 
 concurrency:
   group: feed-update
@@ -27,43 +28,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          fetch-depth: 0
 
-      - name: Create Stentorian GitHub App token
-        id: app_token
-        uses: actions/create-github-app-token@v3
+      - name: Install Rust
+        uses: ./.github/actions/setup-rust
         with:
-          app-id: ${{ vars.STENTORIAN_APP_ID }}
-          private-key: ${{ secrets.STENTORIAN_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
+          shared-key: feed-update
 
       - name: Select feed update branch
         id: feed_branch
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
           set -euo pipefail
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          branch="chore/feed-update"
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags origin main
 
-          existing_branch="$(gh pr list \
-            --state open \
-            --json headRefName,updatedAt \
-            --jq 'map(select(.headRefName | startswith("chore/feed-update"))) | sort_by(.updatedAt) | reverse | .[0].headRefName // ""')"
-
-          if [[ -n "$existing_branch" ]]; then
-            echo "branch=$existing_branch" >> "$GITHUB_OUTPUT"
-            echo "existing_pr=true" >> "$GITHUB_OUTPUT"
-            git fetch origin "refs/heads/$existing_branch:refs/remotes/origin/$existing_branch"
-            git checkout -B "$existing_branch" "origin/$existing_branch"
-          else
-            branch="chore/feed-update"
-            echo "branch=$branch" >> "$GITHUB_OUTPUT"
-            echo "existing_pr=false" >> "$GITHUB_OUTPUT"
-            git checkout -b "$branch"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch --no-tags origin "refs/heads/$branch:refs/remotes/origin/$branch"
           fi
+
+          git checkout -B "$branch" "origin/main"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
       - name: Extract OSV.dev IOCs
         run: scripts/update-feed-rules.sh
@@ -71,27 +58,59 @@ jobs:
       - name: Check for changes
         id: diff
         run: |
-          if git diff --quiet crates/guard-core/data/malicious-ossf-packages.yaml; then
+          target="crates/guard-core/data/malicious-ossf-packages.yaml"
+
+          if ! git diff --quiet -- "$target"; then
+            git add "$target"
+            git commit -m "chore(core): update threat-intel feed IOCs from OSV.dev"
+          fi
+
+          if git diff --quiet origin/main -- "$target"; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit feed update
+      - name: Validate feed update branch
+        if: steps.diff.outputs.changed == 'true'
+        run: scripts/validate-feed-update-pr.sh origin/main
+
+      - name: Publish feed update PR
         if: steps.diff.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           branch="${{ steps.feed_branch.outputs.branch }}"
-          git add crates/guard-core/data/malicious-ossf-packages.yaml
-          git commit -m "chore(core): update threat-intel feed IOCs from OSV.dev"
-          git push -u origin "$branch"
+          git push --force-with-lease -u origin "$branch"
 
-          if [[ "${{ steps.feed_branch.outputs.existing_pr }}" != "true" ]]; then
+          existing_pr="$(gh pr list \
+            --state open \
+            --head "$branch" \
+            --json number \
+            --jq '.[0].number // ""')"
+
+          if [[ -z "$existing_pr" ]]; then
             gh pr create \
               --title "chore(core): update threat-intel feed IOCs" \
               --body "Automated nightly update of \`crates/guard-core/data/malicious-ossf-packages.yaml\` with host IOCs extracted from [OSV.dev](https://osv.dev) malicious-package advisories (MAL-*)." \
               --base main \
               --head "$branch"
           fi
+
+      - name: Publish feed validation status
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${head_sha}" \
+            -f state=success \
+            -f context="Requirement gate" \
+            -f description="Generated feed YAML validation passed" \
+            -f target_url="$target_url"

@@ -63,15 +63,14 @@ We would rather triage a known limitation than miss a real vulnerability.
 ## Deployment Model
 
 The repo-hosted installer deploys root-owned binaries, enrolls the invoking
-sudo user's non-exportable Secure Enclave rule-signing key, registers that
-public signer with daemon state, and runs the daemon as a dedicated
+user's device-local macOS Keychain rule-signing key,
+registers that public signer with daemon state, and runs the daemon as a dedicated
 `_stt_guard` service user (no login shell, no home directory — the same
 convention as macOS's `_postgres` and `_mysql`). This is the only deployment
 mode and prevents a compromised process from tampering with the guard itself.
 Linux production install support is being designed around the same root-owned
-and service-owned split with systemd, but it is not enabled until
-hardware-backed Linux signer enrollment and install-health validation are
-complete.
+and service-owned split with systemd, but it is not enabled until OS-backed
+Linux signer enrollment and install-health validation are complete.
 
 | Component | Path | Owner |
 |---|---|---|
@@ -90,7 +89,7 @@ complete.
 | Modify snapshot contents | Snapshot signature validates authenticity | `_stt_guard`-owned, written by daemon only |
 | Delete denial logs | User-owned, deletable | `_stt_guard`-owned |
 | Kill daemon and replace with rogue | Codesign peer auth detects | Can't kill a different UID without root; LaunchDaemon auto-restarts |
-| Forge trusted policy artifacts | Daemon-writable state can be modified | Baseline/snapshot authenticity signing must use hardware-backed private keys that the daemon cannot export or forge with |
+| Forge trusted policy artifacts | Daemon-writable state can be modified | Baseline/snapshot authenticity signing must use OS- or hardware-mediated private keys that the daemon cannot export or forge with |
 | `sudo` inside monitored tree | Blocked (setuid check) | Blocked with explicit `PrivilegeEscalation` reason |
 
 The IPC socket is world-writable — any process can connect — but the daemon
@@ -98,14 +97,14 @@ authenticates every connection via macOS audit tokens and codesign identity
 verification (shipped in v0.7). The socket is the door; codesign is the lock.
 Tagged IPC frames are plain CBOR frames over the authenticated Unix socket.
 IPC authorization lives in peer authentication and daemon-side message policy;
-policy artifact authenticity lives in hardware-backed signatures.
+policy artifact authenticity lives in OS- or hardware-mediated signatures.
 
 Baseline/snapshot authenticity signing has a stricter key-storage requirement
-than file ownership integrity: private signing keys must be hardware-backed
-(Secure Enclave, security key, TPM-backed key, or an equivalent non-exportable
-platform facility). On macOS, the privileged system install creates or locates
-a Secure Enclave P-256 key in the invoking user's keychain, requires user
-presence for signing, records the signer in a root-owned manifest under
+than file ownership integrity: private signing keys must be OS- or
+hardware-mediated (macOS Keychain, security key, TPM-backed key, or an equivalent
+platform facility). On macOS, the installer creates or locates a device-local
+macOS Keychain P-256 key in the invoking user's keychain before privilege
+escalation, records the signer in a root-owned manifest under
 `/usr/local/libexec/stt-guard/`, and mirrors only public signing metadata into
 daemon state for operational lookups. Software-only private keys are not
 acceptable because the daemon must be able to verify signatures without being

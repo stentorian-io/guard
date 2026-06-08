@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Live-network e2e for ENF-07 closure (gap-closure 02-08).
 //!
 //! Mirrors 02-07-PLAN.md:99 precedent: live-network tests are

@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Daemon-killed failure-mode e2e — v0.7.
 //!
 //! Asserts that when the daemon is SIGKILL'd mid-run:

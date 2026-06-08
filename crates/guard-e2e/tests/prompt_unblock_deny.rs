@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! M005-S05: Deny verdict via PTY prompt.
 //!
 //! Test: stt-guard wrap wraps node against a non-allowlisted hostname. The hook's

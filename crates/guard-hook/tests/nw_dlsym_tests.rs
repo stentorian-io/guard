@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Verifies A6: that `nw_connection_cancel` (and the core set) resolve via
 //! dlsym on the build machine (macOS 15+). This calls dlopen + dlsym DIRECTLY
 //! — independent of the dylib's ctor — so the test passes/fails based on the

@@ -1,11 +1,10 @@
+#![cfg(target_os = "macos")]
+
 //! Privileged e2e coverage for the system installer and hardened install health.
 //!
-//! This test intentionally mutates system install locations and therefore runs
-//! only when `STT_GUARD_E2E_PRIVILEGED_INSTALL=1` is set. The GitHub validation
-//! workflow sets that env var on ephemeral macOS runners. Ordinary local
-//! `cargo test` runs skip it to avoid touching a developer machine.
+//! This test intentionally mutates system install locations. It runs by default
+//! on macOS because release validation must cover the real system install path.
 
-#[cfg(target_os = "macos")]
 mod macos {
     use std::ffi::OsStr;
     use std::net::TcpListener;
@@ -18,7 +17,6 @@ mod macos {
 
     use guard_e2e::{cargo_target_dir, resolve_cli};
 
-    const ENABLE_ENV: &str = "STT_GUARD_E2E_PRIVILEGED_INSTALL";
     const BIN_DIR: &str = "/usr/local/libexec/stt-guard";
     const STATE_DIR: &str = "/Library/Application Support/Stentorian Guard";
     const LOG_DIR: &str = "/var/log/stt-guard";
@@ -26,7 +24,6 @@ mod macos {
     const PLIST_LABEL: &str = "io.stentorian.guard.daemon";
     #[cfg(feature = "test-signer")]
     const INSTALL_FAIL_STEP_ENV: &str = "STT_GUARD_INSTALL_FAIL_STEP";
-
     struct Cleanup;
 
     impl Drop for Cleanup {
@@ -37,31 +34,30 @@ mod macos {
 
     #[test]
     fn privileged_init_and_health_fail_closed_on_corruption() {
-        if std::env::var_os(ENABLE_ENV).as_deref() != Some(OsStr::new("1")) {
-            eprintln!("SKIP: set {ENABLE_ENV}=1 to run privileged install e2e");
-            return;
-        }
-
         let cli = resolve_cli();
         let target_dir = cargo_target_dir();
         ensure_install_named_hook_dylib(&target_dir);
         assert_release_payload_present(&target_dir);
 
-        if !passwordless_sudo_available() {
-            eprintln!("SKIP: privileged install e2e requires passwordless sudo");
-            return;
-        }
+        let sudo_probe = sudo([OsStr::new("/usr/bin/true")]);
+        assert!(
+            sudo_probe.status.success(),
+            "privileged install e2e requires passwordless sudo; stdout={} stderr={}",
+            stdout(&sudo_probe),
+            stderr(&sudo_probe)
+        );
 
         cleanup_system_install();
         let _cleanup = Cleanup;
 
         assert_pre_install_refuses(&cli);
+
+        #[cfg(feature = "test-signer")]
         assert_failed_install_rolls_back_created_system_resources(&cli);
+
         cleanup_system_install();
 
-        if !install_system_or_skip(&cli) {
-            return;
-        }
+        install_system(&cli);
 
         wait_for_status_ok(&cli);
         assert_wrapped_user_process_loads_system_snapshot_and_enforces_policy(&cli, &target_dir);
@@ -85,28 +81,22 @@ mod macos {
         );
     }
 
-    fn install_system_or_skip(cli: &Path) -> bool {
-        let install = sudo([
-            cli.as_os_str(),
-            OsStr::new("install-system"),
-            OsStr::new("--yes"),
-        ]);
-        if !install.status.success() && hardware_signing_unavailable(&stderr(&install)) {
-            eprintln!(
-                "SKIP: hosted runner cannot enroll Secure Enclave signing key; stdout={} stderr={}",
-                stdout(&install),
-                stderr(&install)
-            );
-            return false;
-        }
+    fn install_system(cli: &Path) {
+        let install = Command::new(cli)
+            .arg("install-system")
+            .arg("--yes")
+            .env_clear()
+            .env("HOME", test_home())
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .output()
+            .expect("run install-system");
+
         assert!(
             install.status.success(),
             "system install failed; stdout={} stderr={}",
             stdout(&install),
             stderr(&install)
         );
-
-        true
     }
 
     fn assert_hook_mode_tampering_detected(cli: &Path) {
@@ -125,41 +115,33 @@ mod macos {
         assert!(run_cli(cli, ["status", "logs"]).status.success());
     }
 
+    #[cfg(feature = "test-signer")]
     fn assert_failed_install_rolls_back_created_system_resources(cli: &Path) {
-        #[cfg(feature = "test-signer")]
-        {
-            let install = sudo_with_env(
-                [
-                    cli.as_os_str(),
-                    OsStr::new("install-system"),
-                    OsStr::new("--yes"),
-                ],
-                [(INSTALL_FAIL_STEP_ENV, "after-create-directories")],
-            );
+        let install = sudo_with_env(
+            [
+                cli.as_os_str(),
+                OsStr::new("install-system"),
+                OsStr::new("--yes"),
+            ],
+            [(INSTALL_FAIL_STEP_ENV, "after-create-directories")],
+        );
+        assert!(
+            !install.status.success(),
+            "injected install failure should fail; stdout={} stderr={}",
+            stdout(&install),
+            stderr(&install)
+        );
+        assert_contains(
+            &stderr(&install),
+            "injected install failure at after-create-directories",
+        );
+        assert_contains(&stderr(&install), "rollback completed");
+
+        for path in [BIN_DIR, STATE_DIR, LOG_DIR, PLIST_PATH] {
             assert!(
-                !install.status.success(),
-                "injected install failure should fail; stdout={} stderr={}",
-                stdout(&install),
-                stderr(&install)
+                !Path::new(path).exists(),
+                "failed install left created resource behind: {path}"
             );
-            assert_contains(
-                &stderr(&install),
-                "injected install failure at after-create-directories",
-            );
-            assert_contains(&stderr(&install), "rollback completed");
-
-            for path in [BIN_DIR, STATE_DIR, LOG_DIR, PLIST_PATH] {
-                assert!(
-                    !Path::new(path).exists(),
-                    "failed install left created resource behind: {path}"
-                );
-            }
-        }
-
-        #[cfg(not(feature = "test-signer"))]
-        {
-            let _ = cli;
-            eprintln!("SKIP: rollback injection requires the test-signer feature");
         }
     }
 
@@ -344,12 +326,6 @@ mod macos {
         dir
     }
 
-    fn hardware_signing_unavailable(stderr: &str) -> bool {
-        stderr.contains("create Secure Enclave signing key failed")
-            || stderr.contains("hardware-backed signing key unavailable")
-            || stderr.contains("failed to generate asymmetric keypair")
-    }
-
     fn assert_release_payload_present(target_dir: &Path) {
         for file in [
             "stt-guard",
@@ -422,10 +398,13 @@ mod macos {
         env: [(&str, &str); M],
     ) -> Output {
         let mut command = Command::new("/usr/bin/sudo");
-        command.arg("-n").env_clear();
+        command
+            .arg("-n")
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
 
         if !env.is_empty() {
-            command.arg("env");
+            command.arg("/usr/bin/env");
         }
         for (key, value) in env {
             command.arg(format!("{key}={value}"));
@@ -443,10 +422,6 @@ mod macos {
             stdout(&out),
             stderr(&out)
         );
-    }
-
-    fn passwordless_sudo_available() -> bool {
-        sudo([OsStr::new("true")]).status.success()
     }
 
     fn cleanup_system_install() {
@@ -468,10 +443,4 @@ mod macos {
     fn stderr(out: &Output) -> String {
         String::from_utf8_lossy(&out.stderr).into_owned()
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-#[test]
-fn privileged_init_and_health_fail_closed_on_corruption() {
-    eprintln!("SKIP: hardened install e2e only runs on macOS");
 }

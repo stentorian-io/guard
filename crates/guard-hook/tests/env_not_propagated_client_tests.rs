@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! `send_env_not_propagated_gap_sync` round-trip tests (TREE-06 gap-closure 02-09).
 //!
 //! Stub daemon: spawn a thread that accepts on a tempdir Unix socket,

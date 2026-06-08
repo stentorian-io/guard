@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Roadmap success criterion #1: `stt-guard wrap echo hello` registers the
 //! wrapped process's (pid, pidversion) with the daemon AND the wrapped command
 //! exits 0.

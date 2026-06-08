@@ -294,7 +294,7 @@ jobs:
         run: |
           results='${{ toJSON(needs) }}'
           echo "$results"
-          if echo "$results" | grep -qE '"result":"(failure|cancelled)"'; then
+          if ! jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"$results" >/dev/null; then
             echo "::error::One or more required jobs failed or were cancelled"
             exit 1
           fi
@@ -303,13 +303,19 @@ jobs:
     name: Release build (${{ matrix.platform }})
     needs:
       - prepare
+      - lint
       - linux_check
       - macos_check
+      - unit_tests
+      - integration_tests
     if: >-
       !cancelled()
       && needs.prepare.outputs.code == 'true'
+      && needs.lint.result == 'success'
       && (needs.linux_check.result == 'success' || needs.linux_check.result == 'skipped')
       && (needs.macos_check.result == 'success' || needs.macos_check.result == 'skipped')
+      && needs.unit_tests.result == 'success'
+      && needs.integration_tests.result == 'success'
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 15
     strategy:
@@ -339,9 +345,7 @@ jobs:
         with:
           shared-key: release-build-${{ matrix.platform }}
       - name: cargo build workspace (release)
-        run: |
-          cargo build --workspace --release
-          cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer
+        run: cargo build --workspace --release
       - name: Upload release binaries
         uses: actions/upload-artifact@v4
         with:
@@ -472,6 +476,28 @@ jobs:
           chmod +x target/release/stt-guard-daemon
           chmod +x target/release/stt-guard-watchdog
           chmod +x target/release/hardened_exec_probe
+      - name: VAL-05 — privileged system install health
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${KEYCHAIN_PASSWORD:-}" ]; then
+            security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$HOME/Library/Keychains/login.keychain-db" || true
+          fi
+
+          current_user="$(id -un)"
+          current_uid="$(id -u)"
+          sudo launchctl asuser "$current_uid" sudo -u "$current_user" \
+            env \
+              HOME="$HOME" \
+              PATH="$PATH" \
+              CARGO_HOME="${CARGO_HOME:-}" \
+              RUSTUP_HOME="${RUSTUP_HOME:-}" \
+              RUSTFLAGS="${RUSTFLAGS:-}" \
+              RUST_BACKTRACE="${RUST_BACKTRACE:-}" \
+            cargo test -p guard-e2e --test hardened_install_health --release -- --nocapture
+      - name: Build test-signer binaries for harness E2Es
+        run: cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer
       - name: VAL-01 — ua-parser-js@0.7.29 demo
         run: cargo test -p guard-e2e --features test-signer --test ua_parser_js_demo --release -- --nocapture
       - name: VAL-02 — workers.dev allowlist-bleed
@@ -481,10 +507,6 @@ jobs:
         run: cargo test -p guard-e2e --features test-signer --test failure_modes_corrupt_snapshot --release -- --nocapture
       - name: VAL-04 D-10 — hardened-binary exec gap
         run: cargo test -p guard-e2e --features test-signer --test failure_modes_hardened_exec --release -- --nocapture
-      - name: VAL-05 — privileged system install health
-        run: cargo test -p guard-e2e --features test-signer --test hardened_install_health --release -- --nocapture
-        env:
-          STT_GUARD_E2E_PRIVILEGED_INSTALL: '1'
 
   hot_path_benchmark:
     name: Hot path benchmark

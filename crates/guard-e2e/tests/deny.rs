@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Roadmap success criterion #2: a wrapped Node attempt to connect to a
 //! non-allowlisted host is BLOCKED by the dylib (intercepted at
 //! `connect()/getaddrinfo()` against the hand-coded allowlist) and the

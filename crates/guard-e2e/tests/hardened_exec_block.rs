@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Verify issue #1 phase 1 exec-time layered enforcement.
 
 use guard_e2e::{DaemonHarness, cargo_target_dir, resolve_cli, resolve_dylib};

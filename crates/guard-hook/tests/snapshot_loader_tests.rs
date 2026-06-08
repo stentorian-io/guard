@@ -104,7 +104,7 @@ fn signed_snapshot(
         .to_vec();
     let signature = guard_core::SnapshotSignatureV1 {
         scheme: guard_core::RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
-        signer_kind: guard_core::SIGNER_KIND_SECURE_ENCLAVE.to_string(),
+        signer_kind: guard_core::SIGNER_KIND_MACOS_KEYCHAIN.to_string(),
         public_key_sha256: guard_core::sha256_hex(&public_key_x963),
         public_key_x963,
         signature_der,
@@ -274,7 +274,7 @@ fn fail_closed_when_snapshot_signer_untrusted() {
         let _pub = publish_signed_run(state_dir, Snapshot::v2_default(), uuid);
         std::fs::write(
             state_dir.join(guard_core::paths::TRUSTED_RULE_SIGNERS_FILENAME),
-            "other\tsecure-enclave\t0001\ttest\n",
+            "other\tmacos-keychain\t0001\ttest\n",
         )
         .unwrap();
         let manifest_path = guard_daemon::state_dir::run_manifest_path(state_dir, uuid);

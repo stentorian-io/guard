@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! v0.5 — ua-parser-js@0.7.29 supply-chain CVE reproduction.
 //!
 //! Drives `stt-guard wrap npm install ./fixtures/ua-parser-js-0.7.29-sanitized.tgz`

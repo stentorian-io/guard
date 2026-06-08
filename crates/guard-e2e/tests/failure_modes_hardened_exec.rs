@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Issue #1 phase 1 closes the old hardened-runtime coverage gap by blocking
 //! T0 exec targets before DYLD stripping can occur.
 

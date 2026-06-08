@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Run the criterion microbench and verify it compiles and runs.
 //! ENF-06 success criterion #4: formal benchmark on real hardware lands in
 //! v0.5; this v0.1 test is a regression detector.

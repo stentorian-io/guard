@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! TREE-05 success criterion #6: a child that double-forks + calls setsid
 //! is still treated as part of the original guard-run subtree.
 //!

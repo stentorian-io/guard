@@ -2,9 +2,9 @@
 //!
 //! Issue #31 requires persisted baseline/user rules to be authenticated by a
 //! signer the daemon can verify but cannot forge with. Production policy accepts
-//! only hardware-backed signer kinds; CI may opt into the explicit
+//! only OS- or hardware-mediated signer kinds; CI may opt into the explicit
 //! `test-simulator` signer kind to exercise tamper detection without pretending
-//! hosted CI has real signing hardware.
+//! hosted CI has real production signer coverage.
 
 use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::{Signature, VerifyingKey};
@@ -15,7 +15,7 @@ pub const RULE_SIGNATURE_PAYLOAD_SCHEMA_V1: u16 = 1;
 pub const SNAPSHOT_SIGNATURE_PAYLOAD_SCHEMA_V1: u16 = 1;
 pub const MANAGEMENT_ACTION_PAYLOAD_SCHEMA_V1: u16 = 1;
 pub const RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256: &str = "ecdsa-p256-sha256";
-pub const SIGNER_KIND_SECURE_ENCLAVE: &str = "secure-enclave";
+pub const SIGNER_KIND_MACOS_KEYCHAIN: &str = "macos-keychain";
 pub const SIGNER_KIND_SECURITY_KEY: &str = "security-key";
 pub const SIGNER_KIND_TPM: &str = "tpm";
 pub const SIGNER_KIND_TEST_SIMULATOR: &str = "test-simulator";
@@ -340,11 +340,11 @@ fn signer_kind_allowed(kind: &str, policy: RuleSignaturePolicy) -> bool {
     match policy {
         RuleSignaturePolicy::Production => matches!(
             kind,
-            SIGNER_KIND_SECURE_ENCLAVE | SIGNER_KIND_SECURITY_KEY | SIGNER_KIND_TPM
+            SIGNER_KIND_MACOS_KEYCHAIN | SIGNER_KIND_SECURITY_KEY | SIGNER_KIND_TPM
         ),
         RuleSignaturePolicy::AllowTestSimulator => matches!(
             kind,
-            SIGNER_KIND_SECURE_ENCLAVE
+            SIGNER_KIND_MACOS_KEYCHAIN
                 | SIGNER_KIND_SECURITY_KEY
                 | SIGNER_KIND_TPM
                 | SIGNER_KIND_TEST_SIMULATOR

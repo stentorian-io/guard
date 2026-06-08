@@ -405,9 +405,7 @@ impl RuleStore {
                 "system trusted signer manifest is unavailable for this state directory"
                     .to_string(),
             ),
-            action: Some(
-                "run the installer on a supported hardware-backed signing platform".to_string(),
-            ),
+            action: Some("run the installer on a supported OS-backed signing platform".to_string()),
         }
     }
 
@@ -438,7 +436,7 @@ impl RuleStore {
             trust_root_path,
             trust_root_ok: true,
             reason: Some("trusted signer manifest contains no signer entries".to_string()),
-            action: Some("run the installer to enroll a hardware-backed signer".to_string()),
+            action: Some("run the installer to enroll an OS-backed signer".to_string()),
         }
     }
 

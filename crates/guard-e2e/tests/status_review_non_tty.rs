@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! crates/guard-e2e/tests/status_review_non_tty.rs
 //!
 //! v0.7 — `status review` is interactive only.

@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! D-29 per-run snapshot lifecycle: `gc_sweep` removes stale entries.
 //!
 //! Three invariants the GC sweeper MUST hold:

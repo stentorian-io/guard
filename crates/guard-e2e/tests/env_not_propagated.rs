@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! TREE-06 e2e: a tracked process that calls `posix_spawn` with `env_clear()`
 //! triggers `EnvNotPropagatedGap`; the daemon records it.
 //!

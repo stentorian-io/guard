@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Wrapped command exit code is non-zero when the user picks "deny" at the
 //! prompt.
 //!

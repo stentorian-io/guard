@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! E2E test verifying ROADMAP v0.2 success criteria #2 and #3:
 //!   #2: zero-config stt-guard wrap succeeds for allowlisted destinations
 //!   #3: zero-config stt-guard wrap blocks non-allowlisted destinations via

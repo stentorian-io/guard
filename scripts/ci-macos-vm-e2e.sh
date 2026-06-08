@@ -12,6 +12,9 @@
 # The guest image must be CI-ready enough to build this workspace: Xcode
 # command-line tools plus network access for Rust/Node bootstrap. The default
 # Cirrus macOS base images use admin/admin credentials.
+# The runner opens the VM UI by default because macOS Keychain enrollment needs
+# the user's GUI security session; set STT_GUARD_MACOS_VM_GRAPHICS=0 for
+# headless test-signer-only debugging.
 
 set -euo pipefail
 
@@ -24,6 +27,7 @@ VM_NAME="${STT_GUARD_MACOS_VM_NAME:-stt-guard-e2e-$(date +%Y%m%d%H%M%S)-$$}"
 VM_USER="${STT_GUARD_MACOS_VM_USER:-admin}"
 VM_PASSWORD="${STT_GUARD_MACOS_VM_PASSWORD:-admin}"
 REMOTE_ROOT="${STT_GUARD_MACOS_VM_REMOTE_ROOT:-/Users/$VM_USER/stt-guard}"
+VM_GRAPHICS="${STT_GUARD_MACOS_VM_GRAPHICS:-1}"
 SSH_OPTS=(
   -o StrictHostKeyChecking=no
   -o UserKnownHostsFile=/dev/null
@@ -104,10 +108,18 @@ wait_for_ip() {
 wait_for_ssh() {
   local ip="$1"
   local deadline=$((SECONDS + 180))
+  local successful_logins=0
+
   while [ "$SECONDS" -lt "$deadline" ]; do
     if ssh_guest "$ip" "true" >/dev/null 2>&1; then
-      return
+      successful_logins=$((successful_logins + 1))
+      if [ "$successful_logins" -ge 3 ]; then
+        return
+      fi
+    else
+      successful_logins=0
     fi
+
     sleep 3
   done
 
@@ -116,12 +128,20 @@ wait_for_ssh() {
 
 configure_guest() {
   local ip="$1"
-  ssh_guest "$ip" "cat > /tmp/stt-guard-guest-setup.sh && bash /tmp/stt-guard-guest-setup.sh" <<'GUEST_SETUP'
+  local vm_password_quoted
+  printf -v vm_password_quoted '%q' "$VM_PASSWORD"
+
+  ssh_guest "$ip" "cat > /tmp/stt-guard-guest-setup.sh && STT_GUARD_VM_PASSWORD=$vm_password_quoted bash /tmp/stt-guard-guest-setup.sh" <<'GUEST_SETUP'
 set -euo pipefail
 
 echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo -S tee /etc/sudoers.d/stt-guard-ci-nopasswd >/dev/null
 sudo chmod 440 /etc/sudoers.d/stt-guard-ci-nopasswd
 sudo -n true
+
+if command -v security >/dev/null; then
+  security unlock-keychain -p "$STT_GUARD_VM_PASSWORD" "$HOME/Library/Keychains/login.keychain-db" || true
+  security set-keychain-settings -lut 21600 "$HOME/Library/Keychains/login.keychain-db" || true
+fi
 
 if ! command -v cargo >/dev/null; then
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
@@ -161,8 +181,20 @@ GUEST_SETUP
 
 run_guest_e2e() {
   local ip="$1"
-  ssh_guest "$ip" "cd '$REMOTE_ROOT' && cat > /tmp/stt-guard-run-e2e.sh && bash /tmp/stt-guard-run-e2e.sh" <<'GUEST_RUN'
+  local remote_root_quoted
+  printf -v remote_root_quoted '%q' "$REMOTE_ROOT"
+
+  local run_command
+  if [ "$VM_GRAPHICS" = "1" ]; then
+    run_command="cat > /tmp/stt-guard-run-e2e.sh && chmod +x /tmp/stt-guard-run-e2e.sh && sudo launchctl asuser \"\$(id -u)\" sudo -u '$VM_USER' env STT_GUARD_REMOTE_ROOT=$remote_root_quoted bash /tmp/stt-guard-run-e2e.sh"
+  else
+    run_command="cat > /tmp/stt-guard-run-e2e.sh && STT_GUARD_REMOTE_ROOT=$remote_root_quoted bash /tmp/stt-guard-run-e2e.sh"
+  fi
+
+  ssh_guest "$ip" "$run_command" <<'GUEST_RUN'
 set -euo pipefail
+
+cd "$STT_GUARD_REMOTE_ROOT"
 
 if [ -f "$HOME/.cargo/env" ]; then
   # shellcheck disable=SC1091
@@ -176,19 +208,18 @@ if [ -s "$HOME/.nvm/nvm.sh" ]; then
   # shellcheck disable=SC1091
   . "$NVM_DIR/nvm.sh"
 fi
-export STT_GUARD_E2E_PRIVILEGED_INSTALL=1
-
 cargo build --workspace --release
+cargo test -p guard-e2e --test hardened_install_health --release -- --nocapture 2>&1 | tee /tmp/stt-guard-hardened-install-health.log
+if grep -q '^SKIP:' /tmp/stt-guard-hardened-install-health.log; then
+  echo "hardened_install_health reported SKIP; this VM cannot provide no-skip privileged validation" >&2
+  exit 2
+fi
+
 cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer
 cargo test -p guard-e2e --features test-signer --test ua_parser_js_demo --release -- --nocapture
 cargo test -p guard-e2e --features test-signer --test workers_dev_validation --release -- --nocapture
 cargo test -p guard-e2e --features test-signer --test failure_modes_corrupt_snapshot --release -- --nocapture
 cargo test -p guard-e2e --features test-signer --test failure_modes_hardened_exec --release -- --nocapture
-cargo test -p guard-e2e --features test-signer --test hardened_install_health --release -- --nocapture 2>&1 | tee /tmp/stt-guard-hardened-install-health.log
-if grep -q '^SKIP:' /tmp/stt-guard-hardened-install-health.log; then
-  echo "hardened_install_health reported SKIP; this VM cannot provide no-skip privileged validation" >&2
-  exit 2
-fi
 GUEST_RUN
 }
 
@@ -198,7 +229,11 @@ echo "ci-macos-vm-e2e: cloning disposable VM $BASE_NAME -> $VM_NAME"
 tart clone "$BASE_NAME" "$VM_NAME"
 
 echo "ci-macos-vm-e2e: starting $VM_NAME"
-tart run --no-graphics "$VM_NAME" >/tmp/"$VM_NAME".log 2>&1 &
+if [ "$VM_GRAPHICS" = "1" ]; then
+  tart run "$VM_NAME" >/tmp/"$VM_NAME".log 2>&1 &
+else
+  tart run --no-graphics "$VM_NAME" >/tmp/"$VM_NAME".log 2>&1 &
+fi
 
 ip="$(wait_for_ip)"
 echo "ci-macos-vm-e2e: VM IP is $ip"

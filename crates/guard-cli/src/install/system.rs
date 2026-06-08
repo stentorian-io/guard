@@ -10,6 +10,8 @@ use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 #[cfg(not(target_os = "linux"))]
 use std::os::unix::fs::OpenOptionsExt;
+#[cfg(not(target_os = "linux"))]
+use std::os::unix::fs::PermissionsExt;
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
 #[cfg(not(target_os = "linux"))]
@@ -42,8 +44,14 @@ const PLIST_PATH: &str = paths::PLIST_PATH;
 const BINARIES: &[&str] = paths::INSTALLED_BINARIES;
 #[cfg(not(target_os = "linux"))]
 const DYLIB: &str = paths::HOOK_DYLIB;
+#[cfg(target_os = "macos")]
+const CARGO_HOOK_DYLIB: &str = "libguard_hook.dylib";
+#[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
+const CARGO_HOOK_DYLIB: &str = paths::HOOK_DYLIB;
 #[cfg(all(not(target_os = "linux"), feature = "test-signer"))]
 const INSTALL_FAIL_STEP_ENV: &str = "STT_GUARD_INSTALL_FAIL_STEP";
+#[cfg(all(target_os = "macos", not(feature = "test-signer")))]
+const INSTALL_KEYCHAIN_ENROLLMENT_ENV: &str = "STT_GUARD_INSTALL_KEYCHAIN_ENROLLMENT";
 
 /// Check whether the hardened installation is present and internally coherent.
 #[must_use]
@@ -61,6 +69,18 @@ pub fn install_health() -> crate::install::health::InstallHealth {
 #[must_use]
 pub fn system_state_dir() -> PathBuf {
     PathBuf::from(STATE_DIR)
+}
+
+#[cfg(target_os = "linux")]
+#[must_use]
+pub fn running_privileged_install() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "linux"))]
+#[must_use]
+pub fn running_privileged_install() -> bool {
+    nix_is_root()
 }
 
 /// Print the action plan the user is about to confirm.
@@ -85,24 +105,14 @@ pub fn print_plan() {
         "  • systemd daemon unit at {}",
         paths::SYSTEMD_DAEMON_UNIT_PATH
     );
-    eprintln!(
-        "Activation is blocked until Linux hardware-backed signer enrollment is implemented."
-    );
+    eprintln!("Activation is blocked until Linux OS-backed signer enrollment is implemented.");
 }
 
 /// Print the action plan the user is about to confirm.
 #[cfg(not(target_os = "linux"))]
 pub fn print_plan() {
-    eprintln!("stt-guard system install will:");
-    eprintln!("  • Create {SERVICE_USER} service user (no login shell, /var/empty home)");
-    eprintln!("  • Copy binaries to {BIN_DIR}/ (root:wheel, 755)");
-    eprintln!("  • Copy hook dylib to {BIN_DIR}/ (root:wheel, 644)");
-    eprintln!("  • Create state directory at {STATE_DIR}/");
-    eprintln!("  • Create log directory at {LOG_DIR}/");
-    eprintln!("  • Enroll a non-exportable Secure Enclave rule-signing key");
-    eprintln!("  • Register the hardware-backed public signer with the daemon state");
-    eprintln!("  • Install LaunchDaemon ({PLIST_LABEL})");
-    eprintln!("  • Start the daemon");
+    eprintln!("stt-guard will install a root-owned system guard and start {PLIST_LABEL}.");
+    eprintln!("It will request sudo after enrolling your device-local macOS Keychain signer.");
 }
 
 /// Execute the full hardened installation. Must be run as root.
@@ -115,7 +125,7 @@ pub fn print_plan() {
 pub fn run_install() -> Result<(), CliError> {
     Err(CliError::Other(
         "Linux hardened install is not implemented yet. \
-         The systemd layout and health checks are defined, but production activation is blocked on hardware-backed signer enrollment."
+         The systemd layout and health checks are defined, but production activation is blocked on OS-backed signer enrollment."
             .into(),
     ))
 }
@@ -127,7 +137,12 @@ pub fn run_install() -> Result<(), CliError> {
 /// Returns an error when root privileges are missing or any install step fails.
 #[cfg(not(target_os = "linux"))]
 pub fn run_install() -> Result<(), CliError> {
+    if !nix_is_root() {
+        return run_install_with_privilege_escalation();
+    }
+
     require_root()?;
+    require_privileged_signer_handoff()?;
 
     let mut transaction = InstallTransaction::new()?;
 
@@ -142,8 +157,8 @@ pub fn run_install() -> Result<(), CliError> {
         create_directories(service_user.gid, &mut transaction)?;
         maybe_fail_install_step("after-create-directories")?;
 
-        let enrollment = crate::hardware_signing::enroll_secure_enclave_for_init()?;
-        transaction.record_hardware_signer_key(enrollment.created);
+        let enrollment = enroll_hardware_signer_for_install()?;
+        record_hardware_signer_rollback(&mut transaction, enrollment.created);
         maybe_fail_install_step("after-enroll-signer")?;
 
         register_rule_signer(&enrollment, service_user.gid, &mut transaction)?;
@@ -179,15 +194,121 @@ pub fn run_install() -> Result<(), CliError> {
 fn require_root() -> Result<(), CliError> {
     if !nix_is_root() {
         return Err(CliError::Other(
-            "stt-guard system install requires root. Run the installer or stt-guard update.".into(),
+            "stt-guard system install requires root for the final deployment step".into(),
         ));
     }
+    Ok(())
+}
+
+#[cfg(all(target_os = "macos", not(feature = "test-signer")))]
+fn require_privileged_signer_handoff() -> Result<(), CliError> {
+    if std::env::var_os(INSTALL_KEYCHAIN_ENROLLMENT_ENV).is_none() {
+        return Err(CliError::Other(
+            "run install-system without sudo; it will request privileges after enrolling the user signer"
+                .into(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(any(
+    all(not(target_os = "macos"), not(target_os = "linux")),
+    all(target_os = "macos", feature = "test-signer")
+))]
+fn require_privileged_signer_handoff() -> Result<(), CliError> {
     Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
 fn nix_is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_install_with_privilege_escalation() -> Result<(), CliError> {
+    let enrollment = crate::hardware_signing::enroll_keychain_signer_for_init()?;
+    let enrollment_json = serde_json::to_vec(&enrollment)
+        .map_err(|e| CliError::Other(format!("encode Keychain enrollment: {e}")))?;
+    let workspace = InstallWorkspace::create()?;
+    let keychain_enrollment_path = workspace.path().join("keychain-enrollment.json");
+    std::fs::write(&keychain_enrollment_path, enrollment_json).map_err(|e| {
+        CliError::Other(format!("write {}: {e}", keychain_enrollment_path.display()))
+    })?;
+
+    let current_exe = std::env::current_exe()
+        .map_err(|e| CliError::Other(format!("locate installer executable: {e}")))?;
+    let mut command = Command::new("sudo");
+
+    #[cfg(all(target_os = "macos", not(feature = "test-signer")))]
+    command.arg(format!(
+        "{INSTALL_KEYCHAIN_ENROLLMENT_ENV}={}",
+        keychain_enrollment_path.display()
+    ));
+
+    let status = command
+        .arg(current_exe)
+        .arg("install-system")
+        .arg("--yes")
+        .status()
+        .map_err(|e| CliError::Other(format!("run privileged installer: {e}")))?;
+
+    if !status.success() {
+        return Err(CliError::Other(format!(
+            "privileged installer failed with status {status}"
+        )));
+    }
+
+    Ok(())
+}
+
+#[cfg(all(target_os = "macos", feature = "test-signer"))]
+fn enroll_hardware_signer_for_install() -> Result<HardwareSignerEnrollment, CliError> {
+    crate::hardware_signing::enroll_keychain_signer_for_init()
+}
+
+#[cfg(all(target_os = "macos", not(feature = "test-signer")))]
+fn enroll_hardware_signer_for_install() -> Result<HardwareSignerEnrollment, CliError> {
+    let keychain_enrollment_path = std::env::var_os(INSTALL_KEYCHAIN_ENROLLMENT_ENV)
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            CliError::Other(
+                "run install-system without sudo so signer enrollment can happen before privilege escalation"
+                    .into(),
+            )
+        })?;
+    let enrollment_json = std::fs::read(&keychain_enrollment_path).map_err(|e| {
+        CliError::Other(format!(
+            "read Keychain enrollment {}: {e}",
+            keychain_enrollment_path.display()
+        ))
+    })?;
+
+    serde_json::from_slice(&enrollment_json)
+        .map_err(|e| CliError::Other(format!("decode Keychain enrollment: {e}")))
+}
+
+#[cfg(all(not(target_os = "linux"), feature = "test-signer"))]
+fn delete_hardware_signer_for_install() -> Result<(), CliError> {
+    crate::hardware_signing::delete_keychain_signer_for_init()
+}
+
+#[cfg(all(not(target_os = "linux"), feature = "test-signer"))]
+fn record_hardware_signer_rollback(transaction: &mut InstallTransaction, created: bool) {
+    transaction.record_hardware_signer_key(created);
+}
+
+#[cfg(all(not(target_os = "linux"), not(feature = "test-signer")))]
+fn record_hardware_signer_rollback(_transaction: &mut InstallTransaction, _created: bool) {
+    // Production enrollment happens in the invoking user's keychain before
+    // privilege escalation, outside the root-owned install transaction.
+}
+
+#[cfg(all(not(target_os = "linux"), not(target_os = "macos")))]
+fn enroll_hardware_signer_for_install() -> Result<HardwareSignerEnrollment, CliError> {
+    Err(CliError::Other(
+        "hardened install is currently supported on macOS only".into(),
+    ))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -404,19 +525,16 @@ fn deploy_binaries(transaction: &mut InstallTransaction) -> Result<(), CliError>
         })?;
     }
 
-    // Deploy the hook dylib.
-    let dylib_src = source_dir.join(DYLIB);
-    if dylib_src.exists() {
-        let dylib_dst = Path::new(BIN_DIR).join(DYLIB);
-        transaction.record_file_replacement(&dylib_dst)?;
-        std::fs::copy(&dylib_src, &dylib_dst).map_err(|e| {
-            CliError::Other(format!(
-                "copy {} -> {}: {e}",
-                dylib_src.display(),
-                dylib_dst.display()
-            ))
-        })?;
-    }
+    let dylib_src = hook_dylib_source_path(&source_dir)?;
+    let dylib_dst = Path::new(BIN_DIR).join(DYLIB);
+    transaction.record_file_replacement(&dylib_dst)?;
+    std::fs::copy(&dylib_src, &dylib_dst).map_err(|e| {
+        CliError::Other(format!(
+            "copy {} -> {}: {e}",
+            dylib_src.display(),
+            dylib_dst.display()
+        ))
+    })?;
 
     // Set ownership: root:wheel, 755 for binaries, 644 for dylib.
     run_cmd("chown", &["root:wheel", BIN_DIR], "set binary ownership")?;
@@ -461,6 +579,23 @@ fn source_bin_dir() -> Result<PathBuf, CliError> {
 }
 
 #[cfg(not(target_os = "linux"))]
+fn hook_dylib_source_path(source_dir: &Path) -> Result<PathBuf, CliError> {
+    for candidate in [DYLIB, CARGO_HOOK_DYLIB] {
+        let path = source_dir.join(candidate);
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+
+    Err(CliError::Other(format!(
+        "source hook library not found: expected {} or {} in {}",
+        DYLIB,
+        CARGO_HOOK_DYLIB,
+        source_dir.display()
+    )))
+}
+
+#[cfg(not(target_os = "linux"))]
 fn create_directories(
     service_gid: u32,
     transaction: &mut InstallTransaction,
@@ -497,7 +632,7 @@ fn register_rule_signer(
     transaction: &mut InstallTransaction,
 ) -> Result<(), CliError> {
     eprintln!(
-        "  Registering hardware-backed rule signer {}...",
+        "  Registering trusted rule signer {}...",
         enrollment.public_key_sha256
     );
     write_trusted_signer_manifest(enrollment, transaction)?;
@@ -529,7 +664,7 @@ fn write_trusted_signer_manifest(
 ) -> Result<(), CliError> {
     let path = paths::trusted_rule_signers_path();
     let content = format!(
-        "# stt-guard trusted hardware-backed rule signers v1\n{}\t{}\t{}\t{}\n",
+        "# stt-guard trusted OS-backed rule signers v1\n{}\t{}\t{}\t{}\n",
         enrollment.public_key_sha256,
         enrollment.signer_kind,
         hex_lower(&enrollment.public_key_x963),
@@ -699,6 +834,7 @@ impl InstallTransaction {
             .push(RollbackAction::BootoutLaunchDaemon);
     }
 
+    #[cfg(feature = "test-signer")]
     fn record_hardware_signer_key(&mut self, created: bool) {
         if created {
             self.rollback_actions
@@ -830,6 +966,42 @@ impl InstallTransaction {
 }
 
 #[cfg(not(target_os = "linux"))]
+struct InstallWorkspace {
+    path: PathBuf,
+}
+
+#[cfg(not(target_os = "linux"))]
+impl InstallWorkspace {
+    fn create() -> Result<Self, CliError> {
+        let workspace_nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let path = std::env::temp_dir().join(format!(
+            "stt-guard-install-{}-{workspace_nonce}",
+            std::process::id(),
+        ));
+
+        std::fs::create_dir(&path)
+            .map_err(|e| CliError::Other(format!("create {}: {e}", path.display())))?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| CliError::Other(format!("chmod {}: {e}", path.display())))?;
+
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+impl Drop for InstallWorkspace {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
 impl Drop for InstallTransaction {
     fn drop(&mut self) {
         if self.committed {
@@ -889,6 +1061,7 @@ enum RollbackAction {
     BootoutLaunchDaemon,
     BootstrapLaunchDaemon,
     RemoveServiceUser,
+    #[cfg(feature = "test-signer")]
     RemoveHardwareSignerKey,
 }
 
@@ -927,9 +1100,9 @@ impl RollbackAction {
                 "remove service user created by failed install",
             )
             .map_err(|e| e.to_string()),
+            #[cfg(feature = "test-signer")]
             Self::RemoveHardwareSignerKey => {
-                crate::hardware_signing::delete_secure_enclave_key_for_init()
-                    .map_err(|e| e.to_string())
+                delete_hardware_signer_for_install().map_err(|e| e.to_string())
             }
         }
     }

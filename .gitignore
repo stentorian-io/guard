@@ -1,25 +1,6 @@
+# Build
 /target
-**/*.rs.bk
+
+# macOS
 .DS_Store
-*.swp
-*.swo
-*~
 
-# Tooling
-.idea/
-.vscode/
-*.code-workspace
-
-# Environment
-.env
-.env.*
-!.env.example
-
-# GSD / agent workspace
-.gsd/
-.gsd-id
-.mcp.json
-.bg-shell/
-
-# Logs
-*.log

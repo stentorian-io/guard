@@ -243,10 +243,11 @@ toolchains:
       - "26"
   rust:
     minimum: "1.85.0"
-    pinned: "1.95.0"
+    pinned: "1.96.0"
     tracked_channels:
       - stable
     tracked_releases:
+      - "1.96.0"
       - "1.95.0"
       - "1.94"
       - "1.93"

@@ -24,6 +24,8 @@ mod macos {
     const LOG_DIR: &str = "/var/log/stt-guard";
     const PLIST_PATH: &str = "/Library/LaunchDaemons/io.stentorian.guard.daemon.plist";
     const PLIST_LABEL: &str = "io.stentorian.guard.daemon";
+    #[cfg(feature = "test-signer")]
+    const INSTALL_FAIL_STEP_ENV: &str = "STT_GUARD_INSTALL_FAIL_STEP";
 
     struct Cleanup;
 
@@ -45,10 +47,18 @@ mod macos {
         ensure_install_named_hook_dylib(&target_dir);
         assert_release_payload_present(&target_dir);
 
+        if !passwordless_sudo_available() {
+            eprintln!("SKIP: privileged install e2e requires passwordless sudo");
+            return;
+        }
+
         cleanup_system_install();
         let _cleanup = Cleanup;
 
         assert_pre_install_refuses(&cli);
+        assert_failed_install_rolls_back_created_system_resources(&cli);
+        cleanup_system_install();
+
         if !install_system_or_skip(&cli) {
             return;
         }
@@ -113,6 +123,44 @@ mod macos {
             OsStr::new(&format!("{BIN_DIR}/stt-guard-hook.dylib")),
         ]);
         assert!(run_cli(cli, ["status", "logs"]).status.success());
+    }
+
+    fn assert_failed_install_rolls_back_created_system_resources(cli: &Path) {
+        #[cfg(feature = "test-signer")]
+        {
+            let install = sudo_with_env(
+                [
+                    cli.as_os_str(),
+                    OsStr::new("install-system"),
+                    OsStr::new("--yes"),
+                ],
+                [(INSTALL_FAIL_STEP_ENV, "after-create-directories")],
+            );
+            assert!(
+                !install.status.success(),
+                "injected install failure should fail; stdout={} stderr={}",
+                stdout(&install),
+                stderr(&install)
+            );
+            assert_contains(
+                &stderr(&install),
+                "injected install failure at after-create-directories",
+            );
+            assert_contains(&stderr(&install), "rollback completed");
+
+            for path in [BIN_DIR, STATE_DIR, LOG_DIR, PLIST_PATH] {
+                assert!(
+                    !Path::new(path).exists(),
+                    "failed install left created resource behind: {path}"
+                );
+            }
+        }
+
+        #[cfg(not(feature = "test-signer"))]
+        {
+            let _ = cli;
+            eprintln!("SKIP: rollback injection requires the test-signer feature");
+        }
     }
 
     fn assert_plist_tampering_detected(cli: &Path) {
@@ -366,14 +414,25 @@ mod macos {
     }
 
     fn sudo<const N: usize>(args: [&OsStr; N]) -> Output {
-        Command::new("sudo")
-            .arg("-n")
-            .args(args)
-            .env_clear()
-            .env("HOME", test_home())
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .output()
-            .expect("run sudo")
+        sudo_with_env(args, [])
+    }
+
+    fn sudo_with_env<const N: usize, const M: usize>(
+        args: [&OsStr; N],
+        env: [(&str, &str); M],
+    ) -> Output {
+        let mut command = Command::new("/usr/bin/sudo");
+        command.arg("-n").env_clear();
+
+        if !env.is_empty() {
+            command.arg("env");
+        }
+        for (key, value) in env {
+            command.arg(format!("{key}={value}"));
+        }
+        command.args(args);
+
+        command.output().expect("run sudo")
     }
 
     fn sudo_ok<const N: usize>(args: [&OsStr; N]) {
@@ -384,6 +443,10 @@ mod macos {
             stdout(&out),
             stderr(&out)
         );
+    }
+
+    fn passwordless_sudo_available() -> bool {
+        sudo([OsStr::new("true")]).status.success()
     }
 
     fn cleanup_system_install() {

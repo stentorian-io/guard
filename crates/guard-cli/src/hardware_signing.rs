@@ -80,6 +80,7 @@ func publicKeyHex(_ privateKey: SecKey) -> String {
 func enroll() {
     if let existing = findPrivateKey() {
         print("public_key_x963_hex=\(publicKeyHex(existing))")
+        print("created=false")
         return
     }
 
@@ -109,6 +110,20 @@ func enroll() {
         fail("create Secure Enclave signing key failed: \(String(describing: error))")
     }
     print("public_key_x963_hex=\(publicKeyHex(key))")
+    print("created=true")
+}
+
+func deleteEnrolledKey() {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassKey,
+        kSecAttrApplicationTag as String: tag,
+        kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
+        kSecAttrTokenID as String: kSecAttrTokenIDSecureEnclave
+    ]
+    let status = SecItemDelete(query as CFDictionary)
+    if status != errSecSuccess && status != errSecItemNotFound {
+        fail("delete Secure Enclave signing key failed: \(status)")
+    }
 }
 
 func sign(_ payloadHex: String) {
@@ -137,6 +152,8 @@ if CommandLine.arguments.count < 3 {
 switch CommandLine.arguments[1] {
 case "enroll":
     enroll()
+case "delete":
+    deleteEnrolledKey()
 case "sign":
     if CommandLine.arguments.count != 4 { fail("sign requires payload_hex") }
     sign(CommandLine.arguments[3])
@@ -151,6 +168,7 @@ pub struct HardwareSignerEnrollment {
     pub public_key_x963: Vec<u8>,
     pub public_key_sha256: String,
     pub label: String,
+    pub created: bool,
 }
 
 /// Enroll or locate the init user's Secure Enclave signing key.
@@ -178,12 +196,14 @@ fn enroll_secure_enclave_for_init_impl() -> Result<HardwareSignerEnrollment, Cli
     }
     let output = run_swift_as_init_user("enroll", None)?;
     let public_key_x963 = parse_hex_field(&output, "public_key_x963_hex")?;
+    let created = parse_bool_field(&output, "created")?;
     let public_key_sha256 = sha256_hex(&public_key_x963);
     Ok(HardwareSignerEnrollment {
         signer_kind: SIGNER_KIND_SECURE_ENCLAVE.to_string(),
         public_key_x963,
         public_key_sha256,
         label: init_user_label(),
+        created,
     })
 }
 
@@ -198,7 +218,25 @@ fn enroll_test_simulator_for_init() -> Result<HardwareSignerEnrollment, CliError
         public_key_x963,
         public_key_sha256,
         label: "macOS test-signer simulator".to_string(),
+        created: false,
     })
+}
+
+/// Delete the init user's Secure Enclave signing key created by this install.
+///
+/// # Errors
+///
+/// Returns an error when the platform helper cannot remove the key.
+pub fn delete_secure_enclave_key_for_init() -> Result<(), CliError> {
+    #[cfg(feature = "test-signer")]
+    {
+        return Ok(());
+    }
+
+    #[cfg(not(feature = "test-signer"))]
+    {
+        run_swift_as_init_user("delete", None).map(|_| ())
+    }
 }
 
 /// Sign a persistent rule payload with the hardware-backed key.
@@ -393,6 +431,23 @@ fn parse_hex_field(output: &str, key: &str) -> Result<Vec<u8>, CliError> {
     decode_hex(value)
 }
 
+#[cfg(not(feature = "test-signer"))]
+fn parse_bool_field(output: &str, key: &str) -> Result<bool, CliError> {
+    let prefix = format!("{key}=");
+    let value = output
+        .lines()
+        .find_map(|line| line.strip_prefix(&prefix))
+        .ok_or_else(|| CliError::Other(format!("hardware signer helper omitted {key}")))?;
+
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(CliError::Other(format!(
+            "hardware signer helper emitted invalid {key} value {other:?}"
+        ))),
+    }
+}
+
 fn decode_hex(s: &str) -> Result<Vec<u8>, CliError> {
     if s.len() % 2 != 0 {
         return Err(CliError::Other(
@@ -449,5 +504,13 @@ mod tests {
         let parsed =
             parse_hex_field("noise\npublic_key_x963_hex=000102\n", "public_key_x963_hex").unwrap();
         assert_eq!(parsed, vec![0, 1, 2]);
+    }
+
+    #[cfg(not(feature = "test-signer"))]
+    #[test]
+    fn parse_bool_field_reads_created_flag() {
+        assert!(parse_bool_field("created=true\n", "created").unwrap());
+        assert!(!parse_bool_field("created=false\n", "created").unwrap());
+        assert!(parse_bool_field("created=maybe\n", "created").is_err());
     }
 }

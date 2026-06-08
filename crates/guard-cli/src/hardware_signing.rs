@@ -6,8 +6,6 @@
 //! rule approvals sign the canonical rule payload with the private key; the
 //! daemon can verify but cannot forge those signatures.
 
-use std::process::Command;
-
 use guard_core::{
     ManagementActionPayloadV1, RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256, RuleSignaturePayloadV1,
     RuleSignatureV1, SIGNER_KIND_SECURE_ENCLAVE, SnapshotSignaturePayloadV1, SnapshotSignatureV1,
@@ -19,148 +17,6 @@ use crate::CliError;
 
 const KEY_TAG: &str = "com.stentorian-guard.rule-signing.v1";
 const DISABLE_HARDWARE_SIGNER_ENV: &str = "STT_GUARD_DISABLE_HARDWARE_SIGNER";
-
-const SECURE_ENCLAVE_SWIFT: &str = r#"
-import Foundation
-import Security
-
-let tag = Data(CommandLine.arguments[2].utf8)
-let prompt = "Stentorian Guard needs your hardware-backed rule-signing key."
-
-func fail(_ message: String) -> Never {
-    FileHandle.standardError.write(Data((message + "\n").utf8))
-    exit(1)
-}
-
-func hex(_ data: Data) -> String {
-    data.map { String(format: "%02x", $0) }.joined()
-}
-
-func dataFromHex(_ s: String) -> Data? {
-    if s.count % 2 != 0 { return nil }
-    var out = Data(capacity: s.count / 2)
-    var i = s.startIndex
-    while i < s.endIndex {
-        let j = s.index(i, offsetBy: 2)
-        guard let b = UInt8(s[i..<j], radix: 16) else { return nil }
-        out.append(b)
-        i = j
-    }
-    return out
-}
-
-func findPrivateKey() -> SecKey? {
-    let query: [String: Any] = [
-        kSecClass as String: kSecClassKey,
-        kSecAttrApplicationTag as String: tag,
-        kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
-        kSecAttrTokenID as String: kSecAttrTokenIDSecureEnclave,
-        kSecReturnRef as String: true,
-        kSecUseOperationPrompt as String: prompt
-    ]
-    var item: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &item)
-    if status == errSecSuccess {
-        return (item as! SecKey)
-    }
-    return nil
-}
-
-func publicKeyHex(_ privateKey: SecKey) -> String {
-    guard let pub = SecKeyCopyPublicKey(privateKey) else {
-        fail("Secure Enclave key has no public key")
-    }
-    var error: Unmanaged<CFError>?
-    guard let data = SecKeyCopyExternalRepresentation(pub, &error) as Data? else {
-        fail("export Secure Enclave public key failed: \(String(describing: error))")
-    }
-    return hex(data)
-}
-
-func enroll() {
-    if let existing = findPrivateKey() {
-        print("public_key_x963_hex=\(publicKeyHex(existing))")
-        print("created=false")
-        return
-    }
-
-    var acError: Unmanaged<CFError>?
-    guard let access = SecAccessControlCreateWithFlags(
-        nil,
-        kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-        [.privateKeyUsage, .userPresence],
-        &acError
-    ) else {
-        fail("create Secure Enclave access control failed: \(String(describing: acError))")
-    }
-
-    let attrs: [String: Any] = [
-        kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
-        kSecAttrKeySizeInBits as String: 256,
-        kSecAttrTokenID as String: kSecAttrTokenIDSecureEnclave,
-        kSecPrivateKeyAttrs as String: [
-            kSecAttrIsPermanent as String: true,
-            kSecAttrApplicationTag as String: tag,
-            kSecAttrAccessControl as String: access
-        ]
-    ]
-
-    var error: Unmanaged<CFError>?
-    guard let key = SecKeyCreateRandomKey(attrs as CFDictionary, &error) else {
-        fail("create Secure Enclave signing key failed: \(String(describing: error))")
-    }
-    print("public_key_x963_hex=\(publicKeyHex(key))")
-    print("created=true")
-}
-
-func deleteEnrolledKey() {
-    let query: [String: Any] = [
-        kSecClass as String: kSecClassKey,
-        kSecAttrApplicationTag as String: tag,
-        kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
-        kSecAttrTokenID as String: kSecAttrTokenIDSecureEnclave
-    ]
-    let status = SecItemDelete(query as CFDictionary)
-    if status != errSecSuccess && status != errSecItemNotFound {
-        fail("delete Secure Enclave signing key failed: \(status)")
-    }
-}
-
-func sign(_ payloadHex: String) {
-    guard let key = findPrivateKey() else {
-        fail("hardware-backed signing key unavailable; run the installer to enroll Secure Enclave signing")
-    }
-    guard let payload = dataFromHex(payloadHex) else {
-        fail("invalid payload hex")
-    }
-    let algorithm = SecKeyAlgorithm.ecdsaSignatureMessageX962SHA256
-    guard SecKeyIsAlgorithmSupported(key, .sign, algorithm) else {
-        fail("Secure Enclave key does not support ECDSA P-256 SHA-256 signing")
-    }
-    var error: Unmanaged<CFError>?
-    guard let signature = SecKeyCreateSignature(key, algorithm, payload as CFData, &error) as Data? else {
-        fail("Secure Enclave signing failed: \(String(describing: error))")
-    }
-    print("public_key_x963_hex=\(publicKeyHex(key))")
-    print("signature_der_hex=\(hex(signature))")
-}
-
-if CommandLine.arguments.count < 3 {
-    fail("usage: swift -e <script> enroll|sign <tag> [payload_hex]")
-}
-
-switch CommandLine.arguments[1] {
-case "enroll":
-    enroll()
-case "delete":
-    deleteEnrolledKey()
-case "sign":
-    if CommandLine.arguments.count != 4 { fail("sign requires payload_hex") }
-    sign(CommandLine.arguments[3])
-default:
-    fail("unknown mode")
-}
-"#;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HardwareSignerEnrollment {
@@ -175,8 +31,8 @@ pub struct HardwareSignerEnrollment {
 ///
 /// # Errors
 ///
-/// Returns an error when hardware signing is disabled, the Swift helper fails,
-/// or the helper output cannot be parsed.
+/// Returns an error when hardware signing is disabled or Security.framework
+/// cannot enroll/export the hardware-backed key.
 pub fn enroll_secure_enclave_for_init() -> Result<HardwareSignerEnrollment, CliError> {
     #[cfg(feature = "test-signer")]
     {
@@ -194,10 +50,12 @@ fn enroll_secure_enclave_for_init_impl() -> Result<HardwareSignerEnrollment, Cli
     if hardware_signer_disabled() {
         return Err(unavailable_error());
     }
-    let output = run_swift_as_init_user("enroll", None)?;
-    let public_key_x963 = parse_hex_field(&output, "public_key_x963_hex")?;
-    let created = parse_bool_field(&output, "created")?;
+
+    let enrollment = secure_enclave::enroll_key_for_init(KEY_TAG)?;
+    let public_key_x963 = enrollment.public_key_x963;
+    let created = enrollment.created;
     let public_key_sha256 = sha256_hex(&public_key_x963);
+
     Ok(HardwareSignerEnrollment {
         signer_kind: SIGNER_KIND_SECURE_ENCLAVE.to_string(),
         public_key_x963,
@@ -235,7 +93,7 @@ pub fn delete_secure_enclave_key_for_init() -> Result<(), CliError> {
 
     #[cfg(not(feature = "test-signer"))]
     {
-        run_swift_as_init_user("delete", None).map(|_| ())
+        secure_enclave::delete_key_for_init(KEY_TAG)
     }
 }
 
@@ -244,22 +102,21 @@ pub fn delete_secure_enclave_key_for_init() -> Result<(), CliError> {
 /// # Errors
 ///
 /// Returns an error when hardware signing is disabled, payload canonicalization
-/// fails, the Swift helper fails, or the helper output cannot be parsed.
+/// fails, or Security.framework cannot sign with the hardware-backed key.
 pub fn sign_rule_payload(payload: &RuleSignaturePayloadV1) -> Result<RuleSignatureV1, CliError> {
     if hardware_signer_disabled() {
         return Err(unavailable_error());
     }
     let payload_bytes = canonical_rule_payload_bytes(payload)
         .map_err(|e| CliError::Other(format!("canonical rule payload encode failed: {e}")))?;
-    let output = run_swift_current_user("sign", Some(&hex_lower(&payload_bytes)))?;
-    let public_key_x963 = parse_hex_field(&output, "public_key_x963_hex")?;
-    let signature_der = parse_hex_field(&output, "signature_der_hex")?;
+    let signed_payload = secure_enclave::sign_payload(KEY_TAG, &payload_bytes)?;
+
     Ok(RuleSignatureV1 {
         scheme: RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
         signer_kind: SIGNER_KIND_SECURE_ENCLAVE.to_string(),
-        public_key_sha256: sha256_hex(&public_key_x963),
-        public_key_x963,
-        signature_der,
+        public_key_sha256: sha256_hex(&signed_payload.public_key_x963),
+        public_key_x963: signed_payload.public_key_x963,
+        signature_der: signed_payload.signature_der,
         signed_payload_sha256: sha256_hex(&payload_bytes),
         signature_created_at_unix_ms: payload.created_at_unix_ms,
     })
@@ -270,7 +127,7 @@ pub fn sign_rule_payload(payload: &RuleSignaturePayloadV1) -> Result<RuleSignatu
 /// # Errors
 ///
 /// Returns an error when hardware signing is disabled, payload canonicalization
-/// fails, the Swift helper fails, or the helper output cannot be parsed.
+/// fails, or Security.framework cannot sign with the hardware-backed key.
 pub fn sign_snapshot_payload(
     payload: &SnapshotSignaturePayloadV1,
 ) -> Result<SnapshotSignatureV1, CliError> {
@@ -279,15 +136,14 @@ pub fn sign_snapshot_payload(
     }
     let payload_bytes = canonical_snapshot_payload_bytes(payload)
         .map_err(|e| CliError::Other(format!("canonical snapshot payload encode failed: {e}")))?;
-    let output = run_swift_current_user("sign", Some(&hex_lower(&payload_bytes)))?;
-    let public_key_x963 = parse_hex_field(&output, "public_key_x963_hex")?;
-    let signature_der = parse_hex_field(&output, "signature_der_hex")?;
+    let signed_payload = secure_enclave::sign_payload(KEY_TAG, &payload_bytes)?;
+
     Ok(SnapshotSignatureV1 {
         scheme: RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
         signer_kind: SIGNER_KIND_SECURE_ENCLAVE.to_string(),
-        public_key_sha256: sha256_hex(&public_key_x963),
-        public_key_x963,
-        signature_der,
+        public_key_sha256: sha256_hex(&signed_payload.public_key_x963),
+        public_key_x963: signed_payload.public_key_x963,
+        signature_der: signed_payload.signature_der,
         signed_payload_sha256: sha256_hex(&payload_bytes),
         signature_created_at_unix_ms: payload.generated_at_unix_ms,
     })
@@ -298,7 +154,7 @@ pub fn sign_snapshot_payload(
 /// # Errors
 ///
 /// Returns an error when hardware signing is disabled, payload canonicalization
-/// fails, the Swift helper fails, or the helper output cannot be parsed.
+/// fails, or Security.framework cannot sign with the hardware-backed key.
 pub fn sign_management_action_payload(
     payload: &ManagementActionPayloadV1,
 ) -> Result<RuleSignatureV1, CliError> {
@@ -310,15 +166,14 @@ pub fn sign_management_action_payload(
             "canonical management-action payload encode failed: {e}"
         ))
     })?;
-    let output = run_swift_current_user("sign", Some(&hex_lower(&payload_bytes)))?;
-    let public_key_x963 = parse_hex_field(&output, "public_key_x963_hex")?;
-    let signature_der = parse_hex_field(&output, "signature_der_hex")?;
+    let signed_payload = secure_enclave::sign_payload(KEY_TAG, &payload_bytes)?;
+
     Ok(RuleSignatureV1 {
         scheme: RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
         signer_kind: SIGNER_KIND_SECURE_ENCLAVE.to_string(),
-        public_key_sha256: sha256_hex(&public_key_x963),
-        public_key_x963,
-        signature_der,
+        public_key_sha256: sha256_hex(&signed_payload.public_key_x963),
+        public_key_x963: signed_payload.public_key_x963,
+        signature_der: signed_payload.signature_der,
         signed_payload_sha256: sha256_hex(&payload_bytes),
         signature_created_at_unix_ms: payload.created_at_unix_ms,
     })
@@ -334,82 +189,6 @@ fn unavailable_error() -> CliError {
     )
 }
 
-fn run_swift_current_user(mode: &str, payload_hex: Option<&str>) -> Result<String, CliError> {
-    run_swift_command(&CommandSpec::CurrentUser, mode, payload_hex)
-}
-
-#[cfg(not(feature = "test-signer"))]
-fn run_swift_as_init_user(mode: &str, payload_hex: Option<&str>) -> Result<String, CliError> {
-    run_swift_command(&CommandSpec::InitInvokingUser, mode, payload_hex)
-}
-
-enum CommandSpec {
-    CurrentUser,
-    #[cfg(not(feature = "test-signer"))]
-    InitInvokingUser,
-}
-
-fn run_swift_command(
-    command_spec: &CommandSpec,
-    mode: &str,
-    payload_hex: Option<&str>,
-) -> Result<String, CliError> {
-    let swift = "/usr/bin/swift";
-    if !std::path::Path::new(swift).exists() {
-        return Err(unavailable_error());
-    }
-
-    let mut command = match command_spec {
-        CommandSpec::CurrentUser => Command::new(swift),
-        #[cfg(not(feature = "test-signer"))]
-        CommandSpec::InitInvokingUser => init_user_swift_command(swift)?,
-    };
-    command
-        .arg("-e")
-        .arg(SECURE_ENCLAVE_SWIFT)
-        .arg(mode)
-        .arg(KEY_TAG);
-    if let Some(payload_hex) = payload_hex {
-        command.arg(payload_hex);
-    }
-
-    let output = command
-        .output()
-        .map_err(|e| CliError::Other(format!("launch hardware signer helper: {e}")))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stderr.is_empty() {
-            return Err(unavailable_error());
-        }
-        return Err(CliError::Other(stderr));
-    }
-    String::from_utf8(output.stdout).map_err(|e| {
-        CliError::Other(format!(
-            "hardware signer helper emitted non-UTF8 output: {e}"
-        ))
-    })
-}
-
-#[cfg(not(feature = "test-signer"))]
-fn init_user_swift_command(swift: &str) -> Result<Command, CliError> {
-    if unsafe { libc::geteuid() } != 0 {
-        return Ok(Command::new(swift));
-    }
-
-    let sudo_user = std::env::var("SUDO_USER").ok().filter(|u| u != "root");
-    let Some(user) = sudo_user else {
-        return Err(CliError::Other(
-            "hardware signer enrollment requires running the system install via sudo from the target user; \
-             refusing to enroll a root-owned signing key"
-                .into(),
-        ));
-    };
-
-    let mut command = Command::new("/usr/bin/sudo");
-    command.arg("-u").arg(user).arg(swift);
-    Ok(command)
-}
-
 #[cfg(not(feature = "test-signer"))]
 fn init_user_label() -> String {
     if unsafe { libc::geteuid() } == 0 {
@@ -422,58 +201,7 @@ fn init_user_label() -> String {
     "macOS Secure Enclave".to_string()
 }
 
-fn parse_hex_field(output: &str, key: &str) -> Result<Vec<u8>, CliError> {
-    let prefix = format!("{key}=");
-    let value = output
-        .lines()
-        .find_map(|line| line.strip_prefix(&prefix))
-        .ok_or_else(|| CliError::Other(format!("hardware signer helper omitted {key}")))?;
-    decode_hex(value)
-}
-
-#[cfg(not(feature = "test-signer"))]
-fn parse_bool_field(output: &str, key: &str) -> Result<bool, CliError> {
-    let prefix = format!("{key}=");
-    let value = output
-        .lines()
-        .find_map(|line| line.strip_prefix(&prefix))
-        .ok_or_else(|| CliError::Other(format!("hardware signer helper omitted {key}")))?;
-
-    match value {
-        "true" => Ok(true),
-        "false" => Ok(false),
-        other => Err(CliError::Other(format!(
-            "hardware signer helper emitted invalid {key} value {other:?}"
-        ))),
-    }
-}
-
-fn decode_hex(s: &str) -> Result<Vec<u8>, CliError> {
-    if s.len() % 2 != 0 {
-        return Err(CliError::Other(
-            "hardware signer helper emitted odd-length hex".into(),
-        ));
-    }
-    let mut out = Vec::with_capacity(s.len() / 2);
-    for pair in s.as_bytes().chunks_exact(2) {
-        let hi = hex_value(pair[0])?;
-        let lo = hex_value(pair[1])?;
-        out.push((hi << 4) | lo);
-    }
-    Ok(out)
-}
-
-fn hex_value(b: u8) -> Result<u8, CliError> {
-    match b {
-        b'0'..=b'9' => Ok(b - b'0'),
-        b'a'..=b'f' => Ok(b - b'a' + 10),
-        b'A'..=b'F' => Ok(b - b'A' + 10),
-        _ => Err(CliError::Other(
-            "hardware signer helper emitted invalid hex".into(),
-        )),
-    }
-}
-
+#[cfg(test)]
 fn hex_lower(bytes: &[u8]) -> String {
     const HEX: &[u8] = b"0123456789abcdef";
     let mut s = String::with_capacity(bytes.len() * 2);
@@ -484,33 +212,809 @@ fn hex_lower(bytes: &[u8]) -> String {
     s
 }
 
+#[cfg_attr(feature = "test-signer", allow(dead_code))]
+pub(crate) mod secure_enclave {
+    use crate::CliError;
+
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) struct SecureEnclaveEnrollment {
+        pub(crate) public_key_x963: Vec<u8>,
+        pub(crate) created: bool,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) struct SecureEnclaveSignature {
+        pub(crate) public_key_x963: Vec<u8>,
+        pub(crate) signature_der: Vec<u8>,
+    }
+
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) enum KeychainFailureKind {
+        AuthenticationDenied,
+        InteractionUnavailable,
+        MissingEntitlementOrSession,
+        SecurityFrameworkUnavailable,
+        Other,
+    }
+
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn classify_os_status(status: i32) -> KeychainFailureKind {
+        match status {
+            -25_293 | -128 => KeychainFailureKind::AuthenticationDenied,
+            -25_308 => KeychainFailureKind::InteractionUnavailable,
+            -34_018 => KeychainFailureKind::MissingEntitlementOrSession,
+            -25_291 => KeychainFailureKind::SecurityFrameworkUnavailable,
+            _ => KeychainFailureKind::Other,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    mod macos {
+        use std::ffi::{CStr, c_char, c_long, c_void};
+        use std::marker::PhantomData;
+        use std::ptr;
+
+        use super::{
+            KeychainFailureKind, SecureEnclaveEnrollment, SecureEnclaveSignature,
+            classify_os_status,
+        };
+        use crate::CliError;
+
+        const PROMPT: &str = "Stentorian Guard needs your hardware-backed rule-signing key.";
+
+        const ERR_SEC_SUCCESS: i32 = 0;
+        const ERR_SEC_ITEM_NOT_FOUND: i32 = -25_300;
+        const K_CF_NUMBER_INT_TYPE: i32 = 9;
+        const K_SEC_KEY_OPERATION_TYPE_SIGN: u32 = 0;
+        const K_SEC_ACCESS_CONTROL_USER_PRESENCE: u64 = 1 << 0;
+        const K_SEC_ACCESS_CONTROL_PRIVATE_KEY_USAGE: u64 = 1 << 30;
+
+        type CFIndex = c_long;
+        type CFAllocatorRef = *const c_void;
+        type CFDataRef = *const c_void;
+        type CFDictionaryRef = *const c_void;
+        type CFErrorRef = *const c_void;
+        type CFMutableDictionaryRef = *mut c_void;
+        type CFNumberRef = *const c_void;
+        type CFStringRef = *const c_void;
+        type CFTypeRef = *const c_void;
+        type OSStatus = i32;
+        type SecAccessControlRef = *const c_void;
+        type SecKeyAlgorithm = CFStringRef;
+        type SecKeyRef = *const c_void;
+
+        #[repr(C)]
+        struct CFDictionaryKeyCallBacks {
+            version: CFIndex,
+            retain: *const c_void,
+            release: *const c_void,
+            copy_description: *const c_void,
+            equal: *const c_void,
+            hash: *const c_void,
+        }
+
+        #[repr(C)]
+        struct CFDictionaryValueCallBacks {
+            version: CFIndex,
+            retain: *const c_void,
+            release: *const c_void,
+            copy_description: *const c_void,
+            equal: *const c_void,
+        }
+
+        #[link(name = "CoreFoundation", kind = "framework")]
+        unsafe extern "C" {
+            static kCFBooleanTrue: CFTypeRef;
+            static kCFTypeDictionaryKeyCallBacks: CFDictionaryKeyCallBacks;
+            static kCFTypeDictionaryValueCallBacks: CFDictionaryValueCallBacks;
+
+            fn CFDataCreate(
+                allocator: CFAllocatorRef,
+                bytes: *const u8,
+                length: CFIndex,
+            ) -> CFDataRef;
+            fn CFDataGetBytePtr(data: CFDataRef) -> *const u8;
+            fn CFDataGetLength(data: CFDataRef) -> CFIndex;
+            fn CFDictionarySetValue(
+                dictionary: CFMutableDictionaryRef,
+                key: *const c_void,
+                value: *const c_void,
+            );
+            fn CFDictionaryCreateMutable(
+                allocator: CFAllocatorRef,
+                capacity: CFIndex,
+                key_callbacks: *const CFDictionaryKeyCallBacks,
+                value_callbacks: *const CFDictionaryValueCallBacks,
+            ) -> CFMutableDictionaryRef;
+            fn CFErrorGetCode(error: CFErrorRef) -> CFIndex;
+            fn CFNumberCreate(
+                allocator: CFAllocatorRef,
+                number_type: i32,
+                value_ptr: *const c_void,
+            ) -> CFNumberRef;
+            fn CFRelease(object: CFTypeRef);
+            fn CFCopyDescription(object: CFTypeRef) -> CFStringRef;
+            fn CFStringGetCString(
+                string: CFStringRef,
+                buffer: *mut c_char,
+                buffer_size: CFIndex,
+                encoding: u32,
+            ) -> bool;
+        }
+
+        #[link(name = "Security", kind = "framework")]
+        unsafe extern "C" {
+            static kSecAttrAccessControl: CFStringRef;
+            static kSecAttrAccessibleWhenUnlockedThisDeviceOnly: CFStringRef;
+            static kSecAttrApplicationTag: CFStringRef;
+            static kSecAttrIsPermanent: CFStringRef;
+            static kSecAttrKeySizeInBits: CFStringRef;
+            static kSecAttrKeyType: CFStringRef;
+            static kSecAttrKeyTypeECSECPrimeRandom: CFStringRef;
+            static kSecAttrTokenID: CFStringRef;
+            static kSecAttrTokenIDSecureEnclave: CFStringRef;
+            static kSecClass: CFStringRef;
+            static kSecClassKey: CFStringRef;
+            static kSecPrivateKeyAttrs: CFStringRef;
+            static kSecReturnRef: CFStringRef;
+            static kSecUseOperationPrompt: CFStringRef;
+            static kSecKeyAlgorithmECDSASignatureMessageX962SHA256: SecKeyAlgorithm;
+
+            fn SecAccessControlCreateWithFlags(
+                allocator: CFAllocatorRef,
+                protection: CFTypeRef,
+                flags: u64,
+                error: *mut CFErrorRef,
+            ) -> SecAccessControlRef;
+            fn SecItemCopyMatching(query: CFDictionaryRef, result: *mut CFTypeRef) -> OSStatus;
+            fn SecItemDelete(query: CFDictionaryRef) -> OSStatus;
+            fn SecKeyCopyExternalRepresentation(
+                key: SecKeyRef,
+                error: *mut CFErrorRef,
+            ) -> CFDataRef;
+            fn SecKeyCopyPublicKey(key: SecKeyRef) -> SecKeyRef;
+            fn SecKeyCreateRandomKey(
+                parameters: CFDictionaryRef,
+                error: *mut CFErrorRef,
+            ) -> SecKeyRef;
+            fn SecKeyCreateSignature(
+                key: SecKeyRef,
+                algorithm: SecKeyAlgorithm,
+                data_to_sign: CFDataRef,
+                error: *mut CFErrorRef,
+            ) -> CFDataRef;
+            fn SecKeyIsAlgorithmSupported(
+                key: SecKeyRef,
+                operation: u32,
+                algorithm: SecKeyAlgorithm,
+            ) -> bool;
+        }
+
+        pub(super) fn enroll_key_for_init(
+            key_tag: &str,
+        ) -> Result<SecureEnclaveEnrollment, CliError> {
+            let identity_guard = InitUserIdentityGuard::enter()?;
+
+            let enrollment = if let Some(existing_key) = find_private_key(key_tag)? {
+                SecureEnclaveEnrollment {
+                    public_key_x963: export_public_key_x963(existing_key.as_ptr())?,
+                    created: false,
+                }
+            } else {
+                let key = create_private_key(key_tag)?;
+
+                SecureEnclaveEnrollment {
+                    public_key_x963: export_public_key_x963(key.as_ptr())?,
+                    created: true,
+                }
+            };
+
+            identity_guard.restore()?;
+
+            Ok(enrollment)
+        }
+
+        pub(super) fn delete_key_for_init(key_tag: &str) -> Result<(), CliError> {
+            let identity_guard = InitUserIdentityGuard::enter()?;
+            let query = key_lookup_query(key_tag, false)?;
+            let status = unsafe { SecItemDelete(query.as_ptr()) };
+
+            identity_guard.restore()?;
+
+            match status {
+                ERR_SEC_SUCCESS | ERR_SEC_ITEM_NOT_FOUND => Ok(()),
+                other => Err(security_status_error(
+                    "delete Secure Enclave signing key",
+                    other,
+                )),
+            }
+        }
+
+        pub(super) fn sign_payload(
+            key_tag: &str,
+            payload: &[u8],
+        ) -> Result<SecureEnclaveSignature, CliError> {
+            let key = find_private_key(key_tag)?.ok_or_else(|| {
+                CliError::Other(
+                    "hardware-backed signing key unavailable; run the installer to enroll Secure Enclave signing"
+                        .into(),
+                )
+            })?;
+
+            let algorithm = unsafe { kSecKeyAlgorithmECDSASignatureMessageX962SHA256 };
+            let supports_signing = unsafe {
+                SecKeyIsAlgorithmSupported(key.as_ptr(), K_SEC_KEY_OPERATION_TYPE_SIGN, algorithm)
+            };
+            if !supports_signing {
+                return Err(CliError::Other(
+                    "Secure Enclave key does not support ECDSA P-256 SHA-256 signing".into(),
+                ));
+            }
+
+            let data_to_sign = cf_data(payload)?;
+            let mut error = ptr::null();
+            let signature = unsafe {
+                SecKeyCreateSignature(
+                    key.as_ptr(),
+                    algorithm,
+                    data_to_sign.as_ptr(),
+                    &raw mut error,
+                )
+            };
+            if signature.is_null() {
+                return Err(cf_error_or_message("Secure Enclave signing", error));
+            }
+            let signature = OwnedCf::<CFDataRef>::new(signature, signature);
+
+            Ok(SecureEnclaveSignature {
+                public_key_x963: export_public_key_x963(key.as_ptr())?,
+                signature_der: cf_data_bytes(signature.as_ptr())?,
+            })
+        }
+
+        fn find_private_key(key_tag: &str) -> Result<Option<OwnedCf<SecKeyRef>>, CliError> {
+            let query = key_lookup_query(key_tag, true)?;
+            let mut item = ptr::null();
+            let status = unsafe { SecItemCopyMatching(query.as_ptr(), &raw mut item) };
+
+            match status {
+                ERR_SEC_SUCCESS => Ok(Some(OwnedCf::<SecKeyRef>::new(item, item))),
+                ERR_SEC_ITEM_NOT_FOUND => Ok(None),
+                other => Err(security_status_error(
+                    "look up Secure Enclave signing key",
+                    other,
+                )),
+            }
+        }
+
+        fn create_private_key(key_tag: &str) -> Result<OwnedCf<SecKeyRef>, CliError> {
+            let access_control = create_access_control()?;
+            let key_size_bits: i32 = 256;
+            let key_size = cf_number_int(key_size_bits)?;
+            let tag = cf_data(key_tag.as_bytes())?;
+
+            let private_attrs = cf_dictionary()?;
+            cf_dictionary_set(
+                private_attrs.as_ptr(),
+                unsafe { kSecAttrIsPermanent },
+                unsafe { kCFBooleanTrue },
+            );
+            cf_dictionary_set(
+                private_attrs.as_ptr(),
+                unsafe { kSecAttrApplicationTag },
+                tag.as_ptr(),
+            );
+            cf_dictionary_set(
+                private_attrs.as_ptr(),
+                unsafe { kSecAttrAccessControl },
+                access_control.as_ptr(),
+            );
+
+            let attrs = cf_dictionary()?;
+            cf_dictionary_set(attrs.as_ptr(), unsafe { kSecAttrKeyType }, unsafe {
+                kSecAttrKeyTypeECSECPrimeRandom
+            });
+            cf_dictionary_set(
+                attrs.as_ptr(),
+                unsafe { kSecAttrKeySizeInBits },
+                key_size.as_ptr(),
+            );
+            cf_dictionary_set(attrs.as_ptr(), unsafe { kSecAttrTokenID }, unsafe {
+                kSecAttrTokenIDSecureEnclave
+            });
+            cf_dictionary_set(
+                attrs.as_ptr(),
+                unsafe { kSecPrivateKeyAttrs },
+                private_attrs.as_ptr(),
+            );
+
+            let mut error = ptr::null();
+            let key = unsafe { SecKeyCreateRandomKey(attrs.as_ptr(), &raw mut error) };
+            if key.is_null() {
+                return Err(cf_error_or_message(
+                    "create Secure Enclave signing key",
+                    error,
+                ));
+            }
+
+            Ok(OwnedCf::<SecKeyRef>::new(key, key))
+        }
+
+        fn create_access_control() -> Result<OwnedCf<SecAccessControlRef>, CliError> {
+            let mut error = ptr::null();
+            let flags = K_SEC_ACCESS_CONTROL_PRIVATE_KEY_USAGE | K_SEC_ACCESS_CONTROL_USER_PRESENCE;
+            let access_control = unsafe {
+                SecAccessControlCreateWithFlags(
+                    ptr::null(),
+                    kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+                    flags,
+                    &raw mut error,
+                )
+            };
+            if access_control.is_null() {
+                return Err(cf_error_or_message(
+                    "create Secure Enclave access control",
+                    error,
+                ));
+            }
+
+            Ok(OwnedCf::<SecAccessControlRef>::new(
+                access_control,
+                access_control,
+            ))
+        }
+
+        fn key_lookup_query(
+            key_tag: &str,
+            return_ref: bool,
+        ) -> Result<OwnedCf<CFMutableDictionaryRef>, CliError> {
+            let tag = cf_data(key_tag.as_bytes())?;
+            let prompt = cf_string(PROMPT)?;
+            let query = cf_dictionary()?;
+
+            cf_dictionary_set(query.as_ptr(), unsafe { kSecClass }, unsafe {
+                kSecClassKey
+            });
+            cf_dictionary_set(
+                query.as_ptr(),
+                unsafe { kSecAttrApplicationTag },
+                tag.as_ptr(),
+            );
+            cf_dictionary_set(query.as_ptr(), unsafe { kSecAttrKeyType }, unsafe {
+                kSecAttrKeyTypeECSECPrimeRandom
+            });
+            cf_dictionary_set(query.as_ptr(), unsafe { kSecAttrTokenID }, unsafe {
+                kSecAttrTokenIDSecureEnclave
+            });
+            cf_dictionary_set(
+                query.as_ptr(),
+                unsafe { kSecUseOperationPrompt },
+                prompt.as_ptr(),
+            );
+
+            if return_ref {
+                cf_dictionary_set(query.as_ptr(), unsafe { kSecReturnRef }, unsafe {
+                    kCFBooleanTrue
+                });
+            }
+
+            Ok(query)
+        }
+
+        fn export_public_key_x963(private_key: SecKeyRef) -> Result<Vec<u8>, CliError> {
+            let public_key = unsafe { SecKeyCopyPublicKey(private_key) };
+            if public_key.is_null() {
+                return Err(CliError::Other(
+                    "Secure Enclave key has no public key".into(),
+                ));
+            }
+            let public_key = OwnedCf::<SecKeyRef>::new(public_key, public_key);
+
+            let mut error = ptr::null();
+            let data =
+                unsafe { SecKeyCopyExternalRepresentation(public_key.as_ptr(), &raw mut error) };
+            if data.is_null() {
+                return Err(cf_error_or_message(
+                    "export Secure Enclave public key",
+                    error,
+                ));
+            }
+            let data = OwnedCf::<CFDataRef>::new(data, data);
+
+            cf_data_bytes(data.as_ptr())
+        }
+
+        fn cf_dictionary() -> Result<OwnedCf<CFMutableDictionaryRef>, CliError> {
+            let dictionary = unsafe {
+                CFDictionaryCreateMutable(
+                    ptr::null(),
+                    0,
+                    &raw const kCFTypeDictionaryKeyCallBacks,
+                    &raw const kCFTypeDictionaryValueCallBacks,
+                )
+            };
+            if dictionary.is_null() {
+                return Err(CliError::Other(
+                    "create Core Foundation dictionary failed".into(),
+                ));
+            }
+
+            Ok(OwnedCf::<CFMutableDictionaryRef>::new(
+                dictionary,
+                dictionary.cast_const(),
+            ))
+        }
+
+        fn cf_dictionary_set(dictionary: CFMutableDictionaryRef, key: CFTypeRef, value: CFTypeRef) {
+            // The dictionary is created with Core Foundation retain callbacks,
+            // so borrowed key/value references remain valid after wrappers drop.
+            unsafe { CFDictionarySetValue(dictionary, key, value) };
+        }
+
+        fn cf_data(bytes: &[u8]) -> Result<OwnedCf<CFDataRef>, CliError> {
+            let byte_count = CFIndex::try_from(bytes.len()).map_err(|e| {
+                CliError::Other(format!("Core Foundation data length is too large: {e}"))
+            })?;
+            let data = unsafe { CFDataCreate(ptr::null(), bytes.as_ptr(), byte_count) };
+            if data.is_null() {
+                return Err(CliError::Other("create Core Foundation data failed".into()));
+            }
+
+            Ok(OwnedCf::<CFDataRef>::new(data, data))
+        }
+
+        fn cf_data_bytes(data: CFDataRef) -> Result<Vec<u8>, CliError> {
+            let len = unsafe { CFDataGetLength(data) };
+            let len = usize::try_from(len).map_err(|e| {
+                CliError::Other(format!("Core Foundation data length is invalid: {e}"))
+            })?;
+            let bytes = unsafe { CFDataGetBytePtr(data) };
+
+            // CFData owns this buffer; copy it before the owning wrapper drops.
+            Ok(unsafe { std::slice::from_raw_parts(bytes, len) }.to_vec())
+        }
+
+        fn cf_number_int(value: i32) -> Result<OwnedCf<CFNumberRef>, CliError> {
+            let number = unsafe {
+                CFNumberCreate(
+                    ptr::null(),
+                    K_CF_NUMBER_INT_TYPE,
+                    (&raw const value).cast::<c_void>(),
+                )
+            };
+            if number.is_null() {
+                return Err(CliError::Other(
+                    "create Core Foundation number failed".into(),
+                ));
+            }
+
+            Ok(OwnedCf::<CFNumberRef>::new(number, number))
+        }
+
+        fn cf_string(value: &str) -> Result<OwnedCf<CFStringRef>, CliError> {
+            let data = cf_data(value.as_bytes())?;
+            let string = unsafe {
+                CFStringCreateFromExternalRepresentation(
+                    ptr::null(),
+                    data.as_ptr(),
+                    K_CF_STRING_ENCODING_UTF8,
+                )
+            };
+            if string.is_null() {
+                return Err(CliError::Other(
+                    "create Core Foundation string failed".into(),
+                ));
+            }
+
+            Ok(OwnedCf::<CFStringRef>::new(string, string))
+        }
+
+        const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+
+        #[link(name = "CoreFoundation", kind = "framework")]
+        unsafe extern "C" {
+            fn CFStringCreateFromExternalRepresentation(
+                allocator: CFAllocatorRef,
+                data: CFDataRef,
+                encoding: u32,
+            ) -> CFStringRef;
+        }
+
+        fn cf_error_or_message(action: &str, error: CFErrorRef) -> CliError {
+            let message = if error.is_null() {
+                format!("{action} failed")
+            } else if let Some(description) = actionable_cf_error_description(error) {
+                format!("{action} failed: {description}; {}", cf_description(error))
+            } else {
+                format!("{action} failed: {}", cf_description(error))
+            };
+
+            CliError::Other(message)
+        }
+
+        fn actionable_cf_error_description(error: CFErrorRef) -> Option<String> {
+            let code = unsafe { CFErrorGetCode(error) };
+            let code = i32::try_from(code).ok()?;
+
+            if classify_os_status(code) == KeychainFailureKind::Other {
+                return None;
+            }
+
+            Some(describe_os_status(code))
+        }
+
+        fn security_status_error(action: &str, status: OSStatus) -> CliError {
+            CliError::Other(format!("{action} failed: {}", describe_os_status(status)))
+        }
+
+        fn describe_os_status(status: OSStatus) -> String {
+            match classify_os_status(status) {
+                KeychainFailureKind::AuthenticationDenied => {
+                    format!("user authentication was cancelled or denied (OSStatus {status})")
+                }
+                KeychainFailureKind::InteractionUnavailable => {
+                    format!(
+                        "keychain interaction is not available in this session (OSStatus {status})"
+                    )
+                }
+                KeychainFailureKind::MissingEntitlementOrSession => {
+                    format!(
+                        "keychain access is missing a required entitlement or session binding (OSStatus {status})"
+                    )
+                }
+                KeychainFailureKind::SecurityFrameworkUnavailable => {
+                    format!(
+                        "Security.framework or the keychain is unavailable in this session (OSStatus {status})"
+                    )
+                }
+                KeychainFailureKind::Other => {
+                    format!("Security.framework returned OSStatus {status}")
+                }
+            }
+        }
+
+        fn cf_description(value: CFTypeRef) -> String {
+            let description = unsafe { CFCopyDescription(value) };
+            if description.is_null() {
+                return "Core Foundation did not provide error details".to_string();
+            }
+            let description = OwnedCf::<CFStringRef>::new(description, description);
+            let mut buffer = vec![0; 2048];
+            let copied = unsafe {
+                CFStringGetCString(
+                    description.as_ptr(),
+                    buffer.as_mut_ptr(),
+                    2048,
+                    K_CF_STRING_ENCODING_UTF8,
+                )
+            };
+            if !copied {
+                return "Core Foundation error details were not UTF-8".to_string();
+            }
+
+            unsafe { CStr::from_ptr(buffer.as_ptr()) }
+                .to_string_lossy()
+                .into_owned()
+        }
+
+        struct OwnedCf<T: Copy> {
+            object: T,
+            cf_object: CFTypeRef,
+            _marker: PhantomData<T>,
+        }
+
+        impl<T> OwnedCf<T>
+        where
+            T: Copy,
+        {
+            fn new(object: T, cf_object: CFTypeRef) -> Self {
+                Self {
+                    object,
+                    cf_object,
+                    _marker: PhantomData,
+                }
+            }
+
+            fn as_ptr(&self) -> T {
+                self.object
+            }
+        }
+
+        impl<T> Drop for OwnedCf<T>
+        where
+            T: Copy,
+        {
+            fn drop(&mut self) {
+                // `OwnedCf` only wraps Core Foundation create/copy results with
+                // +1 ownership; constants and borrowed references are not wrapped.
+                unsafe { CFRelease(self.cf_object) };
+            }
+        }
+
+        struct InitUserIdentityGuard {
+            restore_uid: Option<u32>,
+            restore_gid: Option<u32>,
+        }
+
+        impl InitUserIdentityGuard {
+            fn enter() -> Result<Self, CliError> {
+                if unsafe { libc::geteuid() } != 0 {
+                    return Ok(Self {
+                        restore_uid: None,
+                        restore_gid: None,
+                    });
+                }
+
+                let target_user_id = sudo_id("SUDO_UID")?;
+                let target_group_id = sudo_id("SUDO_GID")?;
+                if target_user_id == 0 {
+                    return Err(CliError::Other(
+                        "hardware signer enrollment requires running the system install via sudo from the target user; refusing to enroll a root-owned signing key"
+                            .into(),
+                    ));
+                }
+
+                let installer_user_id = unsafe { libc::geteuid() };
+                let installer_group_id = unsafe { libc::getegid() };
+
+                set_effective_gid(
+                    target_group_id,
+                    "switch to sudo user's group for signer enrollment",
+                )?;
+                set_effective_uid(target_user_id, "switch to sudo user for signer enrollment")?;
+
+                Ok(Self {
+                    restore_uid: Some(installer_user_id),
+                    restore_gid: Some(installer_group_id),
+                })
+            }
+
+            fn restore(self) -> Result<(), CliError> {
+                let user_id_to_restore = self.restore_uid;
+                let group_id_to_restore = self.restore_gid;
+                std::mem::forget(self);
+
+                if let Some(uid) = user_id_to_restore {
+                    set_effective_uid(uid, "restore root user after signer enrollment")?;
+                }
+
+                if let Some(gid) = group_id_to_restore {
+                    set_effective_gid(gid, "restore root group after signer enrollment")?;
+                }
+
+                Ok(())
+            }
+        }
+
+        impl Drop for InitUserIdentityGuard {
+            fn drop(&mut self) {
+                // Early returns still restore the root installer identity. The
+                // explicit restore path reports restoration errors on normal exit.
+                if let Some(uid) = self.restore_uid.take() {
+                    let _ = unsafe { libc::seteuid(uid) };
+                }
+
+                if let Some(gid) = self.restore_gid.take() {
+                    let _ = unsafe { libc::setegid(gid) };
+                }
+            }
+        }
+
+        fn sudo_id(name: &str) -> Result<u32, CliError> {
+            std::env::var(name)
+                .map_err(|_| {
+                    CliError::Other(
+                        "hardware signer enrollment requires SUDO_UID/SUDO_GID from the target install user"
+                            .into(),
+                    )
+                })?
+                .parse::<u32>()
+                .map_err(|e| CliError::Other(format!("{name} contains an invalid uid/gid: {e}")))
+        }
+
+        fn set_effective_uid(uid: u32, action: &str) -> Result<(), CliError> {
+            if unsafe { libc::seteuid(uid) } != 0 {
+                return Err(CliError::Other(format!(
+                    "{action} failed: {}",
+                    std::io::Error::last_os_error()
+                )));
+            }
+
+            Ok(())
+        }
+
+        fn set_effective_gid(gid: u32, action: &str) -> Result<(), CliError> {
+            if unsafe { libc::setegid(gid) } != 0 {
+                return Err(CliError::Other(format!(
+                    "{action} failed: {}",
+                    std::io::Error::last_os_error()
+                )));
+            }
+
+            Ok(())
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    mod macos {
+        use super::{SecureEnclaveEnrollment, SecureEnclaveSignature};
+        use crate::CliError;
+
+        pub(super) fn enroll_key_for_init(
+            _key_tag: &str,
+        ) -> Result<SecureEnclaveEnrollment, CliError> {
+            Err(super::super::unavailable_error())
+        }
+
+        pub(super) fn delete_key_for_init(_key_tag: &str) -> Result<(), CliError> {
+            Err(super::super::unavailable_error())
+        }
+
+        pub(super) fn sign_payload(
+            _key_tag: &str,
+            _payload: &[u8],
+        ) -> Result<SecureEnclaveSignature, CliError> {
+            Err(super::super::unavailable_error())
+        }
+    }
+
+    pub(crate) fn enroll_key_for_init(key_tag: &str) -> Result<SecureEnclaveEnrollment, CliError> {
+        macos::enroll_key_for_init(key_tag)
+    }
+
+    pub(crate) fn delete_key_for_init(key_tag: &str) -> Result<(), CliError> {
+        macos::delete_key_for_init(key_tag)
+    }
+
+    pub(crate) fn sign_payload(
+        key_tag: &str,
+        payload: &[u8],
+    ) -> Result<SecureEnclaveSignature, CliError> {
+        macos::sign_payload(key_tag, payload)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn decode_hex_accepts_lower_and_upper() {
-        assert_eq!(decode_hex("0001feFF").unwrap(), vec![0, 1, 254, 255]);
+    fn hex_lower_encodes_bytes() {
+        assert_eq!(hex_lower(&[0, 1, 254, 255]), "0001feff");
     }
 
     #[test]
-    fn decode_hex_rejects_invalid_input() {
-        assert!(decode_hex("0").is_err());
-        assert!(decode_hex("zz").is_err());
+    fn keychain_os_status_classification_names_actionable_failures() {
+        assert_eq!(
+            secure_enclave::classify_os_status(-34_018),
+            secure_enclave::KeychainFailureKind::MissingEntitlementOrSession
+        );
+        assert_eq!(
+            secure_enclave::classify_os_status(-25_308),
+            secure_enclave::KeychainFailureKind::InteractionUnavailable
+        );
+        assert_eq!(
+            secure_enclave::classify_os_status(-25_293),
+            secure_enclave::KeychainFailureKind::AuthenticationDenied
+        );
+        assert_eq!(
+            secure_enclave::classify_os_status(-25_291),
+            secure_enclave::KeychainFailureKind::SecurityFrameworkUnavailable
+        );
+        assert_eq!(
+            secure_enclave::classify_os_status(-1),
+            secure_enclave::KeychainFailureKind::Other
+        );
     }
 
+    #[cfg(all(not(target_os = "macos"), not(feature = "test-signer")))]
     #[test]
-    fn parse_hex_field_reads_named_line() {
-        let parsed =
-            parse_hex_field("noise\npublic_key_x963_hex=000102\n", "public_key_x963_hex").unwrap();
-        assert_eq!(parsed, vec![0, 1, 2]);
-    }
-
-    #[cfg(not(feature = "test-signer"))]
-    #[test]
-    fn parse_bool_field_reads_created_flag() {
-        assert!(parse_bool_field("created=true\n", "created").unwrap());
-        assert!(!parse_bool_field("created=false\n", "created").unwrap());
-        assert!(parse_bool_field("created=maybe\n", "created").is_err());
+    fn production_hardware_signer_fails_closed_without_macos_security_framework() {
+        let err = secure_enclave::enroll_key_for_init("test").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("hardware-backed signing key unavailable")
+        );
     }
 }

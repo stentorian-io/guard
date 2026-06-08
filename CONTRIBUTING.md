@@ -7,7 +7,7 @@ everything you need to clone, build, test, and submit changes.
 
 - **macOS 14 (Sonoma) or later** — Intel or Apple Silicon for macOS install and
   E2E validation
-- **Rust toolchain** — stable channel, 1.95+ (install via [rustup](https://rustup.rs/))
+- **Rust toolchain** — stable channel, 1.96+ (install via [rustup](https://rustup.rs/))
 - **Node.js 20+** — used by E2E test harnesses (a non-hardened-runtime build; the one from [nodejs.org](https://nodejs.org/) or nvm works)
 - **Docker + Colima** — used by local hooks for Linux lint and E2E parity from
   macOS
@@ -80,7 +80,7 @@ that exercises your change. Before review, let the installed hooks run:
 `pre-commit` covers formatting, clippy, Bash syntax, Linux check/lint parity in
 Docker, macOS and Linux release builds, unit tests, and integration tests;
 `pre-push` covers Linux LD_PRELOAD E2E in Docker and the macOS E2E smoke suite.
-The Linux stages use the same `rust:1.95.0-bookworm` container image locally and
+The Linux stages use the same `rust:1.96.0-bookworm` container image locally and
 in CI, with Cargo caches under `/private/tmp/stt-guard-docker`.
 
 Secret scan and dependency CVE audit are available locally but opt-in because

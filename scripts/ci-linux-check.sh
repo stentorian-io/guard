@@ -8,7 +8,7 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-IMAGE="rust:1.95.0-bookworm"
+IMAGE="rust:1.96.0-bookworm"
 CACHE_ROOT="/private/tmp/stt-guard-docker"
 CARGO_REGISTRY_CACHE="$CACHE_ROOT/cargo-registry"
 RUSTUP_CACHE="$CACHE_ROOT/rustup"

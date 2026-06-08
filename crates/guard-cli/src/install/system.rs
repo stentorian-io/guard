@@ -7,10 +7,13 @@
 #[cfg(not(target_os = "linux"))]
 use std::io::Write;
 #[cfg(not(target_os = "linux"))]
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::MetadataExt;
 #[cfg(not(target_os = "linux"))]
-use std::path::Path;
+use std::os::unix::fs::OpenOptionsExt;
+#[cfg(target_os = "linux")]
 use std::path::PathBuf;
+#[cfg(not(target_os = "linux"))]
+use std::path::{Path, PathBuf};
 #[cfg(not(target_os = "linux"))]
 use std::process::Command;
 
@@ -39,6 +42,8 @@ const PLIST_PATH: &str = paths::PLIST_PATH;
 const BINARIES: &[&str] = paths::INSTALLED_BINARIES;
 #[cfg(not(target_os = "linux"))]
 const DYLIB: &str = paths::HOOK_DYLIB;
+#[cfg(all(not(target_os = "linux"), feature = "test-signer"))]
+const INSTALL_FAIL_STEP_ENV: &str = "STT_GUARD_INSTALL_FAIL_STEP";
 
 /// Check whether the hardened installation is present and internally coherent.
 #[must_use]
@@ -123,13 +128,49 @@ pub fn run_install() -> Result<(), CliError> {
 #[cfg(not(target_os = "linux"))]
 pub fn run_install() -> Result<(), CliError> {
     require_root()?;
-    let service_gid = create_service_user()?;
-    deploy_binaries()?;
-    create_directories(service_gid)?;
-    let enrollment = crate::hardware_signing::enroll_secure_enclave_for_init()?;
-    register_rule_signer(&enrollment, service_gid)?;
-    install_launchdaemon()?;
-    start_daemon()?;
+
+    let mut transaction = InstallTransaction::new()?;
+
+    let result: Result<(), CliError> = (|| {
+        let service_user = create_service_user()?;
+        transaction.record_service_user(service_user.created);
+        maybe_fail_install_step("after-create-service-user")?;
+
+        deploy_binaries(&mut transaction)?;
+        maybe_fail_install_step("after-deploy-binaries")?;
+
+        create_directories(service_user.gid, &mut transaction)?;
+        maybe_fail_install_step("after-create-directories")?;
+
+        let enrollment = crate::hardware_signing::enroll_secure_enclave_for_init()?;
+        transaction.record_hardware_signer_key(enrollment.created);
+        maybe_fail_install_step("after-enroll-signer")?;
+
+        register_rule_signer(&enrollment, service_user.gid, &mut transaction)?;
+        maybe_fail_install_step("after-register-signer")?;
+
+        install_launchdaemon(&mut transaction)?;
+        maybe_fail_install_step("after-install-launchdaemon")?;
+
+        start_daemon(&mut transaction)?;
+        maybe_fail_install_step("after-start-daemon")?;
+
+        Ok(())
+    })();
+
+    if let Err(install_error) = result {
+        eprintln!("\nstt-guard: system install failed: {install_error}");
+
+        let rollback = transaction.rollback();
+        eprintln!("stt-guard: {}", rollback.status_message());
+
+        return Err(CliError::Other(format!(
+            "system install failed: {install_error}; {}",
+            rollback.error_suffix()
+        )));
+    }
+
+    transaction.commit();
     eprintln!("\nstt-guard: system install complete.");
     Ok(())
 }
@@ -150,7 +191,13 @@ fn nix_is_root() -> bool {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn create_service_user() -> Result<u32, CliError> {
+struct ServiceUserInstall {
+    gid: u32,
+    created: bool,
+}
+
+#[cfg(not(target_os = "linux"))]
+fn create_service_user() -> Result<ServiceUserInstall, CliError> {
     // Check if user already exists.
     let check = Command::new("dscl")
         .args([".", "-read", &format!("/Users/{SERVICE_USER}")])
@@ -161,7 +208,10 @@ fn create_service_user() -> Result<u32, CliError> {
         eprintln!("  {SERVICE_USER} user already exists, verifying attributes");
         let gid = service_gid()?;
         set_service_user_attributes(gid)?;
-        gid
+        ServiceUserInstall {
+            gid,
+            created: false,
+        }
     } else {
         eprintln!("  Creating {SERVICE_USER} service user...");
 
@@ -201,7 +251,10 @@ fn create_service_user() -> Result<u32, CliError> {
         }
 
         set_service_user_attributes(uid)?;
-        uid
+        ServiceUserInstall {
+            gid: uid,
+            created: true,
+        }
     };
 
     Ok(gid)
@@ -326,9 +379,11 @@ fn find_available_uid() -> Result<u32, CliError> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn deploy_binaries() -> Result<(), CliError> {
+fn deploy_binaries(transaction: &mut InstallTransaction) -> Result<(), CliError> {
     eprintln!("  Deploying binaries to {BIN_DIR}/...");
 
+    transaction.record_directory_created(Path::new(BIN_DIR))?;
+    transaction.record_path_metadata(Path::new(BIN_DIR))?;
     std::fs::create_dir_all(BIN_DIR)
         .map_err(|e| CliError::Other(format!("create {BIN_DIR}: {e}")))?;
 
@@ -343,6 +398,7 @@ fn deploy_binaries() -> Result<(), CliError> {
                 src.display()
             )));
         }
+        transaction.record_file_replacement(&dst)?;
         std::fs::copy(&src, &dst).map_err(|e| {
             CliError::Other(format!("copy {} -> {}: {e}", src.display(), dst.display()))
         })?;
@@ -352,6 +408,7 @@ fn deploy_binaries() -> Result<(), CliError> {
     let dylib_src = source_dir.join(DYLIB);
     if dylib_src.exists() {
         let dylib_dst = Path::new(BIN_DIR).join(DYLIB);
+        transaction.record_file_replacement(&dylib_dst)?;
         std::fs::copy(&dylib_src, &dylib_dst).map_err(|e| {
             CliError::Other(format!(
                 "copy {} -> {}: {e}",
@@ -362,14 +419,15 @@ fn deploy_binaries() -> Result<(), CliError> {
     }
 
     // Set ownership: root:wheel, 755 for binaries, 644 for dylib.
-    run_cmd(
-        "chown",
-        &["-R", "root:wheel", BIN_DIR],
-        "set binary ownership",
-    )?;
+    run_cmd("chown", &["root:wheel", BIN_DIR], "set binary ownership")?;
     run_cmd("chmod", &["755", BIN_DIR], "set binary dir permissions")?;
     for bin_name in BINARIES {
         let path = Path::new(BIN_DIR).join(bin_name);
+        run_cmd(
+            "chown",
+            &["root:wheel", &path.to_string_lossy()],
+            "set binary ownership",
+        )?;
         run_cmd(
             "chmod",
             &["755", &path.to_string_lossy()],
@@ -378,6 +436,11 @@ fn deploy_binaries() -> Result<(), CliError> {
     }
     let dylib_dst = Path::new(BIN_DIR).join(DYLIB);
     if dylib_dst.exists() {
+        run_cmd(
+            "chown",
+            &["root:wheel", &dylib_dst.to_string_lossy()],
+            "set dylib ownership",
+        )?;
         run_cmd(
             "chmod",
             &["644", &dylib_dst.to_string_lossy()],
@@ -398,10 +461,15 @@ fn source_bin_dir() -> Result<PathBuf, CliError> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn create_directories(service_gid: u32) -> Result<(), CliError> {
+fn create_directories(
+    service_gid: u32,
+    transaction: &mut InstallTransaction,
+) -> Result<(), CliError> {
     let service_owner = format!("{SERVICE_USER}:{service_gid}");
 
     eprintln!("  Creating state directory at {STATE_DIR}/...");
+    transaction.record_directory_created(Path::new(STATE_DIR))?;
+    transaction.record_path_metadata(Path::new(STATE_DIR))?;
     std::fs::create_dir_all(STATE_DIR)
         .map_err(|e| CliError::Other(format!("create {STATE_DIR}: {e}")))?;
     run_cmd(
@@ -412,6 +480,8 @@ fn create_directories(service_gid: u32) -> Result<(), CliError> {
     run_cmd("chmod", &["711", STATE_DIR], "set state dir permissions")?;
 
     eprintln!("  Creating log directory at {LOG_DIR}/...");
+    transaction.record_directory_created(Path::new(LOG_DIR))?;
+    transaction.record_path_metadata(Path::new(LOG_DIR))?;
     std::fs::create_dir_all(LOG_DIR)
         .map_err(|e| CliError::Other(format!("create {LOG_DIR}: {e}")))?;
     run_cmd("chown", &[&service_owner, LOG_DIR], "set log dir ownership")?;
@@ -424,13 +494,15 @@ fn create_directories(service_gid: u32) -> Result<(), CliError> {
 fn register_rule_signer(
     enrollment: &HardwareSignerEnrollment,
     service_gid: u32,
+    transaction: &mut InstallTransaction,
 ) -> Result<(), CliError> {
     eprintln!(
         "  Registering hardware-backed rule signer {}...",
         enrollment.public_key_sha256
     );
-    write_trusted_signer_manifest(enrollment)?;
+    write_trusted_signer_manifest(enrollment, transaction)?;
     let db_path = paths::db_path(Path::new(STATE_DIR));
+    transaction.record_sqlite_replacement(&db_path)?;
     let store = guard_daemon::rule_store::RuleStore::open(&db_path)
         .map_err(|e| CliError::Other(format!("open rule store for signer enrollment: {e}")))?;
     store
@@ -451,7 +523,10 @@ fn register_rule_signer(
 }
 
 #[cfg(not(target_os = "linux"))]
-fn write_trusted_signer_manifest(enrollment: &HardwareSignerEnrollment) -> Result<(), CliError> {
+fn write_trusted_signer_manifest(
+    enrollment: &HardwareSignerEnrollment,
+    transaction: &mut InstallTransaction,
+) -> Result<(), CliError> {
     let path = paths::trusted_rule_signers_path();
     let content = format!(
         "# stt-guard trusted hardware-backed rule signers v1\n{}\t{}\t{}\t{}\n",
@@ -460,6 +535,7 @@ fn write_trusted_signer_manifest(enrollment: &HardwareSignerEnrollment) -> Resul
         hex_lower(&enrollment.public_key_x963),
         enrollment.label.replace(['\t', '\n'], " "),
     );
+    transaction.record_file_replacement(&path)?;
     if let Ok(meta) = std::fs::symlink_metadata(&path) {
         if meta.file_type().is_dir() {
             return Err(CliError::Other(format!(
@@ -504,11 +580,12 @@ fn hex_lower(bytes: &[u8]) -> String {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn install_launchdaemon() -> Result<(), CliError> {
+fn install_launchdaemon(transaction: &mut InstallTransaction) -> Result<(), CliError> {
     eprintln!("  Installing LaunchDaemon ({PLIST_LABEL})...");
 
     let plist_content = crate::install::health::expected_launchdaemon_plist();
 
+    transaction.record_file_replacement(Path::new(PLIST_PATH))?;
     std::fs::write(PLIST_PATH, plist_content)
         .map_err(|e| CliError::Other(format!("write {PLIST_PATH}: {e}")))?;
     run_cmd("chown", &["root:wheel", PLIST_PATH], "set plist ownership")?;
@@ -518,7 +595,7 @@ fn install_launchdaemon() -> Result<(), CliError> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn start_daemon() -> Result<(), CliError> {
+fn start_daemon(transaction: &mut InstallTransaction) -> Result<(), CliError> {
     eprintln!("  Starting daemon...");
 
     // Unload first (ignore failure — may not be loaded yet).
@@ -532,6 +609,454 @@ fn start_daemon() -> Result<(), CliError> {
         "bootstrap LaunchDaemon",
     )?;
 
+    transaction.record_started_launchdaemon();
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+struct InstallTransaction {
+    rollback_actions: Vec<RollbackAction>,
+    backup_dir: PathBuf,
+    pre_existing_guard_state: bool,
+    committed: bool,
+}
+
+#[cfg(not(target_os = "linux"))]
+impl InstallTransaction {
+    fn new() -> Result<Self, CliError> {
+        let backup_nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let backup_dir = std::env::temp_dir().join(format!(
+            "stt-guard-install-rollback-{}-{backup_nonce}",
+            std::process::id(),
+        ));
+        if backup_dir.exists() {
+            std::fs::remove_dir_all(&backup_dir).map_err(|e| {
+                CliError::Other(format!("remove stale {}: {e}", backup_dir.display()))
+            })?;
+        }
+        std::fs::create_dir(&backup_dir)
+            .map_err(|e| CliError::Other(format!("create {}: {e}", backup_dir.display())))?;
+
+        let trusted_rule_signers_path = paths::trusted_rule_signers_path();
+        let pre_existing_guard_state = [
+            Path::new(BIN_DIR),
+            Path::new(STATE_DIR),
+            Path::new(LOG_DIR),
+            Path::new(PLIST_PATH),
+            trusted_rule_signers_path.as_path(),
+        ]
+        .iter()
+        .any(|path| path.exists());
+
+        let mut rollback_actions = Vec::new();
+        if launchdaemon_loaded() {
+            rollback_actions.push(RollbackAction::BootstrapLaunchDaemon);
+        }
+
+        Ok(Self {
+            rollback_actions,
+            backup_dir,
+            pre_existing_guard_state,
+            committed: false,
+        })
+    }
+
+    fn commit(mut self) {
+        self.committed = true;
+        self.remove_backup_dir_after_success();
+    }
+
+    fn rollback(mut self) -> RollbackReport {
+        let mut failures = Vec::new();
+
+        while let Some(action) = self.rollback_actions.pop() {
+            if let Err(err) = action.rollback() {
+                failures.push(err);
+            }
+        }
+
+        if let Err(err) = std::fs::remove_dir_all(&self.backup_dir)
+            && self.backup_dir.exists()
+        {
+            failures.push(format!("remove {}: {err}", self.backup_dir.display()));
+        }
+
+        RollbackReport { failures }
+    }
+
+    fn record_service_user(&mut self, created: bool) {
+        if created && !self.pre_existing_guard_state {
+            self.rollback_actions
+                .push(RollbackAction::RemoveServiceUser);
+        }
+    }
+
+    fn record_started_launchdaemon(&mut self) {
+        self.rollback_actions
+            .push(RollbackAction::BootoutLaunchDaemon);
+    }
+
+    fn record_hardware_signer_key(&mut self, created: bool) {
+        if created {
+            self.rollback_actions
+                .push(RollbackAction::RemoveHardwareSignerKey);
+        }
+    }
+
+    fn record_directory_created(&mut self, path: &Path) -> Result<(), CliError> {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(CliError::Other(format!(
+                        "refusing to use symlinked install directory {}",
+                        path.display()
+                    )));
+                }
+                if !metadata.is_dir() {
+                    return Err(CliError::Other(format!(
+                        "install directory path is not a directory: {}",
+                        path.display()
+                    )));
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                self.rollback_actions
+                    .push(RollbackAction::RemoveDirectoryIfCreated(path.to_path_buf()));
+            }
+            Err(err) => {
+                return Err(CliError::Other(format!(
+                    "inspect {} before install: {err}",
+                    path.display()
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn record_path_metadata(&mut self, path: &Path) -> Result<(), CliError> {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                let path_metadata = PathMetadata::from_metadata(&metadata);
+                self.rollback_actions.push(RollbackAction::RestoreMetadata {
+                    path: path.to_path_buf(),
+                    metadata: path_metadata,
+                });
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(CliError::Other(format!(
+                    "inspect {} metadata before install: {err}",
+                    path.display()
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn record_file_replacement(&mut self, path: &Path) -> Result<(), CliError> {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(CliError::Other(format!(
+                        "refusing to replace symlinked install file {}",
+                        path.display()
+                    )));
+                }
+                if !metadata.is_file() {
+                    return Err(CliError::Other(format!(
+                        "install file path is not a regular file: {}",
+                        path.display()
+                    )));
+                }
+
+                let backup = self.next_backup_path();
+                std::fs::copy(path, &backup).map_err(|e| {
+                    CliError::Other(format!(
+                        "backup {} -> {}: {e}",
+                        path.display(),
+                        backup.display()
+                    ))
+                })?;
+                self.rollback_actions.push(RollbackAction::RestoreFile {
+                    path: path.to_path_buf(),
+                    backup,
+                    metadata: PathMetadata::from_metadata(&metadata),
+                });
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                self.rollback_actions
+                    .push(RollbackAction::RemoveFileIfCreated(path.to_path_buf()));
+            }
+            Err(err) => {
+                return Err(CliError::Other(format!(
+                    "inspect {} before replacement: {err}",
+                    path.display()
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn record_sqlite_replacement(&mut self, db_path: &Path) -> Result<(), CliError> {
+        self.record_file_replacement(db_path)?;
+        for sidecar_path in sqlite_sidecar_paths(db_path) {
+            self.record_file_replacement(&sidecar_path)?;
+        }
+
+        Ok(())
+    }
+
+    fn next_backup_path(&self) -> PathBuf {
+        self.backup_dir
+            .join(format!("backup-{}", self.rollback_actions.len()))
+    }
+
+    fn remove_backup_dir_after_success(&self) {
+        if let Err(err) = std::fs::remove_dir_all(&self.backup_dir)
+            && self.backup_dir.exists()
+        {
+            eprintln!(
+                "stt-guard: warning: could not remove rollback backup directory {}: {err}",
+                self.backup_dir.display()
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+impl Drop for InstallTransaction {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+
+        if self.backup_dir.exists() {
+            eprintln!(
+                "stt-guard: warning: abandoned rollback backup directory {}",
+                self.backup_dir.display()
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+#[derive(Clone, Copy)]
+struct PathMetadata {
+    uid: u32,
+    gid: u32,
+    mode: u32,
+}
+
+#[cfg(not(target_os = "linux"))]
+impl PathMetadata {
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        Self {
+            uid: metadata.uid(),
+            gid: metadata.gid(),
+            mode: metadata.mode() & 0o7777,
+        }
+    }
+
+    fn restore(self, path: &Path) -> Result<(), String> {
+        let owner = format!("{}:{}", self.uid, self.gid);
+        let mode = format!("{:o}", self.mode);
+        run_cmd("chown", &[&owner, &path.to_string_lossy()], "restore owner")
+            .map_err(|e| e.to_string())?;
+        run_cmd("chmod", &[&mode, &path.to_string_lossy()], "restore mode")
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+enum RollbackAction {
+    RemoveFileIfCreated(PathBuf),
+    RestoreFile {
+        path: PathBuf,
+        backup: PathBuf,
+        metadata: PathMetadata,
+    },
+    RemoveDirectoryIfCreated(PathBuf),
+    RestoreMetadata {
+        path: PathBuf,
+        metadata: PathMetadata,
+    },
+    BootoutLaunchDaemon,
+    BootstrapLaunchDaemon,
+    RemoveServiceUser,
+    RemoveHardwareSignerKey,
+}
+
+#[cfg(not(target_os = "linux"))]
+impl RollbackAction {
+    fn rollback(self) -> Result<(), String> {
+        match self {
+            Self::RemoveFileIfCreated(path) => remove_file_if_present(&path),
+            Self::RestoreFile {
+                path,
+                backup,
+                metadata,
+            } => restore_file_from_backup(&path, &backup, metadata),
+            Self::RemoveDirectoryIfCreated(path) => remove_directory_if_empty(&path),
+            Self::RestoreMetadata { path, metadata } => {
+                if !path.exists() {
+                    return Ok(());
+                }
+                metadata.restore(&path)
+            }
+            Self::BootoutLaunchDaemon => {
+                let _ = Command::new("launchctl")
+                    .args(["bootout", &format!("system/{PLIST_LABEL}")])
+                    .output();
+                Ok(())
+            }
+            Self::BootstrapLaunchDaemon => run_cmd(
+                "launchctl",
+                &["bootstrap", "system", PLIST_PATH],
+                "restore pre-existing LaunchDaemon",
+            )
+            .map_err(|e| e.to_string()),
+            Self::RemoveServiceUser => run_cmd(
+                "dscl",
+                &[".", "-delete", &format!("/Users/{SERVICE_USER}")],
+                "remove service user created by failed install",
+            )
+            .map_err(|e| e.to_string()),
+            Self::RemoveHardwareSignerKey => {
+                crate::hardware_signing::delete_secure_enclave_key_for_init()
+                    .map_err(|e| e.to_string())
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+struct RollbackReport {
+    failures: Vec<String>,
+}
+
+#[cfg(not(target_os = "linux"))]
+impl RollbackReport {
+    fn status_message(&self) -> String {
+        if self.failures.is_empty() {
+            return "rollback completed.".to_string();
+        }
+
+        format!(
+            "rollback partially completed with {} failure(s): {}",
+            self.failures.len(),
+            self.failures.join("; ")
+        )
+    }
+
+    fn error_suffix(&self) -> String {
+        if self.failures.is_empty() {
+            return "rollback completed".to_string();
+        }
+
+        format!(
+            "rollback partially completed with {} failure(s): {}",
+            self.failures.len(),
+            self.failures.join("; ")
+        )
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn restore_file_from_backup(
+    path: &Path,
+    backup: &Path,
+    metadata: PathMetadata,
+) -> Result<(), String> {
+    if let Ok(current_metadata) = std::fs::symlink_metadata(path) {
+        if current_metadata.file_type().is_symlink() || current_metadata.is_file() {
+            std::fs::remove_file(path)
+                .map_err(|e| format!("remove changed {}: {e}", path.display()))?;
+        } else {
+            return Err(format!(
+                "cannot restore {}; current path is not a file",
+                path.display()
+            ));
+        }
+    }
+
+    std::fs::copy(backup, path).map_err(|e| {
+        format!(
+            "restore {} from backup {}: {e}",
+            path.display(),
+            backup.display()
+        )
+    })?;
+    metadata.restore(path)?;
+    std::fs::remove_file(backup)
+        .map_err(|e| format!("remove consumed backup {}: {e}", backup.display()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn remove_file_if_present(path: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || metadata.is_file() {
+                std::fs::remove_file(path)
+                    .map_err(|e| format!("remove created file {}: {e}", path.display()))?;
+            }
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!("inspect created file {}: {err}", path.display())),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn remove_directory_if_empty(path: &Path) -> Result<(), String> {
+    match std::fs::remove_dir(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!(
+            "remove created directory {}: {err}",
+            path.display()
+        )),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn launchdaemon_loaded() -> bool {
+    Command::new("launchctl")
+        .args(["print", &format!("system/{PLIST_LABEL}")])
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn sqlite_sidecar_paths(db_path: &Path) -> [PathBuf; 2] {
+    [
+        PathBuf::from(format!("{}-wal", db_path.display())),
+        PathBuf::from(format!("{}-shm", db_path.display())),
+    ]
+}
+
+#[cfg(all(not(target_os = "linux"), feature = "test-signer"))]
+fn maybe_fail_install_step(step: &str) -> Result<(), CliError> {
+    if std::env::var(INSTALL_FAIL_STEP_ENV).as_deref() == Ok(step) {
+        return Err(CliError::Other(format!(
+            "injected install failure at {step}"
+        )));
+    }
+
+    Ok(())
+}
+
+#[cfg(all(not(target_os = "linux"), not(feature = "test-signer")))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "run_install uses one failpoint call shape in test and production builds"
+)]
+fn maybe_fail_install_step(_step: &str) -> Result<(), CliError> {
     Ok(())
 }
 
@@ -547,6 +1072,85 @@ fn run_cmd(program: &str, args: &[&str], description: &str) -> Result<(), CliErr
         return Err(CliError::Other(format!("{description} failed: {stderr}")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[cfg(not(target_os = "linux"))]
+mod tests {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn rollback_restores_replaced_file_and_removes_created_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let existing_path = temp.path().join("existing");
+        let created_path = temp.path().join("created");
+
+        {
+            let mut existing = std::fs::File::create(&existing_path).expect("create existing");
+            existing.write_all(b"before").expect("write existing");
+        }
+        std::fs::set_permissions(&existing_path, std::fs::Permissions::from_mode(0o600))
+            .expect("set mode");
+
+        let mut transaction = super::InstallTransaction::new().expect("transaction");
+        transaction
+            .record_file_replacement(&existing_path)
+            .expect("record existing");
+        std::fs::write(&existing_path, b"after").expect("replace existing");
+
+        transaction
+            .record_file_replacement(&created_path)
+            .expect("record created");
+        std::fs::write(&created_path, b"created").expect("write created");
+
+        let rollback = transaction.rollback();
+
+        assert!(
+            rollback.failures.is_empty(),
+            "unexpected rollback failures: {:?}",
+            rollback.failures
+        );
+        assert_eq!(
+            std::fs::read(&existing_path).expect("read restored"),
+            b"before"
+        );
+        assert!(!created_path.exists(), "created file should be removed");
+        assert_eq!(
+            std::fs::metadata(&existing_path)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn rollback_report_separates_success_and_partial_failure() {
+        let success = super::RollbackReport {
+            failures: Vec::new(),
+        };
+        assert_eq!(success.status_message(), "rollback completed.");
+        assert_eq!(success.error_suffix(), "rollback completed");
+
+        let partial = super::RollbackReport {
+            failures: vec!["restore failed".to_string()],
+        };
+        assert!(
+            partial
+                .status_message()
+                .contains("rollback partially completed with 1 failure(s)")
+        );
+    }
+
+    #[test]
+    fn sqlite_sidecar_paths_follow_sqlite_wal_naming() {
+        let paths = super::sqlite_sidecar_paths(std::path::Path::new("/tmp/stt-guard.db"));
+
+        assert_eq!(paths[0], std::path::PathBuf::from("/tmp/stt-guard.db-wal"));
+        assert_eq!(paths[1], std::path::PathBuf::from("/tmp/stt-guard.db-shm"));
+    }
 }
 
 #[cfg(test)]

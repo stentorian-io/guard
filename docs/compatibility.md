@@ -62,12 +62,12 @@ hash still needs a reviewed registry change before it is embedded in the hook.
 
 | Surface | Reviewed entries | Status | Notes |
 | --- | --- | --- | --- |
-| Rust | 1.95.0 pinned, 1.85.0 minimum, stable channel | Reviewed | CI validates the checked-in support claim. |
+| Rust | 1.96.0 pinned, 1.85.0 minimum, stable channel | Reviewed | CI validates the checked-in support claim. |
 | Rust targets | `aarch64-apple-darwin`, `arm64e-apple-darwin`, `i686-apple-darwin`, `x86_64-apple-darwin`, `x86_64h-apple-darwin` | Tracked | macOS target drift opens review work. |
 | Rust targets | `aarch64-unknown-linux-gnu`, `aarch64-unknown-linux-musl`, `i686-unknown-linux-gnu`, `i686-unknown-linux-musl`, `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl` | Tracked | Linux target drift opens review work. |
 | Xcode | 15, 16, 26 | Reviewed | Upstream release drift opens review issues. |
 | LLVM | 18, 19, 20, 21, 22 | Reviewed | Upstream release drift opens review issues. |
-| Homebrew | `rust` 1.95.0, `llvm` 22.1.6 | Reviewed | Used by packaging and release automation. |
+| Homebrew | `rust` 1.96.0, `llvm` 22.1.6 | Reviewed | Used by packaging and release automation. |
 
 ### Automation Boundaries
 

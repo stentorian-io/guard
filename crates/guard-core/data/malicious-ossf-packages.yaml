@@ -379,7 +379,7 @@
 - kind: deny
   match: ip
   pattern: 54.176.251.240
-  reason: "MAL-2026-5273 supply-chain IOC (FEED)"
+  reason: "MAL-2026-5340 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: ip
@@ -1005,6 +1005,11 @@
   match: exact
   pattern: disrupt-evasive-sterility.ngrok-free.dev
   reason: "MAL-2026-5120 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: dns.subtrace.xyz
+  reason: "MAL-2026-5340 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1640,6 +1645,11 @@
   match: exact
   pattern: still-paper-8832.samjango.workers.dev
   reason: "MAL-2026-189 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: subtrace.xyz
+  reason: "MAL-2026-5340 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact

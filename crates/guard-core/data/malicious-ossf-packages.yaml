@@ -1464,7 +1464,7 @@
 - kind: deny
   match: exact
   pattern: platform.safedep.io
-  reason: "MAL-2025-41421 supply-chain IOC (FEED)"
+  reason: "MAL-2025-5248 supply-chain IOC (FEED)"
   confidence: suspect
 - kind: deny
   match: exact
@@ -1675,6 +1675,11 @@
   match: exact
   pattern: t.m-kosche.com
   reason: "MAL-2026-4174 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: telegram-full-server.onrender.com
+  reason: "MAL-2026-5531 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact

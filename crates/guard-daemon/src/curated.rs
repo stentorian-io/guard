@@ -75,7 +75,7 @@ fn parse_entries(json: &str) -> Result<Vec<AllowlistEntry>, CuratedError> {
 #[cfg(any(test, feature = "test-yaml"))]
 pub fn parse_yaml(yaml: &str) -> Result<Vec<AllowlistEntry>, CuratedError> {
     let file: EntriesFile =
-        serde_yml::from_str(yaml).map_err(|e| CuratedError::Parse(e.to_string()))?;
+        serde_norway::from_str(yaml).map_err(|e| CuratedError::Parse(e.to_string()))?;
     validate_entries(file.entries)
 }
 

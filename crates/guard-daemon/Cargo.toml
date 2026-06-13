@@ -20,7 +20,7 @@ name = "stt-guard-daemon"
 path = "src/main.rs"
 
 [features]
-test-yaml = ["dep:serde_yml"]
+test-yaml = ["dep:serde_norway"]
 test-signer = ["guard-core/test-signer"]
 
 [dependencies]
@@ -42,10 +42,10 @@ rusqlite_migration = { workspace = true }
 flate2 = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
-serde_yml = { workspace = true, optional = true }
+serde_norway = { workspace = true, optional = true }
 
 [build-dependencies]
-serde_yml = { workspace = true }
+serde_norway = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]

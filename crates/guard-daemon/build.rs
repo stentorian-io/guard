@@ -55,8 +55,8 @@ fn main() {
         .unwrap_or_else(|e| panic!("write {}: {e}", yaml_path.display()));
 
     // Parse YAML → JSON so the runtime only needs serde_json
-    let parsed: serde_yml::Value =
-        serde_yml::from_str(&combined).unwrap_or_else(|e| panic!("parse combined yaml: {e}"));
+    let parsed: serde_norway::Value =
+        serde_norway::from_str(&combined).unwrap_or_else(|e| panic!("parse combined yaml: {e}"));
     let json = serde_json::to_string(&parsed).unwrap_or_else(|e| panic!("serialize to json: {e}"));
     let json_path = Path::new(&out_dir).join("rules_combined.json");
     std::fs::write(&json_path, &json)

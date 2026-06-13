@@ -171,11 +171,11 @@ fn run(args: Args) -> Result<(), String> {
         .or_else(|| std::env::var("GITHUB_REPOSITORY").ok());
     let manifest_text = fs::read_to_string(&args.manifest)
         .map_err(|error| format!("read {}: {error}", args.manifest.display()))?;
-    let manifest: Manifest = serde_yml::from_str(&manifest_text)
+    let manifest: Manifest = serde_norway::from_str(&manifest_text)
         .map_err(|error| format!("parse {}: {error}", args.manifest.display()))?;
     let trusted_runtime_text = fs::read_to_string(&args.trusted_runtimes)
         .map_err(|error| format!("read {}: {error}", args.trusted_runtimes.display()))?;
-    let trusted_runtimes: TrustedRuntimeRegistry = serde_yml::from_str(&trusted_runtime_text)
+    let trusted_runtimes: TrustedRuntimeRegistry = serde_norway::from_str(&trusted_runtime_text)
         .map_err(|error| format!("parse {}: {error}", args.trusted_runtimes.display()))?;
 
     validate_manifest(&manifest)?;
@@ -1153,7 +1153,7 @@ runtime_integrity:
 "#;
 
     fn manifest() -> Manifest {
-        serde_yml::from_str(MANIFEST).expect("test manifest")
+        serde_norway::from_str(MANIFEST).expect("test manifest")
     }
 
     #[test]

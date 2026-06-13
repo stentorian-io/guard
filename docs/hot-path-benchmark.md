@@ -26,7 +26,9 @@ constant in the same PR and explain why the new number is acceptable.
 The cache-hit benchmark measures the hook's libc decision path for an IPv4
 socket address. It exercises address decoding, cache access, and policy
 evaluation against a realistic allowlist snapshot. It does not contact the
-daemon and does not perform live network I/O.
+daemon and does not perform live network I/O. The reported p99 is computed from
+small batch-average per-call timings so isolated hosted-runner scheduler pauses
+do not dominate the regression signal.
 
 The live-wrap benchmark is a context measurement. It wraps a real Node.js
 process and measures repeated connections to a curated registry host. That

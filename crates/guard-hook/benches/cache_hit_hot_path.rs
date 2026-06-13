@@ -13,6 +13,10 @@
 //!    deltas into an `hdrhistogram::Histogram::<u64>::new(3)`, then `eprintln!`
 //!    p50/p95/p99/p99.9/max as a separate stderr line that
 //!    `scripts/bench-hot-path.sh` parses.
+//!  * Each histogram sample is a small batch average. Hosted macOS runners can
+//!    pause the process for milliseconds; single-call p99 then tracks scheduler
+//!    noise rather than sustained hot-path cost. Batching still catches real
+//!    slowdowns while filtering isolated VM preemption.
 //!  * `ALLOWLIST` is a process-global `OnceLock` (guard-hook/src/lib.rs:50);
 //!    set it ONCE before the bench loop or the bench measures a noise floor
 //!    (RESEARCH §Pitfall 6). We do this via a single warm-up call to
@@ -56,6 +60,9 @@ use hdrhistogram::Histogram;
 use std::hint::black_box;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
+
+#[cfg(target_os = "macos")]
+const HISTOGRAM_SAMPLE_BATCH_SIZE: u64 = 64;
 
 #[cfg(target_os = "macos")]
 /// Build a realistic per-run snapshot's entry mix — `CuratedAllow` + `UserAllow`,
@@ -142,32 +149,41 @@ fn cache_hit_bench(c: &mut Criterion) {
         )
     };
 
-    // hdrhistogram captures per-iteration nanos from inside iter_custom.
+    // hdrhistogram captures per-call nanos from inside iter_custom.
     // sigfig=3 → 0.1% precision; ample for µs-scale measurements.
     let mut hist = Histogram::<u64>::new(3).expect("hdrhistogram new");
 
     c.bench_function("cache_hit/decide_for_sockaddr", |b| {
         b.iter_custom(|iters| {
             let mut total_ns: u64 = 0;
-            for _ in 0..iters {
+            let mut remaining = iters;
+
+            while remaining > 0 {
+                let batch_iters = remaining.min(HISTOGRAM_SAMPLE_BATCH_SIZE);
                 let t0 = Instant::now();
-                // Pass an empty Vec — `test_decide_for_sockaddr` does
-                // `let _ = ALLOWLIST.set(entries)` which silently no-ops once
-                // ALLOWLIST is set, so the empty Vec is never read. The bench
-                // measures `decide_for_sockaddr` against the warm-up's
-                // ALLOWLIST.
-                let _v = unsafe {
-                    test_decide_for_sockaddr(
-                        Vec::new(),
-                        black_box((&raw const sa).cast::<libc::sockaddr>()),
-                        black_box(addrlen),
-                    )
-                };
-                let dt = t0.elapsed();
-                let ns = u64::try_from(dt.as_nanos()).unwrap_or(u64::MAX);
-                hist.record(ns).ok();
-                total_ns = total_ns.saturating_add(ns);
+
+                for _ in 0..batch_iters {
+                    // Pass an empty Vec — `test_decide_for_sockaddr` does
+                    // `let _ = ALLOWLIST.set(entries)` which silently no-ops once
+                    // ALLOWLIST is set, so the empty Vec is never read. The bench
+                    // measures `decide_for_sockaddr` against the warm-up's
+                    // ALLOWLIST.
+                    let _v = unsafe {
+                        test_decide_for_sockaddr(
+                            Vec::new(),
+                            black_box((&raw const sa).cast::<libc::sockaddr>()),
+                            black_box(addrlen),
+                        )
+                    };
+                }
+
+                let batch_ns = u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                let sample_ns = batch_ns / batch_iters;
+                hist.record(sample_ns).ok();
+                total_ns = total_ns.saturating_add(batch_ns);
+                remaining -= batch_iters;
             }
+
             std::time::Duration::from_nanos(total_ns)
         });
     });

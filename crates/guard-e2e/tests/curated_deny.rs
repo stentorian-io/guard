@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! ALLOW-06 abuse-pattern deny e2e test.
 //!
 //! `*.workers.dev` is in the curated YAML deny list (

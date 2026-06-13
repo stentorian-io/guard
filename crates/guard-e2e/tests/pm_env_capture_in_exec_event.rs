@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! v0.1 milestone audit BLOCKER #1 (LOG-02 + VAL-01) — focused capture proof.
 //!
 //! Sibling to `log_writer_pm_env_denylist_e2e.rs`. That test focuses on the

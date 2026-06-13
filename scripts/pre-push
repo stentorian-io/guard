@@ -10,6 +10,12 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+if [ -f "$HOME/.cargo/env" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.cargo/env"
+fi
+export PATH="$HOME/.cargo/bin:/opt/homebrew/opt/rustup/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 source "$REPO_ROOT/scripts/check-cache.sh"
 
 RED='\033[0;31m'
@@ -64,14 +70,6 @@ branch_scan_base() {
   git merge-base --fork-point '@{upstream}' HEAD 2>/dev/null \
     || git merge-base origin/main HEAD 2>/dev/null \
     || git merge-base main HEAD 2>/dev/null
-}
-
-run_e2e() {
-  local test_name="$1"
-  local label="$2"
-  cargo test -p guard-e2e --features test-signer --test "$test_name" --release -- --nocapture \
-    || fail "$label"
-  pass "$label"
 }
 
 run_hot_path_benchmark() {
@@ -145,23 +143,9 @@ scripts/ci-linux-e2e.sh \
   || fail "Linux E2E parity"
 pass "Linux E2E parity"
 
-cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer \
-  || fail "build release binaries with test signer"
-pass "build release binaries with test signer"
-
-run_e2e ua_parser_js_demo "VAL-01 ua-parser-js@0.7.29 demo"
-run_e2e workers_dev_validation "VAL-02 workers.dev allowlist-bleed"
-run_e2e failure_modes_corrupt_snapshot "VAL-04 D-12 corrupt snapshot"
-run_e2e failure_modes_hardened_exec "VAL-04 D-10 hardened-binary exec gap"
-
-if [ "${STT_GUARD_PRE_PUSH_RUN_PRIVILEGED:-0}" = "1" ]; then
-  STT_GUARD_E2E_PRIVILEGED_INSTALL=1 \
-    cargo test -p guard-e2e --features test-signer --test hardened_install_health --release -- --nocapture \
-    || fail "VAL-05 privileged init and install health"
-  pass "VAL-05 privileged init and install health"
-else
-  warn "skipping VAL-05 privileged init and install health (set STT_GUARD_PRE_PUSH_RUN_PRIVILEGED=1 to run)"
-fi
+scripts/ci-macos-vm-e2e.sh \
+  || fail "macOS VM E2E parity"
+pass "macOS VM E2E parity"
 
 run_hot_path_benchmark
 

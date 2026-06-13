@@ -1,14 +1,14 @@
-//! Hardware-backed rule signing for production persistent user rules.
+//! OS-backed rule signing for production persistent user rules.
 //!
-//! macOS production support uses a non-exportable Secure Enclave P-256 key in
-//! the invoking user's keychain. The system installer enrolls/locates that key and
+//! macOS production support uses an OS Keychain-backed P-256 signing key in the
+//! invoking user's keychain. The system installer enrolls/locates that key and
 //! registers the public half with the daemon's trusted signer registry. Later
-//! rule approvals sign the canonical rule payload with the private key; the
-//! daemon can verify but cannot forge those signatures.
+//! rule approvals sign the canonical rule payload through Security.framework;
+//! the daemon can verify but cannot forge those signatures.
 
 use guard_core::{
     ManagementActionPayloadV1, RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256, RuleSignaturePayloadV1,
-    RuleSignatureV1, SIGNER_KIND_SECURE_ENCLAVE, SnapshotSignaturePayloadV1, SnapshotSignatureV1,
+    RuleSignatureV1, SIGNER_KIND_MACOS_KEYCHAIN, SnapshotSignaturePayloadV1, SnapshotSignatureV1,
     canonical_management_action_payload_bytes, canonical_rule_payload_bytes,
     canonical_snapshot_payload_bytes, sha256_hex,
 };
@@ -18,7 +18,7 @@ use crate::CliError;
 const KEY_TAG: &str = "com.stentorian-guard.rule-signing.v1";
 const DISABLE_HARDWARE_SIGNER_ENV: &str = "STT_GUARD_DISABLE_HARDWARE_SIGNER";
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct HardwareSignerEnrollment {
     pub signer_kind: String,
     pub public_key_x963: Vec<u8>,
@@ -27,13 +27,13 @@ pub struct HardwareSignerEnrollment {
     pub created: bool,
 }
 
-/// Enroll or locate the init user's Secure Enclave signing key.
+/// Enroll or locate the init user's macOS Keychain signing key.
 ///
 /// # Errors
 ///
-/// Returns an error when hardware signing is disabled or Security.framework
-/// cannot enroll/export the hardware-backed key.
-pub fn enroll_secure_enclave_for_init() -> Result<HardwareSignerEnrollment, CliError> {
+/// Returns an error when OS-backed signing is disabled or Security.framework
+/// cannot enroll/export the device-local key.
+pub fn enroll_keychain_signer_for_init() -> Result<HardwareSignerEnrollment, CliError> {
     #[cfg(feature = "test-signer")]
     {
         return enroll_test_simulator_for_init();
@@ -41,23 +41,23 @@ pub fn enroll_secure_enclave_for_init() -> Result<HardwareSignerEnrollment, CliE
 
     #[cfg(not(feature = "test-signer"))]
     {
-        enroll_secure_enclave_for_init_impl()
+        enroll_keychain_signer_for_init_impl()
     }
 }
 
 #[cfg(not(feature = "test-signer"))]
-fn enroll_secure_enclave_for_init_impl() -> Result<HardwareSignerEnrollment, CliError> {
+fn enroll_keychain_signer_for_init_impl() -> Result<HardwareSignerEnrollment, CliError> {
     if hardware_signer_disabled() {
         return Err(unavailable_error());
     }
 
-    let enrollment = secure_enclave::enroll_key_for_init(KEY_TAG)?;
+    let enrollment = macos_keychain::enroll_key_for_init(KEY_TAG)?;
     let public_key_x963 = enrollment.public_key_x963;
     let created = enrollment.created;
     let public_key_sha256 = sha256_hex(&public_key_x963);
 
     Ok(HardwareSignerEnrollment {
-        signer_kind: SIGNER_KIND_SECURE_ENCLAVE.to_string(),
+        signer_kind: SIGNER_KIND_MACOS_KEYCHAIN.to_string(),
         public_key_x963,
         public_key_sha256,
         label: init_user_label(),
@@ -80,12 +80,12 @@ fn enroll_test_simulator_for_init() -> Result<HardwareSignerEnrollment, CliError
     })
 }
 
-/// Delete the init user's Secure Enclave signing key created by this install.
+/// Delete the init user's macOS Keychain signing key created by this install.
 ///
 /// # Errors
 ///
 /// Returns an error when the platform helper cannot remove the key.
-pub fn delete_secure_enclave_key_for_init() -> Result<(), CliError> {
+pub fn delete_keychain_signer_for_init() -> Result<(), CliError> {
     #[cfg(feature = "test-signer")]
     {
         return Ok(());
@@ -93,27 +93,27 @@ pub fn delete_secure_enclave_key_for_init() -> Result<(), CliError> {
 
     #[cfg(not(feature = "test-signer"))]
     {
-        secure_enclave::delete_key_for_init(KEY_TAG)
+        macos_keychain::delete_key_for_init(KEY_TAG)
     }
 }
 
-/// Sign a persistent rule payload with the hardware-backed key.
+/// Sign a persistent rule payload with the OS-backed key.
 ///
 /// # Errors
 ///
-/// Returns an error when hardware signing is disabled, payload canonicalization
-/// fails, or Security.framework cannot sign with the hardware-backed key.
+/// Returns an error when OS-backed signing is disabled, payload canonicalization
+/// fails, or Security.framework cannot sign with the device-local key.
 pub fn sign_rule_payload(payload: &RuleSignaturePayloadV1) -> Result<RuleSignatureV1, CliError> {
     if hardware_signer_disabled() {
         return Err(unavailable_error());
     }
     let payload_bytes = canonical_rule_payload_bytes(payload)
         .map_err(|e| CliError::Other(format!("canonical rule payload encode failed: {e}")))?;
-    let signed_payload = secure_enclave::sign_payload(KEY_TAG, &payload_bytes)?;
+    let signed_payload = macos_keychain::sign_payload(KEY_TAG, &payload_bytes)?;
 
     Ok(RuleSignatureV1 {
         scheme: RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
-        signer_kind: SIGNER_KIND_SECURE_ENCLAVE.to_string(),
+        signer_kind: SIGNER_KIND_MACOS_KEYCHAIN.to_string(),
         public_key_sha256: sha256_hex(&signed_payload.public_key_x963),
         public_key_x963: signed_payload.public_key_x963,
         signature_der: signed_payload.signature_der,
@@ -122,12 +122,12 @@ pub fn sign_rule_payload(payload: &RuleSignaturePayloadV1) -> Result<RuleSignatu
     })
 }
 
-/// Sign a snapshot payload with the hardware-backed key.
+/// Sign a snapshot payload with the OS-backed key.
 ///
 /// # Errors
 ///
-/// Returns an error when hardware signing is disabled, payload canonicalization
-/// fails, or Security.framework cannot sign with the hardware-backed key.
+/// Returns an error when OS-backed signing is disabled, payload canonicalization
+/// fails, or Security.framework cannot sign with the device-local key.
 pub fn sign_snapshot_payload(
     payload: &SnapshotSignaturePayloadV1,
 ) -> Result<SnapshotSignatureV1, CliError> {
@@ -136,11 +136,11 @@ pub fn sign_snapshot_payload(
     }
     let payload_bytes = canonical_snapshot_payload_bytes(payload)
         .map_err(|e| CliError::Other(format!("canonical snapshot payload encode failed: {e}")))?;
-    let signed_payload = secure_enclave::sign_payload(KEY_TAG, &payload_bytes)?;
+    let signed_payload = macos_keychain::sign_payload(KEY_TAG, &payload_bytes)?;
 
     Ok(SnapshotSignatureV1 {
         scheme: RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
-        signer_kind: SIGNER_KIND_SECURE_ENCLAVE.to_string(),
+        signer_kind: SIGNER_KIND_MACOS_KEYCHAIN.to_string(),
         public_key_sha256: sha256_hex(&signed_payload.public_key_x963),
         public_key_x963: signed_payload.public_key_x963,
         signature_der: signed_payload.signature_der,
@@ -149,12 +149,12 @@ pub fn sign_snapshot_payload(
     })
 }
 
-/// Sign a management action payload with the hardware-backed key.
+/// Sign a management action payload with the OS-backed key.
 ///
 /// # Errors
 ///
-/// Returns an error when hardware signing is disabled, payload canonicalization
-/// fails, or Security.framework cannot sign with the hardware-backed key.
+/// Returns an error when OS-backed signing is disabled, payload canonicalization
+/// fails, or Security.framework cannot sign with the device-local key.
 pub fn sign_management_action_payload(
     payload: &ManagementActionPayloadV1,
 ) -> Result<RuleSignatureV1, CliError> {
@@ -166,11 +166,11 @@ pub fn sign_management_action_payload(
             "canonical management-action payload encode failed: {e}"
         ))
     })?;
-    let signed_payload = secure_enclave::sign_payload(KEY_TAG, &payload_bytes)?;
+    let signed_payload = macos_keychain::sign_payload(KEY_TAG, &payload_bytes)?;
 
     Ok(RuleSignatureV1 {
         scheme: RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
-        signer_kind: SIGNER_KIND_SECURE_ENCLAVE.to_string(),
+        signer_kind: SIGNER_KIND_MACOS_KEYCHAIN.to_string(),
         public_key_sha256: sha256_hex(&signed_payload.public_key_x963),
         public_key_x963: signed_payload.public_key_x963,
         signature_der: signed_payload.signature_der,
@@ -185,7 +185,7 @@ fn hardware_signer_disabled() -> bool {
 
 fn unavailable_error() -> CliError {
     CliError::Other(
-        "hardware-backed signing key unavailable; software-only rule signing is unsupported".into(),
+        "OS-backed signing key unavailable; software-only rule signing is unsupported".into(),
     )
 }
 
@@ -194,11 +194,11 @@ fn init_user_label() -> String {
     if unsafe { libc::geteuid() } == 0 {
         if let Ok(user) = std::env::var("SUDO_USER") {
             if user != "root" {
-                return format!("macOS Secure Enclave ({user})");
+                return format!("macOS Keychain ({user})");
             }
         }
     }
-    "macOS Secure Enclave".to_string()
+    "macOS Keychain".to_string()
 }
 
 #[cfg(test)]
@@ -213,17 +213,17 @@ fn hex_lower(bytes: &[u8]) -> String {
 }
 
 #[cfg_attr(feature = "test-signer", allow(dead_code))]
-pub(crate) mod secure_enclave {
+pub(crate) mod macos_keychain {
     use crate::CliError;
 
     #[derive(Debug, PartialEq, Eq)]
-    pub(crate) struct SecureEnclaveEnrollment {
+    pub(crate) struct KeychainEnrollment {
         pub(crate) public_key_x963: Vec<u8>,
         pub(crate) created: bool,
     }
 
     #[derive(Debug, PartialEq, Eq)]
-    pub(crate) struct SecureEnclaveSignature {
+    pub(crate) struct KeychainSignature {
         pub(crate) public_key_x963: Vec<u8>,
         pub(crate) signature_der: Vec<u8>,
     }
@@ -256,20 +256,16 @@ pub(crate) mod secure_enclave {
         use std::ptr;
 
         use super::{
-            KeychainFailureKind, SecureEnclaveEnrollment, SecureEnclaveSignature,
-            classify_os_status,
+            KeychainEnrollment, KeychainFailureKind, KeychainSignature, classify_os_status,
         };
         use crate::CliError;
 
-        const PROMPT: &str = "Stentorian Guard needs your hardware-backed rule-signing key.";
+        const PROMPT: &str = "Stentorian Guard needs your OS-backed rule-signing key.";
 
         const ERR_SEC_SUCCESS: i32 = 0;
         const ERR_SEC_ITEM_NOT_FOUND: i32 = -25_300;
         const K_CF_NUMBER_INT_TYPE: i32 = 9;
         const K_SEC_KEY_OPERATION_TYPE_SIGN: u32 = 0;
-        const K_SEC_ACCESS_CONTROL_USER_PRESENCE: u64 = 1 << 0;
-        const K_SEC_ACCESS_CONTROL_PRIVATE_KEY_USAGE: u64 = 1 << 30;
-
         type CFIndex = c_long;
         type CFAllocatorRef = *const c_void;
         type CFDataRef = *const c_void;
@@ -280,7 +276,6 @@ pub(crate) mod secure_enclave {
         type CFStringRef = *const c_void;
         type CFTypeRef = *const c_void;
         type OSStatus = i32;
-        type SecAccessControlRef = *const c_void;
         type SecKeyAlgorithm = CFStringRef;
         type SecKeyRef = *const c_void;
 
@@ -306,6 +301,7 @@ pub(crate) mod secure_enclave {
         #[link(name = "CoreFoundation", kind = "framework")]
         unsafe extern "C" {
             static kCFBooleanTrue: CFTypeRef;
+            static kCFBooleanFalse: CFTypeRef;
             static kCFTypeDictionaryKeyCallBacks: CFDictionaryKeyCallBacks;
             static kCFTypeDictionaryValueCallBacks: CFDictionaryValueCallBacks;
 
@@ -345,15 +341,12 @@ pub(crate) mod secure_enclave {
 
         #[link(name = "Security", kind = "framework")]
         unsafe extern "C" {
-            static kSecAttrAccessControl: CFStringRef;
-            static kSecAttrAccessibleWhenUnlockedThisDeviceOnly: CFStringRef;
             static kSecAttrApplicationTag: CFStringRef;
             static kSecAttrIsPermanent: CFStringRef;
+            static kSecAttrIsExtractable: CFStringRef;
             static kSecAttrKeySizeInBits: CFStringRef;
             static kSecAttrKeyType: CFStringRef;
             static kSecAttrKeyTypeECSECPrimeRandom: CFStringRef;
-            static kSecAttrTokenID: CFStringRef;
-            static kSecAttrTokenIDSecureEnclave: CFStringRef;
             static kSecClass: CFStringRef;
             static kSecClassKey: CFStringRef;
             static kSecPrivateKeyAttrs: CFStringRef;
@@ -361,12 +354,6 @@ pub(crate) mod secure_enclave {
             static kSecUseOperationPrompt: CFStringRef;
             static kSecKeyAlgorithmECDSASignatureMessageX962SHA256: SecKeyAlgorithm;
 
-            fn SecAccessControlCreateWithFlags(
-                allocator: CFAllocatorRef,
-                protection: CFTypeRef,
-                flags: u64,
-                error: *mut CFErrorRef,
-            ) -> SecAccessControlRef;
             fn SecItemCopyMatching(query: CFDictionaryRef, result: *mut CFTypeRef) -> OSStatus;
             fn SecItemDelete(query: CFDictionaryRef) -> OSStatus;
             fn SecKeyCopyExternalRepresentation(
@@ -391,20 +378,18 @@ pub(crate) mod secure_enclave {
             ) -> bool;
         }
 
-        pub(super) fn enroll_key_for_init(
-            key_tag: &str,
-        ) -> Result<SecureEnclaveEnrollment, CliError> {
+        pub(super) fn enroll_key_for_init(key_tag: &str) -> Result<KeychainEnrollment, CliError> {
             let identity_guard = InitUserIdentityGuard::enter()?;
 
             let enrollment = if let Some(existing_key) = find_private_key(key_tag)? {
-                SecureEnclaveEnrollment {
+                KeychainEnrollment {
                     public_key_x963: export_public_key_x963(existing_key.as_ptr())?,
                     created: false,
                 }
             } else {
                 let key = create_private_key(key_tag)?;
 
-                SecureEnclaveEnrollment {
+                KeychainEnrollment {
                     public_key_x963: export_public_key_x963(key.as_ptr())?,
                     created: true,
                 }
@@ -425,7 +410,7 @@ pub(crate) mod secure_enclave {
             match status {
                 ERR_SEC_SUCCESS | ERR_SEC_ITEM_NOT_FOUND => Ok(()),
                 other => Err(security_status_error(
-                    "delete Secure Enclave signing key",
+                    "delete macOS Keychain signing key",
                     other,
                 )),
             }
@@ -434,10 +419,10 @@ pub(crate) mod secure_enclave {
         pub(super) fn sign_payload(
             key_tag: &str,
             payload: &[u8],
-        ) -> Result<SecureEnclaveSignature, CliError> {
+        ) -> Result<KeychainSignature, CliError> {
             let key = find_private_key(key_tag)?.ok_or_else(|| {
                 CliError::Other(
-                    "hardware-backed signing key unavailable; run the installer to enroll Secure Enclave signing"
+                    "OS-backed signing key unavailable; run the installer to enroll macOS Keychain signing"
                         .into(),
                 )
             })?;
@@ -448,7 +433,7 @@ pub(crate) mod secure_enclave {
             };
             if !supports_signing {
                 return Err(CliError::Other(
-                    "Secure Enclave key does not support ECDSA P-256 SHA-256 signing".into(),
+                    "macOS Keychain key does not support ECDSA P-256 SHA-256 signing".into(),
                 ));
             }
 
@@ -463,11 +448,11 @@ pub(crate) mod secure_enclave {
                 )
             };
             if signature.is_null() {
-                return Err(cf_error_or_message("Secure Enclave signing", error));
+                return Err(cf_error_or_message("macOS Keychain signing", error));
             }
             let signature = OwnedCf::<CFDataRef>::new(signature, signature);
 
-            Ok(SecureEnclaveSignature {
+            Ok(KeychainSignature {
                 public_key_x963: export_public_key_x963(key.as_ptr())?,
                 signature_der: cf_data_bytes(signature.as_ptr())?,
             })
@@ -482,14 +467,13 @@ pub(crate) mod secure_enclave {
                 ERR_SEC_SUCCESS => Ok(Some(OwnedCf::<SecKeyRef>::new(item, item))),
                 ERR_SEC_ITEM_NOT_FOUND => Ok(None),
                 other => Err(security_status_error(
-                    "look up Secure Enclave signing key",
+                    "look up macOS Keychain signing key",
                     other,
                 )),
             }
         }
 
         fn create_private_key(key_tag: &str) -> Result<OwnedCf<SecKeyRef>, CliError> {
-            let access_control = create_access_control()?;
             let key_size_bits: i32 = 256;
             let key_size = cf_number_int(key_size_bits)?;
             let tag = cf_data(key_tag.as_bytes())?;
@@ -502,13 +486,13 @@ pub(crate) mod secure_enclave {
             );
             cf_dictionary_set(
                 private_attrs.as_ptr(),
-                unsafe { kSecAttrApplicationTag },
-                tag.as_ptr(),
+                unsafe { kSecAttrIsExtractable },
+                unsafe { kCFBooleanFalse },
             );
             cf_dictionary_set(
                 private_attrs.as_ptr(),
-                unsafe { kSecAttrAccessControl },
-                access_control.as_ptr(),
+                unsafe { kSecAttrApplicationTag },
+                tag.as_ptr(),
             );
 
             let attrs = cf_dictionary()?;
@@ -520,9 +504,6 @@ pub(crate) mod secure_enclave {
                 unsafe { kSecAttrKeySizeInBits },
                 key_size.as_ptr(),
             );
-            cf_dictionary_set(attrs.as_ptr(), unsafe { kSecAttrTokenID }, unsafe {
-                kSecAttrTokenIDSecureEnclave
-            });
             cf_dictionary_set(
                 attrs.as_ptr(),
                 unsafe { kSecPrivateKeyAttrs },
@@ -533,36 +514,12 @@ pub(crate) mod secure_enclave {
             let key = unsafe { SecKeyCreateRandomKey(attrs.as_ptr(), &raw mut error) };
             if key.is_null() {
                 return Err(cf_error_or_message(
-                    "create Secure Enclave signing key",
+                    "create macOS Keychain signing key",
                     error,
                 ));
             }
 
             Ok(OwnedCf::<SecKeyRef>::new(key, key))
-        }
-
-        fn create_access_control() -> Result<OwnedCf<SecAccessControlRef>, CliError> {
-            let mut error = ptr::null();
-            let flags = K_SEC_ACCESS_CONTROL_PRIVATE_KEY_USAGE | K_SEC_ACCESS_CONTROL_USER_PRESENCE;
-            let access_control = unsafe {
-                SecAccessControlCreateWithFlags(
-                    ptr::null(),
-                    kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-                    flags,
-                    &raw mut error,
-                )
-            };
-            if access_control.is_null() {
-                return Err(cf_error_or_message(
-                    "create Secure Enclave access control",
-                    error,
-                ));
-            }
-
-            Ok(OwnedCf::<SecAccessControlRef>::new(
-                access_control,
-                access_control,
-            ))
         }
 
         fn key_lookup_query(
@@ -584,9 +541,6 @@ pub(crate) mod secure_enclave {
             cf_dictionary_set(query.as_ptr(), unsafe { kSecAttrKeyType }, unsafe {
                 kSecAttrKeyTypeECSECPrimeRandom
             });
-            cf_dictionary_set(query.as_ptr(), unsafe { kSecAttrTokenID }, unsafe {
-                kSecAttrTokenIDSecureEnclave
-            });
             cf_dictionary_set(
                 query.as_ptr(),
                 unsafe { kSecUseOperationPrompt },
@@ -606,7 +560,7 @@ pub(crate) mod secure_enclave {
             let public_key = unsafe { SecKeyCopyPublicKey(private_key) };
             if public_key.is_null() {
                 return Err(CliError::Other(
-                    "Secure Enclave key has no public key".into(),
+                    "macOS Keychain key has no public key".into(),
                 ));
             }
             let public_key = OwnedCf::<SecKeyRef>::new(public_key, public_key);
@@ -616,7 +570,7 @@ pub(crate) mod secure_enclave {
                 unsafe { SecKeyCopyExternalRepresentation(public_key.as_ptr(), &raw mut error) };
             if data.is_null() {
                 return Err(cf_error_or_message(
-                    "export Secure Enclave public key",
+                    "export macOS Keychain public key",
                     error,
                 ));
             }
@@ -850,7 +804,7 @@ pub(crate) mod secure_enclave {
                 let target_group_id = sudo_id("SUDO_GID")?;
                 if target_user_id == 0 {
                     return Err(CliError::Other(
-                        "hardware signer enrollment requires running the system install via sudo from the target user; refusing to enroll a root-owned signing key"
+                        "Keychain enrollment requires running the system install via sudo from the target user; refusing to enroll a root-owned signing key"
                             .into(),
                     ));
                 }
@@ -860,9 +814,12 @@ pub(crate) mod secure_enclave {
 
                 set_effective_gid(
                     target_group_id,
-                    "switch to sudo user's group for signer enrollment",
+                    "switch to sudo user's group for Keychain enrollment",
                 )?;
-                set_effective_uid(target_user_id, "switch to sudo user for signer enrollment")?;
+                set_effective_uid(
+                    target_user_id,
+                    "switch to sudo user for Keychain enrollment",
+                )?;
 
                 Ok(Self {
                     restore_uid: Some(installer_user_id),
@@ -876,11 +833,11 @@ pub(crate) mod secure_enclave {
                 std::mem::forget(self);
 
                 if let Some(uid) = user_id_to_restore {
-                    set_effective_uid(uid, "restore root user after signer enrollment")?;
+                    set_effective_uid(uid, "restore root user after Keychain enrollment")?;
                 }
 
                 if let Some(gid) = group_id_to_restore {
-                    set_effective_gid(gid, "restore root group after signer enrollment")?;
+                    set_effective_gid(gid, "restore root group after Keychain enrollment")?;
                 }
 
                 Ok(())
@@ -905,7 +862,7 @@ pub(crate) mod secure_enclave {
             std::env::var(name)
                 .map_err(|_| {
                     CliError::Other(
-                        "hardware signer enrollment requires SUDO_UID/SUDO_GID from the target install user"
+                        "Keychain enrollment requires SUDO_UID/SUDO_GID from the target install user"
                             .into(),
                     )
                 })?
@@ -938,12 +895,10 @@ pub(crate) mod secure_enclave {
 
     #[cfg(not(target_os = "macos"))]
     mod macos {
-        use super::{SecureEnclaveEnrollment, SecureEnclaveSignature};
+        use super::{KeychainEnrollment, KeychainSignature};
         use crate::CliError;
 
-        pub(super) fn enroll_key_for_init(
-            _key_tag: &str,
-        ) -> Result<SecureEnclaveEnrollment, CliError> {
+        pub(super) fn enroll_key_for_init(_key_tag: &str) -> Result<KeychainEnrollment, CliError> {
             Err(super::super::unavailable_error())
         }
 
@@ -954,12 +909,12 @@ pub(crate) mod secure_enclave {
         pub(super) fn sign_payload(
             _key_tag: &str,
             _payload: &[u8],
-        ) -> Result<SecureEnclaveSignature, CliError> {
+        ) -> Result<KeychainSignature, CliError> {
             Err(super::super::unavailable_error())
         }
     }
 
-    pub(crate) fn enroll_key_for_init(key_tag: &str) -> Result<SecureEnclaveEnrollment, CliError> {
+    pub(crate) fn enroll_key_for_init(key_tag: &str) -> Result<KeychainEnrollment, CliError> {
         macos::enroll_key_for_init(key_tag)
     }
 
@@ -970,7 +925,7 @@ pub(crate) mod secure_enclave {
     pub(crate) fn sign_payload(
         key_tag: &str,
         payload: &[u8],
-    ) -> Result<SecureEnclaveSignature, CliError> {
+    ) -> Result<KeychainSignature, CliError> {
         macos::sign_payload(key_tag, payload)
     }
 }
@@ -987,34 +942,34 @@ mod tests {
     #[test]
     fn keychain_os_status_classification_names_actionable_failures() {
         assert_eq!(
-            secure_enclave::classify_os_status(-34_018),
-            secure_enclave::KeychainFailureKind::MissingEntitlementOrSession
+            macos_keychain::classify_os_status(-34_018),
+            macos_keychain::KeychainFailureKind::MissingEntitlementOrSession
         );
         assert_eq!(
-            secure_enclave::classify_os_status(-25_308),
-            secure_enclave::KeychainFailureKind::InteractionUnavailable
+            macos_keychain::classify_os_status(-25_308),
+            macos_keychain::KeychainFailureKind::InteractionUnavailable
         );
         assert_eq!(
-            secure_enclave::classify_os_status(-25_293),
-            secure_enclave::KeychainFailureKind::AuthenticationDenied
+            macos_keychain::classify_os_status(-25_293),
+            macos_keychain::KeychainFailureKind::AuthenticationDenied
         );
         assert_eq!(
-            secure_enclave::classify_os_status(-25_291),
-            secure_enclave::KeychainFailureKind::SecurityFrameworkUnavailable
+            macos_keychain::classify_os_status(-25_291),
+            macos_keychain::KeychainFailureKind::SecurityFrameworkUnavailable
         );
         assert_eq!(
-            secure_enclave::classify_os_status(-1),
-            secure_enclave::KeychainFailureKind::Other
+            macos_keychain::classify_os_status(-1),
+            macos_keychain::KeychainFailureKind::Other
         );
     }
 
     #[cfg(all(not(target_os = "macos"), not(feature = "test-signer")))]
     #[test]
-    fn production_hardware_signer_fails_closed_without_macos_security_framework() {
-        let err = secure_enclave::enroll_key_for_init("test").unwrap_err();
+    fn production_keychain_signer_fails_closed_without_macos_security_framework() {
+        let err = macos_keychain::enroll_key_for_init("test").unwrap_err();
         assert!(
             err.to_string()
-                .contains("hardware-backed signing key unavailable")
+                .contains("OS-backed signing key unavailable")
         );
     }
 }

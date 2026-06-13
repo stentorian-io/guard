@@ -3,7 +3,7 @@
 //! Format (text, 2+ lines):
 //!   line 1: absolute path of the current snapshot CBOR file
 //!   line 2: digest=<64-hex-char SHA-256 of the snapshot bytes>
-//!   line 3+: hardware-backed snapshot signature metadata for per-run manifests
+//!   line 3+: OS- or hardware-mediated snapshot signature metadata for per-run manifests
 //!
 //! Reader (dylib, plan 06) opens the manifest, parses these lines, opens
 //! the snapshot path, computes SHA-256 of its bytes, verifies it matches the

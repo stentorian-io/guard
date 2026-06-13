@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! M005-S01: `guard_getaddrinfo` daemon-proxied DNS tests.
 //!
 //! Verifies that getaddrinfo interpose correctly proxies through the daemon:

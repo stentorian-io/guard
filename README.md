@@ -157,7 +157,7 @@ The installer downloads the latest GitHub Release artifact for your Mac,
 verifies it against the release checksum file, and then runs the hardened system
 install with `sudo`. The system install creates a `_stt_guard` service user,
 deploys root-owned binaries to `/usr/local/libexec/stt-guard/`, enrolls a
-non-exportable Secure Enclave rule-signing key for the invoking sudo user,
+device-local macOS Keychain rule-signing key for the invoking user,
 registers that public signer with the daemon state, and starts the daemon as a
 LaunchDaemon. This is the only supported consumer deployment mode — it prevents
 a compromised process from tampering with the guard itself. See the

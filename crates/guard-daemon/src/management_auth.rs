@@ -2,7 +2,7 @@
 //!
 //! The system daemon socket may be world-writable in system mode, so peer
 //! authentication and codesign checks are only the transport boundary. Mutating
-//! management requests must also carry a user-approved, hardware-backed
+//! management requests must also carry a user-approved, OS- or hardware-mediated
 //! signature over the exact action the daemon is about to perform.
 
 use guard_core::{

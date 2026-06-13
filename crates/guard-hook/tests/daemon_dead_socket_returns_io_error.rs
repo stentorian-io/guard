@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 // crates/guard-hook/tests/daemon_dead_socket_returns_io_error.rs
 //
 // v0.7 / VAL-05 D-38 verification spike.

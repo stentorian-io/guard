@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! E2E: curated (built-in) rule disable/enable via IPC and CLI.
 //!
 //! Tests the full lifecycle: disable → list shows disabled → enable → list

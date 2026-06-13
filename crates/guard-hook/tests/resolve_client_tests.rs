@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! `send_resolve_sync` round-trip tests (gap-closure 02-08).
 //!
 //! Stub daemon: spawn a thread that accepts on a tempdir Unix socket,

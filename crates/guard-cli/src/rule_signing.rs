@@ -1,9 +1,9 @@
 //! Rule authenticity signing for persistent user rules.
 //!
-//! Production signing must use hardware-backed private keys. This vertical slice
-//! enforces that contract by failing closed when no hardware provider is
+//! Production signing must use OS- or hardware-mediated private keys. This vertical slice
+//! enforces that contract by failing closed when no platform signer is
 //! available; CI can opt into the explicit `test-signer` feature to exercise the
-//! signed-rule flow without claiming hardware coverage.
+//! signed-rule flow without claiming production signer coverage.
 
 use crate::CliError;
 use guard_core::{

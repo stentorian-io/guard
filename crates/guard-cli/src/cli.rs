@@ -31,10 +31,10 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
-    /// Install or repair the hardened system deployment. Requires root.
+    /// Install or repair the hardened system deployment.
     ///
-    /// Creates the service identity, deploys root-owned binaries, and starts
-    /// the daemon through the supported platform service manager.
+    /// Enrolls the user Keychain signer, requests sudo, deploys root-owned binaries,
+    /// and starts the daemon through the supported platform service manager.
     #[command(hide = true)]
     InstallSystem {
         /// Skip interactive confirmation.

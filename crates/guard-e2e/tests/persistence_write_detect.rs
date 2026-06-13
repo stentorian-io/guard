@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Verify that file writes to macOS persistence paths are detected and
 //! logged as `persistence-write` gap records.
 //!

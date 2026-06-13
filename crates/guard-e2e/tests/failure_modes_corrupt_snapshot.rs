@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! v0.5 — corrupt-snapshot failure mode.
 //!
 //! Verifies the dylib's "fail closed for tracked subtrees on snapshot decode

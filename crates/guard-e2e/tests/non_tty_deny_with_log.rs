@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! v0.3 — non-TTY stt-guard wrap → no prompt → deny-with-log.
 //!
 //! AC-NTTY-02 / D-74: When stdin is not a TTY, stt-guard wrap sets `is_tty=false`;

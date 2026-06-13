@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! M005-S05: POL-03 5-second batching/dedup window.
 //!
 //! Spawns two concurrent dns.lookup calls to the same (host, port) inside one

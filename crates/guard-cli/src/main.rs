@@ -31,13 +31,16 @@ fn real_main() -> Result<i32, CliError> {
 
     match cli.cmd {
         Cmd::InstallSystem { yes } => {
-            guard_cli::install::system::print_plan();
-            if !yes {
+            let should_prompt = !yes && !guard_cli::install::system::running_privileged_install();
+            if should_prompt {
+                guard_cli::install::system::print_plan();
                 eprintln!();
                 if !guard_cli::tty::confirm("Proceed?")? {
                     eprintln!("Aborted.");
                     return Ok(0);
                 }
+            } else if !guard_cli::install::system::running_privileged_install() {
+                guard_cli::install::system::print_plan();
             }
             eprintln!();
             guard_cli::install::system::run_install()?;

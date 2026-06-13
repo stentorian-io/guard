@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Build the release dylib and verify __DATA,__interpose section size
 //! matches the expected number of records × 16 bytes.
 //!

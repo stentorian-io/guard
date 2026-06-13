@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! v0.1 milestone audit BLOCKER #1 closure (LOG-02 + VAL-01) — dylib-side
 //! `pm_env` capture lands AND obvious secrets never cross the IPC wire.
 //!

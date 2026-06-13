@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! v0.3 — SIGINT cancels parked prompt.
 //!
 //! Test: SIGINT is sent to the stt-guard wrap process while a prompt is parked.

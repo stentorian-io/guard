@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! v0.3 cap rejection: 65th `PromptChannelInit` must
 //! Err-Ack with the exact message `"max concurrent channels reached (64)"`.
 //!

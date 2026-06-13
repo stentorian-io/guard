@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! v0.5 — allowlist-bleed via *.workers.dev.
 //!
 //! Sibling test to v0.2's `curated_deny.rs` (do NOT extend that

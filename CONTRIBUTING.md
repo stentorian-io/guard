@@ -79,9 +79,9 @@ Local validation is stage-based. During iteration, run the focused Cargo command
 that exercises your change. Before review, let the installed hooks run:
 `pre-commit` covers formatting, clippy, Bash syntax, Linux check/lint parity in
 Docker, macOS and Linux release builds, unit tests, and integration tests;
-`pre-push` covers Linux LD_PRELOAD E2E in Docker and the macOS E2E smoke suite.
-The Linux stages use the same `rust:1.96.0-bookworm` container image locally and
-in CI, with Cargo caches under `/private/tmp/stt-guard-docker`.
+`pre-push` covers Linux LD_PRELOAD E2E in Docker and the Tart-backed macOS E2E
+suite. The Linux stages use the same `rust:1.96.0-bookworm` container image
+locally and in CI, with Cargo caches under `/private/tmp/stt-guard-docker`.
 
 Secret scan and dependency CVE audit are available locally but opt-in because
 they can be network-heavy:
@@ -276,10 +276,14 @@ The script clones `ghcr.io/cirruslabs/macos-tahoe-base:latest` into
 `stt-guard-macos-base` on first use, creates a disposable per-run clone, enables
 passwordless sudo inside that clone, copies the repo into the guest, and runs
 the macOS E2E suite including `hardened_install_health` with
-`STT_GUARD_E2E_PRIVILEGED_INSTALL=1`. It fails the run if
+the production signer path before rebuilding test-signer binaries for the
+remaining harness tests. The runner opens the VM UI by default and launches the
+guest suite through the user's GUI security session so macOS Keychain enrollment
+can create the production signing key. It fails the run if
 `hardened_install_health` reports an internal `SKIP:` because the local no-skip
 target must prove privileged install health rather than accept a missing test
-capability. Override the base image or credentials with
+capability. Set `STT_GUARD_MACOS_VM_GRAPHICS=0` only for headless
+test-signer-only debugging. Override the base image or credentials with
 `STT_GUARD_MACOS_VM_BASE`, `STT_GUARD_MACOS_VM_BASE_NAME`,
 `STT_GUARD_MACOS_VM_USER`, and `STT_GUARD_MACOS_VM_PASSWORD`.
 

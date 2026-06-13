@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! M005-S05: `AllowAlwaysMachine` verdict via PTY prompt.
 //!
 //! Test: sends "2\n" (`AllowAlwaysMachine`) into the PTY prompt. The daemon

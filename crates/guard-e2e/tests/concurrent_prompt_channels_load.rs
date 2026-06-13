@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! v0.3: 32 concurrent stt-guard wrap invocations don't
 //! starve the daemon's worker pool.
 //!

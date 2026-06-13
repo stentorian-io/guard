@@ -250,8 +250,9 @@ Benchmark results:
 
 Methodology: criterion 0.8.2, hdrhistogram 7.5.4. Sample size and warm-up are
 criterion defaults (100 samples, 3s warm-up, 5s measurement_time, 95% CI on the
-mean). p99 is computed via hdrhistogram::value_at_quantile(0.99) on
-per-iteration nanoseconds captured inside b.iter_custom(...).
+mean). p99 is computed via hdrhistogram::value_at_quantile(0.99) on small
+batch-average per-call nanoseconds captured inside b.iter_custom(...), which
+keeps hosted-runner scheduler stalls from dominating the cache-hit metric.
 
 Reproduce: ./scripts/bench-hot-path.sh on any Apple Silicon Mac with the
 workspace built.

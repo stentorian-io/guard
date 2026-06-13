@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! M003-S08: open/openat hook overhead benchmark.
 //!
 //! Measures the overhead of the `open()` interpose on non-persistence paths

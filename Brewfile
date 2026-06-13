@@ -12,6 +12,12 @@ brew "trufflehog"
 brew "colima"
 brew "docker"
 
+# macOS E2E parity runs in disposable Tart VMs.
+tap "cirruslabs/cli"
+tap "hudochenkov/sshpass"
+brew "cirruslabs/cli/tart"
+brew "hudochenkov/sshpass/sshpass"
+
 # Conventional-commits changelog generator (cliff.toml).
 brew "git-cliff"
 

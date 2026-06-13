@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Learn-mode hard-deny: curated `BuiltinDeny` still blocks under `--learn`.
 //!
 //! `*.workers.dev` is in the curated YAML deny list with tier `BuiltinDeny`.

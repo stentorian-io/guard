@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! ENF-04 success criterion #1: ambient (non-wrapped) traffic is unaffected
 //! when stt-guard-daemon is running.
 //!

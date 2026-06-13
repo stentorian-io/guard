@@ -1,6 +1,6 @@
 #[cfg(not(feature = "test-signer"))]
 #[test]
-fn production_rule_signing_fails_without_hardware_provider() {
+fn production_rule_signing_fails_without_platform_signer() {
     let payload = guard_core::RuleSignaturePayloadV1::new(
         "allow",
         "exact",
@@ -17,7 +17,7 @@ fn production_rule_signing_fails_without_hardware_provider() {
         .expect_err("production must not fall back to software signing");
     assert!(
         err.to_string()
-            .contains("hardware-backed signing key unavailable")
+            .contains("OS-backed signing key unavailable")
     );
 
     let snapshot_payload = guard_core::SnapshotSignaturePayloadV1::new(
@@ -29,7 +29,7 @@ fn production_rule_signing_fails_without_hardware_provider() {
         .expect_err("production snapshot signing must not fall back to software signing");
     assert!(
         err.to_string()
-            .contains("hardware-backed signing key unavailable")
+            .contains("OS-backed signing key unavailable")
     );
 }
 
@@ -62,7 +62,7 @@ fn test_signer_feature_signs_with_explicit_simulator_kind() {
 #[test]
 fn test_signer_feature_enrolls_simulator_for_system_install() {
     let enrollment =
-        guard_cli::hardware_signing::enroll_secure_enclave_for_init().expect("test enrollment");
+        guard_cli::hardware_signing::enroll_keychain_signer_for_init().expect("test enrollment");
 
     assert_eq!(
         enrollment.signer_kind,

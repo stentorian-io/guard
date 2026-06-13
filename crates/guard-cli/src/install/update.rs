@@ -196,29 +196,28 @@ fn run_downloaded_system_installer(cli_path: &Path) -> Result<(), CliError> {
     }
 
     run_status(
-        "sudo",
-        [
-            cli_path.as_os_str(),
-            OsStr::new("install-system"),
-            OsStr::new("--yes"),
-        ],
+        cli_path.as_os_str(),
+        [OsStr::new("install-system"), OsStr::new("--yes")],
         "run system installer",
     )
 }
 
-fn run_capture<I, S>(program: &str, args: I) -> Result<Vec<u8>, CliError>
+fn run_capture<P, I, S>(program: P, args: I) -> Result<Vec<u8>, CliError>
 where
+    P: AsRef<OsStr>,
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    let program = program.as_ref();
+    let program_display = program.to_string_lossy();
     let output = Command::new(program)
         .args(args)
         .output()
-        .map_err(|e| CliError::Other(format!("run {program}: {e}")))?;
+        .map_err(|e| CliError::Other(format!("run {program_display}: {e}")))?;
 
     if !output.status.success() {
         return Err(CliError::Other(format!(
-            "{program} failed: {}",
+            "{program_display} failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         )));
     }
@@ -226,12 +225,13 @@ where
     Ok(output.stdout)
 }
 
-fn run_status<I, S>(program: &str, args: I, description: &str) -> Result<(), CliError>
+fn run_status<P, I, S>(program: P, args: I, description: &str) -> Result<(), CliError>
 where
+    P: AsRef<OsStr>,
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let status = Command::new(program)
+    let status = Command::new(program.as_ref())
         .args(args)
         .status()
         .map_err(|e| CliError::Other(format!("{description}: {e}")))?;

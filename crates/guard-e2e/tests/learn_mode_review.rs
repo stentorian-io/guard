@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Learn-mode end-of-run review: staged hosts are presented for interactive
 //! allow/deny/skip decisions after the wrapped process exits.
 //!

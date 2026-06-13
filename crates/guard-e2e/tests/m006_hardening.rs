@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! M006 E2E tests — production hardening.
 //!
 //! Test 1: Feed refresh timer spawn message appears in daemon stderr.

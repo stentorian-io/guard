@@ -22,7 +22,7 @@ pub use policy::{
 pub use rule_signature::{
     MANAGEMENT_ACTION_PAYLOAD_SCHEMA_V1, ManagementActionPayloadV1,
     RULE_SIGNATURE_PAYLOAD_SCHEMA_V1, RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256, RuleSignatureError,
-    RuleSignaturePayloadV1, RuleSignaturePolicy, RuleSignatureV1, SIGNER_KIND_SECURE_ENCLAVE,
+    RuleSignaturePayloadV1, RuleSignaturePolicy, RuleSignatureV1, SIGNER_KIND_MACOS_KEYCHAIN,
     SIGNER_KIND_SECURITY_KEY, SIGNER_KIND_TEST_SIMULATOR, SIGNER_KIND_TPM,
     SNAPSHOT_SIGNATURE_PAYLOAD_SCHEMA_V1, SnapshotSignaturePayloadV1, SnapshotSignatureV1,
     canonical_management_action_payload_bytes, canonical_rule_payload_bytes,

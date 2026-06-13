@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Learn-mode TTY gate: `--learn` without a TTY exits 64 (`EX_USAGE`).
 //!
 //! `--learn` requires an interactive terminal because the end-of-run review

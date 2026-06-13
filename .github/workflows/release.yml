@@ -217,7 +217,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          install_output="$(sudo -n ./local-release/stt-guard install-system --yes 2>&1)"
+          install_output="$(./local-release/stt-guard install-system --yes 2>&1)"
           install_status=$?
           set -e
           printf '%s\n' "$install_output"
@@ -225,12 +225,6 @@ jobs:
             /usr/local/libexec/stt-guard/stt-guard status
             exit 0
           fi
-          case "$install_output" in
-            *"create Secure Enclave signing key failed"*|*"hardware-backed signing key unavailable"*|*"failed to generate asymmetric keypair"*)
-              echo "::notice::Skipping full hardened system install because this runner cannot enroll a Secure Enclave signing key."
-              exit 0
-              ;;
-          esac
           exit "$install_status"
 
       - name: Cleanup hardened system install smoke

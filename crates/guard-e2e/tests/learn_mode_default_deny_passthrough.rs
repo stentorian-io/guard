@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Learn-mode passthrough: `DefaultDeny` hosts are allowed and staged.
 //!
 //! In normal mode `discord.com` triggers `DefaultDeny` (not in any allowlist).

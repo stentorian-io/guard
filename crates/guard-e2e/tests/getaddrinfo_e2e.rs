@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! M005-S05: E2E tests for the full getaddrinfo → daemon Resolve → connect flow.
 //!
 //! These tests exercise the complete DNS proxy pipeline introduced in M005:

@@ -131,22 +131,22 @@ mod tests {
     #[test]
     fn parses_comments_blank_lines_and_entries() {
         let entries =
-            parse_trusted_signers("# c\n\nabc\tsecure-enclave\t0001ff\tlabel\n").expect("parse");
+            parse_trusted_signers("# c\n\nabc\tmacos-keychain\t0001ff\tlabel\n").expect("parse");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].public_key_sha256, "abc");
-        assert_eq!(entries[0].signer_kind, "secure-enclave");
+        assert_eq!(entries[0].signer_kind, "macos-keychain");
         assert_eq!(entries[0].public_key_x963_hex, "0001ff");
     }
 
     #[test]
     fn matches_fingerprint_kind_and_public_key() {
-        let contents = "abc\tsecure-enclave\t0001ff\tlabel\n";
+        let contents = "abc\tmacos-keychain\t0001ff\tlabel\n";
         assert!(
-            trusted_signer_matches(contents, "abc", "secure-enclave", Some(&[0, 1, 255]))
+            trusted_signer_matches(contents, "abc", "macos-keychain", Some(&[0, 1, 255]))
                 .expect("match")
         );
         assert!(
-            !trusted_signer_matches(contents, "abc", "secure-enclave", Some(&[0, 1, 254]))
+            !trusted_signer_matches(contents, "abc", "macos-keychain", Some(&[0, 1, 254]))
                 .expect("mismatch")
         );
         assert!(
@@ -158,11 +158,11 @@ mod tests {
     #[test]
     fn rejects_malformed_public_key_hex() {
         assert_eq!(
-            parse_trusted_signers("abc\tsecure-enclave\t0\n").unwrap_err(),
+            parse_trusted_signers("abc\tmacos-keychain\t0\n").unwrap_err(),
             TrustedSignerManifestError::OddLengthPublicKeyHex
         );
         assert_eq!(
-            parse_trusted_signers("abc\tsecure-enclave\tzz\n").unwrap_err(),
+            parse_trusted_signers("abc\tmacos-keychain\tzz\n").unwrap_err(),
             TrustedSignerManifestError::InvalidPublicKeyHex
         );
     }

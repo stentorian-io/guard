@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! E2E: `stt-guard status` emits human-readable state when daemon is running.
 
 #[cfg(target_os = "macos")]

@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! M003-S08: Cross-slice integration tests verifying that all M003 features
 //! work together in a single wrapped process tree.
 //!

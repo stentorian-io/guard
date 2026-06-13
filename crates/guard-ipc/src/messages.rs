@@ -660,7 +660,7 @@ pub struct InstallInfo {
     pub artifacts: Vec<InstallArtifact>,
 }
 
-/// Hardware-backed signing health reported by daemon status.
+/// OS-backed signing health reported by daemon status.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SigningInfo {
     pub configured: bool,

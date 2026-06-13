@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 // crates/guard-e2e/tests/bench_hot_path_e2e.rs
 //
 // v0.7 live-wrap E2E benchmark.

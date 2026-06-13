@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! E2E: stt-guard status reports Operational when the daemon is running,
 //! and includes the Counters section.
 

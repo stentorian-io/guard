@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! M003-S01-T06: verify that exfiltration via `send()` and write()-to-socket
 //! is blocked by the expanded hook surface.
 //!

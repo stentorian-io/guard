@@ -9,22 +9,15 @@ mod elf;
 pub mod macho;
 
 #[cfg(target_os = "linux")]
-pub use elf::{
-    BinaryTier, BlockReason, SuspiciousReason, classify_path, classify_path_with_registry,
-};
+pub use elf::{BinaryTier, BlockReason, SuspiciousReason, classify_path};
 #[cfg(target_os = "macos")]
-pub use macho::{
-    BinaryTier, BlockReason, SuspiciousReason, classify_path, classify_path_with_registry,
-};
+pub use macho::{BinaryTier, BlockReason, SuspiciousReason, classify_path};
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 mod unsupported {
-    use crate::trusted_runtime::TrustedRuntimeRegistry;
-
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum BinaryTier {
         T0Blocked(BlockReason),
-        T1TrustedRuntime,
         T2AllowedScript,
         T2CleanNativeMachO,
         T3SuspiciousUnknown(SuspiciousReason),
@@ -52,19 +45,10 @@ mod unsupported {
         }
     }
 
-    pub fn classify_path(path: *const libc::c_char) -> BinaryTier {
-        classify_path_with_registry(path, crate::trusted_runtime::registry())
-    }
-
-    pub fn classify_path_with_registry(
-        _path: *const libc::c_char,
-        _trusted_registry: &TrustedRuntimeRegistry,
-    ) -> BinaryTier {
+    pub fn classify_path(_path: *const libc::c_char) -> BinaryTier {
         BinaryTier::T0Blocked(BlockReason::UnsupportedPlatform)
     }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub use unsupported::{
-    BinaryTier, BlockReason, SuspiciousReason, classify_path, classify_path_with_registry,
-};
+pub use unsupported::{BinaryTier, BlockReason, SuspiciousReason, classify_path};

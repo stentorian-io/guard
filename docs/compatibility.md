@@ -3,14 +3,13 @@
 Stentorian Guard depends on platform behavior that can drift outside this
 repository: macOS DYLD and hardened-runtime behavior, CPU architecture names,
 Rust and LLVM target support, Xcode releases, installer packaging, reviewed
-runtime identities, and future Linux support expansion. The checked-in source of
+scanner behavior, and future Linux support expansion. The checked-in source of
 truth is
 [`compatibility-matrix.yaml`](../compatibility-matrix.yaml).
 
 The manifest records the OS, CPU, syscall-pattern, and toolchain entries that
-maintainers have already reviewed. Runtime integrity hashes are validated
-against this same review ledger before they can be embedded in the hook. The
-manifest does not grant runtime support by itself; it keeps scanner coverage issue
+maintainers have already reviewed. The manifest does not grant runtime support
+by itself; it keeps scanner coverage issue
 [#1](https://github.com/stentorian-io/guard/issues/1) and Linux coverage issue
 [#2](https://github.com/stentorian-io/guard/issues/2) connected to upstream
 platform changes.
@@ -47,17 +46,6 @@ automation, but they are not automatically supported or trusted.
 | Syscall and exec scanning | Linux ELF exec scanner | Unsupported, fail closed | Linux scanner support is tracked separately. |
 | Syscall and exec scanning | unknown executable classification | Covered on macOS | Unknown or malformed non-script exec targets fail closed. |
 
-### Runtime Integrity
-
-Runtime entries are reviewed release identities for trusted-runtime hash
-eligibility. They do not add trusted hashes by themselves. Each exact executable
-hash still needs a reviewed registry change before it is embedded in the hook.
-
-| Runtime | Reviewed releases | Status | Trust boundary |
-| --- | --- | --- | --- |
-| Node | 25, 24, 22, 20 | Tracked for runtime integrity | Hash additions require PR review. |
-| Python | 3.14, 3.13, 3.12, 3.11 | Tracked for runtime integrity | Hash additions require PR review. |
-
 ### Toolchains And Packaging
 
 | Surface | Reviewed entries | Status | Notes |
@@ -74,7 +62,6 @@ hash still needs a reviewed registry change before it is embedded in the hook.
 | Surface | Automation | Review boundary |
 | --- | --- | --- |
 | Platform and toolchain compatibility | Weekly scans compare upstream release sources with the reviewed compatibility matrix. | New entries open review issues. The matrix changes only through normal PR review. |
-| Runtime integrity allowlists | Runtime release sources are scanned for drift and the trusted-runtime registry is validated against reviewed releases. | New runtime releases and hashes are not trusted automatically. |
 | Threat-intel deny rules | Nightly OSV.dev feed updates open PRs when new malicious-package IOCs are found. | Deny-rule changes land through PR review before being baked into a release. |
 | Curated allow rules | Registry and CDN allowlists are versioned with the codebase and visible through status commands. | Adding or changing an allow rule requires review because it expands what protected processes may reach. |
 
@@ -95,7 +82,7 @@ CI validation, docs, or Linux planning needs follow-up, and then update the
 manifest in a normal PR.
 
 Expected labels include `compatibility`, `cpu-arch`, `scanner-review`, `macos`,
-`toolchain`, `runtime`, `integrity`, `lifecycle`, and `linux`.
+`toolchain`, `lifecycle`, and `linux`.
 
 ## CI Validation
 
@@ -103,12 +90,6 @@ Expected labels include `compatibility`, `cpu-arch`, `scanner-review`, `macos`,
 the platform matrix the project currently claims to support. The compatibility
 tracker opens review issues when upstream sources drift; CI is the single place
 that proves reviewed support still builds and tests.
-
-CI also validates the trusted runtime registry against the compatibility
-manifest. A hash entry for a runtime executable is only valid when its
-`name`/`version` matches a reviewed runtime release in the manifest. New runtime
-releases may be detected automatically, but new trusted hashes must still land
-through a reviewed change.
 
 Linux entries represent Ubuntu `glibc` `x86_64` smoke coverage plus tracked
 review work for `aarch64`, `musl`, and kernel series. The production Linux

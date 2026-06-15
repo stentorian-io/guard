@@ -4,13 +4,11 @@
 //! Mach-O clean-unknown decisions, so non-script exec targets fail closed until
 //! an ELF scanner exists.
 
-use crate::{macho_flags, trusted_runtime};
-use trusted_runtime::TrustedRuntimeRegistry;
+use crate::macho_flags;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryTier {
     T0Blocked(BlockReason),
-    T1TrustedRuntime,
     T2AllowedScript,
     T2CleanNativeMachO,
     T3SuspiciousUnknown(SuspiciousReason),
@@ -71,19 +69,6 @@ impl SuspiciousReason {
 /// `path` must either be null or point to a valid NUL-terminated C string.
 #[must_use]
 pub unsafe fn classify_path(path: *const libc::c_char) -> BinaryTier {
-    unsafe { classify_path_with_registry(path, trusted_runtime::registry()) }
-}
-
-/// Classify a Linux exec target path with an explicit trusted runtime registry.
-///
-/// # Safety
-///
-/// `path` must either be null or point to a valid NUL-terminated C string.
-#[must_use]
-pub unsafe fn classify_path_with_registry(
-    path: *const libc::c_char,
-    _trusted_registry: &TrustedRuntimeRegistry,
-) -> BinaryTier {
     if path.is_null() {
         return BinaryTier::T0Blocked(BlockReason::UnreadablePath);
     }

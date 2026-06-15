@@ -371,7 +371,7 @@ man stt-guard-daemon   # daemon internals
 
 ### Compatibility matrix and tracking
 
-Reviewed OS, runtime, CPU architecture, scanner, toolchain, and packaging
+Reviewed OS, CPU architecture, scanner, toolchain, and packaging
 coverage is tracked in the compatibility matrix. The README keeps the support
 summary short; the comprehensive tables live in
 [docs/compatibility.md](docs/compatibility.md), with platform-specific notes in
@@ -380,12 +380,11 @@ summary short; the comprehensive tables live in
 
 Scheduled automation keeps that matrix current without expanding trust by
 itself. The weekly compatibility tracker opens human-review issues for new OS,
-runtime, CPU architecture, Rust, LLVM, Xcode, and Linux lifecycle
+CPU architecture, Rust, LLVM, Xcode, and Linux lifecycle
 entries. Nightly threat-intel updates open PRs for new malicious-package IOCs.
-New releases, runtime hashes, allow rules, deny rules, and support claims are
+New releases, allow rules, deny rules, and support claims are
 only accepted after review, and the PR validation workflow verifies that the
-checked-in compatibility metadata and trusted-runtime registry still match
-those claims.
+checked-in compatibility metadata still matches those claims.
 
 ### Threat intelligence
 

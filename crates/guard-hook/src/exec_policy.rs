@@ -22,8 +22,6 @@ pub unsafe fn check_exec_target(path: *const libc::c_char) -> ExecDecision {
     match unsafe { scanner::classify_path(path) } {
         BinaryTier::T0Blocked(reason) => ExecDecision::Block(reason),
         BinaryTier::T3SuspiciousUnknown(reason) => ExecDecision::Trace(reason),
-        BinaryTier::T1TrustedRuntime
-        | BinaryTier::T2AllowedScript
-        | BinaryTier::T2CleanNativeMachO => ExecDecision::Allow,
+        BinaryTier::T2AllowedScript | BinaryTier::T2CleanNativeMachO => ExecDecision::Allow,
     }
 }

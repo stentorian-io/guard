@@ -61,7 +61,7 @@ if [[ "${1:-}" == "--dry-run" ]]; then
     if [[ -z "$DRY_CACHE_HIT_P99" ]]; then
         echo "dry-run FAIL: cache-hit grep ('p99=[0-9]+') did not match the synthetic sample." >&2
         echo "  sample: $SAMPLE_CACHE_HIT" >&2
-        echo "  fix: update the grep regex in this script OR the eprintln! in crates/guard-hook/benches/cache_hit_hot_path.rs so they agree." >&2
+        echo "  fix: update the grep regex in this script OR the eprintln! in crates/guard-bench/benches/cache_hit_hot_path.rs so they agree." >&2
         exit 1
     fi
     if [[ -z "$DRY_LIVE_WRAP_P99" ]]; then
@@ -158,7 +158,7 @@ cargo build --workspace --release
 # (cargo bench defaults to the bench profile, which is release-like — RESEARCH Pitfall 7.)
 # ---------------------------------------------------------------------------
 echo "## bench-hot-path: cache-hit (binding number) ..." >&2
-cargo bench -p guard-hook --bench cache_hit_hot_path 2>&1 \
+cargo bench -p guard-bench --bench cache_hit_hot_path 2>&1 \
     | tee "$SCRATCH/bench-cache-hit.out"
 
 # ---------------------------------------------------------------------------

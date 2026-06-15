@@ -345,7 +345,15 @@ jobs:
         with:
           shared-key: release-build-${{ matrix.platform }}
       - name: cargo build workspace (release)
-        run: cargo build --workspace --release
+        run: cargo build --workspace --release --timings
+      - name: Upload Cargo timing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-release-${{ matrix.platform }}
+          path: target/cargo-timings/*.html
+          if-no-files-found: warn
+          retention-days: 7
       - name: Upload release binaries
         uses: actions/upload-artifact@v4
         with:
@@ -378,7 +386,15 @@ jobs:
           fetch-depth: 1
       - uses: ./.github/actions/setup-rust
       - name: cargo test unit targets
-        run: cargo test --workspace --exclude guard-e2e --lib --bins --quiet
+        run: cargo test --workspace --exclude guard-e2e --lib --bins --quiet --timings
+      - name: Upload Cargo timing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-unit-tests
+          path: target/cargo-timings/*.html
+          if-no-files-found: warn
+          retention-days: 7
 
   integration_tests:
     name: Integration tests
@@ -399,7 +415,15 @@ jobs:
           fetch-depth: 1
       - uses: ./.github/actions/setup-rust
       - name: cargo test integration targets
-        run: cargo test --workspace --exclude guard-e2e --tests --quiet
+        run: cargo test --workspace --exclude guard-e2e --tests --quiet --timings
+      - name: Upload Cargo timing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-integration-tests
+          path: target/cargo-timings/*.html
+          if-no-files-found: warn
+          retention-days: 7
 
   linux_e2e_tests:
     name: Linux E2E tests
@@ -497,7 +521,15 @@ jobs:
               RUST_BACKTRACE="${RUST_BACKTRACE:-}" \
             cargo test -p guard-e2e --test hardened_install_health --release -- --nocapture
       - name: Build test-signer binaries for harness E2Es
-        run: cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer
+        run: cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer --timings
+      - name: Upload Cargo timing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-macos-e2e-test-signer
+          path: target/cargo-timings/*.html
+          if-no-files-found: warn
+          retention-days: 7
       - name: VAL-01 — ua-parser-js@0.7.29 demo
         run: cargo test -p guard-e2e --features test-signer --test ua_parser_js_demo --release -- --nocapture
       - name: VAL-02 — workers.dev allowlist-bleed

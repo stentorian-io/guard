@@ -8,10 +8,10 @@
 //!  * the full tier-walking `evaluate_policy` traversal.
 //!
 //! The LOAD-BEARING measurement for VAL-03 lives at
-//! `crates/guard-hook/benches/cache_hit_hot_path.rs` and uses
+//! `crates/guard-bench/benches/cache_hit_hot_path.rs` and uses
 //! criterion's `iter_custom` + an `hdrhistogram` to surface a real p99 line.
 //!
-//! Both benches run together via `cargo bench -p guard-hook`. This file is
+//! Both benches run together via `cargo bench -p guard-bench`. This file is
 //! preserved per v0.7 D-37 as a regression tripwire for `evaluate_rule`.
 
 use criterion::{Criterion, criterion_group, criterion_main};

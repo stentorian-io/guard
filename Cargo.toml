@@ -4,6 +4,7 @@ members = [
   "crates/guard-cli",
   "crates/guard-daemon",
   "crates/guard-hook",
+  "crates/guard-bench",
   "crates/guard-core",
   "crates/guard-os",
   "crates/guard-ipc",

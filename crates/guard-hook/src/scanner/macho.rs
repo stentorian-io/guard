@@ -1,12 +1,11 @@
 //! Mach-O structural scanner for layered enforcement phase 1.
 //!
 //! This module classifies exec targets by facts about the file on disk:
-//! Mach-O shape, native architecture, content hash, and syscall instruction
-//! bytes in executable `__TEXT` segments. It intentionally does not cache any
-//! behavioral observation about a process run.
+//! Mach-O shape, native architecture, and syscall instruction bytes in
+//! executable `__TEXT` segments. It intentionally does not cache any behavioral
+//! observation about a process run.
 
-use crate::trusted_runtime::TrustedRuntimeRegistry;
-use crate::{macho_flags, raw_syscall, trusted_runtime};
+use crate::{macho_flags, raw_syscall};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -41,7 +40,6 @@ const NATIVE_SYSCALL_PATTERNS: &[&[u8]] = &[&[0x0f, 0x05], &[0xcd, 0x80]];
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryTier {
     T0Blocked(BlockReason),
-    T1TrustedRuntime,
     T2AllowedScript,
     T2CleanNativeMachO,
     T3SuspiciousUnknown(SuspiciousReason),
@@ -117,25 +115,12 @@ enum HeaderKind {
 }
 
 #[must_use]
-/// Classify a Mach-O executable path against the default trusted runtime registry.
+/// Classify a Mach-O executable path.
 ///
 /// # Safety
 ///
 /// `path` must either be null or point to a valid NUL-terminated C string.
 pub unsafe fn classify_path(path: *const libc::c_char) -> BinaryTier {
-    unsafe { classify_path_with_registry(path, trusted_runtime::registry()) }
-}
-
-#[must_use]
-/// Classify a Mach-O executable path against the trusted runtime registry.
-///
-/// # Safety
-///
-/// `path` must either be null or point to a valid NUL-terminated C string.
-pub unsafe fn classify_path_with_registry(
-    path: *const libc::c_char,
-    trusted_registry: &TrustedRuntimeRegistry,
-) -> BinaryTier {
     if path.is_null() {
         return BinaryTier::T0Blocked(BlockReason::UnreadablePath);
     }
@@ -190,7 +175,6 @@ pub unsafe fn classify_path_with_registry(
             }
 
             match hash_file(path) {
-                Some(hash) if trusted_registry.get(&hash).is_some() => BinaryTier::T1TrustedRuntime,
                 Some(hash) => match unsafe { cached_or_scan(path, hash) } {
                     Some(ScanVerdict::Clean) => BinaryTier::T2CleanNativeMachO,
                     Some(ScanVerdict::Suspicious(reason)) => {
@@ -439,10 +423,7 @@ fn contains_syscall_pattern(bytes: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trusted_runtime::TrustedRuntimeRegistry;
-    use sha2::{Digest, Sha256};
     use std::ffi::CString;
-    use std::fmt::Write as _;
     use std::io::Write;
     use std::os::unix::ffi::OsStrExt;
 
@@ -508,14 +489,6 @@ mod tests {
         unsafe { classify_path(path.as_ptr()) }
     }
 
-    fn classify_test_path_with_registry(
-        path: &CString,
-        registry: &TrustedRuntimeRegistry,
-    ) -> BinaryTier {
-        // SAFETY: `CString` provides a valid NUL-terminated path pointer.
-        unsafe { classify_path_with_registry(path.as_ptr(), registry) }
-    }
-
     #[test]
     fn detects_fat_magic() {
         let mut data = [0u8; 8];
@@ -547,30 +520,6 @@ mod tests {
         assert_eq!(
             classify_test_path(&path),
             BinaryTier::T3SuspiciousUnknown(SuspiciousReason::SyscallInstruction)
-        );
-    }
-
-    #[test]
-    fn classify_path_promotes_trusted_runtime_before_syscall_scan() {
-        let data = thin_header(
-            NATIVE_CPU_TYPE,
-            native_cpu_subtype(),
-            native_syscall_payload(),
-        );
-        let hash = Sha256::digest(&data);
-        let mut hash_hex = String::with_capacity(hash.len() * 2);
-        for byte in hash {
-            write!(&mut hash_hex, "{byte:02x}").expect("write hash hex");
-        }
-        let registry_yaml = format!(
-            "runtimes:\n  - sha256: \"{hash_hex}\"\n    name: guard-test-runtime\n    version: \"0.0.0\"\n    source: unit-test\n"
-        );
-        let registry = TrustedRuntimeRegistry::parse(&registry_yaml);
-        let file = write_temp(&data);
-        let path = path_cstring(&file);
-        assert_eq!(
-            classify_test_path_with_registry(&path, &registry),
-            BinaryTier::T1TrustedRuntime
         );
     }
 

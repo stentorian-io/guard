@@ -17,7 +17,7 @@ fn hot_path_microbench_compiles_and_runs() {
     cmd.args([
         "bench",
         "-p",
-        "guard-hook",
+        "guard-bench",
         "--bench",
         "hot_path",
         "--",

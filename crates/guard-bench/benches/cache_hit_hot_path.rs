@@ -2,7 +2,7 @@
 //! ACTUAL libc hot path. This is the LOAD-BEARING measurement for the D-03
 //! / VAL-03 < 100µs hot-path budget (v0.7).
 //!
-//! The matcher-only bench at `crates/guard-hook/benches/hot_path.rs` stays
+//! The matcher-only bench at `crates/guard-bench/benches/hot_path.rs` stays
 //! as a regression tripwire for `guard_core::evaluate_rule` per v0.7
 //! D-37 and is NOT load-bearing for VAL-03. This file is the cross-reference
 //! counterpart pointed at from `hot_path.rs`'s header.

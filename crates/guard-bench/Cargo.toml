@@ -1,0 +1,28 @@
+[package]
+name = "guard-bench"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Criterion benchmark harnesses for Stentorian Guard."
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+criterion = { workspace = true }
+guard-core = { workspace = true }
+guard-hook = { path = "../guard-hook" }
+hdrhistogram = "7.5.4"
+libc = { workspace = true }
+
+[[bench]]
+name = "hot_path"
+harness = false
+
+[[bench]]
+name = "cache_hit_hot_path"
+harness = false

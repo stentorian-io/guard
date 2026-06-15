@@ -11,7 +11,7 @@
 // This is the *context* number per CONTEXT D-32 — captures cache-hit +
 // occasional Resolve-IPC cache-miss + TCP handshake against the real host.
 // There is NO fixed budget on this number in v0.2; cache-hit p99 (the binding
-// number) lives in crates/guard-hook/benches/cache_hit_hot_path.rs.
+// number) lives in crates/guard-bench/benches/cache_hit_hot_path.rs.
 //
 // Reuses guard-e2e::DaemonHarness + resolve_node/cli/dylib per CONTEXT D-34,
 // mirroring the harness pattern from failure_modes_daemon_killed.rs.

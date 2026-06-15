@@ -12,13 +12,33 @@ on:
       - "crates/**"
       - "rust-toolchain.toml"
       - ".cargo/**"
+      - ".github/actions/setup-rust/action.yml"
+      - ".github/workflows/cache-warm.yml"
 
 jobs:
   warm-cache:
-    name: Warm Cargo cache
+    name: Warm Cargo cache (${{ matrix.name }})
     runs-on: macos-14
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: validation-check
+            shared-key: validation
+            command: cargo check --workspace
+          - name: validation-tests
+            shared-key: validation
+            command: cargo test --workspace --exclude guard-e2e --lib --bins --no-run
+          - name: release-build-macos
+            shared-key: release-build-macos
+            command: cargo build --workspace --release
+          - name: test-signer-release
+            shared-key: validation
+            command: cargo build -p guard-cli -p guard-daemon -p guard-hook --release --features test-signer
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
-      - run: cargo check --workspace --release
+        with:
+          shared-key: ${{ matrix.shared-key }}
+      - run: ${{ matrix.command }}

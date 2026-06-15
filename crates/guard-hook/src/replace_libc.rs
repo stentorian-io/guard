@@ -116,10 +116,11 @@ unsafe fn raw_sendmsg(s: c_int, msg: *const msghdr, flags: c_int) -> ssize_t {
 // in v0.1. The `with_cache` helper takes a process-global Mutex on every
 // hot-path call (decide_for_sockaddr → cache.lookup), and `std::sync::Mutex`
 // on macOS is a `pthread_mutex` that may heap-allocate on first lock and has
-// unbounded contention behaviour. The criterion bench in benches/hot_path.rs
-// exercises `match_hostname` ONLY — it does NOT load the cache + Mutex path,
-// so the v0.1 ENF-06 microbench is not load-bearing for the full hot-path
-// budget. The formal benchmark on real hardware lands in v0.5 (VAL-03).
+// unbounded contention behaviour. The criterion bench in
+// crates/guard-bench/benches/hot_path.rs exercises `match_hostname` ONLY — it
+// does NOT load the cache + Mutex path, so the v0.1 ENF-06 microbench is not
+// load-bearing for the full hot-path budget. The formal benchmark on real
+// hardware lands in v0.5 (VAL-03).
 //
 // D-17 locks the cache as "per-process". A future v0.5 polish can convert
 // this to a `thread_local!` per-thread cache.

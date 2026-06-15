@@ -1158,6 +1158,11 @@
   confidence: confirmed
 - kind: deny
   match: exact
+  pattern: fixars.top
+  reason: "MAL-2026-5756 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
   pattern: flicxd2.com
   reason: "MAL-2025-191866 supply-chain IOC (FEED)"
   confidence: confirmed

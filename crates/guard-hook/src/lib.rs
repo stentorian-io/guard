@@ -28,7 +28,6 @@ pub mod replace_open; // M003-S04: open/openat interpose for persistence monitor
 pub mod scanner; // Issue #59: OS/format-specific exec-target scanner boundary
 pub mod self_check; // M004-S03: hook binary self-integrity verification
 pub mod snapshot;
-pub mod trusted_runtime; // Issue #1 phase 2: content-hash trusted runtime registry
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use log_buffer::LOG_RING;

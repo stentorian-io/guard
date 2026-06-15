@@ -1,7 +1,5 @@
 // Linker tweaks for the cdylib's __DATA,__interpose section retention.
 fn main() {
-    println!("cargo:rerun-if-changed=../guard-core/data/trusted-runtimes.yaml");
-
     let target_os = std::env::var_os("CARGO_CFG_TARGET_OS");
     let target_os = target_os.as_deref();
 

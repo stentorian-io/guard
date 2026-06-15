@@ -22,9 +22,6 @@ labels:
     - lifecycle
   toolchain:
     - toolchain
-  runtime:
-    - runtime
-    - integrity
   linux:
     - linux
     - lifecycle
@@ -57,13 +54,6 @@ sources:
   - id: github-llvm-releases
     category: toolchain
     url: https://api.github.com/repos/llvm/llvm-project/releases?per_page=10
-  - id: github-node-releases
-    category: runtime
-    url: https://api.github.com/repos/nodejs/node/releases?per_page=10
-  - id: github-python-releases
-    category: runtime
-    url: https://api.github.com/repos/python/cpython/releases?per_page=10
-
 cpu_architectures:
   - id: arm64
     aliases:
@@ -272,28 +262,3 @@ toolchains:
       - "20"
       - "21"
       - "22"
-runtime_integrity:
-  review_scope: Exact executable hashes from official runtime release artifacts.
-  registry: crates/guard-core/data/trusted-runtimes.yaml
-  trusted_hash_policy: human-reviewed
-  runtimes:
-    - id: node
-      name: node
-      status: tracked
-      source_refs:
-        - github-node-releases
-      reviewed_releases:
-        - "25"
-        - "24"
-        - "22"
-        - "20"
-    - id: python
-      name: python
-      status: tracked
-      source_refs:
-        - github-python-releases
-      reviewed_releases:
-        - "3.14"
-        - "3.13"
-        - "3.12"
-        - "3.11"

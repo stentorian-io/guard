@@ -623,6 +623,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "guard-bench"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "guard-core",
+ "guard-hook",
+ "hdrhistogram",
+ "libc",
+]
+
+[[package]]
 name = "guard-cli"
 version = "0.1.0"
 dependencies = [
@@ -713,14 +724,12 @@ dependencies = [
 name = "guard-hook"
 version = "0.1.0"
 dependencies = [
- "criterion",
  "crossbeam-queue",
  "ctor",
  "guard-core",
  "guard-daemon",
  "guard-ipc",
  "guard-os",
- "hdrhistogram",
  "libc",
  "memmap2",
  "p256",

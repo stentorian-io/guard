@@ -94,7 +94,7 @@ STT_GUARD_PRE_PUSH_SECRET_SCAN=1 STT_GUARD_PRE_PUSH_CVE_AUDIT=1 git push
 GitHub Actions remains the required PR validation surface, including secret
 scan, dependency audit, and privileged macOS install-health validation.
 
-Benchmark infrastructure lives in `crates/guard-hook/benches/` (criterion) and
+Benchmark infrastructure lives in `crates/guard-bench/benches/` (criterion) and
 `crates/guard-e2e/tests/bench_hot_path_e2e.rs` (live-wrap). Run
 `./scripts/bench-hot-path.sh` to reproduce locally. Pre-push runs the
 deterministic cache-hit benchmark after the E2E checks on macOS. CI runs the

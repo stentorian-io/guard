@@ -71,7 +71,7 @@ automation, but they are not automatically supported or trusted.
 It executes:
 
 ```sh
-scripts/compatibility-tracker.sh --create-issues
+bun scripts/compatibility-tracker.ts --create-issues
 ```
 
 The tracker fetches the sources listed in the manifest, compares discovered
@@ -106,19 +106,19 @@ it is explicit.
 Validate the manifest without network access:
 
 ```sh
-scripts/compatibility-tracker.sh --offline
+bun scripts/compatibility-tracker.ts --offline
 ```
 
 Run a local scan without creating issues:
 
 ```sh
-scripts/compatibility-tracker.sh
+bun scripts/compatibility-tracker.ts
 ```
 
 Create issues in a specific repository when authenticated with `gh`:
 
 ```sh
-scripts/compatibility-tracker.sh --create-issues --repo stentorian-io/guard
+bun scripts/compatibility-tracker.ts --create-issues --repo stentorian-io/guard
 ```
 
 The scan exits with status `2` when new review entries are detected. That is

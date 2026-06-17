@@ -24,8 +24,8 @@ brew "git-cliff"
 # JSON processing for feed updates and workflow scripts.
 brew "jq"
 
-# Node — drives `npx markdownlint-cli2` from the pre-commit hook.
-brew "node"
+# Bun — runs TypeScript repository automation scripts and markdown lint tooling.
+brew "bun"
 
 # Shell script linting for workflow helper scripts.
 brew "shellcheck"

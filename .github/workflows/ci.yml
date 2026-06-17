@@ -77,6 +77,8 @@ jobs:
       markdown: ${{ steps.context.outputs.markdown }}
       tooling: ${{ steps.context.outputs.tooling }}
       hot_path_benchmark: ${{ steps.context.outputs.hot_path_benchmark }}
+      base: ${{ steps.context.outputs.base }}
+      head: ${{ steps.context.outputs.head }}
       is_pr: ${{ steps.context.outputs.is_pr }}
     steps:
       - name: Checkout PR head
@@ -556,10 +558,32 @@ jobs:
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
-          fetch-depth: 1
+          fetch-depth: 0
       - uses: ./.github/actions/setup-rust
         with:
           shared-key: hot-path-benchmark
+      - name: Fetch benchmark base
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags upstream main
+      - name: Run base cache-hit hot path benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/bench-hot-path
+          git checkout --detach "${{ needs.prepare.outputs.base }}"
+          ./scripts/bench-hot-path.sh \
+            --cache-hit-only \
+            --enforce-cache-hit-budget \
+            --github-action-benchmark-json target/bench-hot-path/base-github-action-benchmark.json \
+            | tee target/bench-hot-path/base-summary.md
+      - name: Restore PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach "${{ needs.prepare.outputs.head }}"
       - name: Restore benchmark history
         id: benchmark_history
         uses: actions/cache/restore@v4
@@ -568,7 +592,7 @@ jobs:
           key: hot-path-benchmark-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             hot-path-benchmark-${{ runner.os }}-
-      - name: Run cache-hit hot path benchmark
+      - name: Run head cache-hit hot path benchmark
         shell: bash
         run: |
           set -euo pipefail
@@ -578,10 +602,58 @@ jobs:
             --enforce-cache-hit-budget \
             --github-action-benchmark-json target/bench-hot-path/github-action-benchmark.json \
             | tee target/bench-hot-path/summary.md
+      - name: Check same-runner hot path regression
+        shell: bash
+        env:
+          ACCEPTED_REGRESSION: ${{ contains(github.event.pull_request.labels.*.name, 'accepted-hot-path-regression') }}
+        run: |
+          set -euo pipefail
+
+          extract_cache_hit_p99() {
+            local path="$1"
+            grep -oE '"value": [0-9]+' "$path" | head -1 | sed 's/^"value": //'
+          }
+
+          BASE_P99="$(extract_cache_hit_p99 target/bench-hot-path/base-github-action-benchmark.json)"
+          HEAD_P99="$(extract_cache_hit_p99 target/bench-hot-path/github-action-benchmark.json)"
+          THRESHOLD_RATIO="1.5"
+
+          if [[ -z "$BASE_P99" || -z "$HEAD_P99" ]]; then
+            echo "hot-path regression check: could not extract base/head p99" >&2
+            exit 1
+          fi
+
+          awk \
+            -v base="$BASE_P99" \
+            -v head="$HEAD_P99" \
+            -v threshold="$THRESHOLD_RATIO" \
+            -v accepted="$ACCEPTED_REGRESSION" \
+            'BEGIN {
+              if (base <= 0) {
+                print "hot-path regression check: base p99 must be positive" > "/dev/stderr";
+                exit 2;
+              }
+
+              ratio = head / base;
+              printf("hot-path regression check: base=%dns head=%dns ratio=%.2fx threshold=%.2fx\n", base, head, ratio, threshold);
+
+              if (ratio > threshold && accepted != "true") {
+                printf("hot-path regression check: head p99 is %.2fx slower than base; apply accepted-hot-path-regression only for an intentional regression\n", ratio) > "/dev/stderr";
+                exit 1;
+              }
+            }'
       - name: Publish benchmark summary
         if: always() && hashFiles('target/bench-hot-path/summary.md') != ''
-        run: cat target/bench-hot-path/summary.md >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          {
+            echo "### Base"
+            cat target/bench-hot-path/base-summary.md
+            echo
+            echo "### Head"
+            cat target/bench-hot-path/summary.md
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Store benchmark trend
+        if: always() && hashFiles('target/bench-hot-path/github-action-benchmark.json') != ''
         uses: benchmark-action/github-action-benchmark@v1.22.1
         with:
           name: Stentorian Guard hot path
@@ -589,7 +661,7 @@ jobs:
           output-file-path: target/bench-hot-path/github-action-benchmark.json
           external-data-json-path: .benchmark-history/benchmark-data.json
           alert-threshold: '150%'
-          fail-on-alert: ${{ !contains(github.event.pull_request.labels.*.name, 'accepted-hot-path-regression') }}
+          fail-on-alert: false
           summary-always: true
       - name: Save benchmark history
         if: success() && hashFiles('.benchmark-history/benchmark-data.json') != ''
@@ -603,6 +675,8 @@ jobs:
         with:
           name: hot-path-benchmark
           path: |
+            target/bench-hot-path/base-summary.md
+            target/bench-hot-path/base-github-action-benchmark.json
             target/bench-hot-path/summary.md
             target/bench-hot-path/github-action-benchmark.json
             target/criterion/cache_hit/decide_for_sockaddr

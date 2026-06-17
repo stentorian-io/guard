@@ -40,11 +40,16 @@ is reported for visibility but is not the hard budget gate.
 CI runs the deterministic cache-hit benchmark on macOS and fails when p99
 exceeds the 100 microsecond budget.
 
-CI also records benchmark trend data and alerts on large relative regressions.
-A relative regression can be accepted by applying the
-`accepted-hot-path-regression` PR label, but that label does not bypass the hard
-p99 budget. A hard-budget regression must be accepted by changing the budget
-constant in the benchmark runner, which leaves a normal code-review diff.
+CI also checks relative regressions by running the base commit and PR head on
+the same macOS runner, then comparing head p99 against base p99. A relative
+regression can be accepted by applying the `accepted-hot-path-regression` PR
+label, but that label does not bypass the hard p99 budget.
+
+CI still records benchmark trend data from the PR head for visibility, but
+cached historical samples are not used as the required failure predicate because
+hosted macOS runner variance can dominate that comparison. A hard-budget
+regression must be accepted by changing the budget constant in the benchmark
+runner, which leaves a normal code-review diff.
 
 The local pre-push hook runs the same deterministic cache-hit benchmark after
 the E2E checks on macOS.

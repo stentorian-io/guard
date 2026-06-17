@@ -60,28 +60,21 @@ fi
 # For the commit message itself, we install a companion commit-msg check below.
 
 # ── 2. Markdown lint ────────────────────────────────────────────────────────
-NODE_BIN="$(command -v node || true)"
-if [ -x /opt/homebrew/bin/node ]; then
-  NODE_BIN=/opt/homebrew/bin/node
-fi
-if [ -x /opt/homebrew/opt/node@20/bin/node ]; then
-  NODE_BIN=/opt/homebrew/opt/node@20/bin/node
-fi
-if [ -n "$NODE_BIN" ] && [ -x "$(dirname "$NODE_BIN")/npx" ]; then
+if command -v bunx >/dev/null; then
   MD_FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.md' || true)
   if [ -n "$MD_FILES" ]; then
     fp=$(staged_md_fingerprint)
     if cache_hit "pre-commit:mdlint" "$fp"; then
       skip "markdown lint"
     else
-      echo "$MD_FILES" | PATH="$(dirname "$NODE_BIN"):$PATH" xargs npx --yes markdownlint-cli2 \
+      echo "$MD_FILES" | TMPDIR="${TMPDIR:-/private/tmp}" xargs bunx markdownlint-cli2 \
         || fail "markdown lint failed"
       cache_mark "pre-commit:mdlint" "$fp"
       pass "markdown lint"
     fi
   fi
 else
-  echo "⚠ node/npx not found — skipping markdown lint"
+  echo "⚠ bunx not found — skipping markdown lint"
 fi
 
 # ── 3. GitHub Actions lint ─────────────────────────────────────────────────

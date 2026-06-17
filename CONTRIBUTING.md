@@ -8,16 +8,16 @@ everything you need to clone, build, test, and submit changes.
 - **macOS 14 (Sonoma) or later** — Intel or Apple Silicon for macOS install and
   E2E validation
 - **Rust toolchain** — stable channel, 1.96+ (install via [rustup](https://rustup.rs/))
-- **Node.js 20+** — used by E2E test harnesses (a non-hardened-runtime build; the one from [nodejs.org](https://nodejs.org/) or nvm works)
+- **Bun** — used by repository automation scripts such as the compatibility tracker
 - **Docker + Colima** — used by local hooks for Linux lint and E2E parity from
   macOS
 - **Git**
 
 ```sh
-brew bundle       # optional: installs actionlint, Docker/Colima, Node, and helpers
+brew bundle       # optional: installs actionlint, Docker/Colima, Bun, and helpers
 colima start      # required before Docker-backed local checks
 rustc --version   # 1.95 or later
-node --version    # 20 or later
+bun --version
 docker info
 ```
 

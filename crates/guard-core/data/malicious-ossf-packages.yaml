@@ -148,6 +148,11 @@
   confidence: confirmed
 - kind: deny
   match: ip
+  pattern: 185.184.192.205
+  reason: "MAL-2026-5519 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: ip
   pattern: 185.196.8.88
   reason: "MAL-2025-3008 supply-chain IOC (FEED)"
   confidence: confirmed
@@ -1748,6 +1753,11 @@
   confidence: confirmed
 - kind: deny
   match: exact
+  pattern: update.windowsuqdate.com
+  reason: "MAL-2026-5839 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
   pattern: updatedappython.com
   reason: "MAL-2026-897 supply-chain IOC (FEED)"
   confidence: confirmed
@@ -1815,6 +1825,11 @@
   match: exact
   pattern: whined.org
   reason: "MAL-2025-3008 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: windowsuqdate.com
+  reason: "MAL-2026-5839 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact

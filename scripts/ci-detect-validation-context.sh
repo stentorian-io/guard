@@ -41,7 +41,7 @@ while IFS= read -r path; do
       ;;
   esac
   case "$path" in
-    scripts/*.sh|tools/*.sh|.github/workflows/*|.github/actions/*)
+    scripts/*.sh|scripts/*.ts|tools/*.sh|tools/*.ts|.github/workflows/*|.github/actions/*)
       tooling=true
       ;;
   esac

@@ -653,16 +653,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "guard-compat"
-version = "0.1.0"
-dependencies = [
- "clap",
- "serde",
- "serde_json",
- "serde_norway",
-]
-
-[[package]]
 name = "guard-core"
 version = "0.1.0"
 dependencies = [

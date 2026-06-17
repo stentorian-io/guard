@@ -19,10 +19,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          toolchain: stable
+          bun-version: latest
 
       - name: Ensure review labels
         env:
@@ -40,4 +40,4 @@ jobs:
       - name: Scan sources and open review issues
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: scripts/compatibility-tracker.sh --create-issues
+        run: bun scripts/compatibility-tracker.ts --create-issues

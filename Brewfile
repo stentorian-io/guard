@@ -27,5 +27,8 @@ brew "jq"
 # Bun — runs TypeScript repository automation scripts and markdown lint tooling.
 brew "bun"
 
-# Shell script linting for workflow helper scripts.
+# Static analysis for the public POSIX shell install/uninstall scripts.
 brew "shellcheck"
+
+# Unit tests for the public POSIX shell install/uninstall scripts.
+brew "shunit2"

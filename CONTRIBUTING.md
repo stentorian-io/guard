@@ -77,8 +77,9 @@ cargo test -p guard-daemon
 
 Local validation is stage-based. During iteration, run the focused Cargo command
 that exercises your change. Before review, let the installed hooks run:
-`pre-commit` covers formatting, clippy, Bash syntax, Linux check/lint parity in
-Docker, macOS and Linux release builds, unit tests, and integration tests;
+`pre-commit` covers formatting, clippy, shell syntax/lint/tests, Linux
+check/lint parity in Docker, macOS and Linux release builds, unit tests, and
+integration tests;
 `pre-push` covers Linux LD_PRELOAD E2E in Docker and the Tart-backed macOS E2E
 suite. The Linux stages use the same `rust:1.96.0-bookworm` container image
 locally and in CI, with Cargo caches under `/private/tmp/stt-guard-docker`.
@@ -96,11 +97,11 @@ scan, dependency audit, and privileged macOS install-health validation.
 
 Benchmark infrastructure lives in `crates/guard-bench/benches/` (criterion) and
 `crates/guard-e2e/tests/bench_hot_path_e2e.rs` (live-wrap). Run
-`./scripts/bench-hot-path.sh` to reproduce locally. Pre-push runs the
+`./scripts/bench/hot-path.ts` to reproduce locally. Pre-push runs the
 deterministic cache-hit benchmark after the E2E checks on macOS. CI runs the
 same cache-hit benchmark, fails if p99 exceeds the 100 microsecond hot-path
 budget defined as `CACHE_HIT_BUDGET_NS` near the top of
-`scripts/bench-hot-path.sh`, and stores trend data through the workflow cache.
+`scripts/bench/hot-path.ts`, and stores trend data through the workflow cache.
 Relative regressions also fail CI unless the PR is explicitly labelled
 `accepted-hot-path-regression`; the hard budget still applies. To accept a new
 hard budget, update that script constant in the same PR and explain the change.
@@ -229,7 +230,7 @@ Use `ci: ...` without a scope.
 - Unit tests in each crate (`#[cfg(test)]` modules)
 - Integration tests in `crates/*/tests/`
 - E2E tests in `crates/guard-e2e/tests/` — spawn real daemon + hook, exercise full flow
-- Benchmarks: criterion micro-benchmarks + E2E live-wrap bench (`./scripts/bench-hot-path.sh`)
+- Benchmarks: criterion micro-benchmarks + E2E live-wrap bench (`./scripts/bench/hot-path.ts`)
 
 ### Code style
 
@@ -237,15 +238,30 @@ Use `ci: ...` without a scope.
 - `cargo clippy --workspace` should be clean
 - `panic=abort` workspace-wide — do not rely on `catch_unwind`
 
+### Automation language policy
+
+- Prefer Rust for product behavior, security-sensitive logic, OS integration,
+  policy handling, IPC, persistence, and anything that ships in the Guard
+  runtime.
+- Use Bun TypeScript for internal repository automation: CI helpers, release
+  packaging, feed updates, local hooks, benchmarks, and developer convenience
+  scripts.
+- Use shell only where the shell runtime is part of the compatibility contract:
+  public-facing bootstrap scripts such as `install.sh` and `uninstall.sh`, or
+  fixture reconstruction scripts that intentionally depend on shell tooling such
+  as `fixtures/vendor-ua-parser-js.sh`.
+- Keep public shell scripts POSIX `sh` unless there is an explicit compatibility
+  reason not to. Keep fixture shell scripts honest about their interpreter, for
+  example Bash when they use Bash-only behavior.
+
 ## CI
 
 GitHub Actions run one validation workflow. Secret scan runs first for PRs, then
 PR title validation, preparation, and repository linting run before heavier
 validation starts:
 
-- `Lint` runs GitHub Actions workflow lint, Markdown lint, Bash lint, and Rust
-  lint in one Ubuntu job. Bash lint checks changed `scripts/*.sh` and
-  `tools/*.sh` files.
+- `Lint` runs GitHub Actions workflow lint, Markdown lint, Bun script tests,
+  public shell lint/tests, and Rust lint in one Ubuntu job.
 - Linux check, macOS check, workspace unit tests, and workspace integration
   tests run in parallel after linting passes.
 - Linux and macOS release builds run as a release-build matrix after platform
@@ -269,7 +285,7 @@ For local macOS E2E without mutating the host, use the Tart-backed VM runner:
 
 ```sh
 brew install cirruslabs/cli/tart hudochenkov/sshpass/sshpass
-scripts/ci-macos-vm-e2e.sh
+scripts/ci/macos-vm-e2e.ts
 ```
 
 The script clones `ghcr.io/cirruslabs/macos-tahoe-base:latest` into

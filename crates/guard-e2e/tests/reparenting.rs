@@ -3,10 +3,10 @@
 //! TREE-05 success criterion #6: a child that double-forks + calls setsid
 //! is still treated as part of the original guard-run subtree.
 //!
-//! E2E approach: wrap a shell script that double-forks + setsid + attempts
+//! E2E approach: wrap a Bun harness that double-forks + setsid + attempts
 //! a connection. The wrapped command's exit code is not directly meaningful
 //! (the connect happens in a backgrounded grandchild whose stdout is dropped);
-//! the assertion instead verifies a SOFTER property: the wrapped sh exits
+//! the assertion instead verifies a SOFTER property: the wrapped Bun process exits
 //! cleanly within the test deadline, i.e. the dylib's fork-hook didn't
 //! fail-closed under non-pathological use.
 //!
@@ -27,20 +27,17 @@ fn double_fork_setsid_wrapped_command_completes() {
     let cli = resolve_cli();
     let dylib = resolve_dylib();
     let harness = DaemonHarness::start().expect("start daemon");
-    let script = cargo_workspace_root().join("crates/guard-e2e/harness/double_fork_setsid.sh");
+    let script = cargo_workspace_root().join("crates/guard-e2e/harness/double_fork_setsid.ts");
     assert!(
         script.exists(),
         "harness script missing at {}",
         script.display()
     );
 
-    // The wrapped sh root MUST exit cleanly within the test deadline.
-    // Use /bin/sh explicitly (Apple-shipped, hardened-runtime). DYLD_INSERT_LIBRARIES
-    // strips on hardened binaries — the wrapping sh itself may not be hooked,
-    // but the test still verifies the CLI's spawn path doesn't fail-closed.
+    // The wrapped Bun process MUST exit cleanly within the test deadline.
     let mut cmd = Command::new(&cli);
     cmd.arg("wrap");
-    cmd.arg("/bin/sh")
+    cmd.arg("bun")
         .arg(&script)
         .env_clear()
         .env("HOME", harness.home.path())

@@ -6,7 +6,7 @@ is the reference; **this fixture contains no real malicious bytes**.
 
 It exists for **Stentorian Guard's VAL-01 validation test only**. The committed
 `ua-parser-js-0.7.29-sanitized.tgz` is a deterministic build product of
-`tools/vendor-ua-parser-js.sh` and is byte-identical across hosts.
+`fixtures/vendor-ua-parser-js.sh` and is byte-identical across hosts.
 
 ## Provenance — Why a Synthetic Mock?
 
@@ -60,7 +60,7 @@ shape and nothing else.
 9398ea5503135f17bc0c424e6373ddce7c0e113d23577a136638dd7ddcdce984
 ```
 
-Embedded in `tools/vendor-ua-parser-js.sh` as `EXPECTED_OUTPUT_SHA256`.
+Embedded in `fixtures/vendor-ua-parser-js.sh` as `EXPECTED_OUTPUT_SHA256`.
 The script verifies on every run; drift triggers an abort.
 
 CI does **not** run the vendoring script. CI verifies the committed
@@ -69,10 +69,10 @@ tarball against this pin (per CONTEXT D-02 / D-15).
 ## Reconstruction Recipe
 
 The synthetic fixture is rebuildable byte-identically from
-`tools/vendor-ua-parser-js.sh`:
+`fixtures/vendor-ua-parser-js.sh`:
 
 ```sh
-bash tools/vendor-ua-parser-js.sh
+bash fixtures/vendor-ua-parser-js.sh
 ```
 
 The script writes a `package/` tree under `mktemp -d`, normalizes mtimes
@@ -83,8 +83,8 @@ compresses with `gzip -n`. Output is byte-identical across hosts.
 If a future revision changes the synthetic source, refresh the pin with:
 
 ```sh
-bash tools/vendor-ua-parser-js.sh --update-pin
-bash tools/vendor-ua-parser-js.sh   # verify
+bash fixtures/vendor-ua-parser-js.sh --update-pin
+bash fixtures/vendor-ua-parser-js.sh   # verify
 ```
 
 Both this README and the script must be updated together; fixture changes should

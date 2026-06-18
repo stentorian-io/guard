@@ -73,16 +73,16 @@ fn warning_05_regression_cloud_metadata_ipv6_normalization() {
 // --- Hard rules in evaluate_policy --------------------------------------
 
 #[test]
-fn evaluate_loopback_host_allows() {
+fn evaluate_loopback_host_denies() {
     let (v, src) = evaluate_policy(b"localhost", None, false, &[]);
-    assert_eq!(v, Verdict::Allow);
+    assert_eq!(v, Verdict::Deny);
     assert_eq!(src, SourceKind::HardRule("loopback"));
 }
 
 #[test]
-fn evaluate_loopback_ip_allows() {
+fn evaluate_loopback_ip_denies() {
     let (v, src) = evaluate_policy(b"", Some(b"127.0.0.1"), false, &[]);
-    assert_eq!(v, Verdict::Allow);
+    assert_eq!(v, Verdict::Deny);
     assert_eq!(src, SourceKind::HardRule("loopback"));
 }
 
@@ -154,11 +154,10 @@ fn blocker_01_regression_libc_hot_path_contract() {
     assert_eq!(v3, Verdict::Deny);
     assert_eq!(src3, SourceKind::HardRule("cloud-metadata"));
 
-    // Case 4: cache-miss connect to a loopback IP — loopback hard rule wins
-    // over cache-miss-deny (Tier 0a before 0c). The libc path's previous
-    // `node_connect_to_loopback_is_allowed` fix must not regress.
+    // Case 4: cache-miss connect to a loopback IP — loopback fail-closed wins
+    // over cache-miss-deny (Tier 0a before 0c).
     let (v4, src4) = evaluate_policy(b"", Some(b"127.0.0.1"), false, &[]);
-    assert_eq!(v4, Verdict::Allow);
+    assert_eq!(v4, Verdict::Deny);
     assert_eq!(src4, SourceKind::HardRule("loopback"));
 }
 
@@ -271,7 +270,10 @@ fn user_allow_used_when_no_higher_tier_matches() {
 
 #[test]
 fn source_kind_as_label_covers_all_variants() {
-    assert_eq!(SourceKind::HardRule("loopback").as_label(), "loopback");
+    assert_eq!(
+        SourceKind::HardRule("loopback").as_label(),
+        "loopback-denied"
+    );
     assert_eq!(
         SourceKind::HardRule("cloud-metadata").as_label(),
         "cloud-metadata-blocked"
@@ -279,6 +281,10 @@ fn source_kind_as_label_covers_all_variants() {
     assert_eq!(
         SourceKind::HardRule("raw-ip-cache-miss").as_label(),
         "raw-ip-no-dns"
+    );
+    assert_eq!(
+        SourceKind::HardRule("unix-socket").as_label(),
+        "unix-socket-denied"
     );
     assert_eq!(
         SourceKind::HardRule("fail-closed").as_label(),

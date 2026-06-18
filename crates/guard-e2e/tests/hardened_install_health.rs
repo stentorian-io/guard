@@ -297,8 +297,8 @@ mod macos {
         let exit_code = out.status.code().unwrap_or(-1);
 
         assert!(
-            exit_code & 1 == 1,
-            "system wrapped command did not allow loopback; exit={exit_code} stdout={} stderr={}",
+            exit_code & 1 == 0,
+            "system wrapped command allowed loopback relay path; exit={exit_code} stdout={} stderr={}",
             stdout(&out),
             stderr(&out)
         );

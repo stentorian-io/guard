@@ -40,6 +40,8 @@ The following are **in scope** as security issues:
 
 - Bypasses that allow a non-hardened, DYLD-injectable process to exfiltrate
   data despite an active Stentorian Guard deny policy
+- Local relay paths where wrapped code sends data to loopback TCP/UDP or a
+  Unix-domain socket so an unwrapped local process can perform outbound egress
 - IPC protocol vulnerabilities (spoofing, replay, privilege escalation)
 - Snapshot signature or trusted-signer bypass
 - Daemon vulnerabilities (unauthorized rule injection, SQLite injection)
@@ -56,6 +58,13 @@ The following are **known limitations**, not vulnerabilities:
   closed before child creation
 - Processes launched outside a `stt-guard wrap` subtree — Stentorian Guard is
   process-tree-scoped in v1, not system-wide
+
+Wrapped processes fail closed on loopback destinations (`localhost`,
+`localhost6`, `127.0.0.0/8`, and `::1`) and direct Unix-domain socket connects.
+This intentionally breaks local relay patterns rather than treating them as
+safe local IPC. Existing file descriptors inherited before wrapping remain an
+ambient capability of the parent process and should not be used to grant network
+egress to untrusted commands.
 
 If you are unsure whether something is in scope, report it anyway.
 We would rather triage a known limitation than miss a real vulnerability.

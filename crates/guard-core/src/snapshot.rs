@@ -46,29 +46,13 @@ impl Snapshot {
         Self {
             schema_version: SCHEMA_V2,
             generated_at_unix_ms: 0,
-            entries: vec![
-                AllowlistEntry {
-                    kind: RuleKind::Allow,
-                    tier: RuleTier::CuratedAllow,
-                    match_type: MatchType::Ip,
-                    pattern: "127.0.0.1".into(),
-                    reason: "loopback (D-25a)".into(),
-                },
-                AllowlistEntry {
-                    kind: RuleKind::Allow,
-                    tier: RuleTier::CuratedAllow,
-                    match_type: MatchType::Ip,
-                    pattern: "::1".into(),
-                    reason: "loopback6 (D-25a)".into(),
-                },
-                AllowlistEntry {
-                    kind: RuleKind::Allow,
-                    tier: RuleTier::CuratedAllow,
-                    match_type: MatchType::Exact,
-                    pattern: "registry.npmjs.org".into(),
-                    reason: "npm default registry (ALLOW-01)".into(),
-                },
-            ],
+            entries: vec![AllowlistEntry {
+                kind: RuleKind::Allow,
+                tier: RuleTier::CuratedAllow,
+                match_type: MatchType::Exact,
+                pattern: "registry.npmjs.org".into(),
+                reason: "npm default registry (ALLOW-01)".into(),
+            }],
             run_uuid: None,
         }
     }

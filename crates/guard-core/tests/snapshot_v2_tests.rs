@@ -12,7 +12,7 @@ fn v2_default_has_v2_schema_and_nonempty_entries() {
     assert_eq!(s.schema_version, SCHEMA_V2);
     assert!(
         !s.entries.is_empty(),
-        "v2_default must seed at least loopback + registry.npmjs.org"
+        "v2_default must seed registry.npmjs.org"
     );
     assert!(
         s.run_uuid.is_none(),

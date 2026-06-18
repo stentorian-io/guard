@@ -653,14 +653,7 @@ jobs:
           set -euo pipefail
           mkdir -p target/bench-hot-path
           git checkout --detach "${{ needs.prepare.outputs.base }}"
-
-          if [ -x scripts/bench/hot-path.ts ]; then
-            benchmark_script=(bun scripts/bench/hot-path.ts)
-          else
-            benchmark_script=(scripts/bench-hot-path.sh)
-          fi
-
-          "${benchmark_script[@]}" \
+          bun scripts/bench/hot-path.ts \
             --cache-hit-only \
             --enforce-cache-hit-budget \
             --github-action-benchmark-json target/bench-hot-path/base-github-action-benchmark.json \

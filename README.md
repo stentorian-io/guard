@@ -4,7 +4,7 @@
   <h4 align="center">When a compromised dependency tries to phone home, Guard severs the line.</h4>
   <p align="center">
     <a href="https://github.com/stentorian-io/guard/releases/latest"><img src="https://img.shields.io/github/v/release/stentorian-io/guard?label=release&color=blue" alt="Latest release"></a>
-    <a href="https://github.com/stentorian-io/guard/actions/workflows/cve-audit.yml"><img src="https://img.shields.io/github/actions/workflow/status/stentorian-io/guard/cve-audit.yml?branch=main&label=CVE%20audit" alt="CVE audit"></a>
+    <a href="https://github.com/stentorian-io/guard/actions/workflows/cve-audit.yml"><img src="https://img.shields.io/github/actions/workflow/status/stentorian-io/guard/cve-audit.yml?branch=main&event=schedule&label=CVE%20audit" alt="Nightly CVE audit"></a>
     <a href="https://github.com/stentorian-io/guard/actions/workflows/feed-update.yml"><img src="https://img.shields.io/github/last-commit/stentorian-io/guard/main?path=crates/guard-core/data/malicious-ossf-packages.yaml&label=IOC%20feed" alt="IOC feed freshness"></a>
     <a href="#license"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License"></a>
   </p>

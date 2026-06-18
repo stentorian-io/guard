@@ -12,7 +12,7 @@
 //!    We use `b.iter_custom(...)` and record per-iteration `Instant::now()`-bracketed
 //!    deltas into an `hdrhistogram::Histogram::<u64>::new(3)`, then `eprintln!`
 //!    p50/p95/p99/p99.9/max as a separate stderr line that
-//!    `scripts/bench-hot-path.sh` parses.
+//!    `scripts/bench/hot-path.ts` parses.
 //!  * Each histogram sample is a small batch average. Hosted macOS runners can
 //!    pause the process for milliseconds; single-call p99 then tracks scheduler
 //!    noise rather than sustained hot-path cost. Batching still catches real
@@ -188,7 +188,7 @@ fn cache_hit_bench(c: &mut Criterion) {
         });
     });
 
-    // Print percentile line — `scripts/bench-hot-path.sh`
+    // Print percentile line — `scripts/bench/hot-path.ts`
     // greps for `p99=` from this. Intentionally NO assertion against a
     // hard p99 threshold (D-33: no CI gate).
     eprintln!(

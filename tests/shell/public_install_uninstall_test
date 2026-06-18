@@ -1,0 +1,96 @@
+#!/usr/bin/env sh
+
+unset CDPATH
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+INSTALL_SCRIPT="$REPO_ROOT/install.sh"
+UNINSTALL_SCRIPT="$REPO_ROOT/uninstall.sh"
+
+RUN_STATUS=0
+RUN_STDOUT=""
+RUN_STDERR=""
+
+run_script() {
+  script=$1
+  shift
+
+  stdout_file=$(mktemp)
+  stderr_file=$(mktemp)
+
+  sh "$script" "$@" >"$stdout_file" 2>"$stderr_file"
+  RUN_STATUS=$?
+  RUN_STDOUT=$(cat "$stdout_file")
+  RUN_STDERR=$(cat "$stderr_file")
+
+  rm -f "$stdout_file" "$stderr_file"
+}
+
+assert_contains() {
+  haystack=$1
+  needle=$2
+
+  case "$haystack" in
+    *"$needle"*) ;;
+    *) fail "expected output to contain: $needle" ;;
+  esac
+}
+
+test_install_script_has_posix_shell_syntax() {
+  sh -n "$INSTALL_SCRIPT"
+  assertEquals 0 "$?"
+}
+
+test_uninstall_script_has_posix_shell_syntax() {
+  sh -n "$UNINSTALL_SCRIPT"
+  assertEquals 0 "$?"
+}
+
+test_install_help_prints_usage_without_side_effects() {
+  run_script "$INSTALL_SCRIPT" --help
+
+  assertEquals 0 "$RUN_STATUS"
+  assert_contains "$RUN_STDOUT" "Usage: install.sh"
+  assertEquals "" "$RUN_STDERR"
+}
+
+test_uninstall_help_prints_usage_without_side_effects() {
+  run_script "$UNINSTALL_SCRIPT" --help
+
+  assertEquals 0 "$RUN_STATUS"
+  assert_contains "$RUN_STDOUT" "Usage: uninstall.sh"
+  assertEquals "" "$RUN_STDERR"
+}
+
+test_install_rejects_unknown_arguments_before_side_effects() {
+  run_script "$INSTALL_SCRIPT" --definitely-not-valid
+
+  assertEquals 64 "$RUN_STATUS"
+  assert_contains "$RUN_STDERR" "install.sh: unknown argument: --definitely-not-valid"
+}
+
+test_uninstall_rejects_unknown_arguments_before_side_effects() {
+  run_script "$UNINSTALL_SCRIPT" --definitely-not-valid
+
+  assertEquals 64 "$RUN_STATUS"
+  assert_contains "$RUN_STDERR" "uninstall.sh: unknown argument: --definitely-not-valid"
+}
+
+test_install_requires_version_value_before_side_effects() {
+  run_script "$INSTALL_SCRIPT" --version
+
+  assertEquals 64 "$RUN_STATUS"
+  assert_contains "$RUN_STDERR" "install.sh: --version requires a value"
+}
+
+SHUNIT2_PATH=${SHUNIT2:-}
+if [ -z "$SHUNIT2_PATH" ]; then
+  SHUNIT2_PATH=$(command -v shunit2 2>/dev/null || true)
+fi
+
+if [ -z "$SHUNIT2_PATH" ]; then
+  echo "shunit2 not found; install it with brew bundle" >&2
+  exit 127
+fi
+
+# shellcheck disable=SC1090
+. "$SHUNIT2_PATH"

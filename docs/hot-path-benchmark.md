@@ -59,13 +59,13 @@ the E2E checks on macOS.
 Run the full local benchmark report:
 
 ```sh
-./scripts/bench-hot-path.sh
+./scripts/bench/hot-path.ts
 ```
 
 Run only the deterministic cache-hit gate used by CI and pre-push:
 
 ```sh
-./scripts/bench-hot-path.sh --cache-hit-only --enforce-cache-hit-budget
+./scripts/bench/hot-path.ts --cache-hit-only --enforce-cache-hit-budget
 ```
 
 The runner prints a markdown summary with machine, operating system, Rust

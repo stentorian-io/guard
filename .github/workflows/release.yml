@@ -133,6 +133,8 @@ jobs:
 
       - name: Install git-cliff
         uses: kenji-miyake/setup-git-cliff@v2
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Determine version
         id: version
@@ -156,12 +158,12 @@ jobs:
 
       - name: Generate release-meta.json
         run: |
-          scripts/generate-release-meta.sh "${{ steps.version.outputs.tag }}" > artifacts/release-meta.json
+          bun scripts/release/generate-release-meta.ts "${{ steps.version.outputs.tag }}" > artifacts/release-meta.json
           cat artifacts/release-meta.json
 
       - name: Package target tarballs
         id: package
-        run: scripts/ci-package-release-tarballs.sh "${{ steps.version.outputs.version }}"
+        run: bun scripts/ci/package-release-tarballs.ts "${{ steps.version.outputs.version }}"
 
       - name: Upload packaged release candidates
         uses: actions/upload-artifact@v4
@@ -176,7 +178,7 @@ jobs:
 
       - name: Dry-run summary
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true'
-        run: scripts/ci-write-release-dry-run-summary.sh "${{ steps.version.outputs.tag }}"
+        run: bun scripts/ci/write-release-dry-run-summary.ts "${{ steps.version.outputs.tag }}"
 
   install_smoke:
     name: Hardened install smoke

@@ -18,8 +18,48 @@ permissions:
   pull-requests: read
 
 jobs:
+  current_with_main:
+    name: Current with main
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git remote add upstream "https://github.com/${{ github.repository }}.git"
+          git fetch --no-tags upstream "$BASE_REF"
+
+      - name: Require PR branch to include latest main
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          base_tip="$(git rev-parse "upstream/$BASE_REF")"
+
+          if git merge-base --is-ancestor "$base_tip" HEAD; then
+            echo "PR branch includes latest $BASE_REF ($base_tip)."
+            exit 0
+          fi
+
+          merge_base="$(git merge-base "$base_tip" HEAD)"
+
+          echo "::error title=PR branch is behind $BASE_REF::Update this branch with the latest $BASE_REF before running full CI."
+          echo "Base tip:   $base_tip"
+          echo "Merge base: $merge_base"
+          echo "Head:       $(git rev-parse HEAD)"
+          exit 1
+
   secret_scan:
     name: Secret scan
+    needs: current_with_main
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:

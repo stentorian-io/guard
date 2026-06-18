@@ -12,7 +12,7 @@ use crate::state_dir::run_manifest_path;
 use crate::tracked::{ProcessTree, RunRecord};
 use guard_core::{AllowlistEntry, MatchType, RuleKind, RuleTier, SnapshotBuildInput};
 use guard_ipc::{PublishSignedSnapshot, SnapshotInputsReply, SnapshotReply};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -400,22 +400,42 @@ pub fn handle_prepare_snapshot_v4_full(
 }
 
 fn validate_cwd(cwd: &Path) -> Result<std::path::PathBuf, String> {
-    let canonical = cwd
-        .canonicalize()
-        .map_err(|e| format!("canonicalize {}: {e}", cwd.display()))?;
-    if !canonical.is_dir() {
-        return Err(format!("not a directory: {}", canonical.display()));
-    }
-    let canonical_str = canonical.to_string_lossy();
+    let normalized = normalize_absolute_cwd(cwd)?;
+    let canonical_str = normalized.to_string_lossy();
+
     for prefix in FORBIDDEN_CWD_PREFIXES {
         if canonical_str == *prefix || canonical_str.starts_with(&format!("{prefix}/")) {
             return Err(format!(
                 "cwd in forbidden system path: {}",
-                canonical.display()
+                normalized.display()
             ));
         }
     }
-    Ok(canonical)
+
+    Ok(normalized)
+}
+
+fn normalize_absolute_cwd(cwd: &Path) -> Result<PathBuf, String> {
+    if !cwd.is_absolute() {
+        return Err(format!("cwd must be absolute: {}", cwd.display()));
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in cwd.components() {
+        match component {
+            Component::RootDir => normalized.push(Path::new("/")),
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(format!("cwd must not contain '..': {}", cwd.display()));
+            }
+            Component::Prefix(_) => {
+                return Err(format!("unsupported cwd prefix: {}", cwd.display()));
+            }
+        }
+    }
+
+    Ok(normalized)
 }
 
 fn unix_ms_now() -> i64 {
@@ -425,4 +445,31 @@ fn unix_ms_now() -> i64 {
         .as_millis();
 
     i64::try_from(unix_ms).unwrap_or(i64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_cwd;
+    use std::path::Path;
+
+    #[test]
+    fn cwd_validation_accepts_user_private_absolute_paths_without_daemon_access() {
+        let cwd = validate_cwd(Path::new("/Users/alice/private/project")).unwrap();
+
+        assert_eq!(cwd, Path::new("/Users/alice/private/project"));
+    }
+
+    #[test]
+    fn cwd_validation_rejects_parent_components() {
+        let message = validate_cwd(Path::new("/Users/alice/../project")).unwrap_err();
+
+        assert!(message.contains("must not contain '..'"));
+    }
+
+    #[test]
+    fn cwd_validation_rejects_forbidden_system_paths() {
+        let message = validate_cwd(Path::new("/System/Library")).unwrap_err();
+
+        assert!(message.contains("forbidden system path"));
+    }
 }

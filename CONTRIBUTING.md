@@ -270,7 +270,14 @@ validation starts:
   macOS E2E runs after the macOS release build plus unit and integration tests.
 - Dependency CVE audit runs last for lockfile-changing PRs. The dedicated
   `.github/workflows/cve-audit.yml` workflow runs the scheduled main-branch CVE
-  audit.
+  audit, and the README badge represents that nightly main-branch health signal.
+  Both audit paths stay Linux-only, install pinned `cargo-audit` with
+  `taiki-e/install-action`, disable fallback installs, and need only
+  `contents: read` because plain failing jobs and logs are enough.
+- If audit install time becomes material, replace the installer step with a
+  pinned internal GHCR image that has `cargo-audit` preinstalled and is rebuilt
+  nightly for RustSec DB freshness plus tool and base-image updates. Add
+  `cargo-deny` only when license, duplicate, or banned-dependency policy exists.
 - Platform E2E jobs download the release build artifacts so install-health tests
   exercise the same payload produced by the release-build matrix.
 - `.github/workflows/compatibility-tracker.yml` runs Mondays at 08:00 UTC and

@@ -294,13 +294,13 @@ fn getaddrinfo_allowlisted_host_resolves_and_connects() {
 }
 
 // ============================================================================
-// Test 4: Differential — denied host at connect vs allowed loopback
-//         Proves Stentorian Guard discriminates, not "everything fails"
+// Test 4: Differential — denied host at connect and denied loopback
+//         Pins local relay fail-closed behavior.
 // ============================================================================
 
 #[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
-fn getaddrinfo_differential_deny_vs_loopback_allow() {
+fn getaddrinfo_differential_deny_vs_loopback_deny() {
     if !deny_target_resolves() {
         eprintln!(
             "SKIP: {DENY_HOST}:{DENY_PORT} does not resolve outside Stentorian Guard \
@@ -356,10 +356,10 @@ fn getaddrinfo_differential_deny_vs_loopback_allow() {
          RESOLVE-OK + EHOSTUNREACH (connect deny); got: {deny_stdout}"
     );
 
-    // Part B: loopback connect is allowed (Stentorian Guard doesn't block 127.0.0.1).
+    // Part B: loopback connect is denied before reaching the kernel.
     let loopback_script = "const net = require('net'); \
-        const s = net.connect(9, '127.0.0.1', () => { console.log('LOOPBACK-OK'); s.destroy(); process.exit(0); }); \
-        s.on('error', e => { console.log('LOOPBACK-ERR', e.code); process.exit(e.code === 'ECONNREFUSED' ? 0 : 5); }); \
+        const s = net.connect(9, '127.0.0.1', () => { console.log('LOOPBACK-OK'); s.destroy(); process.exit(5); }); \
+        s.on('error', e => { console.log('LOOPBACK-ERR', e.code); process.exit(e.code === 'EHOSTUNREACH' ? 0 : 5); }); \
         setTimeout(() => process.exit(3), 5000);";
 
     let allow_output = Command::new(&cli)
@@ -380,18 +380,13 @@ fn getaddrinfo_differential_deny_vs_loopback_allow() {
 
     assert!(
         allow_output.status.success(),
-        "allow leg: loopback must reach kernel (exit 0); got {:?}\n\
+        "loopback leg: expected Stentorian Guard denial (exit 0 from script); got {:?}\n\
          stdout: {allow_stdout}\nstderr: {allow_stderr}",
         allow_output.status.code()
     );
     assert!(
-        allow_stdout.contains("ECONNREFUSED") || allow_stdout.contains("LOOPBACK-OK"),
-        "allow leg: expected ECONNREFUSED or LOOPBACK-OK; got: {allow_stdout}"
-    );
-    assert!(
-        !allow_stdout.contains("EHOSTUNREACH"),
-        "allow leg: Stentorian Guard denied loopback! D-18 allowlists 127.0.0.1. \
-         stdout: {allow_stdout}"
+        allow_stdout.contains("EHOSTUNREACH"),
+        "loopback leg: expected EHOSTUNREACH; got: {allow_stdout}"
     );
 }
 

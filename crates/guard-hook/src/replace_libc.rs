@@ -38,7 +38,7 @@ const RESOLVE_TIMEOUT_MS: u64 = 100;
 ///
 /// This closes the BLOCKER-01 finding: the cloud-metadata hard rule (D-25b)
 /// for `169.254.169.254` / `fe80::a9fe:a9fe`, the raw-IP cache-miss hard rule
-/// (D-25c / ALLOW-08), AND the loopback hard rule (D-25a) are now ALL
+/// (D-25c / ALLOW-08), AND the loopback fail-closed rule (ISS-114) are now ALL
 /// enforced on the libc connect/sendto/sendmsg/connectx path — even when a
 /// a user-approved `AllowlistEntry` tries to allow IMDS. The tier-walk
 /// also produces correct `SourceKind` attribution for the daemon's block-log
@@ -302,8 +302,8 @@ unsafe extern "C" fn guard_connectx(
 //   → on Addresses: populates DNS cache, assembles addrinfo linked list
 //   → subsequent connect() to those IPs cache-hits → allowed
 //
-// Reentrancy safety: IPC uses AF_UNIX connect which passes through
-// guard_connect's AF_UNIX fast-path (no policy check, no IPC).
+// Reentrancy safety: hook-internal IPC uses AF_UNIX connect while IN_HOOK is set,
+// so guard_connect passes through to the raw syscall instead of applying policy.
 // The InHookGuard also prevents re-entering guard_getaddrinfo if
 // the IPC somehow triggers another getaddrinfo (it shouldn't — Unix
 // sockets don't need DNS).
@@ -717,17 +717,15 @@ unsafe fn notify_deny_for_sockaddr(
 }
 
 fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, SourceKind) {
-    // v0.1 policy: Unix domain sockets (AF_UNIX) are always allowed.
-    // They are local IPC — not network egress. Denying them breaks Node's
-    // internal libuv event loop (it uses a Unix socketpair for signaling),
-    // the daemon's own socket, and any other local IPC. (Rule 1 auto-fix.)
+    // ISS-114: local IPC can relay data to an unwrapped process that performs
+    // outbound egress. Fail closed for direct user-code AF_UNIX connects.
     if !addr.is_null()
         && usize::try_from(addrlen)
             .is_ok_and(|len| len >= core::mem::size_of::<libc::sa_family_t>())
     {
         let family = unsafe { (*addr).sa_family };
         if i32::from(family) == libc::AF_UNIX {
-            return (Verdict::Allow, SourceKind::HardRule("unix-socket"));
+            return (Verdict::Deny, SourceKind::HardRule("unix-socket"));
         }
     }
 
@@ -751,7 +749,7 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, S
 
     // BLOCKER-01 fix: rebuild the (host_bytes, ip_bytes, resolved) triple and
     // delegate to `evaluate_policy`. The evaluator's hard rules cover
-    // loopback (D-25a), cloud-metadata (D-25b), and raw-IP cache-miss
+    // loopback fail-closed (ISS-114), cloud-metadata (D-25b), and raw-IP cache-miss
     // (D-25c / ALLOW-08) — the libc hot path now enforces them all, with
     // correct precedence even when a project allow tries to override.
     //
@@ -842,7 +840,7 @@ fn decide_for_sockaddr(addr: *const sockaddr, addrlen: socklen_t) -> (Verdict, S
             // Cache miss: connect-by-IP with no prior resolution. Pass an
             // empty host so the evaluator tier-walks against the IP only;
             // the cache-miss-deny hard rule fires at this point unless the
-            // destination is loopback (the loopback hard rule comes first
+            // destination is loopback (the loopback fail-closed rule comes first
             // inside `evaluate_policy`).
             evaluate_in_hook(b"", ip_slice, false, entries)
         }

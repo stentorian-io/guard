@@ -9,8 +9,7 @@
 // from "Stentorian Guard didn't fire -- the host just doesn't resolve".
 // `discord.com` (a) resolves successfully outside Stentorian Guard, (b) is NOT in
 // the curated allowlist, so the only failure path is Stentorian Guard-induced. The
-// companion test in deny.rs additionally exercises a loopback (allowlisted)
-// host -- the differential proves Stentorian Guard discriminated.
+// companion test in deny.rs additionally exercises loopback fail-closed.
 //
 // STT_GUARD_TEST_DENY_HOST env var lets the test override the host.
 // STT_GUARD_TEST_DENY_PORT env var lets the test override the port.

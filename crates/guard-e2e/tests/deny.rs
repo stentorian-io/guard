@@ -23,12 +23,9 @@
 //!     ENOTFOUND in this test is unambiguous evidence of Stentorian Guard firing
 //!     at the getaddrinfo layer.
 //!
-//!   - `node_connect_to_loopback_is_allowed`: connects to `127.0.0.1:9`.
-//!     Loopback IS in D-18's allowlist. ECONNREFUSED proves the connect
-//!     reached libc and was refused by the kernel (port 9 not listening)
-//!     -- Stentorian Guard did NOT block. The differential vs the deny case proves
-//!     Stentorian Guard discriminated based on allowlist membership, not on
-//!     "everything fails".
+//!   - `node_connect_to_loopback_is_denied`: connects to `127.0.0.1:9`.
+//!     Loopback is local relay risk, so ISS-114 fails it closed before the
+//!     kernel can return ECONNREFUSED.
 //!
 //! Target binary requirement: node must be NON-hardened-runtime (Pitfall 2;
 //! spike A2). On macOS 26.x with Homebrew node, this is the case;
@@ -162,14 +159,7 @@ fn node_connect_to_non_allowlisted_host_is_denied() {
 
 #[cfg_attr(not(target_os = "macos"), ignore = "macOS-only test")]
 #[test]
-fn node_connect_to_loopback_is_allowed() {
-    // Differential companion: 127.0.0.1 IS in the v0.1 allowlist
-    // (D-18). A Node connect to 127.0.0.1:9 (discard service) should NOT be
-    // blocked by Stentorian Guard; it'll fail with ECONNREFUSED (no service
-    // listening on port 9) -- which is a NETWORK-level failure, NOT Stentorian Guard
-    // deny. The ECONNREFUSED-vs-EHOSTUNREACH distinction proves the verdict
-    // path chose Allow for the loopback case while choosing Deny for the
-    // non-allowlisted case in the deny test above.
+fn node_connect_to_loopback_is_denied() {
     let cli = resolve_cli();
     let dylib = resolve_dylib();
     let node = match resolve_node() {
@@ -182,8 +172,8 @@ fn node_connect_to_loopback_is_allowed() {
 
     let harness = DaemonHarness::start().expect("start daemon");
     let inline_script = "const net = require('net'); \
-        const s = net.connect(9, '127.0.0.1', () => { console.log('ALLOWED'); s.destroy(); process.exit(0); }); \
-        s.on('error', e => { console.log('NETERR', e.code); process.exit(e.code === 'ECONNREFUSED' ? 0 : 5); }); \
+        const s = net.connect(9, '127.0.0.1', () => { console.log('ALLOWED'); s.destroy(); process.exit(5); }); \
+        s.on('error', e => { console.log('NETERR', e.code); process.exit(e.code === 'EHOSTUNREACH' ? 0 : 5); }); \
         setTimeout(() => process.exit(3), 5000);";
 
     let output = Command::new(&cli)
@@ -202,26 +192,15 @@ fn node_connect_to_loopback_is_allowed() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Allow path: either ALLOWED (something is listening) or NETERR ECONNREFUSED
-    // (allowlist passed; network said no). Both are exit 0 in our script.
     assert!(
         output.status.success(),
-        "loopback connect must reach the network layer (ECONNREFUSED is OK); status={:?}\n\
+        "loopback connect must be denied by Stentorian Guard; status={:?}\n\
          stdout: {stdout}\n\
          stderr: {stderr}",
         output.status
     );
     assert!(
-        stdout.contains("ECONNREFUSED") || stdout.contains("ALLOWED"),
-        "expected ECONNREFUSED or ALLOWED in stdout (proves the connect went to libc, \
-         not denied by Stentorian Guard); got: {stdout}"
-    );
-
-    // EHOSTUNREACH would mean Stentorian Guard denied the loopback case -- that's a
-    // critical bug (D-18 explicitly allowlists loopback).
-    assert!(
-        !stdout.contains("EHOSTUNREACH"),
-        "Stentorian Guard denied loopback! D-18 says 127.0.0.1 IS in the v0.1 \
-         allowlist; this is a critical regression. Got: {stdout}"
+        stdout.contains("EHOSTUNREACH"),
+        "expected EHOSTUNREACH in stdout; got: {stdout}"
     );
 }

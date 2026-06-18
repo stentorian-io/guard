@@ -409,6 +409,11 @@ high-volume attack — supply-chain packages that phone home through standard
 networking calls — which is how the overwhelming majority of these compromises
 work. The goal is to make that attack class fail by default.
 
+Wrapped processes also fail closed on local relay paths: `localhost`,
+`localhost6`, `127.0.0.0/8`, `::1`, and direct Unix-domain socket connects.
+Local IPC is not treated as safe when untrusted wrapped code could hand data to
+an unwrapped relay process.
+
 With the [standard installation](SECURITY.md#deployment-model), a local attacker needs
 root to tamper with the guard's binaries, database, or logs. Without root, the
 remaining attack surface is DYLD stripping (a parent process removing the

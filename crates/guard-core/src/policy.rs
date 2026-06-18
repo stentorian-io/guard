@@ -11,7 +11,7 @@ use crate::allowlist::{AllowlistEntry, RuleKind, RuleTier, Verdict};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceKind {
     /// Hard rule encoded in this file. The &'static str names the rule —
-    /// "loopback" | "cloud-metadata" | "raw-ip-cache-miss".
+    /// "loopback" | "cloud-metadata" | "raw-ip-cache-miss" | "unix-socket".
     HardRule(&'static str),
     BuiltinDeny,
     CuratedAllow,
@@ -37,7 +37,8 @@ impl SourceKind {
     #[must_use]
     pub fn as_label(&self) -> &'static str {
         match self {
-            SourceKind::HardRule("loopback") => "loopback",
+            SourceKind::HardRule("loopback") => "loopback-denied",
+            SourceKind::HardRule("unix-socket") => "unix-socket-denied",
             SourceKind::HardRule("cloud-metadata") => "cloud-metadata-blocked",
             SourceKind::HardRule("raw-ip-cache-miss") => "raw-ip-no-dns",
             SourceKind::HardRule("fail-closed") => "fail-closed",
@@ -148,13 +149,13 @@ pub fn evaluate_policy(
     resolved_via_getaddrinfo: bool,
     entries: &[AllowlistEntry],
 ) -> (Verdict, SourceKind) {
-    // --- Tier 0a: loopback always-allow (D-25a) ---
+    // --- Tier 0a: loopback fail-closed (ISS-114) ---
     if !host.is_empty() && is_loopback_host(host) {
-        return (Verdict::Allow, SourceKind::HardRule("loopback"));
+        return (Verdict::Deny, SourceKind::HardRule("loopback"));
     }
     if let Some(ip_bytes) = ip {
         if is_loopback_ip(ip_bytes) {
-            return (Verdict::Allow, SourceKind::HardRule("loopback"));
+            return (Verdict::Deny, SourceKind::HardRule("loopback"));
         }
     }
 

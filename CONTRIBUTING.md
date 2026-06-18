@@ -165,6 +165,7 @@ Stentorian Guard is a defense-in-depth layer, not a sandbox. Known boundaries:
 | Scenario | Coverage | Detail |
 |---|---|---|
 | Standard networking (libc) | **Blocked** | All `connect()` / `sendto()` / `getaddrinfo()` calls intercepted |
+| Local relay over loopback or Unix sockets | **Blocked** | Wrapped processes fail closed on `localhost`, `127.0.0.0/8`, `::1`, and direct `AF_UNIX` socket connects |
 | Hardened-runtime binaries | **Mitigated** | System tools reject DYLD injection; Stentorian Guard blocks `exec` into hardened children from wrapped subtrees |
 | Raw syscalls | Not covered | Bypasses libc interposition entirely; not a realistic supply-chain vector — packages use libc. [Tracking issue](https://github.com/stentorian-io/guard/issues/1) |
 | Sandbox escape | Not covered | A sufficiently motivated attacker with arbitrary code execution can escape; Stentorian Guard targets the realistic attack class |

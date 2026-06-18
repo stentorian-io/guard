@@ -1208,6 +1208,11 @@
   confidence: confirmed
 - kind: deny
   match: exact
+  pattern: goy.mikoz.xyz
+  reason: "MAL-2026-6076 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
   pattern: helixguard.ai
   reason: "MAL-2025-191533 supply-chain IOC (FEED)"
   confidence: suspect
@@ -1246,6 +1251,11 @@
   pattern: honey.zakura-int.workers.dev
   reason: "MAL-2025-191790 supply-chain IOC (FEED)"
   confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: hybrid-analysis.com
+  reason: "MAL-2026-6076 supply-chain IOC (FEED)"
+  confidence: suspect
 - kind: deny
   match: exact
   pattern: i-like-boys.com
@@ -1370,6 +1380,11 @@
   match: exact
   pattern: mexc.workers.dev
   reason: "MAL-2025-3439 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: mikoz.xyz
+  reason: "MAL-2026-6076 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1498,6 +1513,11 @@
   confidence: confirmed
 - kind: deny
   match: exact
+  pattern: pooron.org
+  reason: "MAL-2026-6080 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
   pattern: pov.sh
   reason: "MAL-2025-2935 supply-chain IOC (FEED)"
   confidence: confirmed
@@ -1545,6 +1565,11 @@
   match: exact
   pattern: quiet-sky-123.onrender.com
   reason: "MAL-2026-5086 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: quitlag.com
+  reason: "MAL-2026-5995 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact
@@ -1765,6 +1790,11 @@
   match: exact
   pattern: updatenet.work
   reason: "MAL-2025-193012 supply-chain IOC (FEED)"
+  confidence: confirmed
+- kind: deny
+  match: exact
+  pattern: urmomthabomb.com
+  reason: "MAL-2026-6080 supply-chain IOC (FEED)"
   confidence: confirmed
 - kind: deny
   match: exact

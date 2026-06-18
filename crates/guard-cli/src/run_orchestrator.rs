@@ -30,6 +30,12 @@ pub fn run(
     command: &[OsString],
     learn_mode: bool,
 ) -> Result<i32, CliError> {
+    crate::spawn::preflight_root_command(
+        command
+            .first()
+            .ok_or_else(|| CliError::Other("command is empty".into()))?,
+    )?;
+
     let cwd = std::env::current_dir().map_err(|e| CliError::Other(format!("cwd: {e}")))?;
     let is_tty = std::io::stdin().is_terminal();
 

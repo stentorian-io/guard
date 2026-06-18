@@ -328,10 +328,14 @@ jobs:
           key: >-
             cargo-audit-${{ steps.audit_cache_key.outputs.scope }}-${{ steps.audit_cache_key.outputs.date }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
           lookup-only: true
-      - uses: rustsec/audit-check@v2.0.0
+      - uses: taiki-e/install-action@v2.82.0
         if: steps.audit_cache.outputs.cache-hit != 'true'
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          tool: cargo-audit@0.22.2
+          fallback: none
+      - name: Audit Cargo.lock
+        if: steps.audit_cache.outputs.cache-hit != 'true'
+        run: cargo audit
       - name: Write daily audit marker
         if: steps.audit_cache.outputs.cache-hit != 'true'
         run: |

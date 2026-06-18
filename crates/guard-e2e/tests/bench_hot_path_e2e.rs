@@ -6,7 +6,7 @@
 //
 // Wraps a real `node` child via `stt-guard wrap`, loops `net.connect` against
 // `registry.npmjs.org`, and prints a `LIVE_WRAP_NS p50=... p99=...` line on
-// stdout that scripts/bench-hot-path.sh parses.
+// stdout that scripts/bench/hot-path.ts parses.
 //
 // This is the *context* number per CONTEXT D-32 — captures cache-hit +
 // occasional Resolve-IPC cache-miss + TCP handshake against the real host.
@@ -28,11 +28,11 @@ use guard_e2e::{DaemonHarness, resolve_cli, resolve_dylib, resolve_node};
 
 #[cfg_attr(
     not(target_os = "macos"),
-    ignore = "macOS-only; live-wrap bench opt-in via scripts/bench-hot-path.sh"
+    ignore = "macOS-only; live-wrap bench opt-in via scripts/bench/hot-path.ts"
 )]
 #[cfg_attr(
     target_os = "macos",
-    ignore = "live-wrap bench — opt-in via scripts/bench-hot-path.sh"
+    ignore = "live-wrap bench - opt-in via scripts/bench/hot-path.ts"
 )]
 #[test]
 fn live_wrap_npmjs_loop_p99_context() {

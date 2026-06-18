@@ -1,6 +1,6 @@
 # Auto-generated from OSV.dev malicious-package advisories (MAL-*).
 # Source: https://osv-vulnerabilities.storage.googleapis.com/all.zip
-# Managed by scripts/update-feed-rules.sh — do not edit manually.
+# Managed by scripts/feed/update-rules.ts - do not edit manually.
 - kind: deny
   match: exact
   pattern: 0.feedback

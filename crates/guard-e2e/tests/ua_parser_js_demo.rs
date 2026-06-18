@@ -155,7 +155,7 @@ fn extract_fixture_package() -> UaParserFixture {
         .join("ua-parser-js-0.7.29-sanitized.tgz");
     assert!(
         fixture.exists(),
-        "fixture missing — run tools/vendor-ua-parser-js.sh first: {}",
+        "fixture missing - run fixtures/vendor-ua-parser-js.sh first: {}",
         fixture.display()
     );
 

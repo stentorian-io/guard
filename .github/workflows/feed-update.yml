@@ -34,6 +34,8 @@ jobs:
         uses: ./.github/actions/setup-rust
         with:
           shared-key: feed-update
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Select feed update branch
         id: feed_branch
@@ -53,7 +55,7 @@ jobs:
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
       - name: Extract OSV.dev IOCs
-        run: scripts/update-feed-rules.sh
+        run: bun scripts/feed/update-rules.ts
 
       - name: Check for changes
         id: diff
@@ -73,7 +75,7 @@ jobs:
 
       - name: Validate feed update branch
         if: steps.diff.outputs.changed == 'true'
-        run: scripts/validate-feed-update-pr.sh origin/main
+        run: bun scripts/feed/validate-update-pr.ts origin/main
 
       - name: Publish feed update PR
         if: steps.diff.outputs.changed == 'true'

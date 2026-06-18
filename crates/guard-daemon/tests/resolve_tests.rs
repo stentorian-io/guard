@@ -89,8 +89,8 @@ fn policy_gate_denies_unknown_host() {
 }
 
 #[test]
-fn policy_gate_allows_loopback_regardless() {
+fn policy_gate_denies_loopback_regardless() {
     let entries = vec![];
     let (verdict, _) = evaluate_policy(b"localhost", None, false, &entries);
-    assert_eq!(verdict, guard_core::Verdict::Allow);
+    assert_eq!(verdict, guard_core::Verdict::Deny);
 }

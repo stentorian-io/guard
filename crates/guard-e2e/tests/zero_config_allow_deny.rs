@@ -1,26 +1,17 @@
 #![cfg(target_os = "macos")]
 
-//! E2E test verifying ROADMAP v0.2 success criteria #2 and #3:
-//!   #2: zero-config stt-guard wrap succeeds for allowlisted destinations
-//!   #3: zero-config stt-guard wrap blocks non-allowlisted destinations via
-//!       the dylib's in-process snapshot lookup
+//! E2E test verifying local relay and raw-IP destinations fail closed under
+//! zero-config `stt-guard wrap`.
 //!
 //! Harness design — UPDATED FROM PLAN per executor-discovered constraint:
 //!
-//! The plan originally proposed two distinct loopback IPs (127.0.0.1 +
-//! 127.0.0.2) where 127.0.0.1 would be hard-rule allowed and 127.0.0.2 would
-//! fall through to default-deny. The executor verified during execution that
-//! `guard_core::policy::is_loopback_ip` accepts the entire
-//! 127.0.0.0/8 range — this is the strictly-correct RFC 1122 behavior — so
-//! BOTH 127.0.0.1 and 127.0.0.2 are hard-rule loopback allow. The plan's
-//! original design therefore cannot differentiate ALLOW from DENY using two
-//! loopback aliases.
+//! ISS-114 changed local transports to fail closed. Loopback is now a denial
+//! target, not the allow leg.
 //!
 //! Pragmatic redesign (plan §action option 3):
 //!
-//!   - `addr_a` = `127.0.0.1:port_a` with a real local listener — exercises the
-//!     allow path under stt-guard (loopback hard-rule allow). Under no-stt-guard,
-//!     also succeeds (kernel allows the connect).
+//!   - `addr_a` = `127.0.0.1:port_a` with a real local listener — succeeds
+//!     without stt-guard and is denied under stt-guard.
 //!   - `addr_b` = 192.0.2.1:80 (RFC 5737 TEST-NET-1, unrouted) — exercises the
 //!     dylib's libc `connect()` hook against a non-loopback IP that has no
 //!     prior getaddrinfo cache entry. The current v0.2 hot path
@@ -29,20 +20,8 @@
 //!     (sub-microsecond). Under no-stt-guard, the connect attempt to TEST-NET-1
 //!     times out at the 500ms probe deadline (no route exists).
 //!
-//! Because both baseline and under-stt-guard produce exit=1 (A succeeds, B
-//! fails), we cannot use exit code alone to differentiate. Instead we measure
-//! the wall-clock time of the probe: under stt-guard, B fails in well under
-//! 50ms (the dylib's hot-path budget per D-03). Without stt-guard, B fails
-//! after the full 500ms timeout. A 200ms threshold reliably differentiates
-//! the two regimes on macOS without flakiness.
-//!
-//! ROADMAP success criteria coverage:
-//!   #2 (allowlisted destination succeeds): assertion that `addr_a`'s success
-//!      bit (bit 0) is set under stt-guard.
-//!   #3 (non-allowlisted destination denied): assertion that the probe's
-//!      total runtime under stt-guard is < 200ms — proves stt-guard denied B
-//!      fast at the dylib layer rather than letting it reach the network
-//!      where it would time out.
+//! The wrapped probe should return exit code 0 because both destinations are
+//! denied before connecting.
 
 #[cfg(target_os = "macos")]
 use guard_e2e::{DaemonHarness, cargo_target_dir, resolve_cli, resolve_dylib};
@@ -85,8 +64,8 @@ fn e2e_zero_config_allow_deny() {
         return;
     }
 
-    // Bind a listener on 127.0.0.1 (random port). 127.0.0.1 is hard-rule
-    // loopback allow — addr_a will succeed under stt-guard.
+    // Bind a listener on 127.0.0.1 (random port). The baseline can connect;
+    // stt-guard must deny this local relay path.
     let listener_a = match TcpListener::bind("127.0.0.1:0") {
         Ok(l) => l,
         Err(e) => {
@@ -122,14 +101,8 @@ fn e2e_zero_config_allow_deny() {
     let dylib = resolve_dylib();
     let harness = DaemonHarness::start().expect("start daemon");
 
-    // Run the probe under `stt-guard wrap`. We measure both exit code and
-    // elapsed wall-clock time:
-    //   - exit code bit 0 (= 1 in result) MUST be set: addr_a connects
-    //     successfully (loopback hard-rule allow).
-    //   - exit code bit 1 (= 2 in result) MUST NOT be set: addr_b denied.
-    //   - elapsed time MUST be < 1500ms: under stt-guard, addr_b's connect
-    //     fast-fails. Without guard-level enforcement at libc, the connect
-    //     to TEST-NET-1 would consume the full 500ms timeout per addr.
+    // Run the probe under `stt-guard wrap`. Both connect attempts must be
+    // denied by the hook, so neither success bit should be set.
     let start = Instant::now();
     let out = Command::new(&cli)
         .arg("wrap")
@@ -153,10 +126,9 @@ fn e2e_zero_config_allow_deny() {
         "zero_config_allow_deny: exit={exit_code} elapsed={elapsed:?}\nstdout: {stdout}\nstderr: {stderr}"
     );
 
-    // ROADMAP #2: addr_a (allowlisted via loopback hard-rule) MUST succeed.
     assert!(
-        exit_code & 1 == 1,
-        "ROADMAP #2 violation: probe's bit 0 not set (addr_a 127.0.0.1 connect failed under stt-guard wrap)\n\
+        exit_code & 1 == 0,
+        "ISS-114 violation: probe's bit 0 set (addr_a 127.0.0.1 connect succeeded under stt-guard wrap)\n\
          exit={exit_code} elapsed={elapsed:?}\nstdout: {stdout}\nstderr: {stderr}"
     );
 

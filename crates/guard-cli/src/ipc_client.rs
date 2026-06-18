@@ -334,7 +334,7 @@ pub fn insert_user_rule_request_with_origin(
     origin: &str,
     run_uuid: Option<&str>,
 ) -> Result<i64, CliError> {
-    let bio_reason = format!("Stentorian Guard: {kind} rule for {pattern}");
+    let bio_reason = format!("create {kind} rule for {pattern}");
     if !crate::biometric::authenticate(&bio_reason) {
         return Err(CliError::Other(
             "biometric authentication required to modify rules".into(),
@@ -440,7 +440,7 @@ pub fn disable_curated_rule_request(
     pattern: &str,
     reason: &str,
 ) -> Result<(), CliError> {
-    let bio_reason = format!("Stentorian Guard: disable curated rule for {pattern}");
+    let bio_reason = format!("disable curated rule for {pattern}");
     if !crate::biometric::authenticate(&bio_reason) {
         return Err(CliError::Other(
             "biometric authentication required to modify rules".into(),
@@ -471,7 +471,7 @@ pub fn disable_curated_rule_request(
 ///
 /// Returns an error when authentication, signing, IPC, or daemon update fails.
 pub fn enable_curated_rule_request(sock: &Path, pattern: &str) -> Result<bool, CliError> {
-    let bio_reason = format!("Stentorian Guard: re-enable curated rule for {pattern}");
+    let bio_reason = format!("re-enable curated rule for {pattern}");
     if !crate::biometric::authenticate(&bio_reason) {
         return Err(CliError::Other(
             "biometric authentication required to modify rules".into(),

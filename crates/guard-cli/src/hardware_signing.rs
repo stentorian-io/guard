@@ -16,6 +16,8 @@ use guard_core::{
 use crate::CliError;
 
 const KEY_TAG: &str = "com.stentorian-guard.rule-signing.v1";
+#[cfg(target_os = "macos")]
+const KEY_LABEL: &str = "Stentorian Guard Rule Signing Key";
 const DISABLE_HARDWARE_SIGNER_ENV: &str = "STT_GUARD_DISABLE_HARDWARE_SIGNER";
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -109,7 +111,7 @@ pub fn sign_rule_payload(payload: &RuleSignaturePayloadV1) -> Result<RuleSignatu
     }
     let payload_bytes = canonical_rule_payload_bytes(payload)
         .map_err(|e| CliError::Other(format!("canonical rule payload encode failed: {e}")))?;
-    let signed_payload = macos_keychain::sign_payload(KEY_TAG, &payload_bytes)?;
+    let signed_payload = macos_keychain::sign_payload_with_prompt(KEY_TAG, &payload_bytes)?;
 
     Ok(RuleSignatureV1 {
         scheme: RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
@@ -136,7 +138,12 @@ pub fn sign_snapshot_payload(
     }
     let payload_bytes = canonical_snapshot_payload_bytes(payload)
         .map_err(|e| CliError::Other(format!("canonical snapshot payload encode failed: {e}")))?;
-    let signed_payload = macos_keychain::sign_payload(KEY_TAG, &payload_bytes)?;
+    let signed_payload =
+        macos_keychain::sign_payload_without_prompt(KEY_TAG, &payload_bytes).map_err(|e| {
+            CliError::Other(format!(
+                "snapshot signing requires repaired macOS Keychain access; run `sudo stt-guard install-system -y`: {e}"
+            ))
+        })?;
 
     Ok(SnapshotSignatureV1 {
         scheme: RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
@@ -166,7 +173,7 @@ pub fn sign_management_action_payload(
             "canonical management-action payload encode failed: {e}"
         ))
     })?;
-    let signed_payload = macos_keychain::sign_payload(KEY_TAG, &payload_bytes)?;
+    let signed_payload = macos_keychain::sign_payload_with_prompt(KEY_TAG, &payload_bytes)?;
 
     Ok(RuleSignatureV1 {
         scheme: RULE_SIGNATURE_SCHEME_ECDSA_P256_SHA256.to_string(),
@@ -216,6 +223,10 @@ fn hex_lower(bytes: &[u8]) -> String {
 pub(crate) mod macos_keychain {
     use crate::CliError;
 
+    #[cfg(target_os = "macos")]
+    pub(super) const INTERACTIVE_SIGNING_PROMPT: &str =
+        "sign this Stentorian Guard rule with your Keychain key";
+
     #[derive(Debug, PartialEq, Eq)]
     pub(crate) struct KeychainEnrollment {
         pub(crate) public_key_x963: Vec<u8>,
@@ -256,11 +267,10 @@ pub(crate) mod macos_keychain {
         use std::ptr;
 
         use super::{
-            KeychainEnrollment, KeychainFailureKind, KeychainSignature, classify_os_status,
+            INTERACTIVE_SIGNING_PROMPT, KeychainEnrollment, KeychainFailureKind, KeychainSignature,
+            classify_os_status,
         };
         use crate::CliError;
-
-        const PROMPT: &str = "Stentorian Guard needs your OS-backed rule-signing key.";
 
         const ERR_SEC_SUCCESS: i32 = 0;
         const ERR_SEC_ITEM_NOT_FOUND: i32 = -25_300;
@@ -268,6 +278,7 @@ pub(crate) mod macos_keychain {
         const K_SEC_KEY_OPERATION_TYPE_SIGN: u32 = 0;
         type CFIndex = c_long;
         type CFAllocatorRef = *const c_void;
+        type CFArrayRef = *const c_void;
         type CFDataRef = *const c_void;
         type CFDictionaryRef = *const c_void;
         type CFErrorRef = *const c_void;
@@ -276,6 +287,7 @@ pub(crate) mod macos_keychain {
         type CFStringRef = *const c_void;
         type CFTypeRef = *const c_void;
         type OSStatus = i32;
+        type SecAccessRef = *const c_void;
         type SecKeyAlgorithm = CFStringRef;
         type SecKeyRef = *const c_void;
 
@@ -347,13 +359,22 @@ pub(crate) mod macos_keychain {
             static kSecAttrKeySizeInBits: CFStringRef;
             static kSecAttrKeyType: CFStringRef;
             static kSecAttrKeyTypeECSECPrimeRandom: CFStringRef;
+            static kSecAttrAccess: CFStringRef;
+            static kSecAttrLabel: CFStringRef;
             static kSecClass: CFStringRef;
             static kSecClassKey: CFStringRef;
             static kSecPrivateKeyAttrs: CFStringRef;
             static kSecReturnRef: CFStringRef;
+            static kSecUseAuthenticationUI: CFStringRef;
+            static kSecUseAuthenticationUIFail: CFStringRef;
             static kSecUseOperationPrompt: CFStringRef;
             static kSecKeyAlgorithmECDSASignatureMessageX962SHA256: SecKeyAlgorithm;
 
+            fn SecAccessCreate(
+                descriptor: CFStringRef,
+                trustedlist: CFArrayRef,
+                access_ref: *mut SecAccessRef,
+            ) -> OSStatus;
             fn SecItemCopyMatching(query: CFDictionaryRef, result: *mut CFTypeRef) -> OSStatus;
             fn SecItemDelete(query: CFDictionaryRef) -> OSStatus;
             fn SecKeyCopyExternalRepresentation(
@@ -381,18 +402,11 @@ pub(crate) mod macos_keychain {
         pub(super) fn enroll_key_for_init(key_tag: &str) -> Result<KeychainEnrollment, CliError> {
             let identity_guard = InitUserIdentityGuard::enter()?;
 
-            let enrollment = if let Some(existing_key) = find_private_key(key_tag)? {
-                KeychainEnrollment {
-                    public_key_x963: export_public_key_x963(existing_key.as_ptr())?,
-                    created: false,
-                }
-            } else {
-                let key = create_private_key(key_tag)?;
-
-                KeychainEnrollment {
-                    public_key_x963: export_public_key_x963(key.as_ptr())?,
-                    created: true,
-                }
+            let old_key_existed = delete_key(key_tag)?;
+            let key = create_private_key(key_tag)?;
+            let enrollment = KeychainEnrollment {
+                public_key_x963: export_public_key_x963(key.as_ptr())?,
+                created: !old_key_existed,
             };
 
             identity_guard.restore()?;
@@ -402,13 +416,19 @@ pub(crate) mod macos_keychain {
 
         pub(super) fn delete_key_for_init(key_tag: &str) -> Result<(), CliError> {
             let identity_guard = InitUserIdentityGuard::enter()?;
-            let query = key_lookup_query(key_tag, false)?;
-            let status = unsafe { SecItemDelete(query.as_ptr()) };
-
+            delete_key(key_tag)?;
             identity_guard.restore()?;
 
+            Ok(())
+        }
+
+        fn delete_key(key_tag: &str) -> Result<bool, CliError> {
+            let query = key_item_query(key_tag)?;
+            let status = unsafe { SecItemDelete(query.as_ptr()) };
+
             match status {
-                ERR_SEC_SUCCESS | ERR_SEC_ITEM_NOT_FOUND => Ok(()),
+                ERR_SEC_SUCCESS => Ok(true),
+                ERR_SEC_ITEM_NOT_FOUND => Ok(false),
                 other => Err(security_status_error(
                     "delete macOS Keychain signing key",
                     other,
@@ -416,11 +436,26 @@ pub(crate) mod macos_keychain {
             }
         }
 
-        pub(super) fn sign_payload(
+        pub(super) fn sign_payload_with_prompt(
             key_tag: &str,
             payload: &[u8],
         ) -> Result<KeychainSignature, CliError> {
-            let key = find_private_key(key_tag)?.ok_or_else(|| {
+            sign_payload(key_tag, payload, SigningInteraction::WithPrompt)
+        }
+
+        pub(super) fn sign_payload_without_prompt(
+            key_tag: &str,
+            payload: &[u8],
+        ) -> Result<KeychainSignature, CliError> {
+            sign_payload(key_tag, payload, SigningInteraction::WithoutPrompt)
+        }
+
+        fn sign_payload(
+            key_tag: &str,
+            payload: &[u8],
+            signing_interaction: SigningInteraction,
+        ) -> Result<KeychainSignature, CliError> {
+            let key = find_private_key(key_tag, signing_interaction)?.ok_or_else(|| {
                 CliError::Other(
                     "OS-backed signing key unavailable; run the installer to enroll macOS Keychain signing"
                         .into(),
@@ -458,8 +493,11 @@ pub(crate) mod macos_keychain {
             })
         }
 
-        fn find_private_key(key_tag: &str) -> Result<Option<OwnedCf<SecKeyRef>>, CliError> {
-            let query = key_lookup_query(key_tag, true)?;
+        fn find_private_key(
+            key_tag: &str,
+            signing_interaction: SigningInteraction,
+        ) -> Result<Option<OwnedCf<SecKeyRef>>, CliError> {
+            let query = key_lookup_query(key_tag, true, signing_interaction)?;
             let mut item = ptr::null();
             let status = unsafe { SecItemCopyMatching(query.as_ptr(), &raw mut item) };
 
@@ -494,6 +532,18 @@ pub(crate) mod macos_keychain {
                 unsafe { kSecAttrApplicationTag },
                 tag.as_ptr(),
             );
+            let label = cf_string(super::super::KEY_LABEL)?;
+            cf_dictionary_set(
+                private_attrs.as_ptr(),
+                unsafe { kSecAttrLabel },
+                label.as_ptr(),
+            );
+            let access = create_key_access()?;
+            cf_dictionary_set(
+                private_attrs.as_ptr(),
+                unsafe { kSecAttrAccess },
+                access.as_ptr(),
+            );
 
             let attrs = cf_dictionary()?;
             cf_dictionary_set(attrs.as_ptr(), unsafe { kSecAttrKeyType }, unsafe {
@@ -522,12 +572,8 @@ pub(crate) mod macos_keychain {
             Ok(OwnedCf::<SecKeyRef>::new(key, key))
         }
 
-        fn key_lookup_query(
-            key_tag: &str,
-            return_ref: bool,
-        ) -> Result<OwnedCf<CFMutableDictionaryRef>, CliError> {
+        fn key_item_query(key_tag: &str) -> Result<OwnedCf<CFMutableDictionaryRef>, CliError> {
             let tag = cf_data(key_tag.as_bytes())?;
-            let prompt = cf_string(PROMPT)?;
             let query = cf_dictionary()?;
 
             cf_dictionary_set(query.as_ptr(), unsafe { kSecClass }, unsafe {
@@ -541,11 +587,30 @@ pub(crate) mod macos_keychain {
             cf_dictionary_set(query.as_ptr(), unsafe { kSecAttrKeyType }, unsafe {
                 kSecAttrKeyTypeECSECPrimeRandom
             });
-            cf_dictionary_set(
-                query.as_ptr(),
-                unsafe { kSecUseOperationPrompt },
-                prompt.as_ptr(),
-            );
+
+            Ok(query)
+        }
+
+        fn key_lookup_query(
+            key_tag: &str,
+            return_ref: bool,
+            signing_interaction: SigningInteraction,
+        ) -> Result<OwnedCf<CFMutableDictionaryRef>, CliError> {
+            let query = key_item_query(key_tag)?;
+
+            if signing_interaction == SigningInteraction::WithPrompt {
+                let prompt = cf_string(INTERACTIVE_SIGNING_PROMPT)?;
+
+                cf_dictionary_set(
+                    query.as_ptr(),
+                    unsafe { kSecUseOperationPrompt },
+                    prompt.as_ptr(),
+                );
+            } else {
+                cf_dictionary_set(query.as_ptr(), unsafe { kSecUseAuthenticationUI }, unsafe {
+                    kSecUseAuthenticationUIFail
+                });
+            }
 
             if return_ref {
                 cf_dictionary_set(query.as_ptr(), unsafe { kSecReturnRef }, unsafe {
@@ -554,6 +619,27 @@ pub(crate) mod macos_keychain {
             }
 
             Ok(query)
+        }
+
+        fn create_key_access() -> Result<OwnedCf<SecAccessRef>, CliError> {
+            let descriptor = cf_string(super::super::KEY_LABEL)?;
+            let mut access = ptr::null();
+            let status =
+                unsafe { SecAccessCreate(descriptor.as_ptr(), ptr::null(), &raw mut access) };
+            if status != ERR_SEC_SUCCESS {
+                return Err(security_status_error(
+                    "create macOS Keychain signing key access policy",
+                    status,
+                ));
+            }
+
+            Ok(OwnedCf::<SecAccessRef>::new(access, access))
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum SigningInteraction {
+            WithPrompt,
+            WithoutPrompt,
         }
 
         fn export_public_key_x963(private_key: SecKeyRef) -> Result<Vec<u8>, CliError> {
@@ -906,7 +992,14 @@ pub(crate) mod macos_keychain {
             Err(super::super::unavailable_error())
         }
 
-        pub(super) fn sign_payload(
+        pub(super) fn sign_payload_with_prompt(
+            _key_tag: &str,
+            _payload: &[u8],
+        ) -> Result<KeychainSignature, CliError> {
+            Err(super::super::unavailable_error())
+        }
+
+        pub(super) fn sign_payload_without_prompt(
             _key_tag: &str,
             _payload: &[u8],
         ) -> Result<KeychainSignature, CliError> {
@@ -922,11 +1015,18 @@ pub(crate) mod macos_keychain {
         macos::delete_key_for_init(key_tag)
     }
 
-    pub(crate) fn sign_payload(
+    pub(crate) fn sign_payload_with_prompt(
         key_tag: &str,
         payload: &[u8],
     ) -> Result<KeychainSignature, CliError> {
-        macos::sign_payload(key_tag, payload)
+        macos::sign_payload_with_prompt(key_tag, payload)
+    }
+
+    pub(crate) fn sign_payload_without_prompt(
+        key_tag: &str,
+        payload: &[u8],
+    ) -> Result<KeychainSignature, CliError> {
+        macos::sign_payload_without_prompt(key_tag, payload)
     }
 }
 
@@ -961,6 +1061,16 @@ mod tests {
             macos_keychain::classify_os_status(-1),
             macos_keychain::KeychainFailureKind::Other
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn keychain_interactive_prompt_reads_after_macos_prefix() {
+        assert_eq!(
+            macos_keychain::INTERACTIVE_SIGNING_PROMPT,
+            "sign this Stentorian Guard rule with your Keychain key"
+        );
+        assert!(!macos_keychain::INTERACTIVE_SIGNING_PROMPT.ends_with('.'));
     }
 
     #[cfg(all(not(target_os = "macos"), not(feature = "test-signer")))]

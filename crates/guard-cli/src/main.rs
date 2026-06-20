@@ -48,11 +48,6 @@ fn real_main() -> Result<i32, CliError> {
         }
         Cmd::Update { check, version } => guard_cli::install::update::run_update(check, version),
         Cmd::Wrap { learn, argv } => {
-            guard_cli::spawn::preflight_root_command(
-                argv.first()
-                    .ok_or_else(|| CliError::Other("command is empty".into()))?,
-            )?;
-
             if learn && !guard_cli::tty::stdin_is_tty() {
                 eprintln!(
                     "stt-guard: --learn requires an interactive terminal \
@@ -60,6 +55,12 @@ fn real_main() -> Result<i32, CliError> {
                 );
                 return Ok(64); // EX_USAGE
             }
+
+            guard_cli::spawn::preflight_root_command(
+                argv.first()
+                    .ok_or_else(|| CliError::Other("command is empty".into()))?,
+            )?;
+
             let state = resolve_state_dir();
             let sock = socket_path(&state);
             guard_cli::ensure_daemon::ensure_daemon(&sock, &state)?;

@@ -5,7 +5,7 @@
 use std::ffi::OsString;
 use std::ffi::{CString, OsStr};
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use guard_core::paths::{
     ENV_HOOK_INJECTION, ENV_SNAPSHOT_MANIFEST as ENV_MANIFEST, ENV_STATE_DIR as ENV_STATE,
@@ -140,6 +140,8 @@ pub fn spawn_wrapped_with_pgid(
         return Err(crate::CliError::Other("command is empty".into()));
     }
 
+    preflight_root_command(&command[0])?;
+
     let dylib =
         crate::locate::find_dylib().map_err(|e| crate::CliError::DylibNotFound(e.to_string()))?;
 
@@ -181,4 +183,101 @@ pub fn spawn_wrapped_with_pgid(
         crate::CliError::Other(format!("child pid {} does not fit i32", child.id()))
     })?;
     Ok((child, pgid))
+}
+
+/// Fail before daemon setup or child spawn when the root command cannot carry
+/// Guard's hook injection.
+///
+/// # Errors
+///
+/// Returns an error when the command resolves to a platform binary that will
+/// shed the hook environment before `stt-guard-hook` can load.
+pub fn preflight_root_command(command: &OsStr) -> Result<(), crate::CliError> {
+    let Some(command_path) = resolve_command_path(command) else {
+        return Ok(());
+    };
+
+    #[cfg(target_os = "macos")]
+    {
+        reject_dyld_restricted_root_command(&command_path)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = command_path;
+        Ok(())
+    }
+}
+
+fn resolve_command_path(command: &OsStr) -> Option<PathBuf> {
+    let command_path = PathBuf::from(command);
+    if command_path.components().count() > 1 {
+        return Some(command_path);
+    }
+
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(command);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn reject_dyld_restricted_root_command(command_path: &Path) -> Result<(), crate::CliError> {
+    let checked_path = command_path
+        .canonicalize()
+        .unwrap_or_else(|_| command_path.to_path_buf());
+
+    if !is_apple_system_command_path(&checked_path) {
+        return Ok(());
+    }
+
+    Err(crate::CliError::Other(format!(
+        "refusing to wrap {} because macOS will strip {} before the guard hook can load; use a non-hardened toolchain binary instead",
+        checked_path.display(),
+        ENV_HOOK_INJECTION
+    )))
+}
+
+#[cfg(target_os = "macos")]
+fn is_apple_system_command_path(path: &Path) -> bool {
+    const PREFIXES: &[&str] = &[
+        "/bin",
+        "/sbin",
+        "/usr/bin",
+        "/usr/sbin",
+        "/usr/libexec",
+        "/System",
+    ];
+
+    PREFIXES.iter().any(|prefix| {
+        let prefix = Path::new(prefix);
+        path == prefix || path.starts_with(prefix)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "macos")]
+    use super::is_apple_system_command_path;
+    #[cfg(target_os = "macos")]
+    use std::path::Path;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn root_command_preflight_blocks_apple_curl_path() {
+        assert!(is_apple_system_command_path(Path::new("/usr/bin/curl")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn root_command_preflight_allows_homebrew_curl_path() {
+        assert!(!is_apple_system_command_path(Path::new(
+            "/opt/homebrew/bin/curl"
+        )));
+    }
 }

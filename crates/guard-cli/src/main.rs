@@ -55,6 +55,12 @@ fn real_main() -> Result<i32, CliError> {
                 );
                 return Ok(64); // EX_USAGE
             }
+
+            guard_cli::spawn::preflight_root_command(
+                argv.first()
+                    .ok_or_else(|| CliError::Other("command is empty".into()))?,
+            )?;
+
             let state = resolve_state_dir();
             let sock = socket_path(&state);
             guard_cli::ensure_daemon::ensure_daemon(&sock, &state)?;

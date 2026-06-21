@@ -142,16 +142,17 @@ fn authenticate_allow_choice(req: &PromptRequest, verdict: PromptVerdict) -> Pro
         return verdict;
     }
 
-    let reason = format!(
-        "Stentorian Guard: approve outbound to {}:{}",
-        req.dest_host, req.dest_port
-    );
+    let reason = allow_choice_authentication_reason(req);
     if crate::biometric::authenticate(&reason) {
         verdict
     } else {
         println!("  authentication failed — treating as deny");
         PromptVerdict::Deny
     }
+}
+
+fn allow_choice_authentication_reason(req: &PromptRequest) -> String {
+    format!("approve outbound to {}", req.dest_host)
 }
 
 fn rule_pattern_for_verdict(req: &PromptRequest, verdict: &PromptVerdict) -> Option<RulePattern> {
@@ -206,4 +207,40 @@ fn unix_ms_now() -> i64 {
         .as_millis();
 
     i64::try_from(millis).unwrap_or(i64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use guard_ipc::{ProcessCtx, SuggestedRule};
+
+    #[test]
+    fn allow_choice_authentication_reason_reads_after_macos_prefix() {
+        let req = PromptRequest {
+            schema_version: IPC_SCHEMA_V3,
+            prompt_id: "prompt-1".to_string(),
+            dest_host: "example.com".to_string(),
+            dest_port: 0,
+            dest_ip: None,
+            source_kind: "unknown".to_string(),
+            source_locator: None,
+            package_context: None,
+            process: ProcessCtx {
+                pid: 1,
+                pidversion: 0,
+                argv0: "node".to_string(),
+                cwd: "/tmp".to_string(),
+            },
+            intel: None,
+            suggested_rules: vec![SuggestedRule {
+                match_type: "exact".to_string(),
+                pattern: "example.com".to_string(),
+            }],
+        };
+
+        assert_eq!(
+            allow_choice_authentication_reason(&req),
+            "approve outbound to example.com"
+        );
+    }
 }

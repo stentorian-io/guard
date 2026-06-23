@@ -799,6 +799,14 @@ impl InstallTransaction {
         })
     }
 
+    #[cfg(test)]
+    fn new_without_ambient_system_actions() -> Result<Self, CliError> {
+        let mut transaction = Self::new()?;
+        transaction.rollback_actions.clear();
+
+        Ok(transaction)
+    }
+
     fn commit(mut self) {
         self.committed = true;
         self.remove_backup_dir_after_success();
@@ -1266,7 +1274,8 @@ mod tests {
         std::fs::set_permissions(&existing_path, std::fs::Permissions::from_mode(0o600))
             .expect("set mode");
 
-        let mut transaction = super::InstallTransaction::new().expect("transaction");
+        let mut transaction =
+            super::InstallTransaction::new_without_ambient_system_actions().expect("transaction");
         transaction
             .record_file_replacement(&existing_path)
             .expect("record existing");

@@ -311,9 +311,12 @@ fn trusted_signer_manifest_contains(
     state_dir: &Path,
 ) -> Result<bool, LoadError> {
     let mut path = guard_core::paths::trusted_rule_signers_path();
-    if (cfg!(debug_assertions) || cfg!(feature = "test-signer")) && !path.exists() {
-        path = state_dir.join(guard_core::paths::TRUSTED_RULE_SIGNERS_FILENAME);
+    let state_dir_path = state_dir.join(guard_core::paths::TRUSTED_RULE_SIGNERS_FILENAME);
+
+    if (cfg!(debug_assertions) || cfg!(feature = "test-signer")) && state_dir_path.exists() {
+        path = state_dir_path;
     }
+
     verify_trusted_signer_manifest_path(&path)?;
     let contents = std::fs::read_to_string(&path)
         .map_err(|e| LoadError::TrustedSignerManifestInvalid(e.to_string()))?;

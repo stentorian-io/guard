@@ -21,6 +21,11 @@ on:
       - 'v[0-9]+.*'
   workflow_dispatch:
     inputs:
+      tag:
+        description: 'Release tag to build (for example, v0.2.0). Leave empty for dry-run builds.'
+        required: false
+        default: ''
+        type: string
       dry_run:
         description: 'Dry run (skip GitHub Release creation)'
         required: false
@@ -42,20 +47,27 @@ jobs:
       - name: Checkout exact release commit
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: Validate release tag is on main
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || inputs.tag != ''
         run: |
           set -euo pipefail
 
           git fetch --no-tags origin main
 
-          release_commit="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="${{ inputs.tag }}"
+          fi
+
+          release_commit="$(git rev-list -n 1 "$TAG")"
           main_commit="$(git rev-parse origin/main)"
 
           if ! git merge-base --is-ancestor "$release_commit" "$main_commit"; then
-            echo "release tag $GITHUB_REF_NAME points to $release_commit, which is not on origin/main $main_commit" >&2
+            echo "release tag $TAG points to $release_commit, which is not on origin/main $main_commit" >&2
             exit 1
           fi
 
@@ -75,6 +87,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
 
       - uses: ./.github/actions/setup-rust
@@ -123,6 +136,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: Download build artifacts
@@ -141,6 +155,8 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             TAG="${GITHUB_REF#refs/tags/}"
+          elif [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
           else
             TAG="v0.0.0-dryrun"
           fi
@@ -189,6 +205,7 @@ jobs:
       - name: Checkout exact release commit
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 1
 
       - name: Download packaged release candidates

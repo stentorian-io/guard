@@ -9,6 +9,7 @@ on:
     branches: [main]
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
@@ -30,6 +31,7 @@ jobs:
         env:
           RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
           MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -49,3 +51,5 @@ jobs:
 
           git tag "$tag" "$MERGE_COMMIT"
           git push origin "$tag"
+
+          gh workflow run release.yml --ref main -f tag="$tag" -f dry_run=false

@@ -1,0 +1,51 @@
+# Creates the semver tag that triggers the release workflow after a release PR
+# is merged. Release branches are named like release/v0.2.0.
+
+name: release-tag
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Tag merged release PR
+    if: >
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Create release tag
+        env:
+          RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+
+          tag="$RELEASE_BRANCH"
+          tag="${tag#release/}"
+
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release branch must be release/vMAJOR.MINOR.PATCH, got $RELEASE_BRANCH" >&2
+            exit 1
+          fi
+
+          git fetch --tags origin
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "tag already exists: $tag" >&2
+            exit 1
+          fi
+
+          git tag "$tag" "$MERGE_COMMIT"
+          git push origin "$tag"

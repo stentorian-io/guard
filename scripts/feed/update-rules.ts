@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { output, run, sha256File, tempDir } from "../lib/command";
+import { run, sha256File, tempDir } from "../lib/command";
 
 const OSV_ALL_ZIP = "https://osv-vulnerabilities.storage.googleapis.com/all.zip";
 const OUTPUT_FILE = "crates/guard-core/data/malicious-ossf-packages.yaml";
@@ -47,15 +47,19 @@ const tmpdir = tempDir("stt-guard-feed");
 const zipPath = join(tmpdir, "all.zip");
 const advisoryDir = join(tmpdir, "advisories");
 
+function maliciousAdvisoryFiles(path: string): string[] {
+  return readdirSync(path, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.startsWith("MAL-") && entry.name.endsWith(".json"))
+    .map((entry) => join(entry.parentPath, entry.name));
+}
+
 console.log("Downloading OSV.dev combined bulk archive ...");
 run("curl", ["-fsSL", "--retry", "3", "--retry-delay", "5", "-o", zipPath, OSV_ALL_ZIP]);
 console.log("Extracting MAL-* advisories ...");
 run("unzip", ["-q", "-o", zipPath, "MAL-*.json", "-d", advisoryDir], { allowFailure: true });
 rmSync(zipPath, { force: true });
 
-const advisoryFiles = output("find", [advisoryDir, "-name", "MAL-*.json"], { allowFailure: true })
-  .split(/\r?\n/)
-  .filter(Boolean);
+const advisoryFiles = maliciousAdvisoryFiles(advisoryDir);
 console.log(`Found ${advisoryFiles.length} MAL-* advisories across all ecosystems.`);
 console.log("Filtering MAL-* advisories and extracting host IOCs ...");
 

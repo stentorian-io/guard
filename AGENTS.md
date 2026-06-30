@@ -190,7 +190,9 @@ trigger them again through Git.
 - Update `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, or `docs/` when behavior,
   installation, threat model, commands, or operational expectations change.
 - Use conventional commit style when committing:
-  `feat(hook): ...`, `fix(daemon): ...`, `test(e2e): ...`, `docs(llm): ...`.
+  `feat: ...`, `fix: ...`, `test: ...`, `docs: ...`. Do not add a
+  component/scope such as `fix(daemon): ...`; the commit-msg hook rejects
+  scoped subjects.
 
 ## Agent And Subagent Expectations
 

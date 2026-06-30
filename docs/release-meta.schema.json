@@ -27,7 +27,7 @@
     },
     "security_fixes": {
       "type": "boolean",
-      "description": "True if the release contains commits with fix(security) scope."
+      "description": "True if the release contains commit subjects starting with 'fix: security:'."
     },
     "published_at": {
       "type": "string",

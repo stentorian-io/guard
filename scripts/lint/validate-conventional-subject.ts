@@ -11,37 +11,23 @@ if (subject.length === 0) {
   reject("subject is required");
 }
 
-const match = subject.match(/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(([^)]+)\))?!?: (.+)$/);
+const scopedMatch = subject.match(/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)\(([^)]+)\)!?: /);
+if (scopedMatch) {
+  reject(`components are not allowed in commit subjects.
+Use '${scopedMatch[1]}: ...' not '${scopedMatch[1]}(${scopedMatch[2]}): ...'
+Got: ${subject}`);
+}
+
+const match = subject.match(/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)!?: (.+)$/);
 if (!match) {
   reject(`subject does not follow Conventional Commits.
-Expected: <type>(<scope>): <description>
+Expected: <type>: <description>
 Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
 Got: ${subject}`);
 }
 
 const type = match[1];
-const scope = match[3] ?? "";
-const description = match[4];
-
-if (type === "docs") {
-  const allowedScopes = new Set(["readme", "llm", "bench", "man", "help", "install"]);
-
-  if (scope.length === 0) {
-    reject(`'docs' subjects require an explicit scope.
-Allowed: docs(readme), docs(llm), docs(bench), docs(man), docs(help), docs(install)
-Got: ${subject}`);
-  }
-
-  if (!allowedScopes.has(scope)) {
-    reject(`docs(${scope}) is not a recognized scope.
-Allowed: readme, llm, bench, man, help, install
-Changelog scopes: man, help, install`);
-  }
-}
-
-if (type === "ci" && scope.length > 0) {
-  reject(`Scopes are not allowed for the 'ci' type. Use 'ci: ...' not 'ci(${scope}): ...'`);
-}
+const description = match[2];
 
 if (/^[A-Z]/.test(description)) {
   reject(`description must start with a lowercase letter.

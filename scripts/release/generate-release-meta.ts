@@ -20,7 +20,7 @@ if (previousTag) {
 let securityFixes = false;
 const tagExists = output("git", ["rev-parse", "--verify", "--quiet", `${newTag}^{commit}`], { allowFailure: true }).trim().length > 0;
 if (tagExists) {
-  securityFixes = /fix\(security\)/i.test(output("git", ["log", "--oneline", range], { allowFailure: true }));
+  securityFixes = /fix!?: security:/i.test(output("git", ["log", "--format=%s", range], { allowFailure: true }));
 }
 
 const severity = denyRuleCount > 0 || securityFixes ? "critical" : "informational";

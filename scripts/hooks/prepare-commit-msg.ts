@@ -70,7 +70,7 @@ function inferType() {
 const inferred = inferType();
 const message = readFileSync(messageFile, "utf8");
 const firstLine = message.split(/\r?\n/, 1)[0] ?? "";
-const currentType = firstLine.match(/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?!?: .+/)?.[1] ?? "";
+const currentType = firstLine.match(/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\(.+\))?!?: .+/)?.[1] ?? "";
 
 if (currentType.length > 0) {
   let rewrite = "";
@@ -87,10 +87,6 @@ if (currentType.length > 0) {
   if (/^(feat|fix)$/.test(currentType) && state.hasBuild && !state.hasSrc && !state.hasUserFacingScript && !state.hasTest && !state.hasCi && !state.hasDoc) {
     rewrite = "chore";
   }
-  if (currentType === "docs" && !/^docs\([^)]+\)/.test(firstLine)) {
-    console.error("prepare-commit-msg: 'docs' requires a scope (readme|llm|bench|man|help|install)");
-  }
-
   if (rewrite.length > 0 && rewrite !== currentType) {
     writeFileSync(messageFile, message.replace(new RegExp(`^${currentType}`), rewrite));
     console.error(`prepare-commit-msg: rewritten type '${currentType}' -> '${rewrite}' (staged files: ${inferred})`);
@@ -98,24 +94,22 @@ if (currentType.length > 0) {
 }
 
 if (messageSource !== "message" || currentType.length === 0) {
-  const changelogNote = inferred === "test" || inferred === "ci" || inferred === "chore or build"
+  const changelogNote = inferred === "test" || inferred === "ci" || inferred === "docs" || inferred === "chore or build"
     ? "(will NOT appear in changelog)"
-    : inferred === "docs"
-      ? "(only docs(man|help|install) appear in changelog)"
-      : "(will appear in changelog)";
+    : "(will appear in changelog)";
 
   appendFileSync(messageFile, `
 # -- Commit type guidance --------------------------------------
 # Staged files suggest: ${inferred} ${changelogNote}
 #
-# Changelog types: feat, fix, perf, docs(man|help|install)
-# Internal types:  test, refactor, chore, build, ci, docs(readme|llm|bench)
+# Changelog types: feat, fix, perf
+# Internal types:  docs, test, refactor, chore, build, ci
 #
 # Rules enforced by commit-msg hook:
 #   feat/fix -> must change source code (.rs) or user-facing install scripts
 #   test     -> must change test files
-#   ci       -> should change .github/ files and must not use a scope
-#   docs     -> requires scope: readme, llm, bench, man, help, install
+#   ci       -> should change .github/ files
+#   subject  -> uses <type>: <description>, with no component/scope
 #   subject  -> starts lowercase and does not end with a period
 # --------------------------------------------------------------
 `);

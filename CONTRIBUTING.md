@@ -21,6 +21,27 @@ bun --version
 docker info
 ```
 
+Install and verify the local repository hooks:
+
+```sh
+bun scripts/hooks/install.ts
+bun scripts/hooks/check.ts
+```
+
+Commits and tags are expected to be SSH-signed. Configure this repo with your
+GitHub signing key:
+
+```sh
+git config gpg.format ssh
+ssh-add -L > .git/signing_key.pub
+git config user.signingkey .git/signing_key.pub
+printf "%s " "$(git config user.email)" > .git/allowed_signers
+cat .git/signing_key.pub >> .git/allowed_signers
+git config gpg.ssh.allowedSignersFile .git/allowed_signers
+git config commit.gpgsign true
+git config tag.gpgSign true
+```
+
 ## Build
 
 ```sh
@@ -207,18 +228,18 @@ Stentorian Guard is a defense-in-depth layer, not a sandbox. Known boundaries:
 
 ### Commits
 
-[Conventional commits](https://www.conventionalcommits.org/) scoped by subsystem:
+[Conventional commits](https://www.conventionalcommits.org/) without subsystem
+components:
 
 ```
-feat(hook): add sendto interposition
-fix(daemon): handle EOF on prompt channel
-test(e2e): add workers.dev edge-case test
-docs(bench): capture p99 on M1 reference run
+feat: add sendto interposition
+fix: handle EOF on prompt channel
+test: add workers.dev edge-case test
+docs: capture p99 on M1 reference run
 chore: update ciborium to 0.2.2
 ```
 
 Subjects start with lowercase text after the colon and do not end with a period.
-Use `ci: ...` without a scope.
 
 ### Error handling
 
